@@ -9,6 +9,8 @@
 
 AVHRR :
   type : obs
+  encoder: obs      # -> observation encoder B
+  forcing: True     # context-only: excluded from the ERA5 teacher target
   stream_id : 22
   filenames : ['observations-file-2001-2023-eumetsat-avhrr-o256-v4.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
@@ -32,6 +34,8 @@ AVHRR :
 
 METOP_IASI_PC :
   type : obs
+  encoder: obs      # -> observation encoder B
+  forcing: True     # context-only: excluded from the ERA5 teacher target
   stream_id : 21
   filenames : ['observations-od-ai-0001-2011-2023-iasi-pc-bufr-v1.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']

@@ -101,7 +101,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/pretrain_multi_data_all_years/"
+streams_directory: "./config/streams/era5_n320_geos_o256_avhrr_iasipc_jepa/"
 streams: ???
 
 general:
@@ -226,6 +226,7 @@ training_config:
       eps : 2e-08
 
   losses : {
+    "physical": { enabled: False, type: Disabled },
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
@@ -270,6 +271,7 @@ training_config:
   forecast :
     time_step: 00:00:00
     num_steps: 0
+    offset: 0
     policy: null
 
 

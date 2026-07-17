@@ -7,8 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# NOTE: filename prefixed "00_" so ERA5 is the FIRST stream (position 0). The SSL teacher takes
+# the first stream's mask per sample as the target region (target_and_aux_ssl_teacher.py:77,
+# `aux_outputs = [meta_info.values()[0] ...]`). ERA5 must be first so the teacher target is the
+# full ERA5 field; otherwise a leading forcing obs stream gives an empty mask -> zero JEPA loss.
+
 ERA5_in :
   type : anemoi_operan
+  encoder: era5     # -> ERA5/physical encoder A (default; explicit)
   stream_id : 0
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr']
   source : [ '10u', '10v', '2d', '2t',  'tcc', 'hcc', 'lcc', 'mcc', 'msl', 'skt', 'sp', 'strd', 'q_1000', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_600', 'q_700', 'q_850', 'q_925', 't_100', 't_1000', 't_150', 't_200', 't_250', 't_300', 't_400', 't_50', 't_500', 't_600', 't_700', 't_850', 't_925', 'u_100', 'u_1000', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_50', 'u_500', 'u_600', 'u_700', 'u_850', 'u_925', 'v_100', 'v_1000', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_50', 'v_500', 'v_600', 'v_700', 'v_850', 'v_925', 'z_100', 'z_1000', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_50', 'z_500', 'z_600', 'z_700', 'z_850', 'z_925']

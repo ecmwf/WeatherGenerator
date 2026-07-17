@@ -46,7 +46,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/jepa_forecast_multi_data_all_years/"
+streams_directory: "./config/streams/era5_n320_geo_o256_avhrr_iasipc/"
 streams: ???
 
 general:

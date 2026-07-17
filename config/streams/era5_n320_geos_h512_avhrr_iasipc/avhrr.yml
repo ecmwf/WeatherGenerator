@@ -1,4 +1,4 @@
-# (C) Copyright 2026 WeatherGenerator contributors.
+# (C) Copyright 2024 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -11,15 +11,20 @@ AVHRR :
   type : obs
   stream_id : 22
   filenames : ['observations-file-2001-2023-eumetsat-avhrr-o256-v4.zarr']
-  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
-  coords_channels: ['latitude', 'longitude']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 1.0
   token_size : 256
-  reconstruct: False
-  tokenize_spacetime: False
+  forcing: True
   embed : 
     net : linear
-  # below unused 
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 256
+    num_blocks : 2
   embed_target_coords : 
     net : linear
     dim_embed : 256
@@ -34,14 +39,20 @@ METOP_IASI_PC :
   type : obs
   stream_id : 21
   filenames : ['observations-od-ai-0001-2011-2023-iasi-pc-bufr-v1.zarr']
-  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  token_size : 128
-  tokenize_spacetime: False
-  reconstruct: False
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 1.0
+  token_size : 256
+  forcing: True
   embed : 
     net : linear
-  # unused below
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 256
+    num_blocks : 2
   embed_target_coords : 
     net : linear
     dim_embed : 256
