@@ -549,7 +549,9 @@ class Regridder:
             regrid_vars[var] = self.regrid_da(ds[var])
         regrid_ds = xr.Dataset(regrid_vars)
         regrid_ds = self.add_attrs(regrid_ds)
-
+        regrid_ds = regrid_ds.transpose(
+            "valid_time", "pressure", "latitude", "longitude", "mem", ..., missing_dims="ignore"
+        )
         return regrid_ds
 
     def regrid_da(self, da: xr.DataArray) -> xr.DataArray:

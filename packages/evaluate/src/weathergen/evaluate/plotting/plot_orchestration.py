@@ -35,6 +35,7 @@ from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     heat_maps_metric_region,
     plot_metric_region,
+    psd_plot_metric_region,
     quantile_plot_metric_region,
     ratio_plot_metric_region,
     score_card_metric_region,
@@ -42,6 +43,7 @@ from weathergen.evaluate.plotting.plot_utils import (
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
+from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
@@ -325,6 +327,157 @@ def _plot_timeseries_parallel(
 
 
 # ---------------------------------------------------------------------------
+# timeseries
+# ---------------------------------------------------------------------------
+def run_score_timeseries_pipeline(
+    reader: Reader,
+    stream: str,
+    regions: list[str],
+    metrics_dict: dict,
+    output_data: "ReaderOutput | None" = None,
+    global_plotting_options: dict | None = None,
+) -> dict[str, dict[str, dict[int, xr.DataArray]]]:
+    """Plot timeseries of score values across forecast steps for all regions.
+
+    Parameters
+    ----------
+    reader : Reader
+        Reader object containing all info about a particular run.
+    stream : str
+        Stream name to plot score timeseries for.
+    regions : list[str]
+        List of regions to plot.
+    metrics_dict : dict
+        Dictionary mapping region names to metric dicts.
+    output_data : ReaderOutput | None
+        Pre-loaded data; when provided ``reader.get_data()`` is skipped.
+    global_plotting_options : dict | None
+        Global plotting options. These can be passed to the plotter and can be used to set options.
+
+    Returns
+    -------
+    dict[str, dict[str, dict[int, xr.DataArray]]]
+        Nested dict: ``scores_by_hour[metric][region][fstep] = xr.DataArray`` with
+        dims ``(source_end_hour, channel)``.  Returns empty dict on failure.
+    """
+
+    available_data = reader.check_availability(stream, mode="evaluation")
+    if not available_data.score_availability:
+        _logger.warning(f"RUN {reader.run_id} - {stream}: No data available for score timeseries.")
+        return {}
+
+    da_tars = output_data.target
+    da_preds = output_data.prediction
+    if not da_tars:
+        return {}
+
+    # Group samples by hour of day of source_interval_end
+    hour_to_samples = group_by_init_hour(output_data)
+    if not hour_to_samples:
+        _logger.warning(f"RUN {reader.run_id} - {stream}: Could not group by init hour. Skipping.")
+        return {}
+
+    unique_hours = sorted(hour_to_samples.keys())
+    fsteps = sorted(da_preds.keys())
+
+    n_workers = get_num_workers(
+        check_process_headroom=True,
+        max_workers=reader.eval_cfg.get("max_workers", None),
+    )
+
+    # --- Parallel score computation across (region, fstep) pairs ---
+    score_tasks: list[dict] = []
+    for fstep in fsteps:
+        preds_fs = da_preds[fstep]
+        tars_fs = da_tars[fstep]
+
+        # Assign source_end_hour coordinate from the grouping
+        hour_values = np.full(len(preds_fs.sample), -1, dtype=int)
+        sample_vals = preds_fs.sample.values
+        for hour, sample_indices in hour_to_samples.items():
+            mask = np.isin(sample_vals, sample_indices)
+            hour_values[mask] = hour
+
+        source_end_hour = xr.DataArray(
+            hour_values, dims=("sample",), coords={"sample": sample_vals}
+        )
+        preds_with_hour = preds_fs.assign_coords(source_end_hour=source_end_hour)
+        tars_with_hour = tars_fs.assign_coords(source_end_hour=source_end_hour)
+
+        for region in regions:
+            region_metrics = metrics_dict.get(region)
+            metric_names = list(region_metrics.keys())
+            metric_params = list(region_metrics.values())
+            score_tasks.append(
+                dict(
+                    fstep=fstep,
+                    region=region,
+                    metric_names=metric_names,
+                    metric_params=metric_params,
+                    preds_with_hour=preds_with_hour,
+                    tars_with_hour=tars_with_hour,
+                    unique_hours=unique_hours,
+                )
+            )
+
+    _logger.info(
+        f"RUN {reader.run_id} - {stream}: Computing score timeseries for "
+        f"{len(score_tasks)} (region, fstep) tasks with up to {n_workers} worker(s)."
+    )
+
+    calls = [delayed(_compute_timeseries_scores_for_fstep)(**t) for t in score_tasks]
+    raw_results = dispatch_parallel(
+        calls, n_workers=n_workers, backend="loky", desc=f"Score timeseries {stream}"
+    )
+
+    # Accumulate results into scores_by_hour[metric][region][fstep]
+    scores_by_hour: dict[str, dict[str, dict[int, xr.DataArray]]] = {}
+    for fstep, region, metric_scores in raw_results:
+        for metric_name, score in metric_scores.items():
+            scores_by_hour.setdefault(metric_name, {}).setdefault(region, {})[fstep] = score
+
+    _logger.info(
+        f"RUN {reader.run_id} - {stream}: Score timeseries computed for "
+        f"{len(fsteps)} fsteps × {len(unique_hours)} init hours."
+    )
+
+    return scores_by_hour
+
+
+def _compute_timeseries_scores_for_fstep(
+    fstep: int,
+    region: str,
+    metric_names: list[str],
+    metric_params: list,
+    preds_with_hour: xr.DataArray,
+    tars_with_hour: xr.DataArray,
+    unique_hours: list[int],
+) -> tuple[int, str, dict[str, xr.DataArray]]:
+    """Compute grouped scores for one (region, fstep) pair (parallelisable worker).
+
+    Returns ``(fstep, region, {metric_name: score_da})``.
+    """
+    group_by_coord = "source_end_hour" if len(unique_hours) > 1 else None
+    agg_dims = ["sample", "ipoint"]
+
+    metric_scores: dict[str, xr.DataArray] = {}
+    for metric_name, parameters in zip(metric_names, metric_params, strict=False):
+        score = get_score(
+            VerifiedData(preds_with_hour, tars_with_hour, None, None, None),
+            metric_name,
+            agg_dims=agg_dims,
+            group_by_coord=group_by_coord,
+            compute=True,
+            parameters=parameters,
+        )
+        if group_by_coord is None:
+            score = score.expand_dims({"source_end_hour": [int(unique_hours[0])]})
+        metric_scores[metric_name] = score
+
+    return fstep, region, metric_scores
+
+
+# ---------------------------------------------------------------------------
 # Score maps
 # ---------------------------------------------------------------------------
 
@@ -400,7 +553,6 @@ def run_score_map_pipeline(
         "fig_size": cfg.get("fig_size", None),
         "animation_format": cfg.get("animation_format", "gif"),
         "fps": cfg.get("fps", 2),
-        "log_colorbar": cfg.get("log_colorbar", False),
     }
     output_basedir = str(reader.runplot_dir)
     run_id = reader.run_id
@@ -473,12 +625,18 @@ def _plot_score_maps_per_stream(
     """Plot 2D score maps for all metrics/channels for one (region, fstep)."""
 
     score_results, preds, metric_names = computed
-    valid = [(m, r) for m, r in zip(metric_names, score_results, strict=False) if r is not None]
+    valid = [
+        (metric, result)
+        for metric, result in zip(metric_names, score_results, strict=False)
+        if result is not None and "ipoint" in result.dims
+    ]
     if not valid:
         return
 
+    ens_metrics = {metric for metric, result in valid if "ens" in result.dims}
+
     plot_metrics = xr.concat(
-        [r for _, r in valid],
+        [result for _, result in valid],
         dim="metric",
         coords="minimal",
         combine_attrs="drop_conflicts",
@@ -486,24 +644,28 @@ def _plot_score_maps_per_stream(
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=[m for m, _ in valid],
+        metric=[metric for metric, _ in valid],
     ).compute()
 
-    if "ens" in preds.dims:
-        plot_metrics["ens"] = preds.ens
+    if "ens" in plot_metrics.dims:
+        plot_metrics = plot_metrics.assign_coords(ens=preds.ens.values)
 
-    has_ens = "ens" in plot_metrics.coords
-    ens_values = plot_metrics.coords["ens"].values if has_ens else [None]
+    all_ens = plot_metrics.coords["ens"].values if "ens" in plot_metrics.dims else [None]
 
     plot_tasks: list[dict] = []
     for metric in plot_metrics.coords["metric"].values:
+        metric_has_ens = str(metric) in ens_metrics and "ens" in plot_metrics.dims
+        ens_values = all_ens if metric_has_ens else [None]
         for ens_val in ens_values:
             tag = "score_maps" + (f"_ens_{ens_val}" if ens_val is not None else "") + f"_{metric}"
             for channel in plot_metrics.coords["channel"].values:
                 sel = {"metric": metric, "channel": channel}
                 if ens_val is not None:
                     sel["ens"] = ens_val
-                data = plot_metrics.sel(**sel).squeeze()
+                data = plot_metrics.sel(**sel)
+                if ens_val is None and "ens" in data.dims:
+                    data = data.isel(ens=0, drop=True)
+                data = data.squeeze()
                 title = f"{metric} - {channel}: fstep {fstep}" + (
                     f", ens {ens_val}" if ens_val is not None else ""
                 )
@@ -573,23 +735,29 @@ def _build_single_animation(
 
     All work is I/O + Pillow — no matplotlib state involved.
 
-    Returns the list of source frame paths that were assembled into the GIF
-    (empty list if no frames were found).
-    """
-    # Both map and histogram filenames follow the same pattern:
-    #   {prefix}_{run_id}_{tag}_{sample}_{valid_time}_{stream}_{region}_{var}_{fstep:03d}
-    # For all_samples histograms, valid_time is omitted.
-    # We match files by checking a fixed prefix and suffix, allowing any
-    # valid_time (or none) in between — no glob wildcards needed.
-    region_part = region if region else ""
-    head = "_".join(filter(None, [prefix, run_id, tag, str(sample)]))
-    tail = "_".join(filter(None, [stream, region_part, var]))
-    suffix = f".{image_format}"
-    fstep_strs = {str(f).zfill(3) for f in fsteps}
+    The function scans ``output_dir`` for per-sample map/histogram frames whose filenames follow:
 
+        {prefix}_{run_id}_{tag}_{sample}_{valid_time}_{stream}_{region}_{var}_{fstep:03d}
+
+    When ``score_animation=True`` filenames are constructed deterministically because
+    the fstep is embedded in the tag (``score_maps_{metric}_fstep_{N}``) rather
+    than being a zero-padded suffix.  Pass ``tag="score_maps_{metric}"`` and
+    ``sample`` as the ensemble value (or ``None`` for no ensemble).
+
+    Returns the list of source frame paths assembled into the animation, or an
+    empty list when no (or fewer than two for score maps) frames were found.
+    """
     if not output_dir.is_dir():
         return []
 
+    region_part = region if region else ""
+    if sample is not None:
+        head = "_".join(filter(None, [prefix, run_id, tag, str(sample)]))
+    else:
+        head = "_".join(filter(None, [prefix, run_id, tag]))
+    tail = "_".join(filter(None, [stream, region_part, var]))
+    suffix = f".{image_format}"
+    fstep_strs = {str(f).zfill(3) for f in fsteps}
     image_paths = sorted(
         str(f)
         for f in output_dir.iterdir()
@@ -747,6 +915,50 @@ def _dispatch_score_map_animations(
 
 
 # ---------------------------------------------------------------------------
+# Timeseries plots
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_timeseries_plots(
+    da_preds: dict,
+    da_tars: dict,
+    output_dir: str,
+    stream: str,
+    regions: list[str],
+    run_id: str,
+    samples: dict,
+    channels: dict,
+    ensemble: list,
+    n_workers: int,
+) -> None:
+    """Build and dispatch timeseries plot tasks for all (channel, sample[, ens]) triples."""
+    data_ts = Timeseries(da_preds, da_tars)
+    has_ens = any("ens" in v.dims for v in da_preds.values())
+    ens_members = ensemble if has_ens else [None]
+    ts_tasks = [
+        {
+            "output_dir": output_dir,
+            "channel": str(channel),
+            "sample": sample,
+            "stream": stream,
+            "region": region,
+            "ens": ens,
+        }
+        for channel in channels
+        for sample in samples
+        for ens in ens_members
+        for region in regions
+    ]
+    calls = [delayed(data_ts.plot_single_timeseries)(**t) for t in ts_tasks]
+    dispatch_parallel(
+        calls,
+        n_workers=n_workers,
+        backend="loky",
+        desc=f"Timeseries {run_id} - {stream}",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Per-sample map / histogram plots
 # ---------------------------------------------------------------------------
 
@@ -887,7 +1099,7 @@ def plot_data(
     stream_cfg = reader.get_stream(stream)
     plot_settings = stream_cfg.get("plotting", {})
 
-    plot_keys = ("plot_maps", "plot_histograms", "plot_animations")
+    plot_keys = ("plot_maps", "plot_histograms", "plot_animations", "plot_timeseries")
     if not plot_settings or not any(plot_settings.get(k, False) for k in plot_keys):
         return
 
@@ -921,6 +1133,9 @@ def plot_data(
     plot_target = plot_settings.get("plot_target", True)
     if not isinstance(plot_target, bool):
         raise TypeError("plot_target must be a boolean.")
+    plot_timeseries = plot_settings.get("plot_timeseries", False)
+    if not isinstance(plot_timeseries, bool):
+        raise TypeError("plot_timeseries must be a boolean.")
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_histograms, bool) and plot_histograms not in {
         "across-samples",
@@ -1073,6 +1288,20 @@ def plot_data(
             desc=f"Across-samples plots {run_id} - {stream}",
         )
 
+    if plot_timeseries:
+        _dispatch_timeseries_plots(
+            da_preds=da_preds,
+            da_tars=da_tars,
+            output_dir=output_dir,
+            stream=stream,
+            regions=plotter.regions,
+            run_id=run_id,
+            samples=plot_sample_set,
+            channels=plot_channel_set,
+            ensemble=list(available_data.ensemble),
+            n_workers=num_plot_workers,
+        )
+
     if plot_animations:
         last_fstep = list(da_tars.keys())[-1]
         last_preds = da_preds[last_fstep]
@@ -1112,52 +1341,6 @@ def plot_data(
 # ---------------------------------------------------------------------------
 
 
-def _fix_zero_lead_times_for_diffusion(scores_dict: dict) -> dict:
-    """Replace all-zero lead_time coordinates with 1, 2, 3, ... when forecast_step is increasing.
-
-    Some runs store no valid timestamps, leaving lead_time as all zeros while
-    forecast_step is a proper increasing sequence.  In that case the x-axis of
-    summary plots collapses to a single point.  This function detects the
-    pattern and replaces lead_time with the 1-based forecast-step index so
-    plots remain readable.
-
-    Parameters
-    ----------
-    scores_dict : dict
-        Nested dict ``scores_dict[metric][region][stream][run_id]`` → xr.DataArray.
-        Modified **in-place** and also returned for convenience.
-    """
-    import numpy as np
-
-    for metric in scores_dict:
-        for region in scores_dict[metric]:
-            for stream in scores_dict[metric][region]:
-                for run_id, da in scores_dict[metric][region][stream].items():
-                    if not isinstance(da, xr.DataArray):
-                        continue
-                    if "lead_time" not in da.coords or "forecast_step" not in da.dims:
-                        continue
-                    lt = da.coords["lead_time"].values
-                    fs = da.coords["forecast_step"].values
-                    lt_flat = np.asarray(lt).ravel()
-                    fs_flat = np.asarray(fs).ravel()
-                    if (
-                        len(lt_flat) > 1
-                        and np.all(lt_flat == 0)
-                        and np.all(np.diff(fs_flat) > 0)
-                    ):
-                        new_lt = np.arange(1, len(fs_flat) + 1, dtype=lt.dtype)
-                        scores_dict[metric][region][stream][run_id] = da.assign_coords(
-                            lead_time=("forecast_step", new_lt)
-                        )
-                        _logger.debug(
-                            f"Fixed all-zero lead_time for run={run_id} "
-                            f"metric={metric} region={region} stream={stream}: "
-                            f"replaced with 1..{len(new_lt)}"
-                        )
-    return scores_dict
-
-
 def plot_timeseries_summary(
     cfg: dict,
     timeseries_scores: dict,
@@ -1183,7 +1366,7 @@ def plot_timeseries_summary(
     image_format = plt_opt.get("image_format", "png")
     dpi_val = plt_opt.get("dpi_val", 150)
 
-    ts_dir = summary_dir / "score_timeseries"
+    ts_dir = summary_dir / "score_init_time_series"
     ts_dir.mkdir(parents=True, exist_ok=True)
 
     for metric_name, region_dict in timeseries_scores.items():
@@ -1215,7 +1398,8 @@ def plot_timeseries_summary(
                             )
                             hours = score_vals.coords["source_end_hour"].values
                             values = score_vals.values.flatten()
-                            label = runs[run_id].get("label", run_id)
+                            run_label = runs[run_id].get("label", run_id)
+                            label = f"{run_label} ({run_id})"
                             color = runs[run_id].get("color", None)
                             plt.plot(
                                 hours,
@@ -1241,8 +1425,10 @@ def plot_timeseries_summary(
                         plt.legend()
                         plt.tight_layout()
 
+                        run_ids_str = "_".join(sorted(run_dict.keys()))
                         plot_path = (
                             ts_dir / f"{metric_name}_{ch_label}_{region}_{stream}"
+                            f"_{run_ids_str}"
                             f"_fstep_{fstep}_by_source_end_hour.{image_format}"
                         )
                         plt.savefig(plot_path, bbox_inches="tight")
@@ -1291,7 +1477,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     for metric in metrics:
         for region in scores_dict[metric].keys():
             if eval_opt.get("summary_plots", False):
-                plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+                if metric == "psd":
+                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                elif metric == "qq_analysis":
+                    quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
+                else:
+                    plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("ratio_plots", False):
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("heat_maps", False):
@@ -1300,5 +1491,3 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
-            if metric == "qq_analysis":
-                quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
