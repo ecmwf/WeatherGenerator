@@ -60,7 +60,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         # so that sigma = exp(eta * p_std + p_mean) is deterministic
         if model.training:
             noise_level_rn = (
-                batch.samples[0].meta_info["ERA5_in"].params["noise_level_rn"]
+                batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
             )  # TODO: adjust for multiple streams
         else:
             noise_level_rn = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0
@@ -69,7 +69,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         with torch.no_grad():
             self.encoder.encoder.eval()  # NOTE: might be redundant
             tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
-            shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+            shape = (len(batch), batch.get_num_target_steps(), *tokens.shape[1:])
             tokens_multi = tokens.reshape(shape)
         # NOTE: must not set to train afterwards unless it was already in train
 
