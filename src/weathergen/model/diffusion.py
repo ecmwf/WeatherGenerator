@@ -280,6 +280,10 @@ class DiffusionForecastEngine(torch.nn.Module):
                 [self._fixed_noise_level if self._fixed_noise_level is not None else 0.0],
                 device=tokens.device,
             )
+        # # generate random tensor following uniform distribution from 0.4 to 50
+        # lower = 0.002
+        # upper = 10
+        # noise_level_rn = (torch.rand_like(noise_level_rn) * (upper - lower) + lower).log()
 
         # Compute sigma from noise_level_rn.
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
@@ -515,6 +519,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         _z = _z_scores.get(sigma_min_quantile, -1.645)
         sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
         sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
+        sigma_max_eff = 50
+        sigma_min_eff = 0.4
         if log_diagnostics:
             logger.info(
                 f"Inference sigma schedule: "
@@ -524,7 +530,6 @@ class DiffusionForecastEngine(torch.nn.Module):
                 f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
             )
         # sigma_min_eff = self.cf.get("sigma_min", 0.002)
-        sigma_min_eff = 40
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -553,7 +558,10 @@ class DiffusionForecastEngine(torch.nn.Module):
         # sigma_min_from_dist = math.exp(log_quantile)
 
         # sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
-        # # sigma_min_eff = 0.002
+
+        # # sigma_min_eff = 40
+        # # sigma_max_eff = 50
+        # # sigma_min_eff = 0.5092
 
         # if log_diagnostics:
         #     logger.info(
@@ -631,7 +639,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["residual_std"].append((x_hat - denoised).std().item())
                 track["x"].append(x_next.cpu())
                 if self.cur_token is not None:
-                    track["l2_to_target"].append((x_next - self.cur_token).norm().item())
+                    track["l2_to_target"].append(((x_next - self.cur_token)**2).mean().item())
                     track["x"].append(self.cur_token.cpu())
 
             if return_trajectory:
@@ -652,7 +660,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         steps = list(range(len(track["sigma"])))
         has_target = len(track["l2_to_target"]) > 0
-        n_plots = 7
+        n_plots = 3
 
         fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
 
@@ -669,50 +677,16 @@ class DiffusionForecastEngine(torch.nn.Module):
         axes[0].legend(fontsize=8)
         axes[0].grid(True, alpha=0.3)
 
-        # 2) Std of x_next and denoised estimate
-        axes[1].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
-        axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
-        if self.cur_token is not None:
-            target_std = self.cur_token.std().item()
-            axes[1].axhline(
-                target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}"
-            )
-        axes[1].set_ylabel("std")
-        axes[1].legend(fontsize=8)
-        axes[1].grid(True, alpha=0.3)
-
         if has_target:
+            # 2) L2 error to target
+            axes[1].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
+            axes[1].set_ylabel("L2 error to target")
+            axes[1].grid(True, alpha=0.3)
+
             # 3) L2 error to target
-            axes[2].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
-            axes[2].set_ylabel("L2 error to target")
+            axes[2].plot(steps, np.log(track["l2_to_target"]), "o-", markersize=3, color="tab:red")
+            axes[2].set_ylabel("log L2 error to target")
             axes[2].grid(True, alpha=0.3)
-
-        # 4) d_cur norm and step norm
-        axes[3].semilogy(steps, track["d_cur_norm"], "o-", markersize=3, label="||d_cur||")
-        axes[3].semilogy(steps, track["d_cur_step_norm"], "^-", markersize=3, label="||(t_next - t_hat) * d_cur||")
-        axes[3].set_ylabel("norm (log scale)")
-        axes[3].set_title("ODE drift norms")
-        axes[3].legend(fontsize=8)
-        axes[3].grid(True, alpha=0.3)
-
-        # 5) Residual std: Std(x_hat - denoised)
-        axes[4].semilogy(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[4].set_ylabel("std (log scale)")
-        axes[4].set_title("Std(x_hat - denoised)")
-        axes[4].grid(True, alpha=0.3)
-
-        # 6) Residual std zoomed to [0, 1]
-        axes[5].plot(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[5].set_ylim(0, 1)
-        axes[5].set_ylabel("std (clipped to 1)")
-        axes[5].set_title("Std(x_hat - denoised)  [y ≤ 1]")
-        axes[5].grid(True, alpha=0.3)
-
-        # 7) Std of x_next over sampling steps
-        axes[6].semilogy(steps, track["x_std"], "o-", markersize=3, color="tab:blue")
-        axes[6].set_ylabel("std (log scale)")
-        axes[6].set_title("Std of x_next over denoising steps")
-        axes[6].grid(True, alpha=0.3)
 
         axes[-1].set_xlabel("sampling step")
         fig.tight_layout()

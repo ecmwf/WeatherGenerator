@@ -62,8 +62,8 @@ fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
 # fe_diffusion_latent_dim: 512
-# fe_diffusion_latent_dim: 2048
-fe_diffusion_latent_dim: 2560
+fe_diffusion_latent_dim: 2048
+# fe_diffusion_latent_dim: 2560
 fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_soft_clamp_channels: []  # [1511, 1772, 1689, 209, 1400, 1944, 1520, 1213, 1402, 646]
@@ -79,8 +79,10 @@ with_step_conditioning: True # False
 frequency_embedding_dim: 256
 embedding_dim: 512
 noise_distribution: &noise_distribution "log_uniform"  # "log_uniform" or "log_normal"
-sigma_min: &sigma_min 0.4
-sigma_max: &sigma_max 50
+# sigma_min: &sigma_min 0.4
+# sigma_max: &sigma_max 50
+sigma_min: &sigma_min 0.2
+sigma_max: &sigma_max 0.22
 sigma_data: 1.0
 rho: 7
 p_mean: 3.5  # only required if noise_distribution is log_normal
@@ -114,9 +116,9 @@ latent_noise_deterministic_latents: True
 
 
 #below for FE training only
-freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 #below for DECODER training only
-# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*fe.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*fe.*|.*noise_embedder.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 #below for FE and DECODER training
 # freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 
@@ -254,20 +256,20 @@ training_config:
       eps : 2e-08
 
   losses : {
-    # "physical": {
-    #     type: LossPhysical,
-    #     weight: 0.0,
-    #     loss_fcts: {
-    #       "mse": {},
-    #     },
-    #     target_and_aux_calc: "Physical",
-    # },
-    "latent_diff": {
-        type: LossLatentDiffusion,
-        weight: 1.0,
-        target_and_aux_calc: DiffusionLatentTargetEncoder,
-        loss_fcts: { "mse": { }, },
-        }
+    "physical": {
+        type: LossPhysical,
+        weight: 0.0,
+        loss_fcts: {
+          "mse": {},
+        },
+        target_and_aux_calc: "Physical",
+    },
+    # "latent_diff": {
+    #     type: LossLatentDiffusion,
+    #     weight: 1.0,
+    #     target_and_aux_calc: DiffusionLatentTargetEncoder,
+    #     loss_fcts: { "mse": { }, },
+    #     }
   }
   
   model_input: {

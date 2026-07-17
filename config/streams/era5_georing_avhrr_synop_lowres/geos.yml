@@ -22,7 +22,7 @@ METEOSAT_SEVIRI_IR :
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
-  # forcing: True
+  forcing: True
   embed : 
     net : transformer
     num_tokens : 1
@@ -55,7 +55,7 @@ GOES_ABI_IR :
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
-  # forcing: True
+  forcing: True
   embed : 
     net : transformer
     num_tokens : 1
@@ -88,7 +88,7 @@ HIMAWARI_AHI_IR :
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
-  # forcing: True
+  forcing: True
   embed : 
     net : transformer
     num_tokens : 1
@@ -122,7 +122,7 @@ GOES_ABI_VIS :
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
-  # forcing: True
+  forcing: True
   embed : 
     net : transformer
     num_tokens : 1
@@ -156,7 +156,7 @@ HIMAWARI_AHI_VIS :
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
-  # forcing: True
+  forcing: True
   embed :
     net : transformer
     num_tokens : 1

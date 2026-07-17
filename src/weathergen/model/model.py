@@ -749,13 +749,42 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
-            # apply forecasting engine
             tokens = self.forecast_engine(
                 tokens,
                 step,
                 meta_info=batch.samples[0].meta_info,
                 coords=model_params.rope_coords,
             )
+
+            # sigmas = []
+            # mses = []
+            # while True:
+            #     # apply forecasting engine
+            #     tokens_pred, sigma = self.forecast_engine(
+            #         tokens,
+            #         step,
+            #         meta_info=batch.samples[0].meta_info,
+            #         coords=model_params.rope_coords,
+            #     )
+            #     mse = ((tokens - tokens_pred)**2).mean().item()
+            #     sigmas.append(sigma.cpu().item()); mses.append(mse)
+            #     print(len(sigmas))
+            #     if len(sigmas) > 500:
+            #         break
+            
+            # # Create scatterplot of sigmas vs mses
+            # import matplotlib.pyplot as plt
+            # plt.scatter(sigmas, mses)
+            # plt.xlabel("Sigma")
+            # plt.ylabel("MSE")
+            # plt.xscale("log")
+            # plt.yscale("log")
+            # plt.title("Sigma vs MSE")
+            # plt.grid()
+            # plt.savefig("sigma_vs_mse.png")
+            # plt.close()
+            # breakpoint()
+            # exit()
 
             # Trajectory inspection mode: decode each ODE step as a separate forecast output
             # so the full denoising trajectory can be inspected downstream.
