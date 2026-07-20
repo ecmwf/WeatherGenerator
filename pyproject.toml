@@ -88,7 +88,11 @@ cpu = [
 gpu = [
   "torch==2.13; sys_platform == 'linux'",
   # flash-attn also has a torch dependency.
-  "flash-attn-3",
+  # Restricted to aarch64: the only FA3 artifact we have is the wheel pre-built on
+  # Santis (see [tool.uv.sources]), and there is no x86_64 equivalent. Without this
+  # marker uv cannot solve the linux/x86_64 split declared in tool.uv.environments.
+  # To restore x86_64 GPU support, add an x86_64 wheel/source below and drop the marker.
+  "flash-attn-3; platform_machine == 'aarch64'",
 ]
 
 
@@ -263,7 +267,12 @@ torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
 
-flash-attn-3 = { git = "https://github.com/Dao-AILab/flash-attention", subdirectory = "hopper" }
+# On Santis (linux/aarch64) we use a wheel pre-built on the HPC — see
+# hpc/santis/build_fa3_slurm.sh in WeatherGenerator-private. Building FA3 from
+# source there takes ~1h and needs the uenv toolchain, so it is done once and pinned.
+# Everywhere else we still build from git.
+# Previously built from git: { git = "https://github.com/Dao-AILab/flash-attention", subdirectory = "hopper" }
+flash-attn-3 = { path = "/capstor/scratch/cscs/florianscheidl/fa3-wheels/flash_attn_3-3.0.0-cp310-abi3-linux_aarch64.whl" }
 
 # TODO: switch back to this branch, but this is a larger update and the tag name is incorrect
 # anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
