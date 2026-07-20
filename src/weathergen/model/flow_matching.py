@@ -575,13 +575,15 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         )
 
         # Per-step diagnostics. At every t we compare the *current noisy state* x_t against the
-        # *denoised estimate* x0_hat = D_t(x_t) predicted from it, both in L2-to-target and in std.
+        # *denoised estimate* x0_hat = D_t(x_t) predicted from it, in RMSE-to-target and in std.
+        # RMSE (not raw L2 norm) so the magnitude is independent of latent size and directly
+        # comparable to sigma_data / to std(z).
         track = {
             "t": [],
             "x_t_std": [],
             "x0_hat_std": [],
-            "l2_x_t": [],
-            "l2_x0_hat": [],
+            "rmse_x_t": [],
+            "rmse_x0_hat": [],
             "vel_norm": [],
         }
         trajectory: list[torch.Tensor] = [] if return_trajectory else None
@@ -620,8 +622,11 @@ class FlowMatchingForecastEngine(torch.nn.Module):
                 track["x0_hat_std"].append(x0_hat.std().item())
                 track["vel_norm"].append(u.norm().item())
                 if self.cur_token is not None:
-                    track["l2_x_t"].append((x_cur - self.cur_token).norm().item())
-                    track["l2_x0_hat"].append((x0_hat - self.cur_token).norm().item())
+                    # RMSE = ||.|| / sqrt(numel), i.e. per-element error. Size-independent, so it
+                    # is comparable across latent shapes and against sigma_data.
+                    _rn = self.cur_token.numel() ** 0.5
+                    track["rmse_x_t"].append((x_cur - self.cur_token).norm().item() / _rn)
+                    track["rmse_x0_hat"].append((x0_hat - self.cur_token).norm().item() / _rn)
 
             if return_trajectory:
                 trajectory.append(x_next)
@@ -635,8 +640,11 @@ class FlowMatchingForecastEngine(torch.nn.Module):
 
         At every path time t we compare the current *noisy state* x_t against the *denoised
         estimate* x0_hat = D_t(x_t) predicted from it:
-          1. L2 error to the target:  ||x_t - z||  vs  ||x0_hat - z||
-          2. Standard deviation:      std(x_t)     vs  std(x0_hat)
+          1. RMSE to the target:  rmse(x_t, z)  vs  rmse(x0_hat, z)
+          2. Standard deviation:  std(x_t)      vs  std(x0_hat)
+        Panel 1 requires a reference target (``self.cur_token``) and is OMITTED when absent — which
+        is the case in rollout mode (``forecast.num_steps>1``), where model.py sets tokens=None
+        after the first step. Run with ``forecast.num_steps=1`` to get it.
         x0_hat should approach the target (and the target's std) much earlier than x_t does — x_t
         only gets there at t=1, whereas x0_hat is the model's best guess at the clean latent at
         every t.
@@ -657,20 +665,20 @@ class FlowMatchingForecastEngine(torch.nn.Module):
 
         ts = ts_all[sl]
         steps = list(range(skip, len(ts_all)))
-        has_target = len(track["l2_x_t"]) > 0
+        has_target = len(track["rmse_x_t"]) > 0
         n = 3 if has_target else 2
         fig, axes = plt.subplots(n, 1, figsize=(10, 3.2 * n), sharex=True)
         i = 0
 
         skipped = f"  [first {skip} step(s) omitted]" if skip else ""
 
-        # 1) L2 error to target: noisy state vs denoised estimate
+        # 1) RMSE to target: noisy state vs denoised estimate
         if has_target:
-            axes[i].semilogy(steps, track["l2_x_t"][sl], "o-", ms=3, color="tab:blue",
-                             label=r"$\|x_t - z\|$  (noisy state)")
-            axes[i].semilogy(steps, track["l2_x0_hat"][sl], "s-", ms=3, color="tab:red",
-                             label=r"$\|\hat{x}_0(x_t) - z\|$  (denoised estimate)")
-            axes[i].set_ylabel("L2 error to target")
+            axes[i].semilogy(steps, track["rmse_x_t"][sl], "o-", ms=3, color="tab:blue",
+                             label=r"rmse($x_t$, $z$)  (noisy state)")
+            axes[i].semilogy(steps, track["rmse_x0_hat"][sl], "s-", ms=3, color="tab:red",
+                             label=r"rmse($\hat{x}_0(x_t)$, $z$)  (denoised estimate)")
+            axes[i].set_ylabel("RMSE to target")
             axes[i].set_title(
                 f"Flow-matching sampling  |  path={self.path.kind}, "
                 f"pred={self.prediction_type}, sampler={self.sampler}, steps={num_steps}{skipped}"
