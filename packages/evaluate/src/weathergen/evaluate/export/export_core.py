@@ -76,21 +76,23 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     npoints = data_arr.shape[0]
 
     # Handle optional ensemble dimension: squeeze it out if present.
-    if data_arr.ndim == 3 and data_arr.shape[2] == 1:
-        data_arr = data_arr[:, :, 0]
+    if data_arr.ndim == 3:
+        if data_arr.shape[2] == 1:
+            data_arr = data_arr[:, :, 0]
+            data_dims = ["ipoint", "channel"]
+        else:
+            data_dims = ["ipoint", "channel", "mem"]
 
-    da_result = xr.DataArray(
-        data_arr,
-        dims=["ipoint", "channel"],
-        coords={
-            "ipoint": np.arange(npoints),
-            "channel": channels,
-            "forecast_step": fstep,
-            "valid_time": ("ipoint", times_arr),
-            "lat": ("ipoint", coords_arr[:, 0]),
-            "lon": ("ipoint", coords_arr[:, 1]),
-        },
-    )
+    data_coords = {
+        "ipoint": np.arange(npoints),
+        "channel": channels,
+        "forecast_step": fstep,
+        "valid_time": ("ipoint", times_arr),
+        "lat": ("ipoint", coords_arr[:, 0]),
+        "lon": ("ipoint", coords_arr[:, 1]),
+    }
+
+    da_result = xr.DataArray(data_arr, dims=data_dims, coords=data_coords)
 
     return (global_sample, fstep, da_result)
 

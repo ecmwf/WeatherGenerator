@@ -89,6 +89,13 @@ variables:
     wg_unit: Pa
     std_unit: Pa
     level_type: sfc
+  tp:
+    var: tp
+    long: total_precipitation
+    std: precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc
   tp_imerg_0:
     var: tp_imerg_0
     long: imerg_total_precipitation
@@ -148,6 +155,7 @@ coordinates:
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
+        mem: mem
     pl:
         pressure_level: pressure
         valid_time: valid_time
@@ -156,6 +164,7 @@ coordinates:
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
+        mem: mem
 
 dimensions:
     valid_time:
@@ -184,3 +193,8 @@ dimensions:
     ncells:
       wg: ncells
       std: ncells
+    mem:
+      wg: mem
+      std: realization
+      long: realization
+      std_unit: 1
