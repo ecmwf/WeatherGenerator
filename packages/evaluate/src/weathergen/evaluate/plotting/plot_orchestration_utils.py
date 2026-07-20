@@ -81,6 +81,7 @@ def _compute_scores(
     da_preds: dict,
     da_tars: dict,
     aligned_clim_data: dict | None,
+    seeps_clim_data: dict | None = None,
     n_workers: int | None = None,
 ) -> tuple[dict, dict]:
     """Compute scores for all (region, fstep) pairs. Score computation is parallelised across
@@ -106,6 +107,7 @@ def _compute_scores(
             preds_fs = da_preds[fstep]
             preds_next, tars_next = get_next_fstep_data(fstep, da_preds, da_tars, fsteps)
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
+            climatology_seeps = seeps_clim_data[fstep] if seeps_clim_data else None
             tars_r, preds_r, tars_next_r, preds_next_r = [
                 bbox.apply_mask(x) if x is not None else None
                 for x in (tars_fs, preds_fs, tars_next, preds_next)
@@ -117,7 +119,12 @@ def _compute_scores(
                     metric_names=metric_names,
                     metric_params=metric_params,
                     score_data=VerifiedData(
-                        preds_r, tars_r, preds_next_r, tars_next_r, climatology
+                        preds_r,
+                        tars_r,
+                        preds_next_r,
+                        tars_next_r,
+                        climatology,
+                        climatology_seeps=climatology_seeps,
                     ),
                     preds_r=preds_r,
                 )

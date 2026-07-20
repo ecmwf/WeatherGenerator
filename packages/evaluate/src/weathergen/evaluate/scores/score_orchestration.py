@@ -190,14 +190,16 @@ def calc_scores_per_stream(
     fsteps = sorted(list(da_preds.keys()))
 
     required_clims = needed_climatology(metrics_dict)
-    if "default_climatology" in required_clims:
-        aligned_clim_data = get_climatology(reader, da_tars, stream)
-    else:
-        aligned_clim_data = None
-    if "seeps" in required_clims:
-        seeps_clim_data = get_seeps_climatology(reader, da_tars, stream)
-    else:
-        seeps_clim_data = None
+    aligned_clim_data = (
+        get_climatology(reader, da_tars, stream)
+        if "default_climatology" in required_clims
+        else None
+    )
+    seeps_clim_data = (
+        get_seeps_climatology(reader, da_tars, stream)
+        if "seeps" in required_clims
+        else None
+    )
 
     max_workers = reader.eval_cfg.get("max_workers", None)
     agg_dims = reader.eval_cfg.get("agg_dims", "ipoint")

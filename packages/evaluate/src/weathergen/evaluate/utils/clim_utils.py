@@ -274,7 +274,7 @@ def get_seeps_climatology(reader, da_tars, stream: str) -> dict | None:
     return None
 
 
-def needed_climatology(metrics_dict: dict) -> List[str]:
+def needed_climatology(metrics_dict: dict) -> list[str]:
     """
     Check which climatology data is needed (if any).
 
@@ -285,7 +285,7 @@ def needed_climatology(metrics_dict: dict) -> List[str]:
 
     Returns
     -------
-    List[str]
+    list[str]
         A list of required climatology names, or an empty list if none are required
     """
     metrics = [m for metrics in metrics_dict.values() for m in metrics.keys()]
