@@ -342,6 +342,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     fsteps = get_fsteps(fsteps_cfg, first_zarr)
     streams = get_streams(stream, first_zarr)
 
+    processed_samples = [] #for verif
+
     for stream in streams:
         grid_type = get_grid_type(data_type, stream, first_zarr)
         channels = get_channels(channels_cfg, stream, first_zarr)
@@ -429,12 +431,13 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                                 if init_time_reference == "source_start"
                                 else source_end
                             )
-                            parser.process_sample(
+                            processed_sample = parser.process_sample(
                                 iter(sample_results[global_s]),
                                 ref_time=init_time,
                                 source_interval_start=source_start,
                                 source_interval_end=init_time,
                             )
+                            processed_samples.append(processed_sample)
                             # Free memory immediately.
                             del sample_results[global_s]
                             batch_written += 1
@@ -459,5 +462,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             _logger.info(
                 f"Rank {rank_label}: wrote {samples_written}/{len(samples)} samples."
             )
+    
+    # Only save here if need to merge samples (i.e. verif), otherwise saved in process_sample
+    if processed_samples[0] is not None:
+        parser.save(processed_samples)
 
     _logger.info(f"Export complete across {len(rank_files)} rank(s).")

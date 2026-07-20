@@ -55,11 +55,10 @@ class VerifParser(CfParser):
         """
         for k, v in kwargs.items():
             setattr(self, k, v)
-
         super().__init__(config=config)
 
-        if not hasattr(self, "obs"):
-            raise ValueError("Observation data required for creating verif compliant NetCDFs")
+        if self.obs is None:
+            raise ValueError("Observation data (--obs) required for creating verif compliant NetCDFs")
 
         self.mapping = config.get("variables", {})
 
@@ -116,6 +115,7 @@ class VerifParser(CfParser):
             if self.zarr_coords is None:
                 self.zarr_coords = get_grid_points(da_fs[0])
                 self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end)
+                self.zarr_dt = np.timedelta64(6, "h")
             # check consistency of grid points across forecast steps
             if len(da_fs) > 1:
                 assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
@@ -130,6 +130,7 @@ class VerifParser(CfParser):
             for verif_var in self.mapping.keys():
                 da_var = self.regrid(da_fs, verif_var)
                 if da_var is None:
+                    print(f"Variable {verif_var} not available in WeatherGenerator output. Skipping.")
                     continue
                 da_var = self.add_encoding(da_var)
                 obs_result = self.obs_preprocess(da_var, verif_var)
@@ -137,6 +138,7 @@ class VerifParser(CfParser):
                 merged = self.merge(da_var, obs_result)
                 merged = self.add_metadata(merged, verif_var)
                 vars_to_merge[verif_var] = merged
+        print(f"vars_to_merge: {vars_to_merge}")
         return vars_to_merge
 
     def get_zarr_dt(
