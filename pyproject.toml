@@ -193,6 +193,12 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
+# FA3's setup.py imports torch, so it must not be built in an isolated env.
+# Consequence: the venv must already contain torch (and setuptools, which FA3
+# forgets to declare) before uv prepares FA3's metadata — hpc/santis/build_fa3_slurm.sh
+# in WeatherGenerator-private seeds them for a fresh checkout.
+no-build-isolation-package = ["flash-attn-3"]
+
 # One can only have cpu or gpu.
 conflicts = [
   [
@@ -207,16 +213,6 @@ cfunits = ["setuptools<76", "wheel"]
 antlr4-python3-runtime = ["setuptools<76", "wheel"]
 # Cartopy  requires setuptools >= 77
 cartopy = ["setuptools<78", "wheel"]
-# FA3's setup.py imports torch, and its build-system.requires forgets setuptools.
-# Disabling build isolation for it does not help: at metadata time the venv is
-# freshly created, so neither is importable there either. Declaring them as build
-# dependencies (torch pinned to whatever the resolution installs) lets a plain
-# `uv sync` prepare FA3 metadata from an empty venv.
-flash-attn-3 = [
-  "setuptools",
-  "wheel",
-  { requirement = "torch", match-runtime = true },
-]
 
 [tool.pyrefly]
 project-includes = ["src/"]
