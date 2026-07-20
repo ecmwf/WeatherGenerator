@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
-from omegaconf.listconfig import ListConfig
 from tqdm import tqdm
 
 from weathergen.common.config import (
@@ -335,14 +334,16 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     rank_arg = ["all"] if rank == "all" else (rank if isinstance(rank, list) else [rank])
     rank_files = get_model_results(run_id, [epoch], rank_arg)
     if not rank_files:
-        raise FileNotFoundError(f"No rank files found for run_id={run_id}, epoch={epoch}, rank={rank}")
+        raise FileNotFoundError(
+            f"No rank files found for run_id={run_id}, epoch={epoch}, rank={rank}"
+        )
     _logger.info(f"Discovered {len(rank_files)} rank file(s).")
 
     first_zarr = rank_files[0]
     fsteps = get_fsteps(fsteps_cfg, first_zarr)
     streams = get_streams(stream, first_zarr)
 
-    processed_samples = [] #for verif
+    processed_samples = []  # for verif
 
     for stream in streams:
         grid_type = get_grid_type(data_type, stream, first_zarr)
@@ -354,9 +355,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
         for rank_file in rank_files:
             rank_label = rank_file.stem.split("rank")[-1]  # e.g. "0000"
-            _logger.info(
-                f"RUN {run_id}: Processing rank {rank_label} ({rank_file.name})"
-            )
+            _logger.info(f"RUN {run_id}: Processing rank {rank_label} ({rank_file.name})")
 
             samples = get_samples(samples_cfg, rank_file)
             source_starts, source_ends = get_source_info(rank_file, stream, samples)
@@ -459,10 +458,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             if hasattr(parser, "close"):
                 parser.close()
 
-            _logger.info(
-                f"Rank {rank_label}: wrote {samples_written}/{len(samples)} samples."
-            )
-    
+            _logger.info(f"Rank {rank_label}: wrote {samples_written}/{len(samples)} samples.")
+
     # Only save here if need to merge samples (i.e. verif), otherwise saved in process_sample
     if processed_samples[0] is not None:
         parser.save(processed_samples)

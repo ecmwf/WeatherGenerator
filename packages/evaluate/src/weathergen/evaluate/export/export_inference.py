@@ -162,7 +162,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         default="all",
         help="Rank(s) to process. Use '0' for a single rank, 'all' for every rank file, "
-             "or a comma-separated list like '0,1,2'.",
+        "or a comma-separated list like '0,1,2'.",
     )
 
     parser.add_argument(

@@ -69,7 +69,7 @@ class QuaverParser(CfParser):
         # ever reopening the path.
         pl_path = self.get_output_filename("pl")
         sfc_path = self.get_output_filename("sfc")
-        self.pl_file = open(pl_path, "wb")   # noqa: SIM115
+        self.pl_file = open(pl_path, "wb")  # noqa: SIM115
         self.sf_file = open(sfc_path, "wb")  # noqa: SIM115
         _logger.info(f"Opened output files: {pl_path}, {sfc_path}")
 
@@ -214,8 +214,8 @@ class QuaverParser(CfParser):
         rank_label = getattr(self, "rank_label", None)
         rank_tag = f"_{rank_label}" if rank_label else ""
         return (
-            Path(self.output_dir)
-            / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}{rank_tag}.{self.file_extension}"
+            Path(self.output_dir) / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}"
+            f"{rank_tag}.{self.file_extension}"
         )
 
     def assign_coords(self, data: xr.DataArray) -> xr.DataArray:
