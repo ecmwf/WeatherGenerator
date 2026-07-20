@@ -32,6 +32,18 @@ except Exception:
         "Thus, rank histogram calculations are not supported."
     )
 
+try:        
+    from scores.probability import (
+        crps_for_ensemble,
+        interval_tw_crps_for_ensemble,
+        tail_tw_crps_for_ensemble,
+    )
+except Exception:
+    _logger.warning(
+        "Could not import scores. "
+        "Thus, CRPS calculations are not supported."
+    )
+
 
 # helper function to calculate skill score
 
@@ -1577,11 +1589,6 @@ class Scores:
         xr.DataArray
             CRPS score averaged over agg_dims
         """
-        from scores.probability import (
-            crps_for_ensemble,
-            interval_tw_crps_for_ensemble,
-            tail_tw_crps_for_ensemble,
-        )
 
         if self._agg_dims is None:
             raise ValueError("agg_dims required for CRPS")
