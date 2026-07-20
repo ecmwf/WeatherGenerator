@@ -69,7 +69,11 @@ fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.15
 fe_diffusion_soft_clamp_channels: []  # [1511, 1772, 1689, 209, 1400, 1944, 1520, 1213, 1402, 646]
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
-fe_diffusion_model_conditioning_type: "cross_attn" # options: "cross_attn", "concatenate", ..., "spatial_ada_ln", "ada_ln"
+fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "ada_ln", "additive", "concatenate", "spatial_ada_ln", "spatial_ada_ln_perblock"
+# Dim to which the per-cell conditioning tokens are projected before driving the per-block
+# AdaLN-Zero modulation. Smaller keeps the per-block modulation MLPs cheap; larger retains
+# more conditioning detail. Only used for "ada_ln" and "spatial_ada_ln_perblock".
+diffusion_conditioning_embed_dim: 256
 fe_layer_norm_after_blocks: [15]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
 fe_impute_latent_noise_std: 0.0  # 1e-4
 fe_impute_latent_diffusion_noise_std: 1e-3  # 1e-4
@@ -80,8 +84,8 @@ with_step_conditioning: True # False
 frequency_embedding_dim: 256
 embedding_dim: 512
 noise_distribution: &noise_distribution "log_uniform"  # "log_uniform" or "log_normal"
-sigma_min: &sigma_min 0.02
-sigma_max: &sigma_max 10
+sigma_min: &sigma_min 0.4
+sigma_max: &sigma_max 50
 sigma_data: 1.0
 rho: 7
 p_mean: 3.5  # only required if noise_distribution is log_normal
@@ -100,10 +104,10 @@ diffusion_min_snr_gamma: 5.0
 # Enable EDM preconditioning (c_skip/c_out, EDM Eq. 7) in the diffusion denoiser. When False
 # the network predicts x0 directly (c_skip=0, c_out=1). Pair True with diffusion_loss_weighting
 # "edm"; pair False with "min_snr_gamma"/"uniform_x0".
-fe_diffusion_edm_preconditioning: False
+fe_diffusion_edm_preconditioning: True
 # Quantile of the training noise distribution used to set the inference schedule's lower
 # sigma bound; smaller -> refine down to lower noise.
-sigma_min_quantile: 0.05
+# sigma_min_quantile: 0.05
 # Number of ODE denoising steps at inference. If null, uses diffusion.forward's default.
 fe_diffusion_num_inference_steps: null
 

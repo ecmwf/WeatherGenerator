@@ -274,7 +274,6 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         if is_dit:
             if dit_is_cond:
                 assert dim_aux is not None, "For DIT, need to provide dim_aux for ada layer norm"
-            assert dim_aux is None, "conditioning not yet implemented for DIT attention"
             assert with_residual, "DIT attention should always have residual connection"
             self.lnorm = AdaLNZero(dim_embed, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_embed, eps=norm_eps)
             self.noise_conditioning = LinearNormConditioning(

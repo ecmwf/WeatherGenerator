@@ -388,9 +388,10 @@ class Model(torch.nn.Module):
         # Initialize forecasting engine: standard or diffusion-wrapped
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
-            if cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
-                assert cf.get("fe_diffusion_model_conditioning_type", None) is not None, (
-                    "Diffusion conditioning embedding dimension must be specified when using diffusion model conditioning"
+            if cf.get("fe_diffusion_model_conditioning_type", None) in ("ada_ln", "spatial_ada_ln_perblock"):
+                assert cf.get("diffusion_conditioning_embed_dim", None) is not None, (
+                    "diffusion_conditioning_embed_dim must be specified when using "
+                    "'ada_ln' or 'spatial_ada_ln_perblock' diffusion model conditioning"
                 )
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells, dim_aux=self.cf.diffusion_conditioning_embed_dim)
             else:

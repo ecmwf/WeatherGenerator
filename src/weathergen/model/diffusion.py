@@ -93,10 +93,10 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"fe_diffusion_model_conditioning is '{self.conditioning}' "
             f"(got '{self.conditioning_type}')"
         )
-        _ada_ln = self.conditioning_type == "ada_ln"
+        _ada_ln = self.conditioning_type in {"ada_ln", "spatial_ada_ln_perblock"}
         assert self.cf.get("diffusion_conditioning_embed_dim", None) is not None or not _ada_ln, (
             f"diffusion_conditioning_embed_dim must be set when "
-            f"fe_diffusion_model_conditioning_type is 'ada_ln'"
+            f"fe_diffusion_model_conditioning_type is '{self.conditioning_type}'"
         )
         _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)        
         assert self.conditioning not in _date_time_modes or _offset == 0, (
@@ -112,8 +112,8 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"forecast.input_num_steps must be 1 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
         )
-        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev", "concatenate", "concatenate_hiddendim", "concatenate_hdMLP", "spatial_ada_ln"}, (
-            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', 'concatenate', 'concatenate_hiddendim', 'concatenate_hdMLP', or 'spatial_ada_ln' when "
+        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev", "concatenate", "concatenate_hiddendim", "concatenate_hdMLP", "spatial_ada_ln", "spatial_ada_ln_perblock"}, (
+            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', 'concatenate', 'concatenate_hiddendim', 'concatenate_hdMLP', 'spatial_ada_ln', or 'spatial_ada_ln_perblock' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
             f"(got '{self.conditioning_type}')"
         )
@@ -142,6 +142,19 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         else:
             self.spatial_ada_ln = None
+
+        # Per-block spatial AdaLN: instead of modulating once at the input, the per-cell
+        # conditioning tokens drive the DiT AdaLN-Zero inside *every* forecast block
+        # (see ForecastingEngine / AdaLNZero). The tokens are first projected from the
+        # diffusion latent dim down to the (smaller) conditioning-embedding dim so the
+        # per-block modulation MLPs stay cheap; AdaLNZero then broadcasts the resulting
+        # per-token scale/shift/gate across channels automatically.
+        if self.conditioning_type == "spatial_ada_ln_perblock":
+            self.cond_token_proj = torch.nn.Linear(
+                _lat_dim, self.cf.diffusion_conditioning_embed_dim, bias=True
+            )
+        else:
+            self.cond_token_proj = None
 
         if self.conditioning_type == "concatenate_hdMLP":
             self.concat_hd_proj = torch.nn.Linear(2 * _lat_dim, _lat_dim, bias=False)
@@ -347,6 +360,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             net_input = self.latent_proj_up(net_input)
             if c is not None and self.conditioning_type not in {"ada_ln"}:
                 c = self.latent_proj_up(c)
+
+        # Per-block spatial AdaLN: project the (per-cell) conditioning tokens from the diffusion
+        # latent dim down to the conditioning-embedding dim. The projected tokens are then fed to
+        # every DiT block as the AdaLN aux (routed via ForecastingEngine.forward), giving per-cell
+        # modulation that is re-injected at each block rather than only at the network input.
+        if self.conditioning_type == "spatial_ada_ln_perblock":
+            c = self.cond_token_proj(c)
 
         if self.conditioning_type == "concatenate":
             # Concatenate conditioning tokens along sequence dim: (B, H, D') cat (B, H, D') -> (B, 2H, D')

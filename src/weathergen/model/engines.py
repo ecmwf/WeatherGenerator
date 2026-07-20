@@ -591,6 +591,13 @@ class ForecastingEngine(torch.nn.Module):
         _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
         _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
 
+        # DiT-style AdaLN conditioning is used both for the global-signal "ada_ln" mode and for
+        # the per-cell "spatial_ada_ln_perblock" mode. The only difference is the conditioning
+        # tensor fed to each block (a broadcast global vector vs. per-cell tokens); the block
+        # machinery (AdaLNZero) is identical and broadcasts a per-token aux automatically.
+        _cond_type = self.cf.get("fe_diffusion_model_conditioning_type", None)
+        _dit_is_cond = _cond_type in ("ada_ln", "spatial_ada_ln_perblock")
+
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
@@ -611,7 +618,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
+                            dit_is_cond=_dit_is_cond,
                         )
                     )
                 else:
@@ -632,7 +639,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
+                            dit_is_cond=_dit_is_cond,
                         )
                     )
                 # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
@@ -666,7 +673,7 @@ class ForecastingEngine(torch.nn.Module):
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         is_dit=self.cf.get("fe_diffusion_model", False),
-                        dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
+                        dit_is_cond=_dit_is_cond,
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -726,7 +733,7 @@ class ForecastingEngine(torch.nn.Module):
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn_rev":
                         tokens = checkpoint(block, conditioning, tokens, noise_emb, use_reentrant=False)
                 else:
-                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
+                    if self.cf.get("fe_diffusion_model_conditioning_type", None) in ("ada_ln", "spatial_ada_ln_perblock"):
                         assert conditioning is not None, "conditioning must be provided for diffusion model conditioning"
                         tokens = checkpoint(block, tokens, coords, noise_emb, conditioning, use_reentrant=False)
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
