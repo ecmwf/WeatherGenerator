@@ -253,9 +253,30 @@ def get_climatology(reader, da_tars, stream: str) -> dict | None:
     return None
 
 
-def needs_climatology(metrics_dict: dict) -> bool:
+def get_seeps_climatology(reader, da_tars, stream: str) -> dict | None:
     """
-    Check if any of the specified metrics require climatology data.
+    Load SEEPS-specific climatology data for the scoring pipeline.
+    """
+    clim_data_path = reader.get_climatology_filename(stream, climatology_type="seeps")
+
+    if clim_data_path is not None:
+        _logger.info("Loading SEEPS climatology data for scoring...")
+        clim_data = xr.open_dataset(clim_data_path)
+        # Create a time axis and select the monthly value for each day.
+        all_dates = pd.date_range("2024-01-01", "2024-12-31")
+        daily_clim_data = (
+            clim_data.sel(month=all_dates.month)
+            .assign_coords(time=("month", all_dates))
+            .swap_dims({"month": "time"})
+            .drop_vars("month")  # Optional: cleans up the leftover month array
+        )
+        return align_clim_data(da_tars, daily_clim_data)
+    return None
+
+
+def needed_climatology(metrics_dict: dict) -> List[str]:
+    """
+    Check which climatology data is needed (if any).
 
     Parameters
     ----------
@@ -264,9 +285,13 @@ def needs_climatology(metrics_dict: dict) -> bool:
 
     Returns
     -------
-    bool
-        True if any metric requires climatology, False otherwise
+    List[str]
+        A list of required climatology names, or an empty list if none are required
     """
     metrics = [m for metrics in metrics_dict.values() for m in metrics.keys()]
-    req_clim = ["acc", "rps", "rpss"]
-    return any(m in req_clim for m in metrics)
+    res = []
+    if any(m in metrics for m in ["acc", "rps", "rpss"]):
+        res.append("default_climatology")
+    if "seeps" in metrics:
+        res.append("seeps")
+    return res

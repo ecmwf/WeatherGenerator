@@ -78,6 +78,7 @@ class VerifiedData:
     ground_truth_next: xr.DataArray | None
     climatology: xr.DataArray | None
     latitude_weights: xr.DataArray | None = None
+    climatology_seeps: xr.Dataset | None = None
 
     def __post_init__(self):
         # Perform checks on initialization
@@ -307,6 +308,7 @@ class Scores:
             "rpss": ["p", "gt", "c"],
             "fact": ["p", "c"],
             "tact": ["gt", "c"],
+            "seeps": ["p","gt","c_seeps"]
         }
 
         available = {
@@ -315,6 +317,7 @@ class Scores:
             "p_next": data.prediction_next,
             "gt_next": data.ground_truth_next,
             "c": data.climatology,
+            "c_seeps": data.climatology_seeps,
         }
 
         # assign p and gt by default if metrics do not have specific args
@@ -1336,108 +1339,31 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        seeps_weights: xr.DataArray,
-        t1: xr.DataArray,
-        t3: xr.DataArray,
-        spatial_dims: list,
+        c_seeps: xr.Dataset
     ) -> xr.DataArray:
-        """
-        Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
+        p_wet = c_seeps["p_wet"]
+        p_dry = 1 - p_wet
+        p_light = (2 / 3) * p_wet
+        p_heavy = (1 / 3) * p_wet
+        t2 = c_seeps["threshold_heavy"]
 
-        NOTE:
-        Threshold arrays t1 and t3 (derived from space-time dependant climatology)
-        must fit to the forecast and ground truth data.
-
-        Parameters
-        ----------
-        p: xr.DataArray
-            Forecast data array
-        gt: xr.DataArray
-            Ground truth data array
-        seeps_weights: xr.DataArray
-            SEEPS-parameter matrix to weight contingency table elements
-        t1: xr.DataArray
-            Threshold for light precipitation events
-        t3: xr.DataArray
-            Threshold for strong precipitation events
-        spatial_dims: List[str]
-            List of spatial dimensions of the data, e.g. ["lat", "lon"]
-        Returns
-        -------
-        xr.DataArray
-            SEEPS skill score (i.e. 1-SEEPS)
-        """
-
-        def seeps(ground_truth, prediction, thr_light, thr_heavy, seeps_weights):
-            ob_ind = (ground_truth > thr_light).astype(int) + (ground_truth >= thr_heavy).astype(
-                int
-            )
-            fc_ind = (prediction > thr_light).astype(int) + (prediction >= thr_heavy).astype(int)
-            indices = fc_ind * 3 + ob_ind  # index of each data point in their local 3x3 matrices
-            seeps_val = seeps_weights[
-                indices, np.arange(len(indices))
-            ]  # pick the right weight for each data point
-
-            return 1.0 - seeps_val
-
-        if p.ndim == 3:
-            assert len(spatial_dims) == 2, (
-                "Provide two spatial dimensions for three-dimensional data."
-            )
-            prediction, ground_truth = (
-                p.stack({"xy": spatial_dims}),
-                gt.stack({"xy": spatial_dims}),
-            )
-            seeps_weights = seeps_weights.stack({"xy": spatial_dims})
-            t3 = t3.stack({"xy": spatial_dims})
-            lstack = True
-        elif p.ndim == 2:
-            prediction, ground_truth = p, gt
-            lstack = False
-        else:
-            raise ValueError("Data must be a two-or-three-dimensional array.")
-
-        # check dimensioning of data
-        assert prediction.ndim <= 2, (
-            f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions. "
-            "Check if stacking with spatial_dims may help."
+        # Categorize into boolean masks
+        p_dry, p_light, p_heavy = p <= t1, (p > t1) & (p <= t2), p > t2
+        gt_dry, gt_light, gt_heavy = gt <= t1, (gt > t1) & (gt <= t2), gt > t2
+        
+        # Apply the seeps formula based on the categories
+        # We use .where(condition, other) where 'condition' keeps current values, 
+        # and 'other' replaces values where the condition is False.
+        seeps = (
+            xr.zeros_like(fcst_tp, dtype=float)
+            .where(~(p_dry   & gt_light), 1 / p_light)
+            .where(~(p_dry   & gt_heavy), 1 / p_light + 1 / p_heavy)
+            .where(~(p_light & gt_dry),   1 / p_dry)
+            .where(~(p_light & gt_heavy), 1 / p_heavy)
+            .where(~(p_heavy & gt_dry),   1 / p_dry + 1 / (1 - p_heavy))
+            .where(~(p_heavy & gt_light), 1 / (1 - p_heavy))
         )
-
-        if prediction.ndim == 1:
-            seeps_values_all = seeps(ground_truth, prediction, t1.values, t3, seeps_weights)
-        else:
-            prediction, ground_truth = (
-                prediction.transpose(..., "xy"),
-                ground_truth.transpose(..., "xy"),
-            )
-            seeps_values_all = xr.full_like(prediction, np.nan)
-            seeps_values_all.name = "seeps"
-            for it in range(ground_truth.shape[0]):
-                prediction_now, ground_truth_now = (
-                    prediction[it, ...],
-                    ground_truth[it, ...],
-                )
-                # in case of missing data, skip computation
-                if np.all(np.isnan(prediction_now)) or np.all(np.isnan(ground_truth_now)):
-                    continue
-
-                seeps_values_all[it, ...] = seeps(
-                    ground_truth_now,
-                    prediction_now,
-                    t1.values,
-                    t3,
-                    seeps_weights.values,
-                )
-
-        if lstack:
-            seeps_values_all = seeps_values_all.unstack()
-
-        if self._agg_dims is not None:
-            seeps_values = self._mean(seeps_values_all)
-        else:
-            seeps_values = seeps_values_all
-
-        return seeps_values
+        return seeps
 
     def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
