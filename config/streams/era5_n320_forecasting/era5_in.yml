@@ -107,7 +107,30 @@ ERA5_in:
       - "z_700"
       - "z_850"
       - "z_925"
-    target: []
+    # target: []  # SWITCH
+    target_exclude:  # SWITCH
+      - "z"
+      - "w_10"
+      - "w_50"
+      - "w_100"
+      - "w_150"
+      - "w_200"
+      - "w_250"
+      - "w_300"
+      - "w_400"
+      - "w_500"
+      - "w_600"
+      - "w_700"
+      - "w_850"
+      - "w_925"
+      - "w_1000"
+      - "slor"
+      - "sdor"
+      - "tcw"
+      - "cp"
+      - "tp"
+      - "q_50"
+      - "q_100"
     geoinfo_channels:
       - "z"
       - "lsm"
@@ -122,7 +145,8 @@ ERA5_in:
     location_weight: "cosine_latitude"
     token_size: 20
     tokenize_spacetime: true
-    forcing: true
+    # forcing: true  # SWITCH
+    max_num_targets: 542080  # SWITCH
     frequency: "06:00:00"
     nominal_time_mapping:
       "0": 5
