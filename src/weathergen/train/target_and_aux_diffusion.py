@@ -60,7 +60,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         # so that sigma = exp(eta * p_std + p_mean) is deterministic
         if model.training:
             noise_level_rn = (
-                batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
+                batch.samples[0].meta_info["ERA5_in"].params["noise_level_rn"]
             )  # TODO: adjust for multiple streams
         else:
             noise_level_rn = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0

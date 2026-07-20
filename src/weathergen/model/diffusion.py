@@ -266,7 +266,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         c = None
         if self.conditioning in ["date_time", "date", "time"]:
-            c = meta_info["ERA5"].params["timestamp"]
+            c = meta_info["ERA5_in"].params["timestamp"]
         elif self.conditioning == "forecast":
             c = meta_info["LATENT_CONDITIONING_TOKENS"]         # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
@@ -420,7 +420,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Extract conditioning (mirrors training_forward).
         c = None
         if self.conditioning in ["date_time", "date", "time"]:
-            c = meta_info["ERA5"].params["timestamp"]
+            c = meta_info["ERA5_in"].params["timestamp"]
         elif self.conditioning == "forecast":
             c = meta_info["LATENT_CONDITIONING_TOKENS"]
 
