@@ -194,7 +194,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         fstep: int = None,
         meta_info: dict[str, SampleMetaData] = None,
         coords: torch.Tensor = None,
-        num_steps: int = 10,
     ) -> torch.Tensor:
         """
         Forward pass that routes to training_forward or inference_forward based on model status.
@@ -213,7 +212,6 @@ class DiffusionForecastEngine(torch.nn.Module):
             fstep: Forecast step index - required for both modes
             meta_info: Sample metadata dict containing timestamps - required for both modes
             coords: Optional coordinate tensor
-            num_steps: Number of diffusion steps for inference (default: 30)
 
         Returns:
             torch.Tensor: Model output (denoised prediction during training,
@@ -252,9 +250,9 @@ class DiffusionForecastEngine(torch.nn.Module):
                 if fstep is None:
                     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
                 self.cur_token = tokens.detach() if tokens is not None else None
-                # Allow the number of ODE denoising steps to be set from the config.
-                # Falls back to the `num_steps` argument default when not configured.
-                num_steps = self.cf.get("fe_diffusion_num_inference_steps", None) or num_steps
+                # Number of ODE denoising steps, read from config. 10 is the historical
+                # hardcoded value and remains the default when the key is unset.
+                num_steps = self.cf.get("fe_diffusion_num_inference_steps", 10)
                 return self.inference_forward(
                     fstep=fstep,
                     num_steps=num_steps,
