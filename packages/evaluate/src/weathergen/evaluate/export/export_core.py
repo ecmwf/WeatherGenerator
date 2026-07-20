@@ -347,10 +347,10 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
     for stream in streams:
         grid_type = get_grid_type(data_type, stream, first_zarr)
-        channels = get_channels(channels_cfg, stream, first_zarr)
+        stream_channels  = get_channels(channels_cfg, stream, first_zarr)
         kwargs["stream"] = stream
         kwargs["grid_type"] = grid_type
-        kwargs["channels"] = channels
+        kwargs["channels"] = stream_channels
         kwargs["data_type"] = data_type
 
         for rank_file in rank_files:
