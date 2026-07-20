@@ -196,9 +196,7 @@ def calc_scores_per_stream(
         else None
     )
     seeps_clim_data = (
-        get_seeps_climatology(reader, da_tars, stream)
-        if "seeps" in required_clims
-        else None
+        get_seeps_climatology(reader, da_tars, stream) if "seeps" in required_clims else None
     )
 
     max_workers = reader.eval_cfg.get("max_workers", None)
@@ -324,19 +322,13 @@ def compute_scores_for_region(
 
     calls = [
         delayed(_score_single_fstep)(
-            fstep,
-            tars_fs,
-            preds_fs,
-            preds_next,
-            tars_next,
-            climatology,
-            climatology_seeps,
+            *task,
             bbox,
             metrics,
             group_by_coord,
             agg_dims,
         )
-        for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology, climatology_seeps in fstep_tasks
+        for task in fstep_tasks
     ]
     n_workers = get_num_workers(max_workers=max_workers)
     all_results = dispatch_parallel(

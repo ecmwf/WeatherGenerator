@@ -274,9 +274,7 @@ def run_score_map_pipeline(
         else None
     )
     seeps_clim_data = (
-        get_seeps_climatology(reader, da_tars, stream)
-        if "seeps" in required_clims
-        else None
+        get_seeps_climatology(reader, da_tars, stream) if "seeps" in required_clims else None
     )
 
     n_plot_workers = get_num_workers(

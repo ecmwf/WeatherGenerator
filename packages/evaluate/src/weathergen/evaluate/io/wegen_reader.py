@@ -103,7 +103,9 @@ class WeatherGenReader(Reader):
 
         return config
 
-    def get_climatology_filename(self, stream: str, climatology_type: str = "default_climatology") -> str | None:
+    def get_climatology_filename(
+        self, stream: str, climatology_type: str = "default_climatology"
+    ) -> str | None:
         """
         Get the climatology filename for a given stream from the inference
         configuration.

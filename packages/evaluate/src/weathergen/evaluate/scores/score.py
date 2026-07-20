@@ -308,7 +308,7 @@ class Scores:
             "rpss": ["p", "gt", "c"],
             "fact": ["p", "c"],
             "tact": ["gt", "c"],
-            "seeps": ["p","gt","c_seeps"]
+            "seeps": ["p", "gt", "c_seeps"],
         }
 
         available = {
@@ -1335,32 +1335,28 @@ class Scores:
 
         return ratio_spat_variability
 
-    def calc_seeps(
-        self,
-        p: xr.DataArray,
-        gt: xr.DataArray,
-        c_seeps: xr.Dataset
-    ) -> xr.DataArray:
+    def calc_seeps(self, p: xr.DataArray, gt: xr.DataArray, c_seeps: xr.Dataset) -> xr.DataArray:
         p_wet = c_seeps["p_wet"]
         p_dry = 1 - p_wet
         p_light = (2 / 3) * p_wet
         p_heavy = (1 / 3) * p_wet
+        t1 = c_seeps["threshold_dry"]
         t2 = c_seeps["threshold_heavy"]
 
         # Categorize into boolean masks
         p_dry, p_light, p_heavy = p <= t1, (p > t1) & (p <= t2), p > t2
         gt_dry, gt_light, gt_heavy = gt <= t1, (gt > t1) & (gt <= t2), gt > t2
-        
+
         # Apply the seeps formula based on the categories
-        # We use .where(condition, other) where 'condition' keeps current values, 
+        # We use .where(condition, other) where 'condition' keeps current values,
         # and 'other' replaces values where the condition is False.
         seeps = (
-            xr.zeros_like(fcst_tp, dtype=float)
-            .where(~(p_dry   & gt_light), 1 / p_light)
-            .where(~(p_dry   & gt_heavy), 1 / p_light + 1 / p_heavy)
-            .where(~(p_light & gt_dry),   1 / p_dry)
+            xr.zeros_like(p, dtype=float)
+            .where(~(p_dry & gt_light), 1 / p_light)
+            .where(~(p_dry & gt_heavy), 1 / p_light + 1 / p_heavy)
+            .where(~(p_light & gt_dry), 1 / p_dry)
             .where(~(p_light & gt_heavy), 1 / p_heavy)
-            .where(~(p_heavy & gt_dry),   1 / p_dry + 1 / (1 - p_heavy))
+            .where(~(p_heavy & gt_dry), 1 / p_dry + 1 / (1 - p_heavy))
             .where(~(p_heavy & gt_light), 1 / (1 - p_heavy))
         )
         return seeps
