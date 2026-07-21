@@ -174,7 +174,7 @@ class IOReaderData:
         geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
         data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
         datetimes = np.array([], dtype=other.datetimes.dtype)
-        is_spoof = True
+        is_spoof = False # True
 
         for other in others:
             n_datapoints = len(other.data)

@@ -572,17 +572,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
 
-            if rdata.is_empty():
-                # work around for https://github.com/pytorch/pytorch/issues/158719
-                # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(idx)
-                rdata = spoof(
-                    self.healpix_level,
-                    time_win.start,
-                    stream_ds[0].get_geoinfo_size(),
-                    len(stream_ds[0].mean[stream_ds[0].source_idx]),
-                )
-                rdata.is_spoof = True
+            # if rdata.is_empty():
+            #     # work around for https://github.com/pytorch/pytorch/issues/158719
+            #     # create non-empty mean data instead of empty tensor
+            #     time_win = self.time_window_handler.window(idx)
+            #     rdata = spoof(
+            #         self.healpix_level,
+            #         time_win.start,
+            #         stream_ds[0].get_geoinfo_size(),
+            #         len(stream_ds[0].mean[stream_ds[0].source_idx]),
+            #     )
+            #     rdata.is_spoof = False # True
 
             input_data += [rdata]
 
@@ -594,17 +594,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
-            if rdata.is_empty():
-                # work around for https://github.com/pytorch/pytorch/issues/158719
-                # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(step_forecast_dt)
-                rdata = spoof(
-                    self.healpix_level,
-                    time_win.start,
-                    stream_ds[0].get_geoinfo_size(),
-                    len(stream_ds[0].mean[stream_ds[0].target_idx]),
-                )
-                rdata.is_spoof = True
+            # if rdata.is_empty():
+            #     # work around for https://github.com/pytorch/pytorch/issues/158719
+            #     # create non-empty mean data instead of empty tensor
+            #     time_win = self.time_window_handler.window(step_forecast_dt)
+            #     rdata = spoof(
+            #         self.healpix_level,
+            #         time_win.start,
+            #         stream_ds[0].get_geoinfo_size(),
+            #         len(stream_ds[0].mean[stream_ds[0].target_idx]),
+            #     )
+            #     rdata.is_spoof = False # True
 
             output_data += [rdata]
 

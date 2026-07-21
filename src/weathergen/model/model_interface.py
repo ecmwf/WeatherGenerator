@@ -141,6 +141,15 @@ def init_model_and_shard(
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
 
+        # pack zero grads for params that received none, so every rank's
+        # reduce-scatter has the same layout even when branches diverge
+        # (FSDP2's analogue of DDP find_unused_parameters; needs grouped
+        # branches so the forward all-gathers match too)
+        model.set_reduce_scatter_unused_params(True)
+
+        
+
+
         # For reasons we do not yet fully understand, when using train continue in some
         # instances, FSDP2 does not register the forward_channels and forward_columns
         # functions in the embedding engine as forward functions. Thus, yielding a crash

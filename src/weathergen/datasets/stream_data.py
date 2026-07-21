@@ -444,7 +444,7 @@ class StreamData:
         """
         Either source or target at step is spoof
         """
-        return any(self.source_is_spoof) or self.target_is_spoof[step]
+        return False #  any(self.source_is_spoof) or self.target_is_spoof[step]
 
     def get_num_source_steps(self) -> int:
         """
