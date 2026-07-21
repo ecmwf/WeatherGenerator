@@ -16,10 +16,14 @@ ERA5 :
   geoinfo_channels : ['z', 'lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.
   location_weight : cosine_latitude
-  token_size : 8
-  tokenize_spacetime : True
-  max_num_targets: 20000
-  frequency : 06:00:00
+  # token_size : 8
+  # tokenize_spacetime : True
+  # max_num_targets: 20000
+  # frequency : 06:00:00
+  token_size: 64
+  tokenize_spacetime : False
+  max_num_targets: 120000
+  frequency : 01:00:00
   embed : 
     net : transformer
     num_tokens : 1
