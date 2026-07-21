@@ -8,26 +8,26 @@
 # nor does it submit to any jurisdiction.
 
 """
-Structure-function (variogram) loss for precipitation fields.
+Structure-function (variogram) loss for fine-scale fields.
 
-This is the grid-free real-space twin of a power-spectrum / WFCL loss. It penalises a
-mismatch between the predicted and target *second-order structure function*
+Grid-free, real-space alternative to a power-spectrum loss. It penalises a mismatch between
+the predicted and target *second-order structure function*
 
     S(r) = E[ ( y(x) - y(x+r) )^p ]   as a function of separation distance r,
 
 estimated from random pairs of target points binned by great-circle distance. Matching S(r)
 across distance bins is, via Wiener-Khinchin, equivalent to matching the spatial power
-spectrum -- but with no FFT and no regular grid, so it fits the WeatherGenerator decoder's
-scattered per-point output natively and avoids the failure modes of the gridded WFCL
-(resolution ceiling, zero-fill artifacts -- see docs/decoder_assessment.md §7 and the WFCL
-post-mortem). A blurry / over-smoothed prediction has too-small short-range increments, which
-this loss detects and penalises directly; MSE (a first-order, pointwise statistic) cannot.
+spectrum -- but with no FFT and no regular grid, so it applies directly to scattered
+per-point output and needs no gridding. A blurry / over-smoothed prediction has too-small
+short-range increments, which this loss detects and penalises directly; MSE (a first-order,
+pointwise statistic) cannot.
 
-Pairs with the log-ratio objective per distance bin so the *shape* of S(r) is matched and
+The objective is a per-distance-bin log-ratio, so the *shape* of S(r) is matched and
 short-range (high-frequency) bins are not drowned out by the large-scale bins.
 
-Plug-in pattern mirrors LossPhysical: a loss *module* (not a loss-fct) because it needs the
-raw point coordinates. Select via the training config with ``target_and_aux_calc: Physical``.
+Plug-in pattern mirrors the other loss modules (e.g. LossPhysical): a loss *module* rather
+than a plain loss-fct, because it needs the raw point coordinates. Select via the training
+config with ``target_and_aux_calc: Physical``.
 
 Expected config (under ``training_config.losses``):
 
@@ -39,10 +39,11 @@ Expected config (under ``training_config.losses``):
         target_and_aux_calc: Physical,
         loss_fcts: {
           "struct": {
-            target_stream: CERRA,        # apply on a FINE stream (CERRA tp 5.5km / native IMERG)
+            target_stream: <stream>,     # a spatially fine target stream
             channels: ['tp'],            # optional: restrict to these target channels (by name);
-                                         # omit for all channels. Circular channels (10wdir) give
-                                         # spurious increments under |.|^p -- exclude them.
+                                         # omit for all channels. Exclude circular channels
+                                         # (e.g. wind direction) -- their 0/360 wrap yields
+                                         # spurious increments under |.|^p.
             num_pairs: 262144,
             bin_edges_km: [10, 25, 50, 100, 200],
             increment_power: 2.0,        # 2 = standard structure function; 1 = robust (heavy tails)
@@ -52,31 +53,28 @@ Expected config (under ``training_config.losses``):
       }
 
 ``reduce`` (ensemble handling; all identical for ens_size=1):
-  - ``mean``    : ensemble mean field. For quantile heads this is the conditional-mean product
-                  (re-blurred) -- right for a comparability METRIC, wrong for ens>1 TRAINING.
-  - ``median``  : per-point sorted middle (mean of the two central sorted members for even K).
-                  The correct single-field product of a quantile head -- raw head indices carry
-                  no quantile identity (heads do not self-order under the pinball sort).
-  - ``members`` : per-point sort, then the SF loss is computed for EVERY sorted member and
-                  averaged -- pushes realistic spatial texture into each quantile field.
-  - int         : a single RAW member index (pre-sort). Only meaningful when members have fixed
-                  identities (e.g. genuine ensemble runs), not for quantile heads.
+  - ``mean``    : score the ensemble-mean field. Right for a comparability METRIC; for ens>1
+                  TRAINING it re-blurs the very structure this loss should reward.
+  - ``median``  : per-point sorted middle (mean of the two central members for even K).
+  - ``members`` : per-point sort, then compute the loss for every sorted member and average --
+                  pushes realistic spatial texture into each member.
+  - int         : a single member index (pre-sort). Meaningful only when members have fixed
+                  identities.
 
-Note on scale: choose ``bin_edges_km`` to straddle the artifact scale of the *target* stream;
-on a ~1° stream (IMERG_ANEMOI) the sub-cell scales are unresolved -- prefer a fine stream.
+Note on scale: choose ``bin_edges_km`` to straddle the scales of interest for the *target*
+stream; on a spatially coarse stream the sub-cell scales are unresolved, so prefer a fine one.
 
 Note on ``num_pairs`` (IMPORTANT): pairs are sampled uniformly over points, so their distance
 distribution follows the domain's pair-distance density -- short separations are RARE. On a
-continental domain (CERRA Europe), 8192 pairs put only ~1 pair into the 10-25 km bin, i.e.
-below ``min_pairs_per_bin`` and the fine-scale bins (exactly where decoder blur lives) are
-silently skipped. Empirically, ~1e6 pairs give ~150/500/1900/7200 pairs for the default bins;
-the default here (262144) is a safe floor. The cost is a few gathers + elementwise ops --
-negligible next to the model forward.
+large domain too few pairs land in the short-distance bins (below ``min_pairs_per_bin``), and
+those fine-scale bins -- exactly where blur lives -- are then silently skipped. The default
+here is a safe floor; the cost is a few gathers plus elementwise ops, negligible next to the
+model forward.
 
-Validation-only usage: since the loss calculator skips terms with ``weight: 0`` and the
-validation config is merged ON TOP of the training config, adding this block under
-``validation_config.losses`` (with any weight > 0) computes it as a validation metric without
-affecting training gradients -- the clean way to score a pure-MSE A/B for sharpness.
+Validation-only usage: the loss calculator skips terms with ``weight: 0`` and the validation
+config is merged ON TOP of the training config, so adding this block under
+``validation_config.losses`` (with any weight > 0) computes it as a validation-only sharpness
+metric without affecting training gradients.
 """
 
 import logging
@@ -145,32 +143,43 @@ def structure_function_loss(
         return None
 
     device = target.device
+    channels = target.shape[1]
+    num_bins = len(bin_edges_km) - 1
     idx_i = torch.randint(0, n, (num_pairs,), device=device, generator=generator)
     idx_j = torch.randint(0, n, (num_pairs,), device=device, generator=generator)
 
+    # Assign every pair to its distance bin in one pass. bucketize (right=False) returns the
+    # first edge >= dist, i.e. bin b spans (edges[b], edges[b+1]]; dist <= edges[0] -> -1 and
+    # dist > edges[-1] -> num_bins are both out of range and dropped by the mask below.
     dist = _haversine_km(coords, idx_i, idx_j)
-    lo, hi = float(bin_edges_km[0]), float(bin_edges_km[-1])
-    keep = (dist > lo) & (dist <= hi) & (idx_i != idx_j)
-    if int(keep.sum()) < min_pairs_per_bin:
-        return None
-    idx_i, idx_j, dist = idx_i[keep], idx_j[keep], dist[keep]
+    edges = torch.as_tensor(bin_edges_km, device=device, dtype=dist.dtype)
+    bin_id = torch.bucketize(dist, edges) - 1
+    valid = (bin_id >= 0) & (bin_id < num_bins) & (idx_i != idx_j)
+
+    idx_i, idx_j, bin_id = idx_i[valid], idx_j[valid], bin_id[valid]
 
     # increments (target side carries no gradient; pred side does, via the index gather)
     inc_t = (target[idx_i] - target[idx_j]).abs().pow(increment_power)  # [P, C]
     inc_p = (pred[idx_i] - pred[idx_j]).abs().pow(increment_power)  # [P, C]
 
-    losses = []
-    for b in range(len(bin_edges_km) - 1):
-        in_bin = (dist > float(bin_edges_km[b])) & (dist <= float(bin_edges_km[b + 1]))
-        if int(in_bin.sum()) < min_pairs_per_bin:
-            continue
-        s_t = inc_t[in_bin].mean(0)  # [C]
-        s_p = inc_p[in_bin].mean(0)  # [C]
-        losses.append((torch.log(s_p + eps) - torch.log(s_t + eps)).pow(2))
+    # Per-bin mean increment via scatter-add (no Python loop, no per-bin host sync).
+    idx_bc = bin_id.unsqueeze(1).expand(-1, channels)  # [P, C]
+    counts = torch.zeros(num_bins, device=device, dtype=inc_t.dtype)
+    counts.scatter_add_(0, bin_id, torch.ones_like(bin_id, dtype=inc_t.dtype))
+    sum_t = torch.zeros(num_bins, channels, device=device, dtype=inc_t.dtype)
+    sum_p = torch.zeros(num_bins, channels, device=device, dtype=inc_p.dtype)
+    sum_t.scatter_add_(0, idx_bc, inc_t)
+    sum_p.scatter_add_(0, idx_bc, inc_p)
 
-    if not losses:
+    denom = counts.clamp(min=1.0).unsqueeze(1)  # [B, 1]
+    per_bin = (torch.log(sum_p / denom + eps) - torch.log(sum_t / denom + eps)).pow(2)  # [B, C]
+
+    # equal-weight mean over bins that met min_pairs_per_bin (masked bins contribute no gradient)
+    bin_ok = (counts >= min_pairs_per_bin).unsqueeze(1)  # [B, 1]
+    n_ok = bin_ok.sum()
+    if int(n_ok) == 0:
         return None
-    return torch.stack(losses, 0).mean(0)  # [C]
+    return (per_bin * bin_ok).sum(0) / n_ok  # [C]
 
 
 class LossStructureFunction(LossModuleBase):
@@ -191,7 +200,7 @@ class LossStructureFunction(LossModuleBase):
         self.device = device
         self.name = "LossStructureFunction"
 
-        # exactly one config key (e.g. "struct"), mirroring LossSpectralWFCL
+        # exactly one config key (e.g. "struct")
         cfg_key = next(iter(loss_fcts.keys()))
         cfg = loss_fcts[cfg_key]
 
