@@ -207,8 +207,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
 
-        self.cur_token = tokens.detach()
-
         # y is always the target to denoise (set by DiffusionLatentTargetEncoder.pre_compute)
         y = tokens
         assert y is not None, (
@@ -536,13 +534,13 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["residual_std"].append((x_hat - denoised).std().item())
                 track["x"].append(x_next.cpu())
                 if self.cur_token is not None:
-                    track["l2_to_target"].append((x_next - self.cur_token).norm().item())
+                    track["l2_to_target"].append(((x_next - self.cur_token)**2).mean().item())
                     track["x"].append(self.cur_token.cpu())
 
             if return_trajectory:
                 intermediate_x.append(x_next)
 
-        if log_diagnostics:
+        if log_diagnostics and len(track["l2_to_target"]) > 0:
             self._plot_sampling_diagnostics(track, num_steps)
 
         return x_next, intermediate_x
@@ -557,7 +555,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         steps = list(range(len(track["sigma"])))
         has_target = len(track["l2_to_target"]) > 0
-        n_plots = 7
+        n_plots = 3
 
         fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
 
@@ -574,61 +572,26 @@ class DiffusionForecastEngine(torch.nn.Module):
         axes[0].legend(fontsize=8)
         axes[0].grid(True, alpha=0.3)
 
-        # 2) Std of x_next and denoised estimate
-        axes[1].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
-        axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
-        if self.cur_token is not None:
-            target_std = self.cur_token.std().item()
-            axes[1].axhline(
-                target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}"
-            )
-        axes[1].set_ylabel("std")
-        axes[1].legend(fontsize=8)
+        # 2) L2 error to target
+        axes[1].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
+        axes[1].set_ylabel("L2 error to target")
         axes[1].grid(True, alpha=0.3)
 
-        if has_target:
-            # 3) L2 error to target
-            axes[2].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
-            axes[2].set_ylabel("L2 error to target")
-            axes[2].grid(True, alpha=0.3)
-
-        # 4) d_cur norm and step norm
-        axes[3].semilogy(steps, track["d_cur_norm"], "o-", markersize=3, label="||d_cur||")
-        axes[3].semilogy(steps, track["d_cur_step_norm"], "^-", markersize=3, label="||(t_next - t_hat) * d_cur||")
-        axes[3].set_ylabel("norm (log scale)")
-        axes[3].set_title("ODE drift norms")
-        axes[3].legend(fontsize=8)
-        axes[3].grid(True, alpha=0.3)
-
-        # 5) Residual std: Std(x_hat - denoised)
-        axes[4].semilogy(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[4].set_ylabel("std (log scale)")
-        axes[4].set_title("Std(x_hat - denoised)")
-        axes[4].grid(True, alpha=0.3)
-
-        # 6) Residual std zoomed to [0, 1]
-        axes[5].plot(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[5].set_ylim(0, 1)
-        axes[5].set_ylabel("std (clipped to 1)")
-        axes[5].set_title("Std(x_hat - denoised)  [y ≤ 1]")
-        axes[5].grid(True, alpha=0.3)
-
-        # 7) Std of x_next over sampling steps
-        axes[6].semilogy(steps, track["x_std"], "o-", markersize=3, color="tab:blue")
-        axes[6].set_ylabel("std (log scale)")
-        axes[6].set_title("Std of x_next over denoising steps")
-        axes[6].grid(True, alpha=0.3)
+        # 3) L2 error to target
+        axes[2].plot(steps, np.log(track["l2_to_target"]), "o-", markersize=3, color="tab:red")
+        axes[2].set_ylabel("log L2 error to target")
+        axes[2].grid(True, alpha=0.3)
 
         axes[-1].set_xlabel("sampling step")
         fig.tight_layout()
 
         out_dir = get_path_run(self.cf)
         out_dir.mkdir(exist_ok=True, parents=True)
-        out_path_base = out_dir / "plots" / "validation" / "plots"
+        out_path_base = out_dir / "plots" / "validation"
         out_path_base.mkdir(exist_ok=True, parents=True)
-        fig.savefig(out_path_base / "sampling_diagnostics.png", dpi=150)
+        fig.savefig(out_path_base / f"sampling_diagnostics.png", dpi=150)
         plt.close(fig)
-        logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
+        logger.info(f"Saved sampling diagnostics to {out_path_base / f'sampling_diagnostics.png'}")
 
 
 class Preconditioner:
@@ -761,3 +724,50 @@ class DateTimeEncoder(torch.nn.Module):
         out = torch.from_numpy(out).float()
 
         return out.reshape(*orig_shape, self.num_frequencies * 4)
+
+
+def sample_and_plot_latent_mse(tokens, step, meta_info, rope_coords, cf, forecast_engine):
+    """Sample diffusion latent MSE across sigma values and save a scatter plot.
+
+    Iterates over randomly sampled noise levels, runs the forecasting engine's
+    training forward pass, records the MSE between input and predicted tokens,
+    then writes a sigma-vs-MSE scatter plot to disk. Resets the sampling counter
+    in ``cf`` afterwards so the diagnostic only runs once.
+    """
+    import matplotlib.pyplot as plt
+    from tqdm import tqdm
+
+    num_samples = cf.get("fe_diffusion_latent_mse_samples", 0)
+    sigmas = []
+    mses = []
+    for _ in tqdm(range(num_samples), desc="Diffusion latent MSE sampling"):
+        lower = np.log(cf.get("sigma_min"))
+        upper = np.log(cf.get("sigma_max"))
+        noise_level_rn = (np.random.rand() * (upper - lower) + lower).astype(np.float32)
+        meta_info["ERA5"].params["noise_level_rn"] = noise_level_rn
+        tokens_pred = forecast_engine.training_forward(
+            tokens,
+            step,
+            meta_info=meta_info,
+            coords=rope_coords,
+        )
+        mse = ((tokens - tokens_pred) ** 2).mean().item()
+        sigmas.append(np.exp(noise_level_rn))
+        mses.append(mse)
+
+    run_id = cf.general.get("run_id")
+    plt.scatter(sigmas, mses)
+    plt.xlabel("Sigma")
+    plt.ylabel("MSE")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.title(f"{run_id}: sigma vs MSE")
+    plt.grid()
+    plt.tight_layout()
+    out_dir = get_path_run(cf)
+    out_dir.mkdir(exist_ok=True, parents=True)
+    out_path_base = out_dir / "plots" / "validation"
+    out_path_base.mkdir(exist_ok=True, parents=True)
+    plt.savefig(out_path_base / "sigma_vs_mse.png")
+    plt.close()
+    cf["fe_diffusion_latent_mse_samples"] = 0  # reset to avoid repeated sampling
