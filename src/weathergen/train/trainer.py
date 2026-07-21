@@ -125,7 +125,7 @@ class Trainer(TrainerBase):
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
-        self.lr_scheduler: LearningRateScheduler | None = None
+        self.lr_schedulers: list[LearningRateScheduler] | None = None
         self.model = None
         self.model_params = None
         self.optimizer: torch.optim.Optimizer | None = None
@@ -418,21 +418,25 @@ class Trainer(TrainerBase):
         # TODO: conf should be read-only, do not modify the conf in flight
         len_ds = len(self.dataset)
         lr_steps = int((len_ds * self.training_cfg.num_mini_epochs) / self.batch_size_per_gpu)
-        self.lr_scheduler = LearningRateScheduler(
-            self.optimizer,
-            self.batch_size_per_gpu,
-            cf.world_size,
-            cf.general.istep,
-            lr_steps,
-            self.training_cfg.learning_rate_scheduling,
-        )
+        self.lr_schedulers = [
+            LearningRateScheduler(
+                optimizer,
+                self.batch_size_per_gpu,
+                cf.world_size,
+                cf.general.istep,
+                lr_steps,
+                lr_cfg,
+            )
+            for optimizer, lr_cfg in zip(self.optimizers, lr_cfgs, strict=True)
+        ]
+
 
         # Restore optimizer momentum buffers when continuing from a checkpoint
         if run_id_contd is not None and self.cf.general.istep != 0:
             self._load_optimizer_state(run_id_contd, mini_epoch_contd)
 
         if self.cf.general.istep > 0 and is_root():
-            logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
+            logger.info(f"Continuing run with learning rate: {self.lr_schedulers[0].get_lr()}")
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
@@ -518,7 +522,8 @@ class Trainer(TrainerBase):
 
         dataset_iter = iter(self.data_loader)
 
-        self.optimizer.zero_grad()
+        for optimizer in self.optimizers:
+            optimizer.zero_grad()
 
         # training loop
         self.t_start = time.time()
@@ -560,7 +565,8 @@ class Trainer(TrainerBase):
             loss_value = self._get_tensor_item(loss.detach())
             if self._maybe_log_loss_spike(loss_value, batch, mini_epoch, bidx):
                 self._drop_latest_loss_record()
-                self.optimizer.zero_grad()
+                for optimizer in self.optimizers:
+                    optimizer.zero_grad()
                 if is_root():
                     logger.warning(
                         "Skipping batch %s in mini_epoch %s due to loss spike: %.8E",
@@ -586,11 +592,15 @@ class Trainer(TrainerBase):
             ]
 
             # backward pass
-            self.optimizer.zero_grad()
+            for optimizer in self.optimizers:
+                optimizer.zero_grad()
+
             self.grad_scaler.scale(loss).backward()
 
             # gradient clipping
-            self.grad_scaler.unscale_(self.optimizer)
+            for optimizer in self.optimizers:
+                self.grad_scaler.unscale_(optimizer) 
+
             total_norm = torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
             )
@@ -603,11 +613,13 @@ class Trainer(TrainerBase):
                     self._log_instant_grad_norms(TRAIN)
 
             # optimizer step
-            self.grad_scaler.step(self.optimizer)
+            for optimizer in self.optimizers:
+                self.grad_scaler.step(optimizer)
             self.grad_scaler.update()
 
             # update learning rate
-            self.lr_scheduler.step()
+            for lr_scheduler in self.lr_schedulers:
+                lr_scheduler.step()
 
             batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
             step = batch_size_total * self.cf.general.istep
@@ -1074,7 +1086,7 @@ class Trainer(TrainerBase):
                     losses_all,
                     stddev_all,
                     avg_loss=avg_loss,
-                    lr=self.lr_scheduler.get_lr(),
+                    lr=self.lr_schedulers[0].get_lr(),
                 )
 
         loss_calculator.loss_hist = []
@@ -1269,7 +1281,7 @@ class Trainer(TrainerBase):
                     pstr = (
                         f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
                         + f"{self.cf.general.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
-                        + f"(lr={self.lr_scheduler.get_lr():.2E}, "
+                        + f"(lr={self.lr_schedulers[0].get_lr():.2E}, "
                     )
                     if self.log_grad_norms:
                         pstr += f"gradient norm={self.last_grad_norm:.3f}, "
