@@ -272,7 +272,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         if self.training:
             noise_level_rn = torch.tensor(
-                [meta_info["ERA5_in"].params["noise_level_rn"]], device=tokens.device
+                [meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device
             )
         else:
             # During validation, use fixed noise level (default: 0.0)
@@ -280,10 +280,6 @@ class DiffusionForecastEngine(torch.nn.Module):
                 [self._fixed_noise_level if self._fixed_noise_level is not None else 0.0],
                 device=tokens.device,
             )
-        # # generate random tensor following uniform distribution from 0.4 to 50
-        # lower = 0.002
-        # upper = 10
-        # noise_level_rn = (torch.rand_like(noise_level_rn) * (upper - lower) + lower).log()
 
         # Compute sigma from noise_level_rn.
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
@@ -693,7 +689,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         out_dir = get_path_run(self.cf)
         out_dir.mkdir(exist_ok=True, parents=True)
-        out_path_base = out_dir / "plots" / "validation" / "plots"
+        out_path_base = out_dir / "plots" / "validation"
         out_path_base.mkdir(exist_ok=True, parents=True)
         fig.savefig(out_path_base / "sampling_diagnostics.png", dpi=150)
         plt.close(fig)
@@ -830,3 +826,50 @@ class DateTimeEncoder(torch.nn.Module):
         out = torch.from_numpy(out).float()
 
         return out.reshape(*orig_shape, self.num_frequencies * 4)
+
+
+def sample_and_plot_latent_mse(tokens, step, meta_info, rope_coords, cf, forecast_engine):
+    """Sample diffusion latent MSE across sigma values and save a scatter plot.
+
+    Iterates over randomly sampled noise levels, runs the forecasting engine's
+    training forward pass, records the MSE between input and predicted tokens,
+    then writes a sigma-vs-MSE scatter plot to disk. Resets the sampling counter
+    in ``cf`` afterwards so the diagnostic only runs once.
+    """
+    import matplotlib.pyplot as plt
+    from tqdm import tqdm
+
+    num_samples = cf.get("fe_diffusion_latent_mse_samples", 0)
+    sigmas = []
+    mses = []
+    for _ in tqdm(range(num_samples), desc="Diffusion latent MSE sampling"):
+        lower = np.log(cf.get("sigma_min"))
+        upper = np.log(cf.get("sigma_max"))
+        noise_level_rn = (np.random.rand() * (upper - lower) + lower).astype(np.float32)
+        meta_info["ERA5"].params["noise_level_rn"] = noise_level_rn
+        tokens_pred = forecast_engine.training_forward(
+            tokens,
+            step,
+            meta_info=meta_info,
+            coords=rope_coords,
+        )
+        mse = ((tokens - tokens_pred) ** 2).mean().item()
+        sigmas.append(np.exp(noise_level_rn))
+        mses.append(mse)
+
+    run_id = cf.general.get("run_id")
+    plt.scatter(sigmas, mses)
+    plt.xlabel("Sigma")
+    plt.ylabel("MSE")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.title(f"{run_id}: sigma vs MSE")
+    plt.grid()
+    plt.tight_layout()
+    out_dir = get_path_run(cf)
+    out_dir.mkdir(exist_ok=True, parents=True)
+    out_path_base = out_dir / "plots" / "validation"
+    out_path_base.mkdir(exist_ok=True, parents=True)
+    plt.savefig(out_path_base / "sigma_vs_mse.png")
+    plt.close()
+    cf["fe_diffusion_latent_mse_samples"] = 0  # reset to avoid repeated sampling

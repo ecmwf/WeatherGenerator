@@ -25,7 +25,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.model.diffusion import DiffusionForecastEngine, sample_and_plot_latent_mse
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -749,42 +749,24 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
+            if self.cf.get("fe_diffusion_latent_mse_samples", 0) > 0:
+                self.forecast_engine.training = True
+                sample_and_plot_latent_mse(
+                    tokens,
+                    step,
+                    meta_info=batch.samples[0].meta_info,
+                    rope_coords=model_params.rope_coords,
+                    cf=self.cf,
+                    forecast_engine=self.forecast_engine,
+                )
+                self.forecast_engine.training = self.training
+            
             tokens = self.forecast_engine(
                 tokens,
                 step,
                 meta_info=batch.samples[0].meta_info,
                 coords=model_params.rope_coords,
             )
-
-            # sigmas = []
-            # mses = []
-            # while True:
-            #     # apply forecasting engine
-            #     tokens_pred, sigma = self.forecast_engine(
-            #         tokens,
-            #         step,
-            #         meta_info=batch.samples[0].meta_info,
-            #         coords=model_params.rope_coords,
-            #     )
-            #     mse = ((tokens - tokens_pred)**2).mean().item()
-            #     sigmas.append(sigma.cpu().item()); mses.append(mse)
-            #     print(len(sigmas))
-            #     if len(sigmas) > 500:
-            #         break
-            
-            # # Create scatterplot of sigmas vs mses
-            # import matplotlib.pyplot as plt
-            # plt.scatter(sigmas, mses)
-            # plt.xlabel("Sigma")
-            # plt.ylabel("MSE")
-            # plt.xscale("log")
-            # plt.yscale("log")
-            # plt.title("Sigma vs MSE")
-            # plt.grid()
-            # plt.savefig("sigma_vs_mse.png")
-            # plt.close()
-            # breakpoint()
-            # exit()
 
             # Trajectory inspection mode: decode each ODE step as a separate forecast output
             # so the full denoising trajectory can be inspected downstream.
