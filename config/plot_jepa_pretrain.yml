@@ -1,0 +1,47 @@
+train:
+  plot:
+    
+    # gjl6a0kb:
+    #   slurm_id: 0
+    #   description: "temporal JEPA pretraining, all years"
+
+    uahdb9yl:
+      slurm_id: 0
+      description: "temporal JEPA pretraining, all years, continued"
+
+    n0t6ejuo:
+      slurm_id: 0
+      description: "temporal JEPA pretraining, all years, continued"
+
+    i65rbk8i:
+      slurm_id: 0
+      description: "temporal JEPA pretraining, all years, 8e-5 lr"
+
+    a0xiro2s:
+      slurm_id: 0
+      description: "temporal JEPA pretraining, 8e-5, era5 only"
+    
+    # nbx7sema-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema: 1.33e-04,587639, save ema state (nbx7nwo3)"
+    
+    # nbx7stv2-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema: 1.33e-04,587639, save model/val ema state too (nbx7nwo3)"
+
+    # op8wojf6-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema: 1.46e-04,812034"
+
+    ### New models 6th July
+    cdbtyx6z:
+      slurm_id: 982741
+      description: "temporal JEPA pretraining, 1979-2015, jepa encoder, develop-ssl"
+
+    
+
+    lazmilcs:
+      slurm_id: 982850
+      description: "temporal JEPA pretraining, 1979-2015, jepa encoder, fix q_cells, 80k ema"
+
+    

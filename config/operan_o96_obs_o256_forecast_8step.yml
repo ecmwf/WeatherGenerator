@@ -1,0 +1,52 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*|.*encoder.*"
+ # freeze_modules: ""
+
+streams_directory: "./weathergen-configs/streams/operan_o96_geos_o256_avhrr_iasipc/"
+
+general:
+
+  # mutable parameters
+  istep: 0
+
+# parameters for data loading
+data_loading :
+
+  num_workers: 8
+  rng_seed: ???
+  repeat_data_in_mini_epoch : False
+
+# config for training
+training_config:
+  
+  num_mini_epochs: 4
+  samples_per_mini_epoch: 8192
+  
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 3.5e-5
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 512
+    policy_warmup: "cosine"
+    policy_decay: "cosine"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 0.8
+
+  forecast :
+      time_step: 06:00:00
+      offset: 1
+      num_steps: 8
+      policy: "fixed"

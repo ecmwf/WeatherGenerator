@@ -1,0 +1,40 @@
+parallelize: false
+
+stages:
+  - name: multipretrain
+    stage: train
+    base_config: ./config/temporal_jepa_pretraining_1979_2015.yml
+    chain_jobs: 4
+    nodes: 2
+
+  - name: mltiprtrnft
+    stage: train
+    from_run_id: STAGE.multipretrain
+    config_files:
+      - ./config/temporal_jepa_pretraining_2016_2022.yml
+    chain_jobs: 2
+    nodes: 2
+
+  - name: frcstft
+    stage: train
+    from_run_id: STAGE.mltiprtrnft
+    config_files:
+      - ./config/temporal_jepa_forecast_era5_o96_unfreeze.yml
+    chain_jobs: 4
+    nodes: 2
+
+  - name: operfrcstft
+    stage: train
+    from_run_id: STAGE.frcstft
+    config_files:
+      - ./config/operan_o96_obs_o256_forecast_2step.yml
+    chain_jobs: 2
+    nodes: 2
+
+  - name: operfrcstft8
+    stage: train
+    from_run_id: STAGE.operfrcstft
+    config_files:
+      - ./config/operan_o96_obs_o256_forecast_8step.yml
+    chain_jobs: 2
+    nodes: 2
