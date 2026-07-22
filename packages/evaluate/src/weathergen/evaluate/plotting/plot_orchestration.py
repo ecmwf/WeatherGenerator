@@ -133,20 +133,9 @@ def run_score_timeseries_pipeline(
 
         for region in regions:
             # PSD is a spatial metric incompatible with sample+ipoint aggregation
-<<<<<<< HEAD
-<<<<<<< HEAD
             region_metrics = dict(metrics_dict.get(region))
             region_metrics.pop("psd", None)
             if not region_metrics:
-=======
-            #TODO: Temporary fix. Will be propery fixed with MetricResults class
-=======
-            # TODO: Temporary fix. Will be propery fixed with MetricResults class
->>>>>>> b53701f9 (lint)
-            metric_names = [m for m in region_metrics.keys() if m != "psd"]
-            metric_params = [region_metrics[m] for m in metric_names]
-            if not metric_names:
->>>>>>> 03fde246 (shorten logic)
                 continue
 
             metric_names = list(region_metrics.keys())

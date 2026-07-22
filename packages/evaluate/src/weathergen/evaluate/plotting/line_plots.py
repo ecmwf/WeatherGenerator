@@ -61,7 +61,6 @@ class LinePlots:
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
         self.baseline = plotter_cfg.get("baseline")
-
         self._base_dir_lines = Path(output_basedir) / "line_plots"
         self._base_dir_ratio = Path(output_basedir) / "ratio_plots"
         self._base_dir_psd = Path(output_basedir) / "psd_plots"
