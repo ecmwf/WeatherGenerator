@@ -355,15 +355,17 @@ def _plot_score_maps_per_stream(
 
     score_results, preds, metric_names = computed
     valid = [
-        (m, r)
-        for m, r in zip(metric_names, score_results, strict=False)
-        if r is not None and "ipoint" in r.dims
+        (metric, result)
+        for metric, result in zip(metric_names, score_results, strict=False)
+        if result is not None and "ipoint" in result.dims
     ]
     if not valid:
         return
 
+    ens_metrics = {metric for metric, result in valid if "ens" in result.dims}
+
     plot_metrics = xr.concat(
-        [r for _, r in valid],
+        [result for _, result in valid],
         dim="metric",
         coords="minimal",
         combine_attrs="drop_conflicts",
@@ -371,24 +373,28 @@ def _plot_score_maps_per_stream(
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=[m for m, _ in valid],
+        metric=[metric for metric, _ in valid],
     ).compute()
 
-    if "ens" in preds.dims:
-        plot_metrics["ens"] = preds.ens
+    if "ens" in plot_metrics.dims:
+        plot_metrics = plot_metrics.assign_coords(ens=preds.ens.values)
 
-    has_ens = "ens" in plot_metrics.coords
-    ens_values = plot_metrics.coords["ens"].values if has_ens else [None]
+    all_ens = plot_metrics.coords["ens"].values if "ens" in plot_metrics.dims else [None]
 
     plot_tasks: list[dict] = []
     for metric in plot_metrics.coords["metric"].values:
+        metric_has_ens = str(metric) in ens_metrics and "ens" in plot_metrics.dims
+        ens_values = all_ens if metric_has_ens else [None]
         for ens_val in ens_values:
             tag = "score_maps" + (f"_ens_{ens_val}" if ens_val is not None else "") + f"_{metric}"
             for channel in plot_metrics.coords["channel"].values:
                 sel = {"metric": metric, "channel": channel}
                 if ens_val is not None:
                     sel["ens"] = ens_val
-                data = plot_metrics.sel(**sel).squeeze()
+                data = plot_metrics.sel(**sel)
+                if ens_val is None and "ens" in data.dims:
+                    data = data.isel(ens=0, drop=True)
+                data = data.squeeze()
                 title = f"{metric} - {channel}: fstep {fstep}" + (
                     f", ens {ens_val}" if ens_val is not None else ""
                 )
@@ -684,7 +690,18 @@ def _dispatch_timeseries_plots(
 # ---------------------------------------------------------------------------
 # Per-sample map / histogram plots
 # ---------------------------------------------------------------------------
+def _select_ensemble_data(da: xr.DataArray, ens):
+    """Return ensemble member, mean or std view of a DataArray."""
+    if "ens" not in da.dims:
+        return da
 
+    if ens == "mean":
+        return da.mean(dim="ens")
+
+    if ens == "std":
+        return da.std(dim="ens")
+
+    return da.sel(ens=ens)
 
 def _plot_single_sample(
     plotter_cfg: dict,
@@ -703,12 +720,14 @@ def _plot_single_sample(
     plot_histograms: bool | str,
     maps_config: dict,
     bias_config: dict,
+    std_config: dict,
 ) -> None:
     """Plot all maps/histograms for a single (fstep, sample) pair (loky worker)."""
     matplotlib.use("Agg")
 
     maps_cfg = oc.OmegaConf.create(maps_config)
     bias_cfg = oc.OmegaConf.create(bias_config)
+    std_cfg = oc.OmegaConf.create(std_config)
     plotter = Plotter(plotter_cfg, Path(output_basedir))
 
     data_selection = {"sample": sample, "stream": stream, "forecast_step": fstep}
@@ -724,18 +743,22 @@ def _plot_single_sample(
             plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
     for ens in ensemble:
-        has_ens = "ens" in preds.dims and ens != "mean"
-        preds_ens = preds.sel(ens=ens) if has_ens else preds
-        preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+        preds_ens = _select_ensemble_data(preds, ens)
+        if ens in ("mean", "std"):
+            preds_tag = f"ens_{ens}"
+        else:
+            preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
         preds_name = "_".join(filter(None, ["preds", preds_tag]))
 
+
         if plot_maps:
+            cfg_to_use = std_cfg if ens == "std" else maps_cfg
             plotter.create_maps_per_sample(
-                preds_ens, plot_chs, data_selection, preds_name, maps_cfg
+                preds_ens, plot_chs, data_selection, preds_name, cfg_to_use
             )
 
             if plot_bias and bias_has_ens:
-                bias_ens = bias_data.sel(ens=ens) if ens != "mean" else bias_data
+                bias_ens = _select_ensemble_data(bias_data, ens)
                 bias_tag = "_".join(filter(None, ["bias", preds_tag]))
                 plotter.create_maps_per_sample(
                     bias_ens, plot_chs, data_selection, bias_tag, bias_cfg
@@ -782,9 +805,12 @@ def _plot_all_samples(
     data_selection = {"sample": "all_samples", "stream": stream, "forecast_step": fstep}
 
     for ens in ensemble:
-        has_ens = "ens" in preds.dims and ens != "mean"
-        preds_ens = preds.sel(ens=ens) if has_ens else preds
-        preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+        preds_ens = _select_ensemble_data(preds, ens)
+
+        if ens in ("mean", "std"):
+            preds_tag = f"ens_{ens}"
+        else:
+            preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
         preds_name = "_".join(filter(None, ["preds", preds_tag]))
 
         plotter.create_histograms(
@@ -908,6 +934,30 @@ def plot_data(
     maps_config_dict = oc.OmegaConf.to_container(common_ranges(*_range_args), resolve=True)
     bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*_range_args), resolve=True)
 
+    has_ens = any("ens" in da.dims for da in da_preds.values())
+
+    if has_ens:
+        std_preds = {
+            fs: da.std(dim="ens")
+            for fs, da in da_preds.items()
+        }
+
+        std_config_dict = oc.OmegaConf.to_container(
+            common_ranges(
+                std_preds,
+                std_preds,
+                available_data.channels,
+                global_plotting_opts[stream],
+            ),
+            resolve=True,
+        )
+
+        for cfg in std_config_dict.values():
+            if isinstance(cfg, dict):
+                cfg["colormap"] = "YlOrRd"
+    else:
+        std_config_dict = maps_config_dict
+
     num_plot_workers = get_num_workers(
         check_process_headroom=True,
         max_workers=reader.eval_cfg.get("max_workers", None),
@@ -972,6 +1022,7 @@ def plot_data(
                     "plot_histograms": plot_histograms,
                     "maps_config": maps_config_dict,
                     "bias_config": bias_config_dict,
+                    "std_config": std_config_dict,
                 }
             )
 
@@ -1034,12 +1085,19 @@ def plot_data(
 
         tags: list[str] = []
         for ens in available_data.ensemble:
-            tags.append("preds" if not has_ens else f"preds_ens_{ens}")
+            if ens in ("mean", "std"):
+                tags.append(f"preds_ens_{ens}")
+            else:
+                tags.append("preds" if not has_ens else f"preds_ens_{ens}")
         if plot_target:
             tags.append("targets")
         if plot_bias:
             for ens in available_data.ensemble:
-                tags.append("bias" if not has_ens else f"bias_ens_{ens}")
+                if ens in ("mean", "std"):
+                    tags.append(f"bias_ens_{ens}")
+                else:
+                    tags.append("bias" if not has_ens else f"bias_ens_{ens}")
+
 
         for tag in tags:
             _dispatch_animations(**anim_kw, tag=tag)
