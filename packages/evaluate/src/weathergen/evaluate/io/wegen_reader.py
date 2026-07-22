@@ -103,9 +103,7 @@ class WeatherGenReader(Reader):
 
         return config
 
-    def get_climatology_filename(
-        self, stream: str, climatology_type: str = "default_climatology"
-    ) -> str | None:
+    def get_climatology_filename(self, stream: str) -> str | None:
         """
         Get the climatology filename for a given stream from the inference
         configuration.
@@ -153,18 +151,12 @@ class WeatherGenReader(Reader):
                 " explicitly via 'climatology_path' in the evaluation config."
             )
             return None
-        if climatology_type == "default_climatology":
-            clim_data_path = (
-                Path(clim_base_dir)
-                / "climatology"
-                / climatology_partial_filename.replace(".zarr", "_climatology.zarr")
-            )
-        elif climatology_type == "seeps":
-            clim_data_path = (
-                Path(clim_base_dir)
-                / "climatology_seeps"
-                / climatology_partial_filename.replace(".zarr", "_SEEPS.nc")
-            )
+
+        clim_data_path = (
+            Path(clim_base_dir)
+            / "climatology"
+            / climatology_partial_filename.replace(".zarr", "_climatology.zarr")
+        )
 
         if not clim_data_path.exists():
             _logger.warning(

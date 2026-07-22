@@ -78,7 +78,6 @@ class VerifiedData:
     ground_truth_next: xr.DataArray | None
     climatology: xr.DataArray | None
     latitude_weights: xr.DataArray | None = None
-    climatology_seeps: xr.Dataset | None = None
 
     def __post_init__(self):
         # Perform checks on initialization
@@ -308,7 +307,7 @@ class Scores:
             "rpss": ["p", "gt", "c"],
             "fact": ["p", "c"],
             "tact": ["gt", "c"],
-            "seeps": ["p", "gt", "c_seeps"],
+            "seeps": ["p", "gt", "c"],
         }
 
         available = {
@@ -317,7 +316,6 @@ class Scores:
             "p_next": data.prediction_next,
             "gt_next": data.ground_truth_next,
             "c": data.climatology,
-            "c_seeps": data.climatology_seeps,
         }
 
         # assign p and gt by default if metrics do not have specific args
@@ -1335,13 +1333,13 @@ class Scores:
 
         return ratio_spat_variability
 
-    def calc_seeps(self, p: xr.DataArray, gt: xr.DataArray, c_seeps: xr.Dataset) -> xr.DataArray:
-        p_wet = c_seeps["p_wet"]
+    def calc_seeps(self, p: xr.DataArray, gt: xr.DataArray, c: xr.Dataset) -> xr.DataArray:
+        p_wet = c["p_wet"]
         p_dry = 1 - p_wet
         p_light = (2 / 3) * p_wet
         p_heavy = (1 / 3) * p_wet
-        t1 = c_seeps["threshold_dry"]
-        t2 = c_seeps["threshold_heavy"]
+        t1 = c.threshold_dry
+        t2 = c.threshold_heavy
 
         # Categorize into boolean masks
         p_dry, p_light, p_heavy = p <= t1, (p > t1) & (p <= t2), p > t2
@@ -1359,7 +1357,7 @@ class Scores:
             .where(~(p_heavy & gt_dry), 1 / p_dry + 1 / (1 - p_heavy))
             .where(~(p_heavy & gt_light), 1 / (1 - p_heavy))
         )
-        return seeps
+        return seeps.mean(self._agg_dims)
 
     def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """

@@ -20,11 +20,7 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import scalar_coord_to_dim
-from weathergen.evaluate.utils.clim_utils import (
-    get_climatology,
-    get_seeps_climatology,
-    needed_climatology,
-)
+from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -50,7 +46,6 @@ def _score_single_fstep(
     preds_next: xr.DataArray | None,
     tars_next: xr.DataArray | None,
     climatology: xr.DataArray | None,
-    climatology_seeps: xr.Dataset | None,
     bbox: "RegionBoundingBox",
     metrics: dict,
     group_by_coord: str | None,
@@ -68,8 +63,6 @@ def _score_single_fstep(
         Next-step data for froct/troct metrics.
     climatology : xr.DataArray | None
         Aligned climatology for this fstep.
-    climatology_seeps : xr.Dataset | None
-        Aligned SEEPS climatology data for this fstep.
     bbox : RegionBoundingBox
         Region bounding box to apply.
     metrics : dict
@@ -88,14 +81,7 @@ def _score_single_fstep(
         bbox.apply_mask(x) if x is not None else None for x in (tars, preds, tars_next, preds_next)
     ]
 
-    score_data = VerifiedData(
-        preds,
-        tars,
-        preds_next,
-        tars_next,
-        climatology,
-        climatology_seeps=climatology_seeps,
-    )
+    score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
 
     valid_scores = []
     valid_metric_names = []
@@ -189,15 +175,8 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     fsteps = sorted(list(da_preds.keys()))
 
-    required_clims = needed_climatology(metrics_dict)
-    aligned_clim_data = (
-        get_climatology(reader, da_tars, stream)
-        if "default_climatology" in required_clims
-        else None
-    )
-    seeps_clim_data = (
-        get_seeps_climatology(reader, da_tars, stream) if "seeps" in required_clims else None
-    )
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
     max_workers = reader.eval_cfg.get("max_workers", None)
     agg_dims = reader.eval_cfg.get("agg_dims", "ipoint")
@@ -214,7 +193,6 @@ def calc_scores_per_stream(
             da_tars,
             fsteps,
             aligned_clim_data,
-            seeps_clim_data,
             is_gridded_data,
             group_by_coord,
             bbox,
@@ -249,7 +227,6 @@ def compute_scores_for_region(
     da_tars: dict,
     fsteps: list[int],
     aligned_clim_data: dict | None,
-    seeps_clim_data: dict | None,
     is_gridded_data: bool,
     group_by_coord: str | None,
     bbox: "RegionBoundingBox",
@@ -273,8 +250,6 @@ def compute_scores_for_region(
         Sorted forecast steps.
     aligned_clim_data : dict | None
         Climatology aligned to forecast steps, or None.
-    seeps_clim_data : dict | None
-        SEEPS climatology data aligned to forecast steps, or None.
     is_gridded_data : bool
         Whether the stream is gridded.
     group_by_coord : str | None
@@ -307,28 +282,22 @@ def compute_scores_for_region(
         else:
             preds_next, tars_next = None, None
         climatology = aligned_clim_data[fstep] if aligned_clim_data else None
-        climatology_seeps = seeps_clim_data[fstep] if seeps_clim_data else None
-        fstep_tasks.append(
-            (
-                fstep,
-                tars_fs,
-                preds_fs,
-                preds_next,
-                tars_next,
-                climatology,
-                climatology_seeps,
-            )
-        )
+        fstep_tasks.append((fstep, tars_fs, preds_fs, preds_next, tars_next, climatology))
 
     calls = [
         delayed(_score_single_fstep)(
-            *task,
+            fstep,
+            tars_fs,
+            preds_fs,
+            preds_next,
+            tars_next,
+            climatology,
             bbox,
             metrics,
             group_by_coord,
             agg_dims,
         )
-        for task in fstep_tasks
+        for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks
     ]
     n_workers = get_num_workers(max_workers=max_workers)
     all_results = dispatch_parallel(

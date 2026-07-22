@@ -46,11 +46,7 @@ from weathergen.evaluate.plotting.score_cards import ScoreCards
 from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
-from weathergen.evaluate.utils.clim_utils import (
-    get_climatology,
-    get_seeps_climatology,
-    needed_climatology,
-)
+from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 
 _logger = logging.getLogger(__name__)
 
@@ -267,15 +263,8 @@ def run_score_map_pipeline(
     da_preds = output_data.prediction
     da_tars = output_data.target
     fsteps = sorted(da_preds.keys())
-    required_clims = needed_climatology(metrics_dict)
-    aligned_clim_data = (
-        get_climatology(reader, da_tars, stream)
-        if "default_climatology" in required_clims
-        else None
-    )
-    seeps_clim_data = (
-        get_seeps_climatology(reader, da_tars, stream) if "seeps" in required_clims else None
-    )
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
     n_plot_workers = get_num_workers(
         check_process_headroom=True,
@@ -300,7 +289,6 @@ def run_score_map_pipeline(
         da_preds,
         da_tars,
         aligned_clim_data,
-        seeps_clim_data,
         n_workers=n_plot_workers,
     )
 
