@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
+import scores
 
 from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
 from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_list
@@ -1334,30 +1335,17 @@ class Scores:
         return ratio_spat_variability
 
     def calc_seeps(self, p: xr.DataArray, gt: xr.DataArray, c: xr.Dataset) -> xr.DataArray:
-        p_wet = c["p_wet"]
-        p_dry = 1 - p_wet
-        p_light = (2 / 3) * p_wet
-        p_heavy = (1 / 3) * p_wet
-        t1 = c.threshold_dry
-        t2 = c.threshold_heavy
-
-        # Categorize into boolean masks
-        p_dry, p_light, p_heavy = p <= t1, (p > t1) & (p <= t2), p > t2
-        gt_dry, gt_light, gt_heavy = gt <= t1, (gt > t1) & (gt <= t2), gt > t2
-
-        # Apply the seeps formula based on the categories
-        # We use .where(condition, other) where 'condition' keeps current values,
-        # and 'other' replaces values where the condition is False.
-        seeps = (
-            xr.zeros_like(p, dtype=float)
-            .where(~(p_dry & gt_light), 1 / p_light)
-            .where(~(p_dry & gt_heavy), 1 / p_light + 1 / p_heavy)
-            .where(~(p_light & gt_dry), 1 / p_dry)
-            .where(~(p_light & gt_heavy), 1 / p_heavy)
-            .where(~(p_heavy & gt_dry), 1 / p_dry + 1 / (1 - p_heavy))
-            .where(~(p_heavy & gt_light), 1 / (1 - p_heavy))
+        return scores.categorical.seeps(
+            fcst = p*1000, # converted to mm
+            obs = gt*1000, 
+            prob_dry = c.sel(statistic="prob_dry"), 
+            light_heavy_threshold = c.sel(statistic="light_heavy_threshold"),
+            dry_light_threshold=0.2, 
+            mask_clim_extremes=True, 
+            lower_masked_value=0.1, 
+            upper_masked_value=0.85, 
+            reduce_dims=self._agg_dims  
         )
-        return seeps.mean(self._agg_dims)
 
     def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
