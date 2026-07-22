@@ -379,7 +379,7 @@ class LinePlots:
             print_summary,
             line=line,
             title=title,
-            out_plot_dir=self.out_plot_dir_lines,
+            out_plot_dir=self.out_plot_dir,
         )
 
     def _plot_base(

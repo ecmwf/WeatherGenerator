@@ -43,6 +43,7 @@ from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
     metric_list_to_json,
 )
+from weathergen.evaluate.utils.config_compat import get_plot_score_options, parse_plot_config
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
@@ -325,11 +326,11 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
 
-    plot_score_options = {
-        "plot_score_maps": cfg.evaluation.get("plot_score_maps", False),
-        "plot_score_animations": cfg.evaluation.get("plot_score_animations", False),
-        "plot_score_init_time_series": cfg.evaluation.get("plot_score_init_time_series", False),
-    }
+    # Normalise boolean plot flags → list-based config (backward-compat shim).
+    with open_dict(cfg):
+        parse_plot_config(cfg)
+
+    plot_score_options = get_plot_score_options(cfg.evaluation)
 
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})
