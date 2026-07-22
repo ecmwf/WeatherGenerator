@@ -563,6 +563,13 @@ class Masker:
                         np.log(masking_strategy_config["sigma_min"]),
                         np.log(masking_strategy_config["sigma_max"]),
                     )
+                elif noise_dist == "uniform":
+                    # Flow matching: draw the path time t ~ Unif[t_min, t_max] directly at the
+                    # source; the flow engine consumes noise_level_rn as t (course Alg. 3).
+                    masking_params["noise_level_rn"] = self.rng.uniform(
+                        masking_strategy_config.get("t_min", 0.0),
+                        masking_strategy_config.get("t_max", 1.0),
+                    )
                 else:  # log_normal (default): store eta ~ N(0,1)
                     masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
 

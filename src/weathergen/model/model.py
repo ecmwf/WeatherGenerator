@@ -25,6 +25,7 @@ from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.model.flow_matching import FlowMatchingForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     MAX_NUMBER_TOKENS_LOCAL_PER_CELL,
@@ -395,7 +396,13 @@ class Model(torch.nn.Module):
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells, dim_aux=self.cf.diffusion_conditioning_embed_dim)
             else:
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
-            if cf.get("fe_diffusion_model", False):
+            # Flow-matching shares the fe_diffusion_model time-conditioned backbone; when
+            # fe_flow_matching_model is set it wraps that backbone (checked before diffusion).
+            if cf.get("fe_flow_matching_model", False):
+                self.forecast_engine = FlowMatchingForecastEngine(
+                    cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                )
+            elif cf.get("fe_diffusion_model", False):
                 self.forecast_engine = DiffusionForecastEngine(
                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
                 )

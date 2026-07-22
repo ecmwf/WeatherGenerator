@@ -1,0 +1,48 @@
+# Evaluation config for the flow-matching inference runs
+# (u1ci2z5r = velocity, walntc9i = noise, yf2t6sl8 = score).
+#
+# Differs from eval_config_diffusion.yml in ONE essential way:
+#   plotting.sample: [0]   (not [1])
+# Those inference runs were produced with test_config.output.num_samples=1, so ONLY sample 0
+# exists in the zarr. Requesting sample [1] makes the plotting stage find nothing and emit no
+# maps/histograms/animations, while scores still come out (evaluation.sample: "all" resolves
+# to the sample that does exist). That is the "scores but no absolute plots" symptom.
+#
+# The runs are 16-step rollouts (forecast steps 0..15), single member (ensemble index 0).
+
+evaluation:
+  # NB: spread / ssr / ssr_adj / crps are ensemble metrics and are degenerate with a single
+  # member (fe_flow_num_ensemble_members=1). Keep them only if you re-run inference with an
+  # ensemble; otherwise rmse/mae are the meaningful ones here.
+  metrics: ["rmse", "mae"]
+  regions: ["global"]
+  summary_plots: true
+  ratio_plots: false
+  heat_maps: false
+  summary_dir: "./plots/flow_matching_eval/"
+  plot_ensemble: false        # single member
+  plot_score_maps: true
+  print_summary: false
+  log_scale: false
+  add_grid: false
+  score_cards: false
+  bar_plots: false
+  num_processes: 0
+
+default_streams:
+  ERA5:
+    channels: ["2t", "10u"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+    plotting:
+      sample: [0]            # only sample 0 exists (inference used num_samples=1)
+      forecast_step: "all"   # every step of the 16-step rollout -> full-resolution gifs
+      ensemble: [0]
+      plot_maps: true
+      plot_target: true
+      plot_histograms: true
+      plot_animations: true
+
+run_ids: {}

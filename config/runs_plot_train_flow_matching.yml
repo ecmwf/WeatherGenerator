@@ -1,0 +1,10 @@
+# Flow matching — prediction-type comparison (2026-07-10)
+# See RUN-LOG.md "Flow Matching — Prediction-Type Comparison".
+# NB: raw loss_avg is NOT comparable ACROSS prediction types (different target scales);
+# use these curves to judge convergence of each run individually.
+train:
+    plot:
+        gv6q1mt7:
+            slurm_id: 990716
+            description: fm test run
+
