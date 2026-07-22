@@ -631,6 +631,23 @@ class FlowMatchingForecastEngine(torch.nn.Module):
             if return_trajectory:
                 trajectory.append(x_next)
 
+        # Record the FINAL state x_next at the terminal node t_steps[num_steps]. The loop above only
+        # tracks x_cur (the state *before* each update), so without this the actual returned sample
+        # is never plotted and x_t appears to stall above x0_hat. For the ve path the last step is a
+        # plain Euler step with h = -sigma_last and u = (x - D)/sigma, so x_next == D exactly: the
+        # endpoint lands ON the x0_hat curve. x0_hat/velocity are not defined at the terminal node
+        # (it would need another net forward, degenerate at sigma=0), so they get NaN and matplotlib
+        # simply omits that marker.
+        with torch.no_grad():
+            track["t"].append(t_steps[num_steps].float().item())
+            track["x_t_std"].append(x_next.std().item())
+            track["x0_hat_std"].append(float("nan"))
+            track["vel_norm"].append(float("nan"))
+            if self.cur_token is not None:
+                _rn = self.cur_token.numel() ** 0.5
+                track["rmse_x_t"].append((x_next - self.cur_token).norm().item() / _rn)
+                track["rmse_x0_hat"].append(float("nan"))
+
         #TODO: Make this optinal with log_diganostics flag
         self._plot_sampling_diagnostics(track, num_steps)
         return x_next, trajectory
