@@ -15,6 +15,16 @@ import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
+# Dask is optional: if it is not installed we transparently fall back to the
+# original eager (non-chunked) behaviour, so functionality never depends on it.
+try:
+    import dask.array as dask_array
+
+    _HAS_DASK = True
+except ImportError:  # pragma: no cover - dask is an optional speed-up dependency
+    dask_array = None
+    _HAS_DASK = False
+
 from weathergen.datasets.data_reader_base import (  # type: ignore
     DataReaderTimestep,
     ReaderData,
@@ -33,6 +43,14 @@ class DataReaderGREP(DataReaderTimestep):
     This reader handles datasets stored as Zarr with dimensions (time, latitude, longitude)
         beta: handling  dimensions (time_centered, nav_lat, nav_lon)
     Converts the gridded data to ReaderData format.
+
+    PERFORMANCE NOTES
+    ------------------
+    This version batches all (channel, timestep) reads for a given window into a single
+    xarray/Dask read instead of issuing one Zarr read per channel per timestep. When Dask
+    is available, the dataset is opened with chunking enabled so that the underlying Zarr
+    chunks can be fetched/decompressed concurrently (multi-threaded) via Dask's scheduler.
+    None of this changes the values, shapes, dtypes or ordering returned by `_get`.
     """
 
     def __init__(
@@ -73,8 +91,14 @@ class DataReaderGREP(DataReaderTimestep):
         self.n_lon: int = 0
         self.n_points: int = 0
 
+        # Cached time coordinate/dimension info (populated during lazy init, reused by _get
+        # on every call instead of being re-resolved each time).
+        self._time_coord_name: str | None = None
+        self._time_dim_name: str | None = None
+        self.time_coord: NDArray | None = None
+
         # debug
-        self.log_debug = False
+        self.log_debug = True
 
         # Set empty defaults so the object is always in a valid state
         self.init_empty()
@@ -97,6 +121,9 @@ class DataReaderGREP(DataReaderTimestep):
         else:
             raise ValueError(f"Cannot determine Zarr format for {self._filename}")
 
+        # Apriamo con chunking Dask invece di chunks=None.
+        use_dask = self._stream_info.get("use_dask", True) and _HAS_DASK
+
         ds = xr.open_zarr(
             self._filename,
             consolidated=True,
@@ -104,14 +131,30 @@ class DataReaderGREP(DataReaderTimestep):
             **kwargs,
         )
 
+        if use_dask:
+            _logger.info(
+                f"{self._stream_info.get('name', '?')}: dataset opened with Dask."
+            )
+        else:
+            _logger.info(
+                f"{self._stream_info.get('name', '?')}: dataset opened without Dask chunking "
+                "(eager reads, same as original behaviour)."
+            )
+
         # ---- Time axis -------------------------------------------------------
 
         for coord_name in ["time", "time_centered", "time_counter"]:
             if coord_name in ds.coords:
                 time_coord: NDArray = ds.coords[coord_name].values
+                self._time_coord_name = coord_name
                 break
         else:
             raise KeyError("Nessuna coordinata temporale trovata")
+
+        # Rechunk with 1 along time dimension cause we read one timestep at a time in _get() (or a small batch of timesteps),
+        # and we want to avoid reading multiple timesteps from the same chunk.
+        if use_dask:
+            ds=ds.chunk({self._time_coord_name: 1})  
 
         data_start_time = np.datetime64(time_coord[0])
         data_end_time = np.datetime64(time_coord[-1])
@@ -131,12 +174,10 @@ class DataReaderGREP(DataReaderTimestep):
             # The base module exposes no str_to_timedelta, so we parse manually.
             period = _str_to_timedelta(self._stream_info["frequency"])
 
-        # Patch the instance attributes that DataReaderTimestep._get_dataset_idxs reads.
-        # This is equivalent to what super().__init__(..., data_start_time, data_end_time, period)
-        # would set, but without the side-effects of calling __init__ a second time.
         self.data_start_time = data_start_time
         self.data_end_time = data_end_time
         self.period = period
+        self.time_coord = time_coord
 
         # ---- Spatial grid ----------------------------------------------------
         grid_defs = [
@@ -401,20 +442,11 @@ class DataReaderGREP(DataReaderTimestep):
 
         # Map channel indices → variable names
         selected_channels = [self.available_vars[i] for i in channels_idx]
-        # selected_channels = self.available_vars
 
-        data_arrays: list[NDArray] = []
-        datetimes_list: list[np.datetime64] = []
-
-        for coord in ["time", "time_centered", "time_counter"]:
-            if coord in self.ds.coords:
-                time_values = self.ds.coords[coord].values
-                break
-        else:
-            raise KeyError(
-                f"No time coordinate found. Available coordinates: {list(self.ds.coords)}"
-            )
-
+        # Time coord/dim were resolved once in _lazy_init; reuse them instead of
+        # re-searching ds.coords / ds.dims on every call.
+        time_values = self.time_coord
+        time_dim = self._time_coord_name
         n_time = len(time_values)
 
         if self.log_debug:
@@ -425,50 +457,63 @@ class DataReaderGREP(DataReaderTimestep):
                 f"\n Selected time indices: {t_idxs} -- len={len(t_idxs)}"
             )
 
-        for t_idx in t_idxs:
-            if t_idx < 0 or t_idx >= n_time:
-                continue
+        # Filtro vettoriale degli indici temporali validi
+        t_idxs_arr = np.asarray(t_idxs)
+        valid_mask = (t_idxs_arr >= 0) & (t_idxs_arr < n_time)
+        valid_t_idxs = t_idxs_arr[valid_mask]
 
-            # (n_points, n_channels)
-            for time_dim in ["time", "time_centered", "time_counter"]:
-                if time_dim in self.ds.dims:
-                    break
-            else:
-                raise KeyError("No time dimension found")
-
-            timestep_data = np.stack(
-                [
-                    self.ds[ch].isel({time_dim: int(t_idx)}).values.astype(np.float32).flatten()
-                    for ch in selected_channels
-                ],
-                axis=1,
-            )
-
-            data_arrays.append(timestep_data)
-            dt = np.datetime64(time_values[t_idx])
-            datetimes_list.extend([dt] * self.n_points)
-
-        if not data_arrays:
+        if len(valid_t_idxs) == 0:
             _logger.info(f"No valid time indices found for idx={idx}; returning empty data.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx),
                 num_geo_fields=0,
             )
 
-        # (n_timesteps * n_points, n_channels)
-        data = np.vstack(data_arrays)
+        # Dentro ogni batch, tutti i canali richiesti vengono letti con
+        # un'unica selezione xarray/Dask: se il dataset è chunkato con Dask, i
+        # chunk Zarr coinvolti (canali x timestep del batch) vengono scaricati e
+        # decompressi in parallelo su più thread in una singola .compute().
+        n_channels = len(selected_channels)
+        n_valid_timesteps = len(valid_t_idxs)
+        ds_sub = self.ds[selected_channels]
+        batch_size = max(1, n_valid_timesteps)
 
-        # use actual count, not len(t_idxs)
-        n_valid_timesteps = len(data_arrays)
+        data = np.empty((n_valid_timesteps * self.n_points, n_channels), dtype=np.float32)
 
-        # NOTE tmp: prima era len(t_idxs) ma se ci sono t_idxs invalidi
-        # (es. fuori range del dataset) allora data_arrays sarà più corto di len(t_idxs).
-        # Meglio usare n_valid_timesteps che è il numero reale di timesteps validi
-        # che abbiamo effettivamente caricato.
+        for batch_start in range(0, n_valid_timesteps, batch_size):
+            batch_t_idxs = valid_t_idxs[batch_start : batch_start + batch_size]
+            ds_batch = ds_sub.isel({time_dim: batch_t_idxs})
+
+            # Forma canonica (time_dim, *dims_spaziali...) per ogni canale,
+            # preservando l'ordine relativo delle dimensioni spaziali (stesso
+            # ordine di flatten() usato per costruire coords_single). Il cast a
+            # float32 viene saltato se il dato è già in quel dtype, per evitare
+            # una copia inutile.
+            channel_arrays = [
+                ds_batch[ch].transpose(time_dim, ...).data for ch in selected_channels
+            ]
+
+            if _HAS_DASK and isinstance(channel_arrays[0], dask_array.Array):
+                # Un'unica .compute(): Dask scarica/decomprime in parallelo tutti
+                # i chunk necessari per l'intero batch (tutti i canali e tutti i
+                # timestep del batch) invece di farlo in sequenza.
+                arr = dask_array.stack(channel_arrays, axis=-1).compute()
+            else:
+                arr = np.stack([np.asarray(a) for a in channel_arrays], axis=-1)
+
+            # (batch_t, *spatial_dims, n_channels) -> (batch_t * n_points, n_channels)
+            arr = np.asarray(arr, dtype=np.float32).reshape(len(batch_t_idxs) * self.n_points, n_channels)
+
+            row_start = batch_start * self.n_points
+            data[row_start : row_start + arr.shape[0]] = arr
+
         coords = np.tile(self.coords_single, (n_valid_timesteps, 1))
-
         geoinfos = np.zeros((len(data), 0), dtype=np.float32)
-        datetimes = np.array(datetimes_list, dtype="datetime64[s]")
+
+        # np.repeat vettoriale invece di costruire una lista Python
+        datetimes = np.repeat(
+            time_values[valid_t_idxs].astype("datetime64[s]"), self.n_points
+        )
 
         rd = ReaderData(
             coords=coords,
