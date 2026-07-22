@@ -57,13 +57,17 @@ def write_output(
     # forecast indices, so synthesize a contiguous run of indices starting at the
     # original first index to cover every entry in model_output / target_aux_out.
     n_pred_steps = len(model_output.physical)
-    if n_pred_steps > len(timestep_idxs):
+    is_denoising_trajectory = n_pred_steps > len(timestep_idxs)
+    if is_denoising_trajectory:
         timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
 
     targets_lens = []
 
     # TODO Maybe stopping at forecast_steps explained #1657
-    for t_idx in timestep_idxs:
+    for t_pos, t_idx in enumerate(timestep_idxs):
+        # A denoising trajectory is reindexed from zero in ModelOutput and TargetAuxOutput,
+        # while t_idx is the forecast step written to the output store.
+        output_idx = t_pos if is_denoising_trajectory else t_idx
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
@@ -79,8 +83,19 @@ def write_output(
             # empty per-stream slots to keep the per-stream array alignment used downstream.
             not_reconstructed = not is_stream_reconstructed(cf.streams[sname])
 
-            if not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                targets = target_aux_out.physical[t_idx][sname]["target"]
+            target_data = target_aux_out.physical[output_idx].get(sname)
+            if target_data is None:
+                # A stream omitted from the physical loss has no TargetAuxOutput
+                # entry. Keep its output slots empty.
+                n_channels = len(cf.streams[sname].val_target_channels)
+                n_samples = len(batch.get_source_samples())
+                preds_s = [np.zeros((1, 0, n_channels)) for _ in range(n_samples)]
+                targets_s = [np.zeros((0, n_channels)) for _ in range(n_samples)]
+                t_coords_s = [np.zeros((0, 2)) for _ in range(n_samples)]
+                t_times_s = [np.array([]).astype("datetime64[ns]") for _ in range(n_samples)]
+
+            elif not_reconstructed or target_data["is_spoof"][0]:
+                targets = target_data["target"]
                 # for-loop to make sure we have a consistent number of samples
                 preds_s = [np.zeros((1, 0, t.shape[1])) for t in targets]
                 targets_s = [np.zeros((0, t.shape[1])) for t in targets]
@@ -88,8 +103,8 @@ def write_output(
                 t_times_s = [np.array([]).astype("datetime64[ns]") for t in targets]
 
             else:
-                preds = model_output.get_physical_prediction(t_idx, sname)
-                targets = target_aux_out.physical[t_idx][sname]["target"]
+                preds = model_output.get_physical_prediction(output_idx, sname)
+                targets = target_data["target"]
 
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
 
@@ -100,11 +115,10 @@ def write_output(
                     preds = [target.clone().unsqueeze(0) for target in targets]
 
                 for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
-                    target_data = target_aux_out.physical[t_idx][sname]
                     t_coords = target_data["target_coords"][i_batch]
                     t_times = target_data["target_times"][i_batch]
 
-                    idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
+                    idxs_inv = target_data["idxs_inv"][i_batch]
                     if idxs_inv is not None:
                         pred = pred[:, idxs_inv]
                         target = target[idxs_inv]
