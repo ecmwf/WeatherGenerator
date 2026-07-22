@@ -26,12 +26,14 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.bar_plots import BarPlots
 from weathergen.evaluate.plotting.line_plots import LinePlots
+from weathergen.evaluate.plotting.pdf_merge import merge_pdf_subdirectories
 from weathergen.evaluate.plotting.plot_orchestration_utils import (
     _compute_ranges,
     _compute_scores,
     group_by_init_hour,
 )
 from weathergen.evaluate.plotting.plot_utils import (
+    PlotSubdir,
     bar_plot_metric_region,
     heat_maps_metric_region,
     plot_metric_region,
@@ -699,6 +701,7 @@ def _select_ensemble_data(da: xr.DataArray, ens):
 
     return da.sel(ens=ens)
 
+
 def _plot_single_sample(
     plotter_cfg: dict,
     output_basedir: str,
@@ -745,7 +748,6 @@ def _plot_single_sample(
         else:
             preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
         preds_name = "_".join(filter(None, ["preds", preds_tag]))
-
 
         if plot_maps:
             cfg_to_use = std_cfg if ens == "std" else maps_cfg
@@ -942,10 +944,7 @@ def plot_data(
     has_ens = any("ens" in da.dims for da in da_preds.values())
 
     if has_ens:
-        std_preds = {
-            fs: da.std(dim="ens")
-            for fs, da in da_preds.items()
-        }
+        std_preds = {fs: da.std(dim="ens") for fs, da in da_preds.items()}
 
         std_config_dict = oc.OmegaConf.to_container(
             common_ranges(
@@ -1103,7 +1102,6 @@ def plot_data(
                 else:
                     tags.append("bias" if not has_ens else f"bias_ens_{ens}")
 
-
         for tag in tags:
             _dispatch_animations(**anim_kw, tag=tag)
 
@@ -1239,24 +1237,56 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "baseline": eval_opt.get("baseline", None),
     }
 
-    plotter = LinePlots(plot_cfg, summary_dir)
-    sc_plotter = ScoreCards(plot_cfg, summary_dir)
-    br_plotter = BarPlots(plot_cfg, summary_dir)
-    quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
+    # Prefix the output directory with a run_ids identifier so that
+    # different evaluation configs can coexist in the same base directory.
+    run_ids_str = "_".join(sorted(runs.keys()))
+    output_basedir = summary_dir / run_ids_str
+
+    plotter = LinePlots(plot_cfg, output_basedir)
+    sc_plotter = ScoreCards(plot_cfg, output_basedir)
+    br_plotter = BarPlots(plot_cfg, output_basedir)
+    quantile_plotter = QuantilePlots(plot_cfg, output_basedir)
+
+    # Map each eval option to whether it's enabled and which subdir(s) it produces,
+    # so the flag is only looked up once and reused for both plotting and PDF merging.
+    plot_option_subdirs = {
+        "summary_plots": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
+        "ratio_plots": [PlotSubdir.ratio_plots],
+        "score_cards": [PlotSubdir.score_cards],
+        "bar_plots": [PlotSubdir.bar_plots],
+    }
+    enabled_opts = {opt: eval_opt.get(opt, False) for opt in plot_option_subdirs}
+
     for metric in metrics:
         for region in scores_dict[metric].keys():
-            if eval_opt.get("summary_plots", False):
+            # Set metric/region subdirectory for all plotters
+            plotter.set_subdir(metric, region)
+            sc_plotter.set_subdir(metric, region)
+            br_plotter.set_subdir(metric, region)
+            quantile_plotter.set_subdir(metric, region)
+
+            if enabled_opts["summary_plots"]:
                 if metric == "psd":
                     psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
                 elif metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:
                     plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
-            if eval_opt.get("ratio_plots", False):
+            if enabled_opts["ratio_plots"]:
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("heat_maps", False):
                 heat_maps_metric_region(metric, region, runs, scores_dict, plotter)
-            if eval_opt.get("score_cards", False):
+            if enabled_opts["score_cards"]:
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
-            if eval_opt.get("bar_plots", False):
+            if enabled_opts["bar_plots"]:
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
+
+    # Merge individual PDFs into combined documents for easier browsing
+    if plot_cfg["image_format"] == "pdf":
+        enabled_subdirs = [
+            subdir
+            for opt, subdirs in plot_option_subdirs.items()
+            if enabled_opts[opt]
+            for subdir in subdirs
+        ]
+        merge_pdf_subdirectories(output_basedir, run_ids=list(runs.keys()), subdirs=enabled_subdirs)
