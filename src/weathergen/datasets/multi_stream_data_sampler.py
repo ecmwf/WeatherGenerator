@@ -388,11 +388,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
     def denormalize_source_channels(self, stream_name, data) -> torch.Tensor:
         # [0]: with multiple ds per stream we use the first one
-        return self.streams_datasets[stream_name].readers[0].denormalize_source_channels(data)
+        return self.streams_datasets[stream_name][0].denormalize_source_channels(data)
 
     def denormalize_target_channels(self, stream_name, data) -> torch.Tensor:
         # [0]: with multiple ds per stream we use the first one
-        return self.streams_datasets[stream_name].readers[0].denormalize_target_channels(data)
+        return self.streams_datasets[stream_name][0].denormalize_target_channels(data)
 
     def _build_stream_data_input(
         self,
