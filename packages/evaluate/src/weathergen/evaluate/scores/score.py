@@ -13,9 +13,9 @@ from dataclasses import dataclass
 import dask.array as da
 import numpy as np
 import pandas as pd
+import scores
 import xarray as xr
 from scipy.spatial import cKDTree
-import scores
 
 from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
 from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_list
@@ -1336,15 +1336,15 @@ class Scores:
 
     def calc_seeps(self, p: xr.DataArray, gt: xr.DataArray, c: xr.Dataset) -> xr.DataArray:
         return scores.categorical.seeps(
-            fcst = p*1000, # converted to mm
-            obs = gt*1000, 
-            prob_dry = c.sel(statistic="prob_dry"), 
-            light_heavy_threshold = c.sel(statistic="light_heavy_threshold"),
-            dry_light_threshold=0.2, 
-            mask_clim_extremes=True, 
-            lower_masked_value=0.1, 
-            upper_masked_value=0.85, 
-            reduce_dims=self._agg_dims  
+            fcst=p * 1000,  # converted to mm
+            obs=gt * 1000,
+            prob_dry=c.sel(statistic="prob_dry"),
+            light_heavy_threshold=c.sel(statistic="light_heavy_threshold"),
+            dry_light_threshold=0.2,
+            mask_clim_extremes=True,
+            lower_masked_value=0.1,
+            upper_masked_value=0.85,
+            reduce_dims=self._agg_dims,
         )
 
     def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
