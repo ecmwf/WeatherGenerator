@@ -32,8 +32,10 @@ _logger = logging.getLogger(__name__)
 class EnsembleSelect:
     """Pre-resolved ensemble selection.
 
-    Use :meth:`mean` for the ensemble-mean sentinel, :meth:`std` for the ensemble-standard-deviation sentinel,
-    or :meth:`from_names` to resolve requested member names against the full list stored in zarr.
+    Use :meth:`mean` for the ensemble-mean sentinel,
+    :meth:`std` for the ensemble-standard-deviation sentinel,
+    or :meth:`from_names` to resolve requested member
+    names against the full list stored in zarr.
     """
 
     labels: list[str]
