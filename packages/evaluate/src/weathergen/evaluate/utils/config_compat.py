@@ -153,6 +153,6 @@ def _set_key(cfg, key, value):
         cfg[key] = value
     except Exception:
         try:
-            setattr(cfg, key, value)
+            setattr(cfg, key, value)  # pylint: disable=bad-builtin
         except Exception:
             _logger.debug(f"Could not set '{key}' on {type(cfg)}")
