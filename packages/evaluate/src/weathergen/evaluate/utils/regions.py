@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import ClassVar
 
+import cartopy.crs as ccrs
 import xarray as xr
 
 _logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ class RegionLibrary:
     Predefined bounding boxes for known regions.
     """
 
+<<<<<<< HEAD
     REGIONS: ClassVar[dict[str, tuple[float, float, float, float]]] = {
         "global": (-90.0, 90.0, -180.0, 180.0),
         "nhem": (0.0, 90.0, -180.0, 180.0),
@@ -32,6 +34,25 @@ class RegionLibrary:
         "uwc-west": (39.0, 63.0, -26.0, 41.0),
         "arome": (37.0, 56.0, -12.0, 16.0),
         "icon": (42.0, 51.0, -1.0, 18.0),
+=======
+    REGIONS: ClassVar[dict[str, tuple[float, float, float, float, ccrs.Projection]]] = {
+        "global": (-90.0, 90.0, -180.0, 180.0, ccrs.Robinson()),
+        "nhem": (0.0, 90.0, -180.0, 180.0, ccrs.PlateCarree()),
+        "shem": (-90.0, 0.0, -180.0, 180.0, ccrs.PlateCarree()),
+        "tropics": (-30.0, 30.0, -180.0, 180.0, ccrs.PlateCarree()),
+        "belgium": (49, 52, 2, 7, ccrs.PlateCarree()),
+        "europe": (35, 70, -10, 40, ccrs.PlateCarree()),
+        "arctic": (
+            50.0,
+            90.0,
+            -180.0,
+            180.0,
+            ccrs.Stereographic(central_longitude=0, central_latitude=90),
+        ),
+        "uwc-west": (39.0, 63.0, -26.0, 41.0, ccrs.PlateCarree()),
+        "arome": (37.0, 56.0, -12.0, 16.0, ccrs.PlateCarree()),
+        "icon": (42.0, 51.0, -1.0, 18.0, ccrs.PlateCarree()),
+>>>>>>> 1d66f4558cf2ddeaa76fb89d45b06a45d53a7208
     }
 
 
@@ -41,6 +62,7 @@ class RegionBoundingBox:
     lat_max: float
     lon_min: float
     lon_max: float
+    projection: ccrs.Projection
 
     def __post_init__(self):
         """Validate the bounding box coordinates."""

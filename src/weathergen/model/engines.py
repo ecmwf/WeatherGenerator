@@ -6,7 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
 import dataclasses
 import math
 
@@ -16,7 +15,9 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.attention import (
+    MultiCrossAttentionHead,
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
@@ -48,9 +49,9 @@ class EmbeddingEngine(torch.nn.Module):
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        self.streams = cf.streams
 
-        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
+        for i, (stream_name, si) in enumerate(self.streams.items()):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
@@ -91,7 +92,10 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
-        for stream_name in self.stream_names:
+        for stream_name in self.streams.keys():
+            if type(self.embeds[stream_name]) is torch.nn.Identity:
+                continue
+
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -108,6 +112,10 @@ class EmbeddingEngine(torch.nn.Module):
 
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
+
+        if x_embeds == []:
+            # if all streams are empty, return empty tensor with correct shape and dtype
+            return tokens_all
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
@@ -133,7 +141,7 @@ class EmbeddingEngine(torch.nn.Module):
         tokens_all = tokens_all + pe_embed[pe_idxs]
 
         return tokens_all
-
+    
     def get_pe_idxs_vectorized(self, batch):
         """
         Compute per cell indices into positional encoding
@@ -183,10 +191,15 @@ class EmbeddingEngine(torch.nn.Module):
         Vectorized version
         """
 
+        streams_active = [
+            i for i, stream_name in enumerate(self.streams.keys())
+            if type(self.embeds[stream_name]) is not torch.nn.Identity
+        ]
+
         dev = batch.get_device()
         # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+        tok_counts = batch.tokens_lens[:, :, streams_active].permute([2, 0, 1, 3]).flatten(1, -1)
 
         # partial sums for per cell offsets
         pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)
@@ -245,7 +258,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = block(tokens_c, cell_lens_c)
+            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
         return tokens_c
 
 
@@ -313,11 +326,13 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
-            tokens_global_c = block(
+            tokens_global_c = checkpoint(
+                block,
                 tokens_global_c,
                 tokens_c,
                 q_cells_lens_c,
                 cell_lens_c,
+                use_reentrant=False
             )
         return tokens_global_c
 
@@ -455,9 +470,11 @@ class QueryAggregationEngine(torch.nn.Module):
         for block in self.ae_aggregation_blocks:
             aux_info = None
             if isinstance(block, MultiSelfAttentionHeadVarlen):
-                tokens = block(tokens, x_lens=batch_lens, coords=coords)
+                tokens = checkpoint(block, tokens, x_lens=batch_lens, coords=coords, use_reentrant=False)
             else:
-                tokens = block(tokens, coords, aux_info)
+                # MLP.forward accepts positional args only (def forward(self, *args)),
+                # so coords/aux_info must be passed positionally, not as keywords.
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -583,6 +600,10 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
+        _concat_hd = self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
+        _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
+        _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
+
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
@@ -590,7 +611,7 @@ class ForecastingEngine(torch.nn.Module):
                 if (i % global_rate == 0) or i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
                         MultiSelfAttentionHead(
-                            self.cf.ae_global_dim_embed,
+                            _inner_dim,
                             num_heads=self.cf.fe_num_heads,
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
@@ -602,12 +623,14 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
+                            is_dit=self.cf.get("fe_diffusion_model", False),
+                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                         )
                     )
                 else:
                     self.fe_blocks.append(
                         MultiSelfAttentionHeadLocal(
-                            self.cf.ae_global_dim_embed,
+                            _inner_dim,
                             num_heads=self.cf.fe_num_heads,
                             qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
                             block_factor=self.cf.ae_global_block_factor,
@@ -621,25 +644,48 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
+                            is_dit=self.cf.get("fe_diffusion_model", False),
+                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
+                        )
+                    )
+                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
+                if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                    self.fe_blocks.append(
+                        MultiCrossAttentionHead(
+                            dim_embed_q=_diffusion_latent_dim,
+                            dim_embed_kv=_diffusion_latent_dim,
+                            num_heads=self.cf.fe_num_heads,
+                            dropout_rate=self.cf.fe_dropout_rate,
+                            with_residual=True,
+                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+                            with_flash=self.cf.with_flash_attention,
+                            norm_type=self.cf.norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
+                            norm_eps=self.cf.norm_eps,
+                            attention_dtype=get_dtype(self.cf.attention_dtype),
+                            is_dit=self.cf.get("fe_diffusion_model", False),
                         )
                     )
                 # Add MLP block
                 self.fe_blocks.append(
                     MLP(
-                        self.cf.ae_global_dim_embed,
-                        self.cf.ae_global_dim_embed,
+                        _inner_dim,
+                        _inner_dim,
+                        num_layers=2,
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
                         mlp_type=self.cf.get("mlp_type", "mlp"),
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
+                        is_dit=self.cf.get("fe_diffusion_model", False),
+                        dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
                 if i in self.cf.get("fe_layer_norm_after_blocks", []):
                     self.fe_blocks.append(
-                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+                        torch.nn.LayerNorm(_inner_dim, elementwise_affine=False)
                     )
 
         def init_weights_final(m):
@@ -651,20 +697,82 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep, coords=None):
+        # For concatenate_hiddendim: project 2D -> D after the full forward pass
+        self.out_proj = (
+            torch.nn.Linear(_inner_dim, _diffusion_latent_dim, bias=False)
+            if _concat_hd else None
+        )
+
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        fstep: int,
+        meta_info: SampleMetaData = None,
+        noise_emb: torch.Tensor = None,
+        conditioning: torch.Tensor = None,
+        coords: torch.Tensor = None,
+    ) -> torch.Tensor:
+        # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
+        # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-        aux_info = None
-        for _b_idx, block in enumerate(self.fe_blocks):
-            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
-                tokens = checkpoint(block, tokens, use_reentrant=False)
-            else:
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
-        return tokens
+        # predict residual to last time step if requested
+        forecast_residual = self.cf.get("forecast_residual", False)
+        if forecast_residual:
+            tokens_in = tokens
+
+        if self.cf.get("fe_diffusion_model", False):
+            assert noise_emb is not None, (
+                "noise_emb must be provided for diffusion model conditioning"
+            )
+            for block in self.fe_blocks:
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = checkpoint(block, tokens, use_reentrant=False)
+                elif isinstance(block, MultiCrossAttentionHead):
+                    assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                        tokens = checkpoint(block, tokens, conditioning, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn_rev":
+                        tokens = checkpoint(block, conditioning, tokens, noise_emb, use_reentrant=False)
+                else:
+                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
+                        assert conditioning is not None, "conditioning must be provided for diffusion model conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, conditioning, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn_rev":
+                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn_rev conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "additive":
+                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for additive conditioning"
+                        tokens = tokens + conditioning
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate":
+                        # Conditioning already baked into tokens via sequence concat in DiffusionForecastEngine.denoise()
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim":
+                        # Conditioning already baked into tokens via hidden-dim concat in DiffusionForecastEngine.denoise()
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    else:
+                        assert conditioning is None, "conditioning should not be provided when diffusion model conditioning is disabled"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+        else:
+            for block in self.fe_blocks:
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = block(tokens)
+                else:
+                    tokens = checkpoint(block, tokens, coords, conditioning, use_reentrant=False)
+
+        if self.out_proj is not None:
+            # tokens = self.out_proj(tokens)  # (B, H, 2D) -> (B, H, D)
+            tokens = checkpoint(self.out_proj, tokens, use_reentrant=False)
+
+        return tokens if not forecast_residual else (tokens_in + tokens)
 
 
 class EnsPredictionHead(torch.nn.Module):
@@ -901,6 +1009,7 @@ class TargetPredictionEngine(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
 
+        target_readout_num_heads = next(self.cf.streams.values())["target_readout"]["num_heads"]
         for ith, dim in enumerate(self.dims_embed[:-1]):
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
@@ -909,7 +1018,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=False,
                         with_adanorm=False,
                         with_mlp=False,
@@ -922,7 +1031,7 @@ class TargetPredictionEngine(nn.Module):
                     SelfAttentionBlock(
                         dim=dim,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
                         dropout_rate=0.1,
@@ -936,7 +1045,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=self.cf.ae_global_dim_embed,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=False,
                         with_mlp=True,
@@ -952,7 +1061,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=True,
                         with_mlp=True,
@@ -970,7 +1079,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_out=self.dims_embed[ith + 1],
                         dim_kv=dim_aux,
                         dim_aux=self.dim_coord_in,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,

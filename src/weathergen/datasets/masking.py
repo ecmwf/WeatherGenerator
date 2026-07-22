@@ -8,6 +8,7 @@ import omegaconf
 import torch
 from numpy.typing import NDArray
 
+from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
 
 # Sample noise levels
@@ -38,17 +39,18 @@ class MaskData:
         return len(self.masks)
 
     def add_mask(self, mask, params, cfg, losses, idx, correspondence, relationship):
+        global_params = {
+            "idx": idx,
+            "correspondence": correspondence,
+            "loss": losses,
+            "relationship": relationship,
+        }
         self.masks += [mask]
         self.metadata += [
             SampleMetaData(
                 params={**cfg, **params},
                 mask=mask,
-                global_params={
-                    "idx": idx,
-                    "correspondence": correspondence,
-                    "loss": losses,
-                    "relationship": relationship,
-                },
+                global_params=global_params,
             )
         ]
 
@@ -207,11 +209,10 @@ class Masker:
 
         return stream_cfg
 
-    def build_effective_masking_cfgs(self, streams, mode_cfg):
+    def build_effective_masking_cfgs(self, streams: Config, mode_cfg):
         """Build effective masking configs for all streams."""
         cfgs = {}
-        for stream_info in streams:
-            name = stream_info["name"]
+        for name, stream_info in streams.items():
             override = stream_info.get("masking_override", {})
             cfgs[name] = self.merge_masking_config(mode_cfg, override)
 
@@ -437,6 +438,13 @@ class Masker:
                 # determine if diagnostic dataset or randomly dropped => mask is empty
                 if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                    # Propagate noise_level_rn from the corresponding target metadata so that
+                    # diffusion.py can access it via the source sample's meta_info during forward.
+                    target_noise_level = target_masks.metadata[target_idx].params.get(
+                        "noise_level_rn"
+                    )
+                    if target_noise_level is not None:
+                        mask_params = {"noise_level_rn": target_noise_level}
                 else:
                     source_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
@@ -600,7 +608,15 @@ class Masker:
             mask = np.ones(num_cells, dtype=np.bool)
 
             if "diffusion_rn" in masking_strategy_config:
-                masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
+                noise_dist = masking_strategy_config.get("noise_distribution", "log_normal")
+                if noise_dist == "log_uniform":
+                    # Store log_sigma directly; model interprets it via noise_distribution flag.
+                    masking_params["noise_level_rn"] = self.rng.uniform(
+                        np.log(masking_strategy_config["sigma_min"]),
+                        np.log(masking_strategy_config["sigma_max"]),
+                    )
+                else:  # log_normal (default): store eta ~ N(0,1)
+                    masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
 
         elif strategy == "healpix":
             # prepare healpix-based masking

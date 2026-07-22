@@ -60,6 +60,40 @@ class RMSNorm(torch.nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
+class AdaLNZero(torch.nn.Module):
+    """
+    AdaLayerNorm with zero initialization and with additional gate parameter
+    """
+
+    def __init__(
+        self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-5
+    ):
+        super().__init__()
+
+        # simple 2-layer MLP for embedding auxiliary information
+        self.embed_aux = torch.nn.ModuleList()
+        self.embed_aux.append(torch.nn.Linear(dim_aux, 6 * dim_aux))
+        self.embed_aux.append(torch.nn.SiLU())
+        self.embed_aux.append(torch.nn.Linear(6 * dim_aux, 3 * dim_embed_x))
+
+        self.norm = torch.nn.LayerNorm(
+            dim_embed_x,
+            eps=norm_eps,
+            elementwise_affine=norm_elementwise_affine,
+        )
+        # Zero-initialize the final modulation layer.
+        nn.init.zeros_(self.embed_aux[-1].weight)
+        nn.init.zeros_(self.embed_aux[-1].bias)
+
+    def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
+        for block in self.embed_aux:
+            aux = block(aux)
+        scale, shift, gate = aux.chunk(3, dim=-1)
+
+        x = self.norm(x) * (1 + scale) + shift
+
+        return x, gate
+
 
 class AdaLayerNorm(torch.nn.Module):
     """

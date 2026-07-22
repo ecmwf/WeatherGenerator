@@ -16,12 +16,21 @@ import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.utils.utils import is_stream_reconstructed
 
 _logger = logging.getLogger(__name__)
 
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
+    cf,
+    val_cfg,
+    batch_size,
+    mini_epoch,
+    batch_idx,
+    dn_data,
+    batch,
+    model_output,
+    target_aux_out,
 ):
     """
     Interface for writing model output
@@ -42,6 +51,15 @@ def write_output(
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
+
+    # Diffusion inference inflates the model output's fstep dimension to one entry per
+    # ODE denoising step (the trajectory). The batch only has the original physical
+    # forecast indices, so synthesize a contiguous run of indices starting at the
+    # original first index to cover every entry in model_output / target_aux_out.
+    n_pred_steps = len(model_output.physical)
+    if n_pred_steps > len(timestep_idxs):
+        timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
+
     targets_lens = []
 
     # TODO Maybe stopping at forecast_steps explained #1657
@@ -51,25 +69,23 @@ def write_output(
         targets_coords_all += [[]]
         targets_times_all += [[]]
         targets_lens += [[]]
-        for stream_info in cf.streams:
-            sname = stream_info["name"]
-
+        for sname in cf.streams.keys():
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
-            if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                preds = model_output.get_physical_prediction(t_idx, sname)
-                # handle forcing streams or if sample is empty
-                if preds is None:
-                    targets = target_aux_out.physical[t_idx][sname]["target"]
-                    # preds are empty so create copy of target and add ensemble dimension
-                    assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
-                    preds = [target.clone().unsqueeze(0) for target in targets]
-                preds_shape = preds[0].shape
+
+            # Streams that are not physically reconstructed (forcing, or reconstruct: false
+            # JEPA-only targets) have no physical decoder, so there are no predictions to
+            # write. They may still carry non-empty targets (used by the teacher), so emit
+            # empty per-stream slots to keep the per-stream array alignment used downstream.
+            not_reconstructed = not is_stream_reconstructed(cf.streams[sname])
+
+            if not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+                targets = target_aux_out.physical[t_idx][sname]["target"]
                 # for-loop to make sure we have a consistent number of samples
-                preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in preds]
-                targets_s = [np.zeros((0, preds_shape[2])) for _ in preds]
-                t_coords_s = [np.zeros((0, 2)) for _ in preds]
-                t_times_s = [np.array([]).astype("datetime64[ns]") for _ in preds]
+                preds_s = [np.zeros((1, 0, t.shape[1])) for t in targets]
+                targets_s = [np.zeros((0, t.shape[1])) for t in targets]
+                t_coords_s = [np.zeros((0, 2)) for t in targets]
+                t_times_s = [np.array([]).astype("datetime64[ns]") for t in targets]
 
             else:
                 preds = model_output.get_physical_prediction(t_idx, sname)
@@ -131,7 +147,8 @@ def write_output(
     # more prep work
 
     # output stream names to be written, use specified ones or all if nothing specified
-    stream_names = [stream.name for stream in cf.streams]
+    stream_names = list(cf.streams.keys())
+    stream_infos = list(cf.streams.values())
     if val_cfg.get("output").get("streams") is not None:
         output_stream_names = val_cfg.output.streams
     else:
@@ -140,10 +157,10 @@ def write_output(
     output_streams = {name: stream_names.index(name) for name in output_stream_names}
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
-    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
-    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
+    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
+    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in stream_infos]
 
-    geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
+    geoinfo_channels = [[] for _ in stream_infos]  # TODO obtain channels
 
     # calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * batch_size
@@ -180,3 +197,8 @@ def write_output(
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
+
+    # Free arrays no longer needed after zarr writing
+    del targets_all, targets_lens, sources, data
+
+    del targets_times_all

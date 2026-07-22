@@ -1,0 +1,52 @@
+
+
+parallelize: false
+# !!! BE CAREFUL !!!
+# Parallelization is supported but not recommended — can lead to unexpected issues.
+
+stages:
+  - name: forecast
+    stage: train
+    base_config: ./config/config_era5_georing_avhrr_forecasting_lowres.yml
+    chain_jobs: 14
+    nodes: 2
+    slurm_args:
+      - "--time=12:00:00"
+
+  - name: finetunefcast
+    stage: train
+    from_run_id: STAGE.forecast
+    config_files:
+      - config/config_era5_georing_avhrr_finetuning_lowres.yml
+    chain_jobs: 6
+    nodes: 2
+    slurm_args:
+      - "--time=12:00:00"
+
+  - name: finetunerollout
+    stage: train
+    from_run_id: STAGE.finetunefcast
+    config_files:
+      - config/config_era5_georing_avhrr_finetuning_rollout_lowres.yml
+    chain_jobs: 6
+    nodes: 2
+    slurm_args:
+      - "--time=12:00:00"
+
+  - name: inference
+    stage: inference
+    from_run_id: STAGE.finetunerollout
+    nodes: 2
+    slurm_args:
+      - "--time=12:00:00"
+
+  - name: evaluation
+    stage: evaluation
+    run_ids: [STAGE.inference]
+    options:
+      - eval_config.metric=rmse
+    nodes: 1
+    slurm_args:
+      - "--time=08:00:00"
+
+

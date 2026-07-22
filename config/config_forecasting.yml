@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 2048
+ae_local_dim_embed: 512
 ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -25,7 +25,7 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 2048
+ae_global_dim_embed: 512
 ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
@@ -63,9 +63,11 @@ fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm
 fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
+fe_diffusion_model: False
 
 healpix_level: 5
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 # Generalized RoPE selector.
 rope_mode: none  # one of: none, 2d, spherical
@@ -77,6 +79,13 @@ use_xsa: True
 =======
 rope_2D: False
 >>>>>>> origin/develop
+=======
+rope_2D: True
+mlp_type: swiglu
+use_xsa: True
+# mlp_type: mlp
+# use_xsa: False
+>>>>>>> 1d66f4558cf2ddeaa76fb89d45b06a45d53a7208
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -101,7 +110,8 @@ qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting/"
+# streams_directory: "./config/streams/era5_1deg_forecasting/"
+streams_directory: "./config/streams/era5_georing_avhrr_synop_lowres/"
 streams: ???
 
 # type of zarr_store
@@ -131,12 +141,12 @@ general:
 train_logging:
   terminal: 10
   metrics: 20
-  checkpoint: 250
+  checkpoint: 50 #250
 
 # parameters for data loading
 data_loading :
 
-  num_workers: 12
+  num_workers: 10
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
@@ -196,14 +206,14 @@ training_config:
   forecast :
       # time_step: 01:00:00
       offset: 1
-      num_steps: 3
+      num_steps: 2
       policy: "fixed"
 
 
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 256
+  samples_per_mini_epoch: 128
   shuffle: False
 
   start_date: 2023-10-01T00:00

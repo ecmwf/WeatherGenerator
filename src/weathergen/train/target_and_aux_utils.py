@@ -1,8 +1,10 @@
 import omegaconf
+import torch
 
 from weathergen.common.config import Config, merge_configs
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import init_model_and_shard
+from weathergen.train.target_and_aux_diffusion import DiffusionLatentTargetEncoder
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher, FrozenTeacher
 from weathergen.train.teacher_utils import load_encoder_from_checkpoint, prepare_encoder_teacher
@@ -32,6 +34,36 @@ def get_target_aux_calculator(
     # create target_and_aux_calc
     if target_and_aux_calc == "Physical":
         target_aux = PhysicalTargetAndAux(loss_cfg, model)
+
+    elif target_and_aux_calc == "DiffusionLatentTargetEncoder":
+        model, _ = init_model_and_shard(
+            cf,
+            dataset,
+            cf.get("load_chkpt", {}).get("run_id", None),
+            cf.get("load_chkpt", {}).get("epoch", -1),
+            "student",
+            device,
+            with_ddp=False,
+            with_fsdp=False,
+            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
+        )
+        # Free components not needed by DiffusionLatentTargetEncoder (only uses the encoder)
+        for attr in (
+            "forecast_engine",
+            "pred_heads",
+            "target_token_engines",
+            "embed_target_coords",
+            "latent_heads",
+            "latent_pre_norm",
+        ):
+            if hasattr(model, attr) and getattr(model, attr) is not None:
+                delattr(model, attr)
+                setattr(model, attr, None)
+        torch.cuda.empty_cache()
+
+        target_aux = DiffusionLatentTargetEncoder(
+            model, is_model_sharded=(cf.with_ddp and cf.with_fsdp)
+        )
 
     elif target_and_aux_calc == "EMATeacher":
         # work around for problems with FSDP2

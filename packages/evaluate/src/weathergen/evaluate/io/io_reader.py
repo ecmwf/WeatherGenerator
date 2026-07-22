@@ -32,10 +32,13 @@ class ReaderOutput:
         Dictionary of xarray Datasets for targets, indexed by forecast step.
     prediction : dict[str, xr.Dataset]
         Dictionary of xarray Datasets for predictions, indexed by forecast step.
+    points_per_sample : xr.DataArray or None
+        Number of points per sample (optional, used by merge reader).
     """
 
     target: dict[str, xr.Dataset]
     prediction: dict[str, xr.Dataset]
+    points_per_sample: xr.DataArray | None = None
 
 
 @dataclass

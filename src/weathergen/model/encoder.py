@@ -57,7 +57,7 @@ class EncoderModule(torch.nn.Module):
 
         # embedding engine
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        self.stream_names = list(cf.streams.keys())
         # separate embedding networks for differnt observation types
         self.embed_engine = EmbeddingEngine(cf, self.sources_size)
 
@@ -137,6 +137,8 @@ class EncoderModule(torch.nn.Module):
             cf, self.num_healpix_cells, tap_global_layers=tap_global_layers
         )
 
+        self.ln = torch.nn.LayerNorm(cf.ae_global_dim_embed, elementwise_affine=False)
+
     def forward(self, model_params, batch):
         """
         Encoder forward
@@ -161,6 +163,8 @@ class EncoderModule(torch.nn.Module):
             use_reentrant=False,
         )
         intermediates.extend(global_intermediates)
+
+        tokens_global = self.ln(tokens_global)
 
         return tokens_global, posteriors, intermediates
 
@@ -376,3 +380,6 @@ class EncoderModule(torch.nn.Module):
         ).flatten(1, 2)
 
         return tokens_global, posteriors
+
+    def reset_parameters(self):
+        return

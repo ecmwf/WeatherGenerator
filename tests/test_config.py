@@ -9,7 +9,7 @@ import weathergen.common.config as config
 TEST_RUN_ID = "test123"
 SECRET_COMPONENT = "53CR3T"
 DUMMY_PRIVATE_CONF = {
-    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"]
+    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"],
     "secrets": {
         "my_big_secret": {
             "my_secret_id": f"{SECRET_COMPONENT}01234",
@@ -276,12 +276,12 @@ def test_print_cf_no_secrets(config_fresh):
 
 @pytest.mark.parametrize("rel_path,cf", VALID_STREAMS)
 def test_load_streams(streams_dir, rel_path, cf):
-    expected = get_expected_config(*[*cf.items()][0])
+    expected = get_expected_config(*next(cf.items()))
     write_stream_file(streams_dir / rel_path, OmegaConf.to_yaml(cf))
 
     streams = config.load_streams(streams_dir)
 
-    assert all(is_equal(stream, expected) for stream in streams)
+    assert all(is_equal(stream, expected) for stream in streams.values())
 
 
 @pytest.mark.parametrize("rel_path,cf", EXCLUDED_STREAMS)
@@ -290,14 +290,14 @@ def test_load_streams_exclude_files(streams_dir, rel_path, cf):
 
     streams = config.load_streams(streams_dir)
 
-    assert streams == []
+    assert streams == {}
 
 
 def test_load_empty_stream(streams_dir):
     write_stream_file(streams_dir / "empty.yml", "")
 
     streams = config.load_streams(streams_dir)
-    assert streams == []
+    assert streams == {}
 
 
 def test_load_malformed_stream(streams_dir):
@@ -323,9 +323,7 @@ def test_load_multiple_streams_content(streams_dir, rel_path, cf):
 
     streams = config.load_streams(streams_dir)
 
-    assert all(
-        is_equal(stream, stream_e) for stream, stream_e in zip(streams, expected, strict=True)
-    )
+    assert all(is_equal(stream, expected) for stream, expected in zip(streams.values(), expected))
 
 
 def test_load_duplicate_streams(streams_dir):
