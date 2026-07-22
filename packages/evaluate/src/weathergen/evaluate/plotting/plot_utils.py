@@ -11,12 +11,30 @@ import datetime
 import logging
 import re
 from collections.abc import Iterable, Sequence
+from enum import Enum
 
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
 _logger = logging.getLogger(__name__)
+
+
+class PlotSubdir(str, Enum):
+    """Known plot subdirectory names produced by the plotting pipeline.
+
+    Being a ``str`` subclass, members compare and format exactly like plain
+    strings (e.g. ``PlotSubdir.line_plots == "line_plots"``), so they can be
+    used as drop-in replacements wherever the raw directory name is expected
+    (e.g. ``Path(base) / PlotSubdir.line_plots``).
+    """
+
+    line_plots = "line_plots"
+    ratio_plots = "ratio_plots"
+    psd_plots = "psd_plots"
+    score_cards = "score_cards"
+    bar_plots = "bar_plots"
+    qq_plots = "qq_plots"
 
 
 # Shared helpers

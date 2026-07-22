@@ -14,23 +14,19 @@ so different evaluations can coexist in the same base directory.
 """
 
 import logging
+from itertools import groupby
 from pathlib import Path
 
 from pypdf import PdfWriter
+
+from weathergen.evaluate.plotting.plot_utils import PlotSubdir
 
 _logger = logging.getLogger(__name__)
 
 
 def _get_known_subdirs() -> list[str]:
     """Return the default list of plot subdirectory names to scan."""
-    return [
-        "line_plots",
-        "ratio_plots",
-        "psd_plots",
-        "score_cards",
-        "bar_plots",
-        "qq_plots",
-    ]
+    return [subdir.value for subdir in PlotSubdir]
 
 
 def _merge_pdfs(pdf_files: list[Path], output_path: Path) -> Path | None:
@@ -62,8 +58,8 @@ def merge_pdf_subdirectories(
 ) -> list[Path]:
     """Merge PDFs in each plot subdirectory, filtered by run_ids.
 
-    Scans known subdirectories (``line_plots/``, ``ratio_plots/``, …) which
-    contain a ``<metric>/<region>/`` nested structure and produces:
+    Scans the given subdirectories (e.g. ``line_plots/``, ``ratio_plots/``, …),
+    each of which contains a ``<metric>/<region>/`` nested structure, and produces:
 
     1. One merged PDF per leaf directory (metric/region).
     2. One merged PDF per plot-type aggregating all metrics/regions.
@@ -75,7 +71,9 @@ def merge_pdf_subdirectories(
     run_ids : list[str]
         Run identifiers from the evaluation config.
     subdirs : list[str] | None
-        Subdirectory names to scan (default: all known plot dirs).
+        Subdirectory names to scan, typically the plot types enabled in the
+        evaluation config. Missing subdirectories are skipped. Defaults to
+        all known plot dirs if not provided.
     """
     if not run_ids:
         _logger.warning("No run_ids provided — skipping PDF merge.")
@@ -90,25 +88,33 @@ def merge_pdf_subdirectories(
         if not subdir.is_dir():
             continue
 
-        # Find all matching PDFs recursively
+        # Find all matching PDFs recursively, sorted so entries sharing the same
+        # parent directory are contiguous (required for groupby below).
         pdfs = sorted(
-            f for f in subdir.rglob("*.pdf")
-            if not f.stem.startswith("merged_")
-            and any(rid in f.stem for rid in run_ids)
+            (
+                f
+                for f in subdir.rglob("*.pdf")
+                if not f.stem.startswith("merged_") and any(rid in f.stem for rid in run_ids)
+            ),
+            key=lambda f: (f.parent, f.name),
         )
         if not pdfs:
             continue
 
         # Merge per leaf directory (metric/region)
-        for leaf_dir in sorted({f.parent for f in pdfs}):
-            leaf_pdfs = [f for f in pdfs if f.parent == leaf_dir]
+        leaf_dirs = set()
+        for leaf_dir, group in groupby(pdfs, key=lambda f: f.parent):
+            leaf_dirs.add(leaf_dir)
+            leaf_pdfs = list(group)
             if len(leaf_pdfs) >= 2:
                 r = _merge_pdfs(leaf_pdfs, leaf_dir / out_name)
                 if r:
                     merged.append(r)
 
-        # Top-level merge for this plot type
-        if len(pdfs) >= 2:
+        # Top-level merge for this plot type, aggregating all metrics/regions.
+        # Skip when every PDF already lives directly under `subdir` (no nested
+        # metric/region structure), since that would just redo the leaf merge above.
+        if len(pdfs) >= 2 and leaf_dirs != {subdir}:
             r = _merge_pdfs(pdfs, subdir / out_name)
             if r:
                 merged.append(r)
