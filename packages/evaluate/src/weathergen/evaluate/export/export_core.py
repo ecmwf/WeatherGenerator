@@ -62,15 +62,13 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     npoints = data_arr.shape[0]
 
     # Handle optional ensemble dimension: squeeze it out if present.
+    data_dims = ["ipoint", "channel"]
     if data_arr.ndim == 3:
         if data_arr.shape[2] == 1:
             data_arr = data_arr[:, :, 0]
-            data_dims = ["ipoint", "channel"]
         else:
-            data_dims = ["ipoint", "channel", "mem"]
-    else:
-        data_dims = ["ipoint", "channel"]
-
+            data_dims.append("mem")
+            
     data_coords = {
         "ipoint": np.arange(npoints),
         "channel": channels,
