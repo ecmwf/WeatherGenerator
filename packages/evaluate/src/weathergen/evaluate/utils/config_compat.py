@@ -16,21 +16,39 @@ SUPPORTED_DATA_PLOTS = frozenset(
     {"maps", "bias", "target", "histograms", "animations", "timeseries"}
 )
 SUPPORTED_SCORE_PLOTS = frozenset(
-    {"lead_time", "ratio", "heatmap", "scorecard", "bar", "qq",
-     "rank_histogram", "score_map", "score_animation", "timeseries"}
+    {
+        "lead_time",
+        "ratio",
+        "heatmap",
+        "scorecard",
+        "bar",
+        "qq",
+        "rank_histogram",
+        "score_map",
+        "score_animation",
+        "timeseries",
+    }
 )
 
 # ── Old boolean key → new list entry ─────────────────────────────────────────
 
 _DATA_PLOT_BOOL_MAP = {
-    "plot_maps": "maps", "plot_bias": "bias", "plot_target": "target",
-    "plot_histograms": "histograms", "plot_animations": "animations",
+    "plot_maps": "maps",
+    "plot_bias": "bias",
+    "plot_target": "target",
+    "plot_histograms": "histograms",
+    "plot_animations": "animations",
     "plot_timeseries": "timeseries",
 }
 _SCORE_PLOT_BOOL_MAP = {
-    "summary_plots": "lead_time", "ratio_plots": "ratio", "heat_maps": "heatmap",
-    "score_cards": "scorecard", "bar_plots": "bar", "plot_score_maps": "score_map",
-    "plot_score_animations": "score_animation", "plot_score_init_timeseries": "timeseries",
+    "summary_plots": "lead_time",
+    "ratio_plots": "ratio",
+    "heat_maps": "heatmap",
+    "score_cards": "scorecard",
+    "bar_plots": "bar",
+    "plot_score_maps": "score_map",
+    "plot_score_animations": "score_animation",
+    "plot_score_init_timeseries": "timeseries",
 }
 
 
@@ -45,8 +63,13 @@ def parse_data_plots(plotting_cfg: dict | None) -> list[str]:
         result = list(plotting_cfg["data_plots"])
         _validate(result, SUPPORTED_DATA_PLOTS, "data_plots")
         return result
-    return _convert_bools(plotting_cfg, _DATA_PLOT_BOOL_MAP, "data_plots",
-                          SUPPORTED_DATA_PLOTS, histograms_special=True)
+    return _convert_bools(
+        plotting_cfg,
+        _DATA_PLOT_BOOL_MAP,
+        "data_plots",
+        SUPPORTED_DATA_PLOTS,
+        histograms_special=True,
+    )
 
 
 def parse_score_plots(eval_cfg: dict | None) -> list[str]:
@@ -57,8 +80,7 @@ def parse_score_plots(eval_cfg: dict | None) -> list[str]:
         result = list(eval_cfg["score_plots"])
         _validate(result, SUPPORTED_SCORE_PLOTS, "score_plots")
         return result
-    return _convert_bools(eval_cfg, _SCORE_PLOT_BOOL_MAP, "score_plots",
-                          SUPPORTED_SCORE_PLOTS)
+    return _convert_bools(eval_cfg, _SCORE_PLOT_BOOL_MAP, "score_plots", SUPPORTED_SCORE_PLOTS)
 
 
 def parse_plot_config(cfg: dict) -> dict:
@@ -68,16 +90,16 @@ def parse_plot_config(cfg: dict) -> dict:
 
     for stream_cfg in (cfg.get("default_streams") or {}).values():
         if isinstance(stream_cfg, dict) and stream_cfg.get("plotting") is not None:
-            _set_key(stream_cfg["plotting"], "data_plots",
-                     parse_data_plots(stream_cfg["plotting"]))
+            _set_key(stream_cfg["plotting"], "data_plots", parse_data_plots(stream_cfg["plotting"]))
 
     for run_cfg in (cfg.get("run_ids") or {}).values():
         if not isinstance(run_cfg, dict):
             continue
         for stream_cfg in (run_cfg.get("streams") or {}).values():
             if isinstance(stream_cfg, dict) and stream_cfg.get("plotting") is not None:
-                _set_key(stream_cfg["plotting"], "data_plots",
-                         parse_data_plots(stream_cfg["plotting"]))
+                _set_key(
+                    stream_cfg["plotting"], "data_plots", parse_data_plots(stream_cfg["plotting"])
+                )
     return cfg
 
 
@@ -110,7 +132,8 @@ def _convert_bools(cfg, bool_map, field_name, supported, *, histograms_special=F
     if found:
         warnings.warn(
             f"Boolean plot flags are deprecated. Use '{field_name}: {result}' instead.",
-            DeprecationWarning, stacklevel=3,
+            DeprecationWarning,
+            stacklevel=3,
         )
     return result
 

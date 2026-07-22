@@ -134,11 +134,15 @@ def run_score_timeseries_pipeline(
         for region in regions:
             # PSD is a spatial metric incompatible with sample+ipoint aggregation
 <<<<<<< HEAD
+<<<<<<< HEAD
             region_metrics = dict(metrics_dict.get(region))
             region_metrics.pop("psd", None)
             if not region_metrics:
 =======
             #TODO: Temporary fix. Will be propery fixed with MetricResults class
+=======
+            # TODO: Temporary fix. Will be propery fixed with MetricResults class
+>>>>>>> b53701f9 (lint)
             metric_names = [m for m in region_metrics.keys() if m != "psd"]
             metric_params = [region_metrics[m] for m in metric_names]
             if not metric_names:
@@ -886,10 +890,10 @@ def plot_data(
         return
 
     # Resolve plotting flags: prefer new-style data_plots list, fall back to old booleans.
-    data_plots_list = plot_settings.get("data_plots",  [])
-    
+    data_plots_list = plot_settings.get("data_plots", [])
+
     _dp = set(data_plots_list)
-    plot_maps = ("maps" in _dp) or plot_settings.get("plot_maps", False) 
+    plot_maps = ("maps" in _dp) or plot_settings.get("plot_maps", False)
     plot_bias = ("bias" in _dp) or plot_settings.get("plot_bias", False)
     plot_target = ("target" in _dp) or plot_settings.get("plot_target", False)
     plot_timeseries = ("timeseries" in _dp) or plot_settings.get("plot_timeseries", False)
@@ -1253,7 +1257,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     # Resolve which summary plots to produce: prefer new-style score_plots list,
     # fall back to old-style individual booleans.
     score_plots_list = eval_opt.get("score_plots", [])
-    _sp = set(score_plots_list) 
+    _sp = set(score_plots_list)
     do_lead_time = "lead_time" in _sp or "qq_analysis" in _sp
     do_ratio = "ratio" in _sp or eval_opt.get("ratio_plots", False)
     do_heatmap = "heatmap" in _sp or eval_opt.get("heat_maps", False)
