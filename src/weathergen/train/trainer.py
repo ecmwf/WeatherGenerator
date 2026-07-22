@@ -128,7 +128,7 @@ class Trainer(TrainerBase):
         self.lr_schedulers: list[LearningRateScheduler] | None = None
         self.model = None
         self.model_params = None
-        self.optimizer: torch.optim.Optimizer | None = None
+        self.optimizers: list[torch.optim.Optimizer] | None = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
         self.target_and_aux_calculators_val = None
@@ -864,33 +864,36 @@ class Trainer(TrainerBase):
 
     def _get_full_optimizer_state_dict(self):
         is_rank_zero = is_root()
-        sharded_sd = self.optimizer.state_dict()
-        sharded_state = sharded_sd["state"]
-        full_state = {}
-        for group_id, sharded_group in sharded_state.items():
-            group_state = {}
-            for attr, sharded_tensor in sharded_group.items():
-                if isinstance(sharded_tensor, DTensor):
-                    # "exp_avg" in AdamW is `DTensor`
-                    full_tensor = sharded_tensor.full_tensor()
-                else:
-                    # "step" in AdamW is plain tensor
-                    full_tensor = sharded_tensor
+        full_state_dicts = []
+        for optimizer in self.optimizers:
+            sharded_sd = optimizer.state_dict()
+            sharded_state = sharded_sd["state"]
+            full_state = {}
+            for group_id, sharded_group in sharded_state.items():
+                group_state = {}
+                for attr, sharded_tensor in sharded_group.items():
+                    if isinstance(sharded_tensor, DTensor):
+                        # "exp_avg" in AdamW / momentum buffer in Muon is `DTensor`
+                        full_tensor = sharded_tensor.full_tensor()
+                    else:
+                        # "step" in AdamW is plain tensor
+                        full_tensor = sharded_tensor
+                    if is_rank_zero:
+                        group_state[attr] = full_tensor.cpu()
+                    else:
+                        del full_tensor
                 if is_rank_zero:
-                    group_state[attr] = full_tensor.cpu()
+                    full_state[group_id] = group_state
                 else:
-                    del full_tensor
+                    del group_state
             if is_rank_zero:
-                full_state[group_id] = group_state
-            else:
-                del group_state
-        if is_rank_zero:
-            return {
-                "param_groups": sharded_sd["param_groups"],
-                "state": full_state,
-            }
-        else:
-            return {}
+                full_state_dicts.append(
+                    {
+                        "param_groups": sharded_sd["param_groups"],
+                        "state": full_state,
+                    }
+                )
+        return full_state_dicts if is_rank_zero else []
 
     def save_model(self, mini_epoch: int, name=None):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
@@ -918,12 +921,21 @@ class Trainer(TrainerBase):
             file_tmp.replace(file_out)
             logger.info(f"Saved model to {file_out}")
 
-            # save optimizer state keyed by parameter name for robust resumption
-            param_names = [n for n, _ in self.model.named_parameters()]
+            # save optimizer state keyed by parameter name for robust resumption.
+            # optim_state_dict has one entry per optimizer; each optimizer's "state" is
+            # keyed by that optimizer's own param index, so map indices back to parameter
+            # names via the parameter order of its param_groups.
+            param_name_by_id = {id(p): n for n, p in self.model.named_parameters()}
             named_optim_state = {}
-            for idx, pname in enumerate(param_names):
-                if idx in optim_state_dict["state"]:
-                    named_optim_state[pname] = optim_state_dict["state"][idx]
+            for opt_sd, optimizer in zip(optim_state_dict, self.optimizers, strict=True):
+                opt_param_names = [
+                    param_name_by_id[id(p)]
+                    for group in optimizer.param_groups
+                    for p in group["params"]
+                ]
+                for idx, pname in enumerate(opt_param_names):
+                    if idx in opt_sd["state"]:
+                        named_optim_state[pname] = opt_sd["state"][idx]
             if named_optim_state:
                 optim_out = base_path / (filename + ".optim")
                 optim_tmp = base_path / (filename + "_tmp.optim")
@@ -1030,9 +1042,21 @@ class Trainer(TrainerBase):
         )
         is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
 
+        # map each parameter to the optimizer that owns it, so state is restored on the
+        # correct optimizer when the model is split across several (e.g. muon + adamw).
+        optimizer_by_param_id = {
+            id(p): optimizer
+            for optimizer in self.optimizers
+            for group in optimizer.param_groups
+            for p in group["params"]
+        }
+
         loaded = 0
         for name, param in self.model.named_parameters():
             if name not in named_state:
+                continue
+            optimizer = optimizer_by_param_id.get(id(param))
+            if optimizer is None:
                 continue
             entry = named_state[name]
             new_entry = {}
@@ -1043,7 +1067,7 @@ class Trainer(TrainerBase):
                     new_entry[key] = val.to(device=param.device)
                 else:
                     new_entry[key] = val
-            self.optimizer.state[param] = new_entry
+            optimizer.state[param] = new_entry
             loaded += 1
 
         if is_root():
