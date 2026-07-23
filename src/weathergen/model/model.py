@@ -24,7 +24,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.model.diffusion import DiffusionForecastEngine, sample_and_plot_latent_mse
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     MAX_NUMBER_TOKENS_LOCAL_PER_CELL,
@@ -763,6 +763,18 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
+            if self.cf.get("fe_diffusion_latent_mse_samples", 0) > 0:
+                self.forecast_engine.training = True
+                sample_and_plot_latent_mse(
+                    tokens,
+                    step,
+                    meta_info=batch.samples[0].meta_info,
+                    rope_coords=model_params.rope_coords,
+                    cf=self.cf,
+                    forecast_engine=self.forecast_engine,
+                )
+                self.forecast_engine.training = self.training
+
             # apply forecasting engine
             tokens = self.forecast_engine(
                 tokens,
@@ -912,7 +924,6 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
         # Empty dicts evaluate to False in python
-        # breakpoint()
         if not self.pred_heads:
             return output
 
@@ -958,7 +969,6 @@ class Model(torch.nn.Module):
             t_coords_lens = [len(t) for t in t_coords]
             t_coords = torch.cat(t_coords)
 
-            # breakpoint()
             if len(t_coords) == 0:
                 continue
 
