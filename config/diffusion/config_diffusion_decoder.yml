@@ -250,7 +250,7 @@ training_config:
   #       target_and_aux_calc: DiffusionLatentTargetEncoder,
   #       loss_fcts: { "mse": { }, },
   #       }
-  # }
+  }
   
   model_input: {
     "forecasting" : {
