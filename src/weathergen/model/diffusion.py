@@ -159,12 +159,24 @@ class DiffusionForecastEngine(torch.nn.Module):
                     f"During training, tokens, fstep, and meta_info are required. "
                     f"Got tokens={tokens is not None}, fstep={fstep}, meta_info={meta_info is not None}"
                 )
-            return self.training_forward(
-                tokens=tokens,
-                fstep=fstep,
-                meta_info=meta_info,
-                coords=coords,
-            )
+            if self.cf.get("diff_train_with_inf", False):
+                with torch.no_grad():
+                    self.cur_token = tokens.detach() if tokens is not None else None
+                    num_steps = 10
+                    res = self.inference_forward(
+                        fstep=fstep,
+                        num_steps=num_steps,
+                        meta_info=meta_info,
+                        coords=coords,
+                    )
+                    return res[-1]
+            else:
+                return self.training_forward(
+                    tokens=tokens,
+                    fstep=fstep,
+                    meta_info=meta_info,
+                    coords=coords,
+                )
         else:
             # called in evaluation mode :
             # decide btw pure noise generation (inference) vs denoising a sample for
@@ -542,7 +554,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         if log_diagnostics and len(track["l2_to_target"]) > 0:
             self._plot_sampling_diagnostics(track, num_steps)
-
+        
         return x_next, intermediate_x
 
     def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
