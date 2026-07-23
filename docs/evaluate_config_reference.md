@@ -586,7 +586,6 @@ evaluation:
 | `ets` | Equitable Threat Score. Default threshold per-variable (see `score.py`). Override with `thresh`. |
 | `pss` | Peirce Skill Score. Override threshold with `thresh`. |
 | `fbi` | Frequency Bias Index. Override threshold with `thresh`. |
-| `seeps` | Stable Equitable Error in Probability Space ([Rodwell et al., 2011](https://journals.ametsoc.org/view/journals/mwre/140/8/mwr-d-11-00301.1.pdf)). |
 | `grad_amplitude` | Ratio of spatial variability (gradient amplitude) between prediction and target. Requires a regular lat/lon grid. |
 | `qq_analysis` | Quantile–quantile analysis. Produces Q-Q plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
 | `psd` | Power Spectral Density. Produces PSD plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
@@ -611,6 +610,7 @@ evaluation:
 | `rpss` | Ranked Probability Skill Score |
 | `fact` | Forecast Activity (standard deviation of forecast anomaly) |
 | `tact` | Target Activity (standard deviation of target anomaly) |
+| `seeps` | Stable Equitable Error in Probability Space ([Rodwell et al., 2011](https://journals.ametsoc.org/view/journals/mwre/140/8/mwr-d-11-00301.1.pdf)). |
 
 ### Probabilistic metrics (require ensemble dimension)
 
@@ -621,7 +621,7 @@ evaluation:
 | `rank_histogram` | Rank Histogram (Talagrand diagram). Produces a bar chart, not a score line plot — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
 | `spread` | Ensemble Spread |
 
-### Special output metrics: `psd`, `qq_analysis`, `rank_histogram`
+### Special output metrics: `psd`, `qq_analysis`, `rank_histogram` and `seeps`
 
 The three metrics below do **not** produce standard score-vs-lead-time line plots. They are
 handled by dedicated plotting functions and generate different output file types.
@@ -699,6 +699,19 @@ evaluation:
         lower_threshold: 0.0
         upper_threshold: 10.0
 ```
+
+#### `seeps` score
+The `seeps` metric accepts two parameters:
+```yaml
+evaluation:
+  metrics:
+    - seeps:
+        minimum_dry_prob: 0.1
+        maximum_dry_prob: 0.85
+```
+Points where the climatological probability of a dry timestep (less than 0.2mm of rain) is below this minimum or above this maximum are excluded from the score computation. 
+The default values given above are used in the literature and should typically not be changed. The other two parameters inherent in the method (the threshold for dryness, 
+here 0.2mm and the conditional probability of heavy rain given a wet timestep, here 2/3) are baked into the climatological weights and cannot be changed by the user.  
 
 ---
 
