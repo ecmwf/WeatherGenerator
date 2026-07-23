@@ -25,7 +25,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.model.diffusion import DiffusionForecastEngine, sample_and_plot_latent_mse
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -749,6 +749,16 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
+            if self.cf.get("fe_diffusion_latent_mse_samples", 0) > 0:
+                sample_and_plot_latent_mse(
+                    tokens,
+                    step,
+                    meta_info=batch.samples[0].meta_info,
+                    rope_coords=model_params.rope_coords,
+                    cf=self.cf,
+                    forecast_engine=self.forecast_engine,
+                )
+
             tokens = self.forecast_engine(
                 tokens,
                 step,
@@ -963,6 +973,12 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.streams.keys():
+            # Forcing / input-only streams (e.g. the separate input stream used in diffusion
+            # forecasting) have no decoder built at model creation (see is_stream_forcing),
+            # so there is nothing to predict for them.
+            if stream_name not in self.pred_heads:
+                continue
+
             # extract target coords for current stream and fstep and convert to one tensor
             # Use modular indexing so that ensemble calls (batch_size > len(batch)) replicate
             # the single real sample's coordinates across all N members.

@@ -91,8 +91,13 @@ def write_output(
 
                 # handle forcing streams or if sample is empty
                 if preds is None:
-                    # preds are empty so create copy of target and add ensemble dimension
-                    assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
+                    # preds are empty so create copy of target and add ensemble dimension.
+                    # A missing prediction is only valid when the target carries no data:
+                    # forcing / input-only streams (e.g. ERA5_in) have empty target *channels*
+                    # so the target tensor has shape (n_points, 0) -> numel() == 0. Checking
+                    # numel (rather than shape[0]) also catches genuinely empty samples while
+                    # still flagging a real missing prediction for a stream with actual data.
+                    assert targets[0].numel() == 0, "Empty preds but non-empty targets."
                     preds = [target.clone().unsqueeze(0) for target in targets]
 
                 for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):

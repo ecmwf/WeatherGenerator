@@ -29,7 +29,7 @@ import math
 import numpy as np
 import torch
 
-from weathergen.common.config import Config, get_path_run
+from weathergen.common.config import Config, get_path_run, get_run_id_from_config
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
@@ -154,6 +154,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
         self.noise_distribution = self.cf.get("noise_distribution", "log_normal")
+        # Number of denoising (ODE) steps used during inference sampling. Configurable via
+        # `fe_diffusion_num_inference_steps`; defaults to 10 to preserve previous behaviour.
+        self.num_inference_steps = self.cf.get("fe_diffusion_num_inference_steps", 10)
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
         self._fixed_noise_level: float | None = None
@@ -171,7 +174,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         fstep: int = None,
         meta_info: dict[str, SampleMetaData] = None,
         coords: torch.Tensor = None,
-        num_steps: int = 10,
+        num_steps: int | None = None,
     ) -> torch.Tensor:
         """
         Forward pass that routes to training_forward or inference_forward based on model status.
@@ -190,7 +193,8 @@ class DiffusionForecastEngine(torch.nn.Module):
             fstep: Forecast step index - required for both modes
             meta_info: Sample metadata dict containing timestamps - required for both modes
             coords: Optional coordinate tensor
-            num_steps: Number of diffusion steps for inference (default: 30)
+            num_steps: Number of diffusion denoising steps for inference. When None, falls
+                back to `self.num_inference_steps` (config `fe_diffusion_num_inference_steps`).
 
         Returns:
             torch.Tensor: Model output (denoised prediction during training,
@@ -231,7 +235,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 self.cur_token = tokens.detach() if tokens is not None else None
                 return self.inference_forward(
                     fstep=fstep,
-                    num_steps=num_steps,
+                    num_steps=self.num_inference_steps if num_steps is None else num_steps,
                     meta_info=meta_info,
                     coords=coords,
                 )
@@ -503,24 +507,33 @@ class DiffusionForecastEngine(torch.nn.Module):
         #     We stop at sigma_min = max(config value, sigma_data * 0.01), which gives
         #     c_skip ≈ 0.9999 — still some network contribution, and avoids the
         #     numerical instability of dividing by near-zero sigma in the ODE.
-        sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
-        sigma_max_eff = min(self.sigma_max, sigma_max_train)
-        # sigma_max_eff = sigma_max_eff * 3.0
+        if self.noise_distribution == "log_uniform":
+            # log_uniform training: sigma ~ exp(Uniform[log(sigma_min), log(sigma_max)]).
+            # The network is trained uniformly across [sigma_min, sigma_max], so the
+            # effective inference bounds are just the config bounds — the log-normal
+            # percentile logic below does not apply.
+            sigma_max_train = self.sigma_max
+            sigma_max_eff = self.sigma_max
+            sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
+            sigma_min_from_dist = self.sigma_min
+            sigma_min_eff = self.sigma_min
+        else:
+            sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
+            sigma_max_eff = min(self.sigma_max, sigma_max_train)
+            # sigma_max_eff = sigma_max_eff * 3.0
 
-        # --- Training-distribution-aligned sigma_min ---
-        # sigma_min_quantile controls what fraction of training samples fall below sigma_min_eff.
-        # sigma at quantile q of log-normal(p_mean, p_std): exp(p_mean + Φ⁻¹(q) * p_std).
-        # Φ⁻¹ approximated via its standard z-scores; default q=0.05 (5th percentile).
-        #   q=0.10 → z=-1.282 → exp(1.5-1.538)≈0.96   (stops right at sigma≈1)
-        #   q=0.05 → z=-1.645 → exp(1.5-1.974)≈0.62
-        #   q=0.01 → z=-2.326 → exp(1.5-2.791)≈0.27
-        sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
-        _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
-        _z = _z_scores.get(sigma_min_quantile, -1.645)
-        sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
-        sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
-        sigma_max_eff = 50
-        sigma_min_eff = 0.4
+            # --- Training-distribution-aligned sigma_min ---
+            # sigma_min_quantile controls what fraction of training samples fall below sigma_min_eff.
+            # sigma at quantile q of log-normal(p_mean, p_std): exp(p_mean + Φ⁻¹(q) * p_std).
+            # Φ⁻¹ approximated via its standard z-scores; default q=0.05 (5th percentile).
+            #   q=0.10 → z=-1.282 → exp(1.5-1.538)≈0.96   (stops right at sigma≈1)
+            #   q=0.05 → z=-1.645 → exp(1.5-1.974)≈0.62
+            #   q=0.01 → z=-2.326 → exp(1.5-2.791)≈0.27
+            sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
+            _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
+            _z = _z_scores.get(sigma_min_quantile, -1.645)
+            sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
+            sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
         if log_diagnostics:
             logger.info(
                 f"Inference sigma schedule: "
@@ -830,3 +843,66 @@ class DateTimeEncoder(torch.nn.Module):
         out = torch.from_numpy(out).float()
 
         return out.reshape(*orig_shape, self.num_frequencies * 4)
+
+def sample_and_plot_latent_mse(tokens, step, meta_info, rope_coords, cf, forecast_engine):
+    """Sample diffusion latent denoising MSE across sigma values and save a scatter plot.
+
+    Sweeps ``fe_diffusion_latent_mse_samples`` noise levels drawn uniformly in
+    log-space over ``[sigma_min, sigma_max]``, runs the diffusion engine's
+    ``training_forward`` at each level, and records the MSE between the clean
+    target tokens and the denoised prediction. A sigma-vs-MSE scatter plot is
+    written to the run's results directory. The sampling counter in ``cf`` is
+    reset afterwards so the diagnostic only runs once.
+
+    The engine's fixed noise level is used so that ``sigma = exp(log_sigma)``
+    holds regardless of the configured ``noise_distribution``. The engine's
+    training flag and fixed-noise-level state are restored on exit.
+    """
+    import matplotlib.pyplot as plt
+    from tqdm import tqdm
+
+    num_samples = cf.get("fe_diffusion_latent_mse_samples", 0)
+    lower = math.log(cf.get("sigma_min"))
+    upper = math.log(cf.get("sigma_max"))
+
+    # Drive the noise level directly via _fixed_noise_level (eval path), so the
+    # sampled log_sigma is interpreted as sigma = exp(log_sigma) independent of
+    # the training noise distribution. State is restored afterwards.
+    prev_training = forecast_engine.training
+    prev_fixed = forecast_engine._fixed_noise_level
+    forecast_engine.training = False
+
+    sigmas = []
+    mses = []
+    try:
+        with torch.no_grad():
+            for _ in tqdm(range(num_samples), desc="Diffusion latent MSE sampling"):
+                log_sigma = float(np.random.rand() * (upper - lower) + lower)
+                forecast_engine._fixed_noise_level = log_sigma
+                tokens_pred = forecast_engine.training_forward(
+                    tokens,
+                    step,
+                    meta_info=meta_info,
+                    coords=rope_coords,
+                )
+                mse = ((tokens - tokens_pred) ** 2).mean().item()
+                sigmas.append(math.exp(log_sigma))
+                mses.append(mse)
+    finally:
+        forecast_engine.training = prev_training
+        forecast_engine._fixed_noise_level = prev_fixed
+
+    run_id = get_run_id_from_config(cf)
+    plt.scatter(sigmas, mses)
+    plt.xlabel("Sigma")
+    plt.ylabel("MSE")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.title(f"{run_id}: sigma vs MSE")
+    plt.grid()
+    plt.tight_layout()
+    out_path_base = get_path_run(cf) / "plots" / "validation"
+    out_path_base.mkdir(exist_ok=True, parents=True)
+    plt.savefig(out_path_base / f"sigma_vs_mse_step{step}.png")
+    plt.close()
+    cf["fe_diffusion_latent_mse_samples"] = 0  # reset to avoid repeated sampling
