@@ -369,7 +369,32 @@ class Masker:
             for _ in range(target_cfg.get("num_samples", 1)):
                 # determine if forcing dataset => mask is empty
                 if is_stream_forcing(stream_info, self.stage):
-                    target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                    masking_config = target_cfg.get("masking_strategy_config", {})
+                    # A forcing stream (e.g. observations with ``target: []``) produces no
+                    # physical prediction target, so the model builds no decoder/readout for it
+                    # and no target VALUES are loaded into the batch. However, for
+                    # student-teacher / latent-loss training the latent target is the frozen
+                    # encoder applied to the target sample, whose network input is gated by this
+                    # target cell mask. A zero mask would drop the stream's source tokens from
+                    # the latent target entirely. Generate the normal (e.g. all-ones "forecast")
+                    # target cell mask so the stream's source tokens ARE encoded into the latent
+                    # target, while still loading no target values (empty target channels).
+                    needs_target_network_input = (
+                        "student_teacher" in training_mode or "latent_loss" in training_mode
+                    )
+                    if needs_target_network_input:
+                        target_mask, mask_params = self._get_mask(
+                            num_cells=num_cells,
+                            strategy=target_cfg.get("masking_strategy"),
+                            masking_strategy_config=masking_config,
+                            target_relationship_mask=("independent", None),
+                        )
+                    else:
+                        target_mask = torch.zeros(num_cells, dtype=torch.bool)
+                        # The per-sample diffusion noise level must still be generated so that
+                        # downstream diffusion target-aux calculators can read it (e.g. via
+                        # meta_info["ERA5_in"]).
+                        mask_params = self._sample_diffusion_noise_level(masking_config)
                 else:
                     masking_config = target_cfg.get("masking_strategy_config", {})
                     # targets are never randomly dropped
@@ -519,6 +544,28 @@ class Masker:
 
         return (mask, params)
 
+    def _sample_diffusion_noise_level(self, masking_strategy_config: dict) -> dict:
+        """Sample the per-sample diffusion noise level when ``diffusion_rn`` is set.
+
+        Returns a dict containing ``noise_level_rn`` (empty if diffusion is not requested).
+        The value is a log-sigma for ``log_uniform`` noise or an eta ~ N(0, 1) for
+        ``log_normal`` noise; the model interprets it via the ``noise_distribution`` flag.
+        """
+        if "diffusion_rn" not in masking_strategy_config:
+            return {}
+
+        noise_dist = masking_strategy_config.get("noise_distribution", "log_normal")
+        if noise_dist == "log_uniform":
+            # Store log_sigma directly; model interprets it via noise_distribution flag.
+            noise_level_rn = self.rng.uniform(
+                np.log(masking_strategy_config["sigma_min"]),
+                np.log(masking_strategy_config["sigma_max"]),
+            )
+        else:  # log_normal (default): store eta ~ N(0,1)
+            noise_level_rn = self.rng.normal(0.0, 1.0)
+
+        return {"noise_level_rn": noise_level_rn}
+
     def _generate_cell_mask(
         self,
         num_cells: int,
@@ -559,16 +606,7 @@ class Masker:
         elif "forecast" in strategy or strategy == "causal":
             mask = np.ones(num_cells, dtype=np.bool)
 
-            if "diffusion_rn" in masking_strategy_config:
-                noise_dist = masking_strategy_config.get("noise_distribution", "log_normal")
-                if noise_dist == "log_uniform":
-                    # Store log_sigma directly; model interprets it via noise_distribution flag.
-                    masking_params["noise_level_rn"] = self.rng.uniform(
-                        np.log(masking_strategy_config["sigma_min"]),
-                        np.log(masking_strategy_config["sigma_max"]),
-                    )
-                else:  # log_normal (default): store eta ~ N(0,1)
-                    masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
+            masking_params.update(self._sample_diffusion_noise_level(masking_strategy_config))
 
         elif strategy == "healpix":
             # prepare healpix-based masking

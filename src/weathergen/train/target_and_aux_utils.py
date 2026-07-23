@@ -47,22 +47,32 @@ def get_target_aux_calculator(
             with_fsdp=False,
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
-        # Free components not needed by DiffusionLatentTargetEncoder (only uses the encoder)
-        for attr in (
-            "forecast_engine",
+        # When enabled, the latent target is built from the previous atmospheric state by
+        # rolling it forward with the (deterministic) forecast engine loaded next to the
+        # encoder; in that case the forecast engine must be kept.
+        use_forecast_engine = target_and_aux_calc_params.get("use_forecast_engine", False)
+
+        # Free components not needed by DiffusionLatentTargetEncoder (only uses the encoder
+        # and, optionally, the forecast engine).
+        attrs_to_free = [
             "pred_heads",
             "target_token_engines",
             "embed_target_coords",
             "latent_heads",
             "latent_pre_norm",
-        ):
+        ]
+        if not use_forecast_engine:
+            attrs_to_free.append("forecast_engine")
+        for attr in attrs_to_free:
             if hasattr(model, attr) and getattr(model, attr) is not None:
                 delattr(model, attr)
                 setattr(model, attr, None)
         torch.cuda.empty_cache()
 
         target_aux = DiffusionLatentTargetEncoder(
-            model, is_model_sharded=(cf.with_ddp and cf.with_fsdp)
+            model,
+            is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            use_forecast_engine=use_forecast_engine,
         )
 
     elif target_and_aux_calc == "EMATeacher":

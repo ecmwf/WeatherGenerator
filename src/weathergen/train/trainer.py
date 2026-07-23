@@ -311,8 +311,17 @@ class Trainer(TrainerBase):
             "num_workers": cf.data_loading.num_workers,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
+
+        # allow a separate (typically smaller) number of workers for validation to
+        # reduce shared-memory pressure; falls back to the training num_workers
+        val_loader_params = {
+            **loader_params,
+            "num_workers": cf.data_loading.get(
+                "num_workers_validation", cf.data_loading.num_workers
+            ),
+        }
         self.data_loader_validation = torch.utils.data.DataLoader(
-            self.dataset_val, **loader_params, sampler=None
+            self.dataset_val, **val_loader_params, sampler=None
         )
 
         self.model, self.model_params = init_model_and_shard(
