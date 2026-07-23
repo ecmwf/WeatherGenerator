@@ -1334,7 +1334,14 @@ class Scores:
 
         return ratio_spat_variability
 
-    def calc_seeps(self, p: xr.DataArray, gt: xr.DataArray, c: xr.Dataset) -> xr.DataArray:
+    def calc_seeps(
+        self, 
+        p: xr.DataArray, 
+        gt: xr.DataArray, 
+        c: xr.Dataset,
+        minimum_dry_prob: float = 0.1,
+        maximum_dry_prob: float = 0.85,
+    ) -> xr.DataArray:
         return scores.categorical.seeps(
             fcst=p * 1000,  # converted to mm
             obs=gt * 1000,
@@ -1342,8 +1349,8 @@ class Scores:
             light_heavy_threshold=c.sel(statistic="light_heavy_threshold"),
             dry_light_threshold=0.2,
             mask_clim_extremes=True,
-            lower_masked_value=0.1,
-            upper_masked_value=0.85,
+            lower_masked_value=minimum_dry_prob,
+            upper_masked_value=maximum_dry_prob,
             reduce_dims=self._agg_dims,
         )
 
