@@ -73,42 +73,37 @@ LOSS_SPIKE_DETECTION_DEFAULTS = {
 
 def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
     """
-    Replicate the single valid target entry in each TargetAuxOutput so its ``physical`` and
-    ``latent`` lists match the number of forecast steps in ``preds``.
-
+    Replicate per-fstep entries in each TargetAuxOutput so its ``physical`` and ``latent``
+    lists match the number of forecast steps in ``preds``.
     Diffusion inference produces one ``preds`` fstep per ODE denoising step, but the
     physical target is identical across the trajectory. Without this expansion the loss
     calculator (which zips preds and targets with ``strict=True``) raises a length
     mismatch.
-
     The expansion replicates references — no tensor copies are made — and is a no-op when
     the lengths already agree.
     """
     n_pred = len(preds.physical)
     for t_aux in targets_and_auxs.values():
-        physical_targets = [target for target in t_aux.physical if target]
-        latent_targets = [target for target in t_aux.latent if target]
-        n_tgt = max(len(physical_targets), len(latent_targets))
-
-        if n_tgt == 0:
+        n_tgt = len(t_aux.physical)
+        if n_tgt == n_pred or n_tgt == 0:
             continue
-        if n_tgt != 1:
+        if n_pred % n_tgt != 0:
             logger.warning(
-                "Cannot expand target/aux from %d to %d fsteps (expected one valid target); "
+                "Cannot expand target/aux from %d to %d fsteps (not a multiple); "
                 "leaving unchanged.",
                 n_tgt,
                 n_pred,
             )
             continue
-
-        # A non-zero forecast offset leaves empty slots before the logical target's
-        # forecast index (for example ``physical == [{}, target]`` for offset 1).
-        # ModelOutput's ODE trajectory is, however, indexed from zero. Replicate the
-        # populated target rather than those placeholder slots.
-        t_aux.physical = [physical_targets[0] if physical_targets else {} for _ in range(n_pred)]
-        t_aux.latent = [latent_targets[0] if latent_targets else {} for _ in range(n_pred)]
-        if t_aux.output_idxs:
-            t_aux.output_idxs = [t_aux.output_idxs[-1]] * n_pred
+        repeat = n_pred // n_tgt
+        t_aux.physical = [t_aux.physical[i // repeat] for i in range(n_pred)]
+        t_aux.latent = [t_aux.latent[i // repeat] for i in range(n_pred)]
+        # output_idxs is consumed by validation IO via batch.get_output_idxs(), but we
+        # keep the dataclass internally consistent in case other consumers read it.
+        if t_aux.output_idxs is not None and len(t_aux.output_idxs) == n_tgt:
+            t_aux.output_idxs = [
+                t_aux.output_idxs[i // repeat] for i in range(n_pred)
+            ]
 
 
 class Trainer(TrainerBase):
