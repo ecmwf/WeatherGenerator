@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import dataclasses
 import logging
 import pathlib
 from collections.abc import Sequence
@@ -83,12 +82,6 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
         rdatas += [rdata]
 
     return IOReaderData.combine(rdatas)
-
-
-@dataclasses.dataclass
-class _Stream:
-    info: Config
-    readers: list[DataReaderBase]
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
@@ -228,12 +221,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return np.arange(self.max_input_steps, perms_len)
 
-    def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
+    def _init_stream_datasets(self, cf) -> dict[StreamName, list[AnyDataReader]]:
         """Load dataset readers for all streams from config."""
-        streams_datasets: dict[StreamName, _Stream] = {}
+        streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
         for stream_name, stream_info in cf.streams.items():
             # list of sources for current stream
-            streams_datasets[stream_name] = _Stream(stream_info, [])
+            streams_datasets[stream_name] = []
 
             kwargs = {
                 "tw_handler": self.time_window_handler,
@@ -281,7 +274,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                streams_datasets[stream_info["name"]] = [ds]
+                streams_datasets[stream_name] += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels

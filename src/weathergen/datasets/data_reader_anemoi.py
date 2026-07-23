@@ -132,19 +132,8 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.geoinfo_idx = self.select_geoinfo_channels(ds)
             self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
         else:
-            # Keep only requested channels that actually exist in the dataset, preserving
-            # the configured order. Synthetic channels such as "noise_time" (a diffusion/SSL
-            # augmentation channel injected at runtime, not stored in the anemoi dataset) are
-            # not present here and are skipped instead of raising a ValueError.
-            requested = stream_info.get("geoinfo_channels")
-            missing = [ch for ch in requested if ch not in ds.variables]
-            if missing:
-                _logger.warning(
-                    f"{stream_info['name']}: skipping geoinfo channels not in dataset: {missing}"
-                )
-            self.geoinfo_channels = [ch for ch in requested if ch in ds.variables]
-            # self.geoinfo_channels = stream_info.get("geoinfo_channels")
-            self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
+            self.geoinfo_idx = self.select_geoinfo_channels(ds)
+            self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
 
         # set geoinfo normalization statistics
         if len(self.geoinfo_idx) > 0:

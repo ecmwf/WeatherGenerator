@@ -75,12 +75,10 @@ def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
     """
     Replicate per-fstep entries in each TargetAuxOutput so its ``physical`` and ``latent``
     lists match the number of forecast steps in ``preds``.
-
     Diffusion inference produces one ``preds`` fstep per ODE denoising step, but the
     physical target is identical across the trajectory. Without this expansion the loss
     calculator (which zips preds and targets with ``strict=True``) raises a length
     mismatch.
-
     The expansion replicates references — no tensor copies are made — and is a no-op when
     the lengths already agree.
     """
