@@ -111,6 +111,7 @@ latent_noise_deterministic_latents: True
 freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 
 load_chkpt: {'run_id': 'c71eo6pu', 'epoch': -1}  # n320 backbone, 82 epochs
+load_decoder_chkpt: {}
 norm_type: "LayerNorm"
 
 #####################################

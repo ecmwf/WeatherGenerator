@@ -175,6 +175,18 @@ def init_model_and_shard(
             if with_fsdp:
                 model.reset_parameters()
 
+    decoder_run_id = cf.get("load_decoder_chkpt", {}).get("run_id", None)
+    if decoder_run_id:
+        decoder_mini_epoch = cf.load_decoder_chkpt.get("mini_epoch", -1)
+        if is_root():
+            logger.info(
+                f"Loading decoder weights from id={decoder_run_id} "
+                f"at mini_epoch {decoder_mini_epoch}."
+            )
+        model = load_decoder_from_checkpoint(
+            cf, model, device, decoder_run_id, decoder_mini_epoch
+        )
+
     # model params
     model_params = ModelParams(cf).create(cf)
     model_params.reset_parameters(cf)
@@ -281,6 +293,90 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         logger.warning(f"Missing keys when loading model: {mkeys}")
     if len(ukeys) > 0:
         logger.warning(f"Unused keys when loading model: {ukeys}")
+
+    return model
+
+
+# top-level module prefixes that make up the physical decoder
+_DECODER_PREFIXES = ("embed_target_coords", "target_token_engines", "pred_heads")
+
+
+def load_decoder_from_checkpoint(cf, model, device, run_id: str, mini_epoch=-1):
+    """Overlay only the physical decoder weights from a separate checkpoint.
+
+    Filters the checkpoint to ``embed_target_coords.*``, ``target_token_engines.*`` and
+    ``pred_heads.*`` and loads them into ``model`` with ``strict=False`` (all other model
+    weights are left untouched). This allows e.g. reusing a pretrained decoder together with an
+    encoder / forecast engine that was trained separately (see load_model for the primary load).
+
+    Args:
+        run_id : model_id of the run providing the decoder weights
+        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
+    """
+
+    path_run = get_path_model(run_id=run_id)
+    mini_epoch_id = (
+        f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+    )
+    filename = f"{run_id}_{mini_epoch_id}.chkpt"
+
+    params = torch.load(
+        path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
+    )
+
+    def _strip(key: str) -> str:
+        return key[len("module.") :] if key.startswith("module.") else key
+
+    decoder_params = {k: v for k, v in params.items() if _strip(k).startswith(_DECODER_PREFIXES)}
+
+    if not decoder_params:
+        logger.warning(
+            f"No decoder weights (matching {_DECODER_PREFIXES}) found in checkpoint {filename}."
+        )
+        return model
+
+    is_model_sharded = cf.with_ddp and cf.with_fsdp
+    if is_model_sharded:
+        meta_sharded_sd = model.state_dict()
+        maybe_sharded_sd = {}
+        for param_name, full_tensor in decoder_params.items():
+            sharded_meta_param = meta_sharded_sd.get(param_name)
+            if (
+                sharded_meta_param is None
+                or type(sharded_meta_param) is not torch.distributed.tensor.DTensor
+            ):
+                logger.warning(
+                    f"Decoder parameter {param_name} from checkpoint not found in model "
+                    "or not sharded; skipping."
+                )
+                continue
+            sharded_tensor = distribute_tensor(
+                full_tensor,
+                sharded_meta_param.device_mesh,
+                sharded_meta_param.placements,
+            )
+            maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+        _, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
+        loaded = maybe_sharded_sd
+    else:
+        # align "module." prefix with the model's state dict key convention
+        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
+        params_has_prefix_module = next(iter(decoder_params)).split(".")[0] == "module"
+        if model_has_prefix_module and not params_has_prefix_module:
+            decoder_params = {"module." + k: v for k, v in decoder_params.items()}
+        elif not model_has_prefix_module and params_has_prefix_module:
+            decoder_params = {_strip(k): v for k, v in decoder_params.items()}
+        _, ukeys = model.load_state_dict(decoder_params, strict=False)
+        model = model.to(device)
+        loaded = decoder_params
+
+    logger.info(
+        f"Loaded {len(loaded)} decoder tensors from checkpoint {filename} (run_id={run_id})."
+    )
+    # ukeys = decoder keys that are absent in the model; missing keys are intentionally not
+    # reported here since the primary checkpoint provides all non-decoder weights.
+    if len(ukeys) > 0:
+        logger.warning(f"Decoder keys from checkpoint not present in model: {ukeys}")
 
     return model
 
