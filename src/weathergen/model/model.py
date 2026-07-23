@@ -933,6 +933,7 @@ class Model(torch.nn.Module):
         batch: ModelBatch,
         output: ModelOutput,
         intermediates: list[torch.Tensor] | None = None,
+        out_step: int | None = None
     ) -> ModelOutput:
         """
         Compute latent predictions

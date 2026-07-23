@@ -11,12 +11,11 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1024
-ae_local_num_blocks: 4
+ae_local_dim_embed: 2048
+ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
-ae_local_max_tokens_per_cell: 128
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
@@ -27,24 +26,24 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 5
-ae_global_num_heads: 16
+ae_global_num_blocks: 4
+ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 # TODO: switching to < 1 triggers triton-related issues.
 # See https://github.com/ecmwf/WeatherGenerator/issues/1050
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
-ae_global_mlp_hidden_factor: 4
-ae_global_trailing_layer_norm: True
+ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 5
-ae_aggregation_num_heads: 16
+ae_aggregation_num_blocks: 0
+ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
 ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
-ae_aggregation_mlp_hidden_factor: 4
+ae_aggregation_mlp_hidden_factor: 2
 
 decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
 pred_adapter_kv: False
@@ -52,14 +51,11 @@ pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
 num_class_tokens: 0
-# srdrwfy6 was pre-trained with 64 register tokens; must match to load the encoder.
-num_register_tokens: 64
-# srdrwfy6 uses RMSNorm for the q/k layer norms (weight-only). Must match to load qk-norm weights.
-qk_norm_type: RMSNorm
+num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 16
+fe_num_blocks: 12
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -70,7 +66,7 @@ fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_soft_clamp_channels: []  # [1511, 1772, 1689, 209, 1400, 1944, 1520, 1213, 1402, 646]
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
 fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "concatenate", ..., "spatial_ada_ln", "ada_ln"
-fe_layer_norm_after_blocks: [15]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
+fe_layer_norm_after_blocks: [11]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
 fe_impute_latent_noise_std: 0.0  # 1e-4
 fe_impute_latent_diffusion_noise_std: 1e-3  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -81,7 +77,7 @@ frequency_embedding_dim: 256
 embedding_dim: 512
 noise_distribution: &noise_distribution "log_uniform"  # "log_uniform" or "log_normal"
 sigma_min: &sigma_min 0.1
-sigma_max: &sigma_max 50
+sigma_max: &sigma_max 0.11
 sigma_data: 1.0
 rho: 7
 p_mean: 3.5  # only required if noise_distribution is log_normal
@@ -135,53 +131,13 @@ latent_noise_deterministic_latents: True
 
 
 #below for FE training only
-freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 #below for DECODER training only
-# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*noise_embedder.*|.*fe.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*noise_embedder.*|.*fe.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 #below for FE and DECODER training
 # freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*noise_embedder.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 
-# load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.7
-# load_chkpt: {'run_id': 'dcl584vo', 'epoch': -1}  # z500 d2048 hl5, sigma_data=159.08
-# load_chkpt: {'run_id': 'tvkicam9', 'epoch': -1}  # z500 d2048 hl3 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'q9grso75', 'epoch': -1}  # z500 d2048 hl3, sigma_data=39.2936
-# load_chkpt: {'run_id': 'qxivdyqz', 'epoch': -1}  # z500 d2048 hl5 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'h8x1qgz3', 'epoch': -1}  # z500 d128 hl5, sigma_data=12.93
-# load_chkpt: {'run_id': '', 'epoch': -1}  # z500 d128 hl5 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'wvpb76ai', 'epoch': -1}  # multi-var d2048 hl3 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'ae4wlc5m', 'epoch': -1}  # multi-var d2048 hl3, sigma_data=2.7047
-# load_chkpt: {'run_id': 'r45iwyns', 'epoch': -1}  # multi-var d512 hl3, sigma_data=1.1785
-# load_chkpt: {'run_id': 'ydka6uql', 'epoch': -1}  # multi-var d512 hl4, sigma_data=0.827
-# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5, sigma_data=0.5789
-# load_chkpt: {'run_id': 'v8kd6xc1', 'epoch': -1}  # multi-var d512 hl5 nopos, sigma_data=0.6481
-# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'y1gu5md8', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'mal6u4gc', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 64 epochs, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'zrpncqb0', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 196 epochs, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'm6fs8wvj', 'epoch': -1}  # multi-var d512 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'cgxt9imf', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=0.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
-# load_chkpt: {'run_id': 'wo5mf2z4', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=1.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
-# load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
-# load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'riyz96d4', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=0.5, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'bokn5d2w', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=1.5, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'uwyv1zdh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.0, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'dvslhdp3', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.5, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'mtlfdgvh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=3.0, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'jnxvjtur', 'epoch': -1}  # d2048 hl5, p_mean=-2.5, forecasting
-# load_chkpt: {'run_id': 'ulw4wid5', 'epoch': -1}  # d2048 hl5, p_mean=-2.0, forecasting
-# load_chkpt: {'run_id': 'lxpbthna', 'epoch': -1}  # d2048 hl5, p_mean=-1.5, forecasting
-# load_chkpt: {'run_id': 'n1e97r8z', 'epoch': -1}  # d2048 hl5, p_mean=-1.2, forecasting
-# load_chkpt: {'run_id': 'halvwj21', 'epoch': -1}  # d2048 hl5, p_mean=-0.5, forecasting
-# load_chkpt: {'run_id': 'dlsp3k31', 'epoch': -1}  # d2048 hl5, p_mean=0.5, forecasting
-# load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
-# load_chkpt: {'run_id': 'i3y5fhda', 'epoch': -1}  # d2048 hl5, p_mean=2.5, forecasting
-# load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
-# load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z, 64 epochs
-# load_chkpt: {'run_id': 'btnf4goa', 'epoch': -1}  # d2048 hl5 pre-training with z, 128 epochs
-# load_chkpt: {'run_id': 'yk85n9s7', 'epoch': -1}  # ERA5+obs 6h
-load_chkpt: {'run_id': 'srdrwfy6', 'epoch': -1}  # ERA5+obs SSL pretraining
+load_chkpt: {'run_id': 'drk4luv0', 'epoch': -1}  # ERA5+obs SSL diffusion forecast model
 
 # Optionally overlay only the physical decoder (embed_target_coords / target_token_engines /
 # pred_heads) from a separate run, on top of the primary checkpoint. Example:
@@ -246,7 +202,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
-  num_mini_epochs: 128
+  num_mini_epochs: 16
   samples_per_mini_epoch: 4096
   shuffle: True
  
@@ -280,21 +236,21 @@ training_config:
       eps : 2e-08
 
   losses : {
-    # "physical": {
-    #     type: LossPhysical,
-    #     weight: 0.0,
-    #     loss_fcts: {
-    #       "mse": {},
-    #     },  
-    #     target_and_aux_calc: "Physical",
-    # },
-    "latent_diff": {
-        type: LossLatentDiffusion,
+    "physical": {
+        type: LossPhysical,
         weight: 1.0,
-        target_and_aux_calc: DiffusionLatentTargetEncoder,
-        loss_fcts: { "mse": { }, },
-        }
-  }
+        loss_fcts: {
+          "mse": {},
+        },  
+        target_and_aux_calc: "Physical",
+    },
+  #   "latent_diff": {
+  #       type: LossLatentDiffusion,
+  #       weight: 1.0,
+  #       target_and_aux_calc: DiffusionLatentTargetEncoder,
+  #       loss_fcts: { "mse": { }, },
+  #       }
+  # }
   
   model_input: {
     "forecasting" : {
