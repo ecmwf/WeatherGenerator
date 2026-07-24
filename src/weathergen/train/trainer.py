@@ -47,6 +47,7 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
+from weathergen.utils.latent_rmse import LatentRolloutRMSE
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
@@ -625,9 +626,20 @@ class Trainer(TrainerBase):
         all_losses: dict[str, list] = {}
         all_stddev: dict[str, list] = {}
 
+        # Latent rollout RMSE diagnostic: the model accumulates per-lead-time latent RMSE in
+        # forward() while self.latent_rmse is set. Accumulate only over the first (random
+        # noise-level) pass so the curve corresponds to a single sampling setting.
+        base_model = getattr(self.model, "module", self.model)
+        latent_rmse = (
+            LatentRolloutRMSE(self.cf, mode_cfg, self.device)
+            if mode_cfg.get("latent_rollout_rmse", False)
+            else None
+        )
+
         for noise_idx, noise_level in enumerate(noise_levels):
             if is_diffusion:
                 self._set_validation_noise_level(noise_level)
+            base_model.latent_rmse = latent_rmse if noise_idx == 0 else None
 
             if noise_level is None:
                 loss_suffix = ""
@@ -752,6 +764,11 @@ class Trainer(TrainerBase):
         # reset fixed noise level
         if is_diffusion:
             self._set_validation_noise_level(None)
+
+        # latent rollout RMSE: reduce across ranks and plot like the evaluate package's curves
+        base_model.latent_rmse = None
+        if latent_rmse is not None:
+            latent_rmse.plot(config.get_path_run(self.cf))
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()

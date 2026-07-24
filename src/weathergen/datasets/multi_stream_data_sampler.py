@@ -113,6 +113,39 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
         self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
 
+        # Latent rollout RMSE diagnostic (inference only). Instead of a bespoke data path,
+        # reuse the source-side num_steps_input machinery to load the truth latents at the
+        # forecast times: encode K+1 source steps and shift the base index forward by K-1
+        # (K = forecast.num_steps), so the backward source window covers [t-1, t, ..., t+(K-1)].
+        # Model.forward then re-indexes conditioning (t-1) and pairs each rollout step with its
+        # truth latent. No target-encoder or forecast-time reads needed.
+        self.latent_rollout_rmse = mode_cfg.get("latent_rollout_rmse", False)
+        self.latent_rollout_base_shift = 0
+        if self.latent_rollout_rmse:
+            k_steps = int(self.list_num_forecast_steps.max())
+            assert k_steps >= 1, "latent_rollout_rmse requires forecast.num_steps >= 1"
+            assert self.output_offset == 0, (
+                f"latent_rollout_rmse requires forecast.offset == 0, got {self.output_offset}"
+            )
+            # The base index is shifted forward by k_steps-1 so the backward source window
+            # covers the forecast times. Only the latent conditioning is re-indexed in
+            # Model.forward, not the physical target/write path, so write_output would emit a
+            # time-misaligned zarr. Forbid it rather than write silently corrupt output.
+            assert mode_cfg.get("output", {}).get("num_samples", 0) == 0, (
+                "latent_rollout_rmse shifts the sample base index, so output.num_samples>0 "
+                "would write a time-misaligned physical zarr. Set output.num_samples=0."
+            )
+            self.latent_rollout_base_shift = k_steps - 1
+            if OmegaConf.is_config(mode_cfg):
+                OmegaConf.set_struct(mode_cfg, False)
+            for _, sc in mode_cfg.get("model_input", {}).items():
+                sc["num_steps_input"] = k_steps + 1
+            if is_root():
+                logger.info(
+                    f"latent_rollout_rmse: model_input num_steps_input -> {k_steps + 1}, "
+                    f"base index shift -> +{k_steps - 1} (K={k_steps})"
+                )
+
         # initialise fsm, but can change for future mini_epochs
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.shuffle = mode_cfg.shuffle
@@ -788,6 +821,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             while True:
                 idx: TIndex = perms[idx_raw % perms.shape[0]]
                 idx_raw += 1
+
+                # Latent rollout diagnostic: anchor the sample at t+(K-1) so the backward
+                # source window loads the forecast-time truth latents (see __init__).
+                idx = idx + self.latent_rollout_base_shift
 
                 batch = self._get_batch(idx, num_forecast_steps)
 
