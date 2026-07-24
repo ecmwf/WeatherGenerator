@@ -29,13 +29,23 @@ from weathergen.model.parametrised_prob_dist import LatentInterpolator
 class EncoderModule(torch.nn.Module):
     name: "EncoderModule"
 
-    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size) -> None:
+    def __init__(
+        self,
+        cf: Config,
+        sources_size,
+        targets_num_channels,
+        targets_coords_size,
+        stream_idxs: list[int] | None = None,
+    ) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
-        :param sources_size: List of source sizes for each stream.
+        :param sources_size: List of source sizes for each stream (aligned with cf.streams).
         :param stream_names: Ordered list of stream identifiers aligned with cf.streams.
+        :param stream_idxs: Optional subset of stream indices this encoder processes; the
+            batch passed to forward must then be restricted to the same subset
+            (ModelBatch.get_stream_subset). Used by StreamGroupEncoder.
         """
         super(EncoderModule, self).__init__()
         self.cf = cf
@@ -57,9 +67,12 @@ class EncoderModule(torch.nn.Module):
 
         # embedding engine
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        if stream_idxs is None:
+            stream_idxs = list(range(len(cf.streams)))
+        self.stream_idxs = stream_idxs
+        self.stream_names = [str(cf.streams[i]["name"]) for i in stream_idxs]
         # separate embedding networks for differnt observation types
-        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size, stream_idxs=stream_idxs)
 
         assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
@@ -376,3 +389,88 @@ class EncoderModule(torch.nn.Module):
         ).flatten(1, 2)
 
         return tokens_global, posteriors
+
+
+def get_stream_encoder_groups(cf: Config) -> dict[str, list[int]]:
+    """
+    Group stream indices by their per-stream `encoder:` tag (default "era5").
+
+    A single group means the standard shared encoder; multiple groups (e.g. "era5"
+    and "obs" in the dual-encoder configs) mean one EncoderModule per group.
+    """
+    groups: dict[str, list[int]] = {}
+    for i, stream_cfg in enumerate(cf.streams):
+        groups.setdefault(str(stream_cfg.get("encoder", "era5")), []).append(i)
+    return groups
+
+
+def iter_encoder_modules(encoder: torch.nn.Module) -> list[EncoderModule]:
+    """
+    Iterate the EncoderModule instances behind a model's encoder attribute:
+    the module itself for the shared encoder, the sub-encoders for StreamGroupEncoder.
+    """
+    if isinstance(encoder, StreamGroupEncoder):
+        return list(encoder.encoders.values())
+    return [encoder]
+
+
+class StreamGroupEncoder(torch.nn.Module):
+    """
+    Dual/multi-encoder: routes stream groups (per-stream `encoder:` tag in the stream
+    configs) to separate EncoderModule instances and combines their global latents.
+
+    Each group encoder embeds and assimilates only its own streams (e.g. ERA5 through
+    the physical encoder A, observations through encoder B); the resulting global
+    token grids are aligned per healpix cell and summed, so the downstream predictor,
+    JEPA heads, and decoders see the same latent layout as with the shared encoder.
+    """
+
+    name: "StreamGroupEncoder"
+
+    def __init__(
+        self,
+        cf: Config,
+        sources_size,
+        targets_num_channels,
+        targets_coords_size,
+        groups: dict[str, list[int]] | None = None,
+    ) -> None:
+        super(StreamGroupEncoder, self).__init__()
+        self.cf = cf
+        if groups is None:
+            groups = get_stream_encoder_groups(cf)
+        self.groups = groups
+        self.encoders = torch.nn.ModuleDict(
+            {
+                group_name: EncoderModule(
+                    cf,
+                    sources_size,
+                    targets_num_channels,
+                    targets_coords_size,
+                    stream_idxs=stream_idxs,
+                )
+                for group_name, stream_idxs in groups.items()
+            }
+        )
+
+    def forward(self, model_params, batch):
+        """
+        Run each group encoder on its stream subset and sum the global latents
+        (and deep-SSL intermediates) across groups.
+        """
+        tokens_global = None
+        posteriors: list[torch.Tensor] = []
+        intermediates: list[torch.Tensor] | None = None
+
+        for group_name, encoder in self.encoders.items():
+            batch_group = batch.get_stream_subset(self.groups[group_name])
+            tokens_g, posteriors_g, intermediates_g = encoder(model_params, batch_group)
+
+            tokens_global = tokens_g if tokens_global is None else tokens_global + tokens_g
+            posteriors += list(posteriors_g)
+            if intermediates is None:
+                intermediates = intermediates_g
+            else:
+                intermediates = [a + b for a, b in zip(intermediates, intermediates_g, strict=True)]
+
+        return tokens_global, posteriors, intermediates

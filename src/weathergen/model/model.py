@@ -23,7 +23,12 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.encoder import EncoderModule
+from weathergen.model.encoder import (
+    EncoderModule,
+    StreamGroupEncoder,
+    get_stream_encoder_groups,
+    iter_encoder_modules,
+)
 from weathergen.model.engines import (
     BilinearDecoder,
     DeepSSLFusion,
@@ -332,7 +337,7 @@ class Model(torch.nn.Module):
         self.targets_coords_size = targets_coords_size
 
         self.embed_target_coords = None
-        self.encoder: EncoderModule | None = None
+        self.encoder: EncoderModule | StreamGroupEncoder | None = None
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
@@ -385,9 +390,20 @@ class Model(torch.nn.Module):
         """Create each individual module of the model"""
         cf = self.cf
 
-        self.encoder = EncoderModule(
-            cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
-        )
+        # dual/multi-encoder: separate encoder per per-stream `encoder:` tag group
+        encoder_groups = get_stream_encoder_groups(cf)
+        if len(encoder_groups) > 1:
+            self.encoder = StreamGroupEncoder(
+                cf,
+                self.sources_size,
+                self.targets_num_channels,
+                self.targets_coords_size,
+                groups=encoder_groups,
+            )
+        else:
+            self.encoder = EncoderModule(
+                cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
+            )
 
         mode_cfg = cf.training_config
         fe_num_blocks = cf.get("fe_num_blocks", 0)
@@ -658,23 +674,34 @@ class Model(torch.nn.Module):
         """Print number of parameters for entire model and each module used to build the model"""
 
         cf = self.cf
+        # covers both the shared encoder and per-group encoders (StreamGroupEncoder)
+        encoders = iter_encoder_modules(self.encoder)
+        embeds_by_stream = {
+            name: enc.embed_engine.embeds[name] for enc in encoders for name in enc.stream_names
+        }
         num_params_embed = [
-            get_num_parameters(self.encoder.embed_engine.embeds[name]) for name in self.stream_names
+            get_num_parameters(embeds_by_stream[name]) for name in self.stream_names
         ]
         num_params_total = get_num_parameters(self)
-        num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)
-        num_params_ae_global = get_num_parameters(self.encoder.ae_global_engine.ae_global_blocks)
-
-        num_params_q_cells = (
-            np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
+        num_params_ae_local = sum(
+            get_num_parameters(enc.ae_local_engine.ae_local_blocks) for enc in encoders
         )
-        num_params_q_aux = (
-            np.prod(self.encoder.q_aux.shape) if self.encoder.q_aux.requires_grad else 0
+        num_params_ae_global = sum(
+            get_num_parameters(enc.ae_global_engine.ae_global_blocks) for enc in encoders
         )
-        num_params_ae_adapter = get_num_parameters(self.encoder.ae_local_global_engine)
 
-        num_params_ae_aggregation = get_num_parameters(
-            self.encoder.ae_aggregation_engine.ae_aggregation_blocks
+        num_params_q_cells = sum(
+            np.prod(enc.q_cells.shape) if enc.q_cells.requires_grad else 0 for enc in encoders
+        )
+        num_params_q_aux = sum(
+            np.prod(enc.q_aux.shape) if enc.q_aux.requires_grad else 0 for enc in encoders
+        )
+        num_params_ae_adapter = sum(
+            get_num_parameters(enc.ae_local_global_engine) for enc in encoders
+        )
+
+        num_params_ae_aggregation = sum(
+            get_num_parameters(enc.ae_aggregation_engine.ae_aggregation_blocks) for enc in encoders
         )
 
         num_params_latent_heads = get_num_parameters(self.latent_heads)

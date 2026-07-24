@@ -36,21 +36,27 @@ from weathergen.utils.utils import get_dtype
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
-    def __init__(self, cf: Config, sources_size) -> None:
+    def __init__(self, cf: Config, sources_size, stream_idxs: list[int] | None = None) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
-        :param sources_size: List of source sizes for each stream.
+        :param sources_size: List of source sizes for each stream (aligned with cf.streams).
+        :param stream_idxs: Optional subset of stream indices this engine embeds
+            (used by StreamGroupEncoder to route stream groups to separate encoders).
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
-        self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        if stream_idxs is None:
+            stream_idxs = list(range(len(cf.streams)))
+        self.streams = [cf.streams[i] for i in stream_idxs]
+        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in self.streams]
+        # aligned with self.streams (subset), not cf.streams
+        self.sources_size = [sources_size[i] for i in stream_idxs]  # KCT:iss130, what is this?
 
-        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
+        for i, (si, stream_name) in enumerate(zip(self.streams, self.stream_names, strict=True)):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue

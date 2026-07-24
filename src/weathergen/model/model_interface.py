@@ -27,6 +27,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
+from weathergen.model.encoder import iter_encoder_modules
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
@@ -74,9 +75,11 @@ def init_model_and_shard(
 
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
-        model.encoder.q_cells.requires_grad = False
+        for enc in iter_encoder_modules(model.encoder):
+            enc.q_cells.requires_grad = False
     if "q_aux" in cf.freeze_modules:
-        model.encoder.q_aux.requires_grad = False
+        for enc in iter_encoder_modules(model.encoder):
+            enc.q_aux.requires_grad = False
 
     if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
@@ -109,17 +112,18 @@ def init_model_and_shard(
             MultiSelfAttentionHeadVarlen,
         )
 
-        for module in model.encoder.ae_local_engine.ae_local_blocks.modules():
-            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
-                fully_shard(module, **fsdp_kwargs)
+        for enc in iter_encoder_modules(model.encoder):
+            for module in enc.ae_local_engine.ae_local_blocks.modules():
+                if isinstance(module, modules_to_shard) and _has_trainable_params(module):
+                    fully_shard(module, **fsdp_kwargs)
 
-        for module in model.encoder.ae_local_global_engine.ae_adapter.modules():
-            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
-                fully_shard(module, **fsdp_kwargs)
+            for module in enc.ae_local_global_engine.ae_adapter.modules():
+                if isinstance(module, modules_to_shard) and _has_trainable_params(module):
+                    fully_shard(module, **fsdp_kwargs)
 
-        for module in model.encoder.ae_global_engine.ae_global_blocks.modules():
-            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
-                fully_shard(module, **fsdp_kwargs)
+            for module in enc.ae_global_engine.ae_global_blocks.modules():
+                if isinstance(module, modules_to_shard) and _has_trainable_params(module):
+                    fully_shard(module, **fsdp_kwargs)
 
         for module in model.forecast_engine.fe_blocks.modules():
             if isinstance(module, modules_to_shard) and _has_trainable_params(module):
@@ -167,9 +171,10 @@ def init_model_and_shard(
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.encoder.embed_engine.embeds.values():
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+        for enc in iter_encoder_modules(model.encoder):
+            for embed in enc.embed_engine.embeds.values():
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is not None:

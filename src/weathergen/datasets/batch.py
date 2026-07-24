@@ -183,6 +183,17 @@ class BatchSamples:
             bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
+    def get_stream_subset(self, stream_idxs: list[int]):
+        """
+        View of the batch restricted to a subset of streams (by index into the stream axis
+        of tokens_lens). Samples are shared with the original batch; consumers must only
+        access the streams corresponding to stream_idxs.
+        """
+        bs = copy.copy(self)
+        torch_idxs = torch.tensor(stream_idxs, dtype=torch.long, device=bs.tokens_lens.device)
+        bs.tokens_lens = torch.index_select(bs.tokens_lens, 2, torch_idxs)
+        return bs
+
     def get_num_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
