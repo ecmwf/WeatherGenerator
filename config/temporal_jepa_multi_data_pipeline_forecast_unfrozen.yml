@@ -1,0 +1,31 @@
+# Forecast finetuning from esnpogmb (multipretrain), same structure as the
+# vrk48hg3 (finetuneft) / frrrtzsq (finetuneftft) resubmit pipeline
+# (notes/job-monitor/incidents/2026-07-21_jgdezaj0_997957/resubmit/pipeline_finetuneft_finetuneftft_resubmit.yml),
+# but with the encoder UNFROZEN end-to-end instead of frozen.
+#
+# Stage 1 uses config_temporal_jepa_multi_data_ft_forecast_all_years_streamsfix_unfreeze.yml,
+# a copy of the streamsfix config vrk48hg3 used with freeze_modules cleared to ""
+# (empty string, not null -> matches no modules -> nothing frozen). Stage 2 reuses
+# config_temporal_jepa_multi_data_ft_forecast.yml UNCHANGED: it only overrides a
+# few keys (streams_directory, dims, data_loading, dates) and does not touch
+# freeze_modules, so under train_continue it inherits stage 1's unfrozen setting
+# from the checkpoint's own saved config - no separate unfreeze copy needed there.
+
+parallelize: false
+
+stages:
+  - name: finetuneft
+    stage: train
+    from_run_id: esnpogmb
+    config_files:
+      - /users/sxhonneu/projects/sophie-dev/WeatherGenerator/config/config_temporal_jepa_multi_data_ft_forecast_all_years_streamsfix_unfreeze.yml
+    chain_jobs: 4
+    nodes: 2
+
+  - name: finetuneftft
+    stage: train
+    from_run_id: STAGE.finetuneft
+    config_files:
+      - /users/sxhonneu/projects/sophie-dev/WeatherGenerator/config/config_temporal_jepa_multi_data_ft_forecast_streamsfix.yml
+    chain_jobs: 3
+    nodes: 2
