@@ -16,6 +16,7 @@ from omegaconf import DictConfig
 from torch import Tensor
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
+from weathergen.model.diffusion import compute_sigma
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import Stage
 
@@ -41,12 +42,6 @@ class LossLatentDiffusion(LossModuleBase):
         self.device = device
         self.name = "LossLatentDiff"
 
-        self.sigma_data = self.cf.sigma_data
-        self.rho = self.cf.rho
-        self.p_mean = self.cf.p_mean
-        self.p_std = self.cf.p_std
-        self.noise_distribution = self.cf.get("noise_distribution", "log_normal")
-
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [
@@ -59,11 +54,14 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.random_target = None
 
-    def _get_noise_weight(self, noise_level_rn):
-        if self.noise_distribution == "log_uniform":
-            sigma = noise_level_rn.exp()
-        else:
-            sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
+    def _get_noise_weight(self, eta, training=True):
+        sigma = compute_sigma(
+            eta,
+            noise_distribution=self.noise_distribution,
+            p_std=self.p_std,
+            p_mean=self.p_mean,
+            training=training,
+        )
         return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
 
     def _get_fstep_weights(self, forecast_steps):
@@ -78,15 +76,14 @@ class LossLatentDiffusion(LossModuleBase):
         loss_fct,
         target: torch.Tensor,
         pred: torch.Tensor,
-        noise_weight: torch.Tensor = 1.0,
     ):
         """
-        Compute loss for given loss function
+        Compute raw (unweighted) loss for given loss function.
+
+        The diffusion noise weight λ(σ) is applied at combine time by DiffusionLossCalculator,
+        not here, so this module stays free of σ logic.
         """
-
         loss, loss_chs = loss_fct(target=target, pred=pred)
-        loss = noise_weight * loss
-
         return loss
 
     def compute_loss(self, preds: dict, targets: dict, **kwargs) -> LossValues:
@@ -110,14 +107,8 @@ class LossLatentDiffusion(LossModuleBase):
                 losses_all={f"{self.name}.{n}": nan for _, _, n in self.loss_fcts},
                 stddev_all={"latent": nan},
             )
-
-        eta = torch.tensor(
-            [targets.aux_outputs["noise_level_rn"]], device=self.device, dtype=torch.float32
-        )
         fsteps = len(target_tokens_all)
 
-        # During validation, use unweighted loss (no noise-level scaling)
-        noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta)
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -135,7 +126,6 @@ class LossLatentDiffusion(LossModuleBase):
                     loss_fct,
                     target=target_tokens,
                     pred=pred_tokens,
-                    noise_weight=noise_weight,
                 )
 
                 losses_all[f"{self.name}.{loss_fct_name}"] += loss_lfct  # TODO: break into fsteps

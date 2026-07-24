@@ -32,6 +32,7 @@ from weathergen.model.model_interface import (
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
+from weathergen.train.loss_calculator_diffusion import make_loss_calculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
@@ -272,7 +273,9 @@ class Trainer(TrainerBase):
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.test_cfg)
 
-        self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
+        self.loss_calculator_val = make_loss_calculator(
+            cf, self.test_cfg, VAL, device=self.devices[0]
+        )
 
         if is_root():
             config.save(self.cf, mini_epoch=0)
@@ -396,9 +399,9 @@ class Trainer(TrainerBase):
                 logger.info(str)
 
         # Instantiate loss calculator modules to compute losses
-        self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
+        self.loss_calculator = make_loss_calculator(cf, self.training_cfg, TRAIN, device=self.device)
         val_cfg = self.validation_cfg
-        self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
+        self.loss_calculator_val = make_loss_calculator(cf, val_cfg, VAL, device=self.device)
 
         # recover mini_epoch when continuing run
         if self.world_size_original is None:
