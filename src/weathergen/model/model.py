@@ -55,10 +55,10 @@ def _single_step_source_view(batch, step: int):
 
     The embedding engine concatenates the source tokens of *all* input steps into one tensor
     before embedding, so encoding a sample that carries many input steps (as the latent
-    rollout RMSE diagnostic does, num_steps_input = K+1) costs K+1x the memory and OOMs.
-    Encoding step by step through this view keeps the peak at a single step. Only
-    ``source_tokens_cells`` / ``source_tokens_lens`` and ``tokens_lens`` are read per step;
-    nothing is deep-copied, so the views alias the original tensors.
+    rollout RMSE truth samples do, K steps) costs Kx the memory and OOMs. Encoding step by
+    step through this view keeps peak memory at a single step. Only ``source_tokens_cells`` /
+    ``source_tokens_lens`` and ``tokens_lens`` are read per step; nothing is deep-copied, so
+    the views alias the original tensors.
     """
 
     view = copy.copy(batch)
@@ -379,10 +379,10 @@ class Model(torch.nn.Module):
         # One-shot flag to avoid log spam when warning about an unsupported
         # diffusion-inference + multi-step-rollout combination.
         self._warned_diffusion_multi_step = False
-        # Set by the trainer (a LatentRolloutRMSE) when the latent rollout RMSE diagnostic is
-        # enabled; None disables it. When set, forward() re-indexes the diffusion conditioning
-        # and accumulates per-lead-time latent RMSE. See forward().
-        self.latent_rmse = None
+        # Set by the trainer for the latent rollout RMSE diagnostic: when True, forward()
+        # records the rolled-out latent per step under the "latent_rollout_pred" key. Purely
+        # additive — the standard path is unaffected.
+        self.record_latent_rollout = False
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -757,55 +757,31 @@ class Model(torch.nn.Module):
 
         output = ModelOutput(batch.get_output_len())
 
-        if self.latent_rmse is not None:
-            # Latent rollout RMSE diagnostic: the source sample carries K+1 input steps, which
-            # the embed engine would otherwise concatenate into a single OOM-inducing forward.
-            # Encode each step separately and stack to bound peak memory (see
-            # _single_step_source_view). Result is already [B, T, ...].
-            step_tokens = []
-            posteriors = None
-            for s in range(batch.get_num_steps()):
-                tok_s, posteriors = self.encoder(model_params, _single_step_source_view(batch, s))
-                step_tokens.append(tok_s)
-            tokens = torch.stack(step_tokens, dim=1)
-        else:
-            tokens, posteriors = self.encoder(model_params, batch)
-            # recover batch dimension and separate input_steps -> [B, T, ...]
-            tokens = tokens.reshape((len(batch), batch.get_num_steps(), *tokens.shape[1:]))
+        tokens, posteriors = self.encoder(model_params, batch)
         output.add_latent_prediction(0, "posteriors", posteriors)
 
-        shape = tokens.shape
-
-        # Truth latents per rollout step, populated only for the latent-rollout RMSE diagnostic.
-        truth_latents = None
+        # recover batch dimension and separate input_steps
+        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+        # Reshape tokens to [B, T, ...]
+        tokens = tokens.reshape(shape)
 
         if self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
             tokens = tokens.reshape(shape)
             # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
-            if self.latent_rmse is not None:
-                # Latent rollout RMSE diagnostic (inference). The source window carries K+1
-                # encoded steps [t-1, t, ..., t+(K-1)]; most-recent first this is
-                # tokens[:, 0] = t+(K-1), ..., tokens[:, K-1] = t, tokens[:, K] = t-1.
-                # Condition on t-1 and pair rollout step j (valid time t+j) with tokens[:, K-1-j].
-                k_steps = tokens.shape[1] - 1
-                conditioning_tokens = tokens[:, k_steps]  # t-1
-                truth_latents = [tokens[:, k_steps - 1 - j] for j in range(k_steps)]  # j -> t+j
-                tokens = tokens[:, k_steps - 1]  # t (reference; the ODE sampler starts from noise)
-            elif self.cf.stage == "inference":
+            if self.cf.stage == "inference":
                 print("Using most recent steps as conditioning tokens for inference.")
                 # conditioning_tokens = tokens[:, :-1].sum(axis=1)
                 conditioning_tokens = tokens[:, 1:].sum(axis=1)
-                tokens = tokens[:, 0]
             else:
                 # Conditioning: all older context steps [t-1, ..., t-(T-1)]; denoising target: t (newest)
                 conditioning_tokens = tokens[:, 1:].sum(axis=1)
                 conditioning_tokens = conditioning_tokens + torch.randn_like(conditioning_tokens) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
                 if np.random.rand() < self.cf.get("fe_diffusion_classifier_free_guidance_prob", 0.0):  # occasionally dropout conditioning for classifier free guidance
                     conditioning_tokens = torch.zeros_like(conditioning_tokens)
-                tokens = tokens[:, 0]
             # X_t (tokens[:, 0], most recent) is the diffusion denoising target; older steps are conditioning.
             batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = conditioning_tokens
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
+            tokens = tokens[:, 0]
         else:
             tokens = tokens.sum(axis=1)
 
@@ -813,7 +789,7 @@ class Model(torch.nn.Module):
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
 
         # roll-out in latent space, iterate and generate output over requested output steps
-        for j, step in enumerate(batch.get_output_idxs()):
+        for step in batch.get_output_idxs():
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
@@ -887,11 +863,15 @@ class Model(torch.nn.Module):
                     output.add_physical_prediction(
                         step, sname, (torch.cat(list(pred_tuple), dim=0),)
                     )
-                # Latent rollout RMSE diagnostic: accumulate RMSE of the rolled-out latent
-                # against the encoded truth latent at this lead time. member_final_tokens is
-                # (N_members, H, D); the truth is (1, H, D) and broadcasts over members.
-                if truth_latents is not None and j < len(truth_latents):
-                    self.latent_rmse.add(j, member_final_tokens, truth_latents[j])
+                # Latent rollout RMSE diagnostic: record the rolled-out latent under a
+                # dedicated key (never "latent_state") so the latent loss is unaffected. The
+                # trainer pairs this with the encoded truth latent. Off by default.
+                if self.record_latent_rollout:
+                    output.add_latent_prediction(
+                        step,
+                        "latent_rollout_pred",
+                        self.tokens_to_latent_state(None, member_final_tokens),
+                    )
                 # Store per-member conditioning for the next rollout step.
                 # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
                 # calls expand(N, ...) which is a no-op when the dim already matches.
@@ -908,6 +888,20 @@ class Model(torch.nn.Module):
             output = self.predict_latent(model_params, step, tokens, batch, output)
 
         return output
+
+    @torch.no_grad()
+    def encode_source_chunked(self, model_params: ModelParams, source_samples) -> torch.Tensor:
+        """
+        Encode a multi-input-step source ``BatchSamples`` one step at a time and stack the
+        latents to ``[B, T, H, D]``. Used by the latent rollout RMSE diagnostic to encode the
+        truth latents at the forecast times without the K-step concatenation OOM (see
+        _single_step_source_view). Read-only; does not touch model state.
+        """
+        step_tokens = []
+        for s in range(source_samples.get_num_steps()):
+            tok_s, _ = self.encoder(model_params, _single_step_source_view(source_samples, s))
+            step_tokens.append(tok_s)
+        return torch.stack(step_tokens, dim=1)
 
     @staticmethod
     def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:

@@ -626,9 +626,10 @@ class Trainer(TrainerBase):
         all_losses: dict[str, list] = {}
         all_stddev: dict[str, list] = {}
 
-        # Latent rollout RMSE diagnostic: the model accumulates per-lead-time latent RMSE in
-        # forward() while self.latent_rmse is set. Accumulate only over the first (random
-        # noise-level) pass so the curve corresponds to a single sampling setting.
+        # Latent rollout RMSE diagnostic (isolated side channel): the model records rolled-out
+        # latents under "latent_rollout_pred" while record_latent_rollout is set; the truth
+        # latents are encoded here from the isolated batch.latent_rmse_source. Accumulate only
+        # over the first (random noise-level) pass. Standard preds/losses/zarr are untouched.
         base_model = getattr(self.model, "module", self.model)
         latent_rmse = (
             LatentRolloutRMSE(self.cf, mode_cfg, self.device)
@@ -639,7 +640,7 @@ class Trainer(TrainerBase):
         for noise_idx, noise_level in enumerate(noise_levels):
             if is_diffusion:
                 self._set_validation_noise_level(noise_level)
-            base_model.latent_rmse = latent_rmse if noise_idx == 0 else None
+            base_model.record_latent_rollout = latent_rmse is not None and noise_idx == 0
 
             if noise_level is None:
                 loss_suffix = ""
@@ -711,6 +712,31 @@ class Trainer(TrainerBase):
                             metadata=extract_batch_metadata(batch),
                         )
 
+                        # Latent rollout RMSE: encode the isolated truth latents and pair them
+                        # with the recorded predictions by lead step (both valid at t+j). Encode
+                        # under the same autocast as the forward so truth and pred share dtype.
+                        if (
+                            latent_rmse is not None
+                            and noise_idx == 0
+                            and batch.latent_rmse_source is not None
+                        ):
+                            with torch.autocast(
+                                device_type=f"cuda:{cf.local_rank}",
+                                dtype=self.mixed_precision_dtype,
+                                enabled=cf.with_mixed_precision,
+                            ):
+                                truth = base_model.encode_source_chunked(
+                                    self.model_params, batch.latent_rmse_source
+                                )  # [B, K, H, D]
+                            for j in range(truth.shape[1]):
+                                pl = (
+                                    preds.latent[j].get("latent_rollout_pred")
+                                    if j < len(preds.latent)
+                                    else None
+                                )
+                                if pl is not None:
+                                    latent_rmse.add(j, pl.z_pre_norm, truth[:, j])
+
                         # log output
                         if noise_idx == 0:
                             if bidx < num_samples_write:
@@ -766,7 +792,7 @@ class Trainer(TrainerBase):
             self._set_validation_noise_level(None)
 
         # latent rollout RMSE: reduce across ranks and plot like the evaluate package's curves
-        base_model.latent_rmse = None
+        base_model.record_latent_rollout = False
         if latent_rmse is not None:
             latent_rmse.plot(config.get_path_run(self.cf))
 
