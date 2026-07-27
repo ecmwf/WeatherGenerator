@@ -281,7 +281,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                streams_datasets[stream_info["name"]] += [ds]
+                streams_datasets[stream_info["name"]] = [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
