@@ -33,17 +33,14 @@ except Exception:
         "Thus, rank histogram calculations are not supported."
     )
 
-try:        
+try:
     from scores.probability import (
         crps_for_ensemble,
         interval_tw_crps_for_ensemble,
         tail_tw_crps_for_ensemble,
     )
 except Exception:
-    _logger.warning(
-        "Could not import scores. "
-        "Thus, CRPS calculations are not supported."
-    )
+    _logger.warning("Could not import scores. Thus, CRPS calculations are not supported.")
 
 
 # helper function to calculate skill score
@@ -1347,9 +1344,9 @@ class Scores:
         return ratio_spat_variability
 
     def calc_seeps(
-        self, 
-        p: xr.DataArray, 
-        gt: xr.DataArray, 
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
         c: xr.Dataset,
         minimum_dry_prob: float = 0.1,
         maximum_dry_prob: float = 0.85,

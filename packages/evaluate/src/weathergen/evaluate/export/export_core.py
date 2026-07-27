@@ -68,7 +68,7 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
             data_arr = data_arr[:, :, 0]
         else:
             data_dims.append("mem")
-            
+
     data_coords = {
         "ipoint": np.arange(npoints),
         "channel": channels,
