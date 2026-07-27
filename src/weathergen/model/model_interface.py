@@ -83,7 +83,8 @@ def init_model_and_shard(
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
     if "q_aux" in cf.freeze_modules:
-        model.encoder.q_aux.requires_grad = False
+        if model.encoder.q_aux is not None:
+            model.encoder.q_aux.requires_grad = False
 
     if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
