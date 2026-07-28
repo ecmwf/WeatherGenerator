@@ -12,6 +12,7 @@ import torch
 import torch.distributed as dist
 
 SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
+_ENCODER_SPATIAL_GROUPS: dict[int, tuple[dist.ProcessGroup, int]] = {}
 
 
 def is_root(pg: dist.ProcessGroup | None = None) -> bool:
@@ -57,6 +58,57 @@ def get_rank() -> int:
         return 0
 
     return dist.get_rank()
+
+
+def get_encoder_spatial_parallel_size(cf) -> int:
+    """Return and validate the configured encoder spatial-parallel size."""
+
+    size = int(cf.get("encoder_spatial_parallel_size", 1))
+    if size < 1:
+        raise ValueError("encoder_spatial_parallel_size must be at least 1")
+
+    world_size = get_world_size()
+    if size > world_size:
+        raise ValueError(
+            f"encoder_spatial_parallel_size ({size}) exceeds world_size ({world_size})"
+        )
+    if world_size % size:
+        raise ValueError(
+            f"world_size ({world_size}) must be divisible by encoder_spatial_parallel_size ({size})"
+        )
+    return size
+
+
+def get_encoder_spatial_parallel_group(cf) -> tuple[dist.ProcessGroup | None, int]:
+    """Create the consecutive-rank process groups used to shard HEALPix cells.
+
+    All ranks call ``new_group`` in the same order. The returned rank is local to
+    the spatial group. A size of one deliberately avoids creating a process group.
+    """
+
+    size = get_encoder_spatial_parallel_size(cf)
+    if size == 1:
+        return None, 0
+    if not _is_distributed_initialized():
+        raise RuntimeError("encoder spatial parallelism requires torch.distributed")
+
+    cached = _ENCODER_SPATIAL_GROUPS.get(size)
+    if cached is not None:
+        return cached
+
+    world_size = dist.get_world_size()
+    global_rank = dist.get_rank()
+    own_group = None
+    for first_rank in range(0, world_size, size):
+        ranks = list(range(first_rank, first_rank + size))
+        group = dist.new_group(ranks=ranks)
+        if global_rank in ranks:
+            own_group = group
+
+    assert own_group is not None
+    result = (own_group, global_rank % size)
+    _ENCODER_SPATIAL_GROUPS[size] = result
+    return result
 
 
 def ddp_average(data: torch.Tensor) -> torch.Tensor:

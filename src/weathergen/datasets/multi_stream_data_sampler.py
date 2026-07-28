@@ -34,7 +34,7 @@ from weathergen.datasets.utils import (
 )
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import get_encoder_spatial_parallel_size, is_root
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -100,8 +100,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mini_epoch = 0
         self.mask_value = 0.0
-        self.rank = cf.rank
-        self.world_size = cf.world_size
+        # Ranks in one encoder-spatial group must consume the same batch. Data
+        # parallelism therefore operates across groups, not across individual ranks.
+        spatial_parallel_size = get_encoder_spatial_parallel_size(cf)
+        self.rank = cf.rank // spatial_parallel_size
+        self.world_size = cf.world_size // spatial_parallel_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # initialise healpic
@@ -822,12 +825,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # happens for each mini_epoch, for train and validation, and independently for each DDP
             # worker. After the bit-wise copy, the rng seed needs to be made unique for
             # DDP workers, loader process, mini_epoch.
-            dist = torch.distributed
             self.data_loader_rng_seed *= (
-                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
-                * ((worker_info.id + 1) * 37)
-                * (self.mini_epoch + 13)
-                * 7
+                ((self.rank + 1) * 73) * ((worker_info.id + 1) * 37) * (self.mini_epoch + 13) * 7
             )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers

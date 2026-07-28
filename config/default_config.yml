@@ -66,6 +66,10 @@ num_register_tokens: 0
 
 healpix_level: 5
 
+# Split the encoder's HEALPix/location dimension across this many consecutive
+# distributed ranks through local assimilation.
+encoder_spatial_parallel_size: 4
+
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
