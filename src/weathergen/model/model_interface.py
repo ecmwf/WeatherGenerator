@@ -94,7 +94,7 @@ def init_model_and_shard(
             find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
-            static_graph=cf.get("ddp_static_graph", True),
+            static_graph=cf.get("ddp_static_graph", False),
         )
 
     elif with_ddp and with_fsdp:
