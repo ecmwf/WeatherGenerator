@@ -83,7 +83,8 @@ def init_model_and_shard(
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
     if "q_aux" in cf.freeze_modules:
-        model.encoder.q_aux.requires_grad = False
+        if model.encoder.q_aux is not None:
+            model.encoder.q_aux.requires_grad = False
 
     if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
@@ -93,7 +94,7 @@ def init_model_and_shard(
             find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
-            static_graph=cf.get("ddp_static_graph", True),
+            static_graph=cf.get("ddp_static_graph", False),
         )
 
     elif with_ddp and with_fsdp:
