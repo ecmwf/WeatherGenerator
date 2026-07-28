@@ -96,6 +96,13 @@ variables:
     wg_unit: m
     std_unit: m
     level_type: sfc
+  cp:
+    var: cp
+    long: convective_precipitation
+    std: convective_precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc 
   tp_imerg_0:
     var: tp_imerg_0
     long: imerg_total_precipitation
