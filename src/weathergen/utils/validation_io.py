@@ -224,8 +224,8 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
             # Calculate global sample index
             global_sample_idx = sample_start + sample_idx_in_batch
 
-            # Create group path: sample/latent/forecast_step
-            group_path = f"{global_sample_idx}/{io.LATENT_STREAM}/{t_idx}"
+            # Reserve latent step 0 for the initial encoded state.
+            group_path = f"{global_sample_idx}/{io.LATENT_STREAM}/{t_idx + 1}"
 
             npoints = _infer_latent_points_for_metadata(latents_in_sample)
             (
