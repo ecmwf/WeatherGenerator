@@ -33,17 +33,14 @@ except Exception:
         "Thus, rank histogram calculations are not supported."
     )
 
-try:        
+try:
     from scores.probability import (
         crps_for_ensemble,
         interval_tw_crps_for_ensemble,
         tail_tw_crps_for_ensemble,
     )
 except Exception:
-    _logger.warning(
-        "Could not import scores. "
-        "Thus, CRPS calculations are not supported."
-    )
+    _logger.warning("Could not import scores. Thus, CRPS calculations are not supported.")
 
 
 # helper function to calculate skill score
@@ -1347,14 +1344,38 @@ class Scores:
         return ratio_spat_variability
 
     def calc_seeps(
-        self, 
-        p: xr.DataArray, 
-        gt: xr.DataArray, 
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
         c: xr.Dataset,
         minimum_dry_prob: float = 0.1,
         maximum_dry_prob: float = 0.85,
     ) -> xr.DataArray:
-        return scores.categorical.seeps(
+        """
+        Calculate SEEPS skill (Rodwell et al. 2010) of precipitation forecast vs. reference.
+
+        ``scores.categorical.seeps`` returns the negatively-oriented SEEPS *error*
+        (0 = perfect). This method returns ``1 - SEEPS_error`` instead, the
+        positively-oriented convention used for ECMWF/AIFS reporting and consistent
+        with ``lower_is_better`` treating ``seeps`` as higher-is-better.
+
+        Parameters
+        ----------
+        p, gt: xr.DataArray
+            Forecast / ground truth precipitation (metres; converted to mm internally).
+        c: xr.Dataset
+            Climatology with a ``statistic`` dim providing ``prob_dry`` and
+            ``light_heavy_threshold``.
+        minimum_dry_prob, maximum_dry_prob: float
+            Bounds on climatological dry probability outside which points are masked.
+
+        Returns
+        -------
+        xr.DataArray
+            ``1 - SEEPS_error`` (higher is better): 1 = perfect, ~0 = no-skill,
+            negative = worse than reference. Masked climatological extremes are NaN.
+        """
+        seeps_error = scores.categorical.seeps(
             fcst=p * 1000,  # converted to mm
             obs=gt * 1000,
             prob_dry=c.sel(statistic="prob_dry"),
@@ -1365,6 +1386,8 @@ class Scores:
             upper_masked_value=maximum_dry_prob,
             reduce_dims=self._agg_dims,
         )
+        # Positively-oriented SEEPS (1 - error); NaNs propagate unchanged.
+        return 1.0 - seeps_error
 
     def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """

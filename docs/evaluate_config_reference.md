@@ -610,7 +610,7 @@ evaluation:
 | `rpss` | Ranked Probability Skill Score |
 | `fact` | Forecast Activity (standard deviation of forecast anomaly) |
 | `tact` | Target Activity (standard deviation of target anomaly) |
-| `seeps` | Stable Equitable Error in Probability Space ([Rodwell et al., 2011](https://journals.ametsoc.org/view/journals/mwre/140/8/mwr-d-11-00301.1.pdf)). |
+| `seeps` | Stable Equitable Error in Probability Space ([Rodwell et al., 2011](https://journals.ametsoc.org/view/journals/mwre/140/8/mwr-d-11-00301.1.pdf)). Reported as the positively-oriented skill `1 − SEEPS_error` (**higher is better**; 1 = perfect). |
 
 ### Probabilistic metrics (require ensemble dimension)
 
@@ -701,6 +701,13 @@ evaluation:
 ```
 
 #### `seeps` score
+The underlying [`scores`](https://scores.readthedocs.io/) implementation computes the Rodwell et al.
+SEEPS **error** (negatively oriented, 0 = perfect). WeatherGenerator reports the
+**positively-oriented** form `1 − SEEPS_error` (**higher is better**), matching the convention used
+for reporting SEEPS at ECMWF (e.g. the [AIFS "it's raining data" blog](https://www.ecmwf.int/en/about/media-centre/aifs-blog/2024/its-raining-data)).
+A perfect forecast scores 1, a climatology/no-skill forecast scores ~0, and values can be negative
+where the forecast is worse than the penalty-matrix reference.
+
 The `seeps` metric accepts two parameters:
 ```yaml
 evaluation:
