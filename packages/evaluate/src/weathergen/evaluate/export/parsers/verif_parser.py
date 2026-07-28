@@ -117,7 +117,6 @@ class VerifParser(CfParser):
             if self.zarr_coords is None:
                 self.zarr_coords = get_grid_points(da_fs[0])
                 self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end)
-                self.zarr_dt = np.timedelta64(6, "h")
             # check consistency of grid points across forecast steps
             if len(da_fs) > 1:
                 assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
