@@ -289,9 +289,11 @@ class Reader(ABC):
             elif not requested[name] <= reader_data[name]:
                 missing = requested[name] - reader_data[name]
 
-                # Special handling for ensemble mean
+                # Special handling for ensemble mean and std
                 if name == "ensemble" and "mean" in missing:
                     missing.remove("mean")
+                if name == "ensemble" and "std" in missing:
+                    missing.remove("std")
 
                 # Derivable channels (e.g. 10ff) will be computed later by
                 # DeriveChannels — keep them in the requested set.
@@ -403,6 +405,8 @@ class Reader(ABC):
 
         if ensemble == "mean":
             ensemble = ["mean"]
+        elif ensemble == "std":
+            ensemble = ["std"]
 
         fsteps = _parse_range_list(fsteps, "forecast_step")
         samples = _parse_range_list(samples, "sample")

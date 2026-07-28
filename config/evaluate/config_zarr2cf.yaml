@@ -145,6 +145,13 @@ variables:
     wg_unit: J m**-2
     std_unit: J m-2
     level_type: sfc
+  tp:
+    var: tp
+    long: imerg_total_precipitation
+    std: precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc
   
 
 coordinates:
