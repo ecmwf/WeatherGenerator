@@ -111,9 +111,13 @@ class EncoderModule(torch.nn.Module):
             q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
-        s_aux = (1, self.num_aux_tokens, cf.ae_global_dim_embed)
-        q_aux = torch.rand(s_aux, requires_grad=True) / cf.ae_global_dim_embed
-        self.q_aux = torch.nn.Parameter(q_aux, requires_grad=True)
+        # Only create the auxiliary-token parameter when aux tokens are actually used.
+        if self.num_aux_tokens > 0:
+            s_aux = (1, self.num_aux_tokens, cf.ae_global_dim_embed)
+            q_aux = torch.rand(s_aux) / cf.ae_global_dim_embed
+            self.q_aux = torch.nn.Parameter(q_aux, requires_grad=True)
+        else:
+            self.q_aux = None
 
         # query aggregation engine
         self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
@@ -322,7 +326,13 @@ class EncoderModule(torch.nn.Module):
         rs = num_steps_input * len(batch)
 
         # create dedicated auxiliary tokens and prepend them to the spatial tokens
-        tokens_global_register_class = self.q_aux.repeat(rs, 1, 1)
+        if self.q_aux is not None:
+            tokens_global_register_class = self.q_aux.repeat(rs, 1, 1)
+        else:
+            # no aux tokens: use an empty (rs, 0, D) tensor matching q_cells dtype/device
+            tokens_global_register_class = self.q_cells.new_zeros(
+                (rs, 0, self.cf.ae_global_dim_embed)
+            )
 
         # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:

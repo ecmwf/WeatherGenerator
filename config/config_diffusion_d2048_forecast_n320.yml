@@ -1,0 +1,355 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+embed_orientation: "channels"
+embed_unembed_mode: "block"
+embed_dropout_rate: 0.1
+
+ae_local_dim_embed: 2048
+ae_local_num_blocks: 2
+ae_local_num_heads: 16
+ae_local_dropout_rate: 0.1
+ae_local_with_qk_lnorm: true
+ae_local_num_queries: 1
+ae_local_queries_per_cell: false
+
+ae_adapter_num_heads: 16
+ae_adapter_embed: 128
+ae_adapter_with_qk_lnorm: true
+ae_adapter_with_residual: true
+ae_adapter_dropout_rate: 0.1
+
+ae_global_dim_embed: 2048
+ae_global_num_blocks: 4
+ae_global_num_heads: 32
+ae_global_dropout_rate: 0.1
+ae_global_with_qk_lnorm: true
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: false
+
+ae_aggregation_num_blocks: 0
+ae_aggregation_num_heads: 32
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: true
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
+decoder_type: "PerceiverIOCoordConditioning"
+pred_adapter_kv: false
+pred_self_attention: true
+pred_dyadic_dims: false
+pred_mlp_adaln: true
+num_class_tokens: 0
+num_register_tokens: 0
+
+# number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
+# one is training an auto-encoder
+fe_num_blocks: 12
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+fe_diffusion_latent_dim: 2048  # set to an int > ae_global_dim_embed to inflate the diffusion latent space; null = use ae_global_dim_embed
+fe_diffusion_model: True
+fe_diffusion_predict_residual: False
+fe_diffusion_classifier_free_guidance_prob: 0.0
+fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
+fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "concatenate", ..., "ada_ln"
+fe_layer_norm_after_blocks: [11]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
+fe_impute_latent_noise_std: 0.0  # 1e-4
+fe_impute_latent_diffusion_noise_std: 1e-3  # 1e-4
+# currently fixed to 1.0 (due to limitations with flex_attention and triton)
+forecast_att_dense_rate: 1.0
+with_step_conditioning: True # False
+# Diffusion related parameters
+frequency_embedding_dim: 256
+embedding_dim: 512
+noise_distribution: &noise_distribution "log_uniform"  # "log_uniform" or "log_normal"
+sigma_min: &sigma_min 0.02
+sigma_max: &sigma_max 10
+sigma_data: 1.0
+rho: 7
+p_mean: 3.5  # only required if noise_distribution is log_normal
+p_std: 1.2  # only required if noise_distribution is log_normal
+
+healpix_level: 5
+
+# Use 2D RoPE instead of traditional global positional encoding
+# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
+# When False: uses traditional pe_global positional encoding
+rope_2D: False
+# mlp_type: swiglu
+# use_xsa: True
+mlp_type: mlp
+use_xsa: False
+
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: False
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
+
+latent_noise_kl_weight: 0.0 # 1e-5
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5 
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True
+
+
+#below for FE training only
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+#below for DECODER training only
+# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*noise_embedder.*|.*fe.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+#below for FE and DECODER training
+# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+
+# load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.7
+# load_chkpt: {'run_id': 'dcl584vo', 'epoch': -1}  # z500 d2048 hl5, sigma_data=159.08
+# load_chkpt: {'run_id': 'tvkicam9', 'epoch': -1}  # z500 d2048 hl3 enc-lnorm, sigma_data=1.0
+# load_chkpt: {'run_id': 'q9grso75', 'epoch': -1}  # z500 d2048 hl3, sigma_data=39.2936
+# load_chkpt: {'run_id': 'qxivdyqz', 'epoch': -1}  # z500 d2048 hl5 enc-lnorm, sigma_data=1.0
+# load_chkpt: {'run_id': 'h8x1qgz3', 'epoch': -1}  # z500 d128 hl5, sigma_data=12.93
+# load_chkpt: {'run_id': '', 'epoch': -1}  # z500 d128 hl5 enc-lnorm, sigma_data=1.0
+# load_chkpt: {'run_id': 'wvpb76ai', 'epoch': -1}  # multi-var d2048 hl3 enc-lnorm, sigma_data=1.0
+# load_chkpt: {'run_id': 'ae4wlc5m', 'epoch': -1}  # multi-var d2048 hl3, sigma_data=2.7047
+# load_chkpt: {'run_id': 'r45iwyns', 'epoch': -1}  # multi-var d512 hl3, sigma_data=1.1785
+# load_chkpt: {'run_id': 'ydka6uql', 'epoch': -1}  # multi-var d512 hl4, sigma_data=0.827
+# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5, sigma_data=0.5789
+# load_chkpt: {'run_id': 'v8kd6xc1', 'epoch': -1}  # multi-var d512 hl5 nopos, sigma_data=0.6481
+# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5 enc-lnorm, sigma_data=1.0
+# load_chkpt: {'run_id': 'y1gu5md8', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'mal6u4gc', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 64 epochs, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'zrpncqb0', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 196 epochs, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'm6fs8wvj', 'epoch': -1}  # multi-var d512 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'cgxt9imf', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=0.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'wo5mf2z4', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=1.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
+# load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
+# load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'riyz96d4', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=0.5, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'bokn5d2w', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=1.5, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'uwyv1zdh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.0, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'dvslhdp3', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.5, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'mtlfdgvh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=3.0, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'jnxvjtur', 'epoch': -1}  # d2048 hl5, p_mean=-2.5, forecasting
+# load_chkpt: {'run_id': 'ulw4wid5', 'epoch': -1}  # d2048 hl5, p_mean=-2.0, forecasting
+# load_chkpt: {'run_id': 'lxpbthna', 'epoch': -1}  # d2048 hl5, p_mean=-1.5, forecasting
+# load_chkpt: {'run_id': 'n1e97r8z', 'epoch': -1}  # d2048 hl5, p_mean=-1.2, forecasting
+# load_chkpt: {'run_id': 'halvwj21', 'epoch': -1}  # d2048 hl5, p_mean=-0.5, forecasting
+# load_chkpt: {'run_id': 'dlsp3k31', 'epoch': -1}  # d2048 hl5, p_mean=0.5, forecasting
+# load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
+# load_chkpt: {'run_id': 'i3y5fhda', 'epoch': -1}  # d2048 hl5, p_mean=2.5, forecasting
+# load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
+# load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z, 64 epochs
+# load_chkpt: {'run_id': 'btnf4goa', 'epoch': -1}  # d2048 hl5 pre-training with z, 128 epochs
+load_chkpt: {'run_id': 'c7d5iw3q', 'epoch': -1}  # n320, 82 epochs
+
+
+norm_type: "LayerNorm"
+
+#####################################
+
+# streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
+# streams_directory: "./config/streams/era5_1deg_forecasting_z500/"
+streams_directory: "./config/streams/era5_n320_forecasting/"
+streams: ???
+
+# type of zarr_store
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+  # local_rank, 
+  # with_ddp,
+  # data_path_*, 
+  # model_path,
+  # run_path, 
+  # path_shared_
+  
+  multiprocessing_method: "fork"
+
+  desc: ""
+  run_id: ???
+  run_history: []
+
+# logging frequency in the training loop (in number of batches)
+train_logging:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
+  log_grad_norms: False
+
+# parameters for data loading
+data_loading :
+
+  num_workers: 12
+  rng_seed: ???
+  repeat_data_in_mini_epoch : False
+
+
+# config for training
+training_config:
+  
+  # training_mode: "masking", "student_teacher", "latent_loss"
+  training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
+
+  num_mini_epochs: 128
+  samples_per_mini_epoch: 4096
+  shuffle: True
+ 
+  start_date: 1979-01-01T00:00
+  end_date: 2022-12-31T18:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+  
+  learning_rate_scheduling :
+    lr_start: 1e-6 #5e-5
+    lr_max: 1e-5 #1e-4
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 64
+    num_steps_cooldown: 512
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw :
+      # parameters are scaled by number of DDP workers
+      beta1 : 0.975
+      beta2 : 0.9875
+      eps : 2e-08
+
+  losses : {
+    #"physical": {
+    #    type: LossPhysical,
+    #    weight: 0.0,
+    #    loss_fcts: {
+    #      "mse": {},
+    #    },
+    #    target_and_aux_calc: "Physical",
+    #},
+    "latent_diff": {
+        type: LossLatentDiffusion,
+        weight: 1.0,
+        target_and_aux_calc: DiffusionLatentTargetEncoder,
+        loss_fcts: { "mse": { }, },
+        }
+  }
+  
+  model_input: {
+    "forecasting" : {
+      # masking strategy: "random", "healpix", "forecast"
+      masking_strategy: "forecast",
+      masking_strategy_config: {
+        diffusion_rn: True,
+        noise_distribution: *noise_distribution,
+        sigma_min: *sigma_min,
+        sigma_max: *sigma_max
+        },
+      num_steps_input: 2,
+      num_samples: 1,
+      }
+    }
+
+  target_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      masking_strategy_config: {diffusion_rn: True},
+      num_steps_input: 1,
+      num_samples: 1,
+      }
+    }
+
+  forecast :
+      time_step: 06:00:00
+      num_steps: 1
+      offset: 0
+      policy: "fixed"
+
+
+# validation config; full validation config is merge of training and validation config
+validation_config: 
+
+  # Noise levels (eta values in standard normal space) at which to evaluate the
+  # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
+  # Each value produces a separate validation pass with independently logged metrics.
+  validation_noise_levels: [1.0, 2.0, 3.0, 4.0]
+
+  samples_per_mini_epoch: 256
+  shuffle: True
+
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T18:00
+  
+  # whether to track the exponential moving average of weights for validation
+  validate_with_ema: 
+    enabled : True
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 1e-3
+
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 0,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
+
+  # run validation before training starts (mainly for model development)
+  validate_before_training: False
+
+
+# test config; full test config is merge of validation and test config
+# test config is used by default when running inference
+
+# Tags for experiment tracking
+# These tags will be logged in MLFlow along with completed runs for train, eval, val
+# The tags are free-form, with the following rules:
+# - tags should be primitive types (strings, numbers, booleans). NO lists or dictionaries
+# - tags should not duplicate existing config entries.
+# - try to reuse existing tags where possible. MLFlow does not like having too many unique tags
+# - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
+wgtags:
+  # The name of the organization of the person running the experiment.
+  # This may be autofilled in the future. Expected values are lowercase strings 
+  # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
+  org: null
+  # The Github issue corresponding to this run (number such as 1234)
+  # Github issues are the central point when running experiment and contain 
+  # links to hedgedocs, code branches, pull requests etc.
+  # It is recommended to associate a run with a Github issue.
+  issue: null
+  # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
+  # This is expected to be the primary tag for comparing experiments in MLFlow, along with the
+  # issue number.
+  # Expected values are lowercase strings with no spaces, just underscores:
+  # Examples: "rollout_ablation_grid"  
+  exp: null
+  # *** Experiment-specific tags ***
+  # All extra tags (including lists, dictionaries, etc.) are treated 
+  # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
+  grid: null
