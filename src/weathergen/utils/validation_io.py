@@ -384,8 +384,8 @@ def _get_healpix_coords(cf) -> tuple[npt.NDArray, npt.NDArray] | None:
 
 
 def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
-    num_register_tokens = int(getattr(cf, "num_register_tokens", 0))
-    num_class_tokens = int(getattr(cf, "num_class_tokens", 0))
+    num_register_tokens = int(cf.get("num_register_tokens", 0))
+    num_class_tokens = int(cf.get("num_class_tokens", 0))
     num_extra_tokens = num_register_tokens + num_class_tokens
 
     healpix_coords = _get_healpix_coords(cf)
