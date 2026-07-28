@@ -103,6 +103,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # Ranks in one encoder-spatial group must consume the same batch. Data
         # parallelism therefore operates across groups, not across individual ranks.
         spatial_parallel_size = get_encoder_spatial_parallel_size(cf)
+        self.spatial_parallel_size = spatial_parallel_size
+        self.spatial_parallel_rank = cf.rank % spatial_parallel_size
         self.rank = cf.rank // spatial_parallel_size
         self.world_size = cf.world_size // spatial_parallel_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
@@ -110,8 +112,29 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # initialise healpic
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
+        if self.num_healpix_cells % spatial_parallel_size:
+            raise ValueError(
+                f"number of HEALPix cells ({self.num_healpix_cells}) must be divisible by "
+                f"encoder_spatial_parallel_size ({spatial_parallel_size})"
+            )
+        self.local_num_healpix_cells = self.num_healpix_cells // spatial_parallel_size
+        self.local_cell_start = self.spatial_parallel_rank * self.local_num_healpix_cells
+        self.local_cell_end = self.local_cell_start + self.local_num_healpix_cells
         self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+        self.tokenizer = TokenizerMasking(
+            cf.healpix_level,
+            self.masker,
+            self.local_cell_start,
+            self.local_cell_end,
+        )
+        if spatial_parallel_size > 1:
+            logger.info(
+                "Encoder spatial rank %d/%d constructs source HEALPix cells [%d, %d)",
+                self.spatial_parallel_rank,
+                spatial_parallel_size,
+                self.local_cell_start,
+                self.local_cell_end,
+            )
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -535,6 +558,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             num_steps_input,
             num_output_steps,
             self.num_healpix_cells,
+            source_healpix_cells=self.local_num_healpix_cells,
         )
 
         stream_data = self._build_stream_data_input(
@@ -706,7 +730,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
+            input_tokens = self.tokenizer.get_tokens_windows(
+                stream_info, input_data, True, local_source=True
+            )
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
             for sidx, source_mask in enumerate(source_masks.masks):
@@ -794,7 +820,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # ensure the batch is valid, i.e. not completely empty and no NaN values
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
-                not_valid = batch.sources_empty() or batch.is_nan()
+                # A valid global sample may have no observations in one rank's
+                # local source domain. All spatial ranks must still emit the
+                # same sample and enter encoder collectives in lockstep.
+                local_sources_empty = batch.sources_empty()
+                not_valid = (
+                    local_sources_empty if self.spatial_parallel_size == 1 else False
+                ) or batch.is_nan()
                 not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
 
                 # skip completely empty batch item or when all targets are empty -> no grad

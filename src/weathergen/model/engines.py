@@ -115,7 +115,12 @@ class EmbeddingEngine(torch.nn.Module):
         )
         " Increase ae_local_max_tokens_per_cell in config."
 
-        if batch.tokens_lens.shape[2] == 1:
+        if not x_embeds:
+            # A spatial rank can legitimately own a domain with no observations
+            # for this sample. Keep an empty tensor so all ranks can continue to
+            # the synchronized local-assimilation path.
+            return tokens_all
+        elif batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
             tokens_all = torch.cat(x_embeds)
 

@@ -144,13 +144,26 @@ class EncoderModule(torch.nn.Module):
             self.embed_engine, batch, model_params.pe_embed, use_reentrant=False
         )
         cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
-        stream_cell_tokens, local_cell_lens = select_packed_cell_shard(
-            stream_cell_tokens,
-            cell_lens,
-            self.num_healpix_cells,
-            self.local_cell_start,
-            self.local_cell_end,
-        )
+        batch_num_cells = batch.tokens_lens.shape[-1]
+        if batch_num_cells == self.local_num_healpix_cells:
+            # The data pipeline already constructed only this rank's HEALPix
+            # cells, so its packed tokens are local without another selection.
+            local_cell_lens = cell_lens
+        elif batch_num_cells == self.num_healpix_cells:
+            # Backward-compatible path for batches constructed with the full
+            # global grid.
+            stream_cell_tokens, local_cell_lens = select_packed_cell_shard(
+                stream_cell_tokens,
+                cell_lens,
+                self.num_healpix_cells,
+                self.local_cell_start,
+                self.local_cell_end,
+            )
+        else:
+            raise ValueError(
+                f"batch has {batch_num_cells} HEALPix cells; expected either "
+                f"{self.local_num_healpix_cells} local or {self.num_healpix_cells} global cells"
+            )
 
         tokens_global, posteriors = checkpoint(
             self.assimilate_local,
@@ -353,7 +366,23 @@ class EncoderModule(torch.nn.Module):
             Tokens for global assimilation
         """
 
-        cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
+        tokens_lens_global = batch.tokens_lens
+        batch_num_cells = tokens_lens_global.shape[-1]
+        if batch_num_cells == self.local_num_healpix_cells:
+            if self.spatial_parallel_size > 1:
+                tokens_lens_global = torch.cat(
+                    all_gather(
+                        tokens_lens_global,
+                        group=self.spatial_parallel_group,
+                    ),
+                    dim=-1,
+                )
+        elif batch_num_cells != self.num_healpix_cells:
+            raise ValueError(
+                f"batch has {batch_num_cells} HEALPix cells; expected either "
+                f"{self.local_num_healpix_cells} local or {self.num_healpix_cells} global cells"
+            )
+        cell_lens = torch.sum(tokens_lens_global, 2).flatten()
 
         num_steps_input = batch.get_num_source_steps()
         rs = num_steps_input * len(batch)
@@ -366,13 +395,16 @@ class EncoderModule(torch.nn.Module):
         # Direct calls retain the old API and perform the shard selection here.
         # ``forward`` passes an already-sharded stream_cell_tokens tensor.
         if cell_lens_local is None:
-            tokens, cell_lens_local = select_packed_cell_shard(
-                tokens,
-                cell_lens,
-                self.num_healpix_cells,
-                self.local_cell_start,
-                self.local_cell_end,
-            )
+            if batch_num_cells == self.local_num_healpix_cells:
+                cell_lens_local = torch.sum(batch.tokens_lens, 2).flatten()
+            else:
+                tokens, cell_lens_local = select_packed_cell_shard(
+                    tokens,
+                    cell_lens,
+                    self.num_healpix_cells,
+                    self.local_cell_start,
+                    self.local_cell_end,
+                )
 
         pe_global_local = model_params.pe_global[self.local_cell_start : self.local_cell_end]
 
@@ -422,7 +454,7 @@ class EncoderModule(torch.nn.Module):
         tokens_global_unmasked = self.aggregation_engine_unmasked(
             tokens_global_unmasked,
             tokens_global_register_class,
-            batch.tokens_lens,
+            tokens_lens_global,
             rope_cell_coords=model_params.rope_cell_coords,
         )
 
