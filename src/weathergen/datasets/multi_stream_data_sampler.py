@@ -578,7 +578,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         generating multiple samples
 
         """
-        stream_ds = stream_ds.readers
 
         # source data: iterate overall input steps
         input_data = []
@@ -713,14 +712,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds
+                idx, num_forecast_steps, i_max, stream_ds.readers
             )
 
             # When teacher_time_offset > 0, load a separate set of data windows
             # shifted forward in time for the teacher (target) samples.
             if self.teacher_time_offset > 0:
                 (input_data_target, output_data_target) = self._get_data_windows(
-                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds
+                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds.readers
                 )
             else:
                 input_data_target = input_data
