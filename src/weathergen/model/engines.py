@@ -79,49 +79,6 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def _get_embed_batch_chunk_size(self) -> int | None:
-        chunk_size = self.cf.get("embed_batch_chunk_size", None)
-        if chunk_size is not None:
-            return chunk_size if chunk_size > 0 else None
-
-        # Validation / inference favors lower peak memory over throughput.
-        return 1024 if not self.training else None
-
-    def _iter_stream_data_chunks(self, batch, stream_name: str, num_steps_input: int, dtype):
-        chunk_size = self._get_embed_batch_chunk_size()
-        if chunk_size is None:
-            sdata = []
-            for istep in range(num_steps_input):
-                for sample in batch.get_samples():
-                    sdata_cur = sample.streams_data[stream_name].source_tokens_cells[istep]
-                    if sdata_cur is not None and sdata_cur.numel() > 0:
-                        sdata.append(sdata_cur)
-
-            if sdata:
-                yield torch.cat(sdata).to(dtype)
-            return
-
-        sdata_chunks = []
-        sdata_rows = 0
-        for istep in range(num_steps_input):
-            for sample in batch.get_samples():
-                sdata_cur = sample.streams_data[stream_name].source_tokens_cells[istep]
-                if sdata_cur is None or sdata_cur.numel() == 0:
-                    continue
-
-                sdata_cur = sdata_cur.to(dtype)
-                for start in range(0, sdata_cur.shape[0], chunk_size):
-                    sdata_part = sdata_cur[start : start + chunk_size]
-                    sdata_chunks.append(sdata_part)
-                    sdata_rows += sdata_part.shape[0]
-                    if sdata_rows >= chunk_size:
-                        yield torch.cat(sdata_chunks)
-                        sdata_chunks = []
-                        sdata_rows = 0
-
-        if sdata_chunks:
-            yield torch.cat(sdata_chunks)
-
     def forward(self, batch, pe_embed):
         num_steps_input = batch.get_num_source_steps()
 
@@ -129,6 +86,26 @@ class EmbeddingEngine(torch.nn.Module):
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
+
+        # iterate over all streams
+        x_embeds = []
+        for stream_name in self.stream_names:
+            # collect all source tokens from all input_steps and all samples in the batch
+            sdata = []
+            for istep in range(num_steps_input):
+                for sample in batch.get_samples():
+                    sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
+
+            if all(s is None for s in sdata):
+                continue
+
+            sdata = torch.cat(sdata).to(tokens_all.dtype)
+            # skip empty stream
+            if sdata.numel() == 0:
+                continue
+
+            # embedding from physical space to per patch latent representation
+            x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
@@ -138,27 +115,20 @@ class EmbeddingEngine(torch.nn.Module):
             "max number of tokens per cell for positional encoding exceeded."
             " Increase ae_local_max_tokens_per_cell in config."
         )
-        # compute scatter index across batch items and input steps
-        scatter_idxs = self.get_scatter_idxs_vectorized(batch)
 
-        # per cell indices into positional encoding
-        pe_idxs = self.get_pe_idxs_vectorized(batch)[scatter_idxs]
-        # iterate over all streams and write embedded tokens incrementally to lower peak memory
-        offset = 0
-        for stream_name in self.stream_names:
-            for sdata in self._iter_stream_data_chunks(
-                batch, stream_name, num_steps_input, tokens_all.dtype
-            ):
-                stream_embeds = self.embeds[stream_name](sdata).flatten(0, 1)
-                next_offset = offset + stream_embeds.shape[0]
-                tokens_all.index_copy_(
-                    0,
-                    scatter_idxs[offset:next_offset],
-                    stream_embeds + pe_embed[pe_idxs[offset:next_offset]],
-                )
-                offset = next_offset
+        if batch.tokens_lens.shape[2] == 1:
+            # trivial with one stream
+            tokens_all = torch.cat(x_embeds)
 
-        assert offset == num_tokens, "Embedded token count does not match token lens metadata."
+        else:
+            scatter_idxs = self.get_scatter_idxs_vectorized(batch)
+            scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+
+            # actual scatter operation and apply per cell positional encoding
+            tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
+
+        pe_idxs = self.get_pe_idxs_vectorized(batch)
+        tokens_all = tokens_all + pe_embed[pe_idxs]
 
         return tokens_all
 
