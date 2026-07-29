@@ -10,6 +10,7 @@
 import argparse
 import logging
 import os
+import time
 import uuid
 from pathlib import Path
 
@@ -25,6 +26,18 @@ _BUCKET_RELEASE = "weathergenerator-release"
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _refresh_atime_if_size_matches(path: Path, expected_size: int) -> bool:
+    if not path.is_file():
+        return False
+
+    file_stat = path.stat()
+    if file_stat.st_size != expected_size:
+        return False
+
+    os.utime(path, ns=(time.time_ns(), file_stat.st_mtime_ns))
+    return True
 
 
 def main() -> None:
@@ -81,7 +94,7 @@ def main() -> None:
         expected_size = s3.head_object(Bucket=args.bucket, Key=source)["ContentLength"]
 
         if os.path.lexists(destination):
-            if destination.is_file() and destination.stat().st_size == expected_size:
+            if _refresh_atime_if_size_matches(destination, expected_size):
                 logger.info("Skipping existing file with matching size: %s", destination)
                 continue
             raise FileExistsError(
@@ -105,7 +118,7 @@ def main() -> None:
                 # created concurrently. The paths share a directory and filesystem.
                 os.link(temporary, destination)
             except FileExistsError:
-                if destination.is_file() and destination.stat().st_size == expected_size:
+                if _refresh_atime_if_size_matches(destination, expected_size):
                     logger.info(
                         "Another process installed a file with matching size: %s", destination
                     )
