@@ -122,7 +122,9 @@ class LossLatentDiffusion(LossModuleBase):
             for _, _, loss_fct_name in self.loss_fcts
         }
 
-        pred_tokens_all = [pl["latent_state"].z_pre_norm for pl in preds.latent if pl and "latent_state" in pl]
+        pred_tokens_all = [
+            pl["latent_state"].z_pre_norm for pl in preds.latent if pl and "latent_state" in pl
+        ]
         target_tokens_all = [latent["diffusion_latent"] for latent in targets.latent if latent]
 
         # Remove the register and class tokens (prepended by the encoder) from the

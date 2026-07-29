@@ -95,15 +95,20 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
         _ada_ln = self.conditioning_type == "ada_ln"
         assert self.cf.get("diffusion_conditioning_embed_dim", None) is not None or not _ada_ln, (
-            f"diffusion_conditioning_embed_dim must be set when "
-            f"fe_diffusion_model_conditioning_type is 'ada_ln'"
+            "diffusion_conditioning_embed_dim must be set when "
+            "fe_diffusion_model_conditioning_type is 'ada_ln'"
         )
-        _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)        
+        _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)
         assert self.conditioning not in _date_time_modes or _offset == 0, (
             f"forecast.offset must be 0 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got offset={_offset})"
         )
-        _input_num_steps = self.cf.get("training_config", {}).get("model_input", {}).get("forecasting", {}).get("num_steps_input", 0)
+        _input_num_steps = (
+            self.cf.get("training_config", {})
+            .get("model_input", {})
+            .get("forecasting", {})
+            .get("num_steps_input", 0)
+        )
         # assert self.conditioning != "forecast" or _input_num_steps == 2, (
         #     f"forecast.input_num_steps must be 2 when fe_diffusion_model_conditioning is "
         #     f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
@@ -112,7 +117,15 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"forecast.input_num_steps must be 1 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
         )
-        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev", "concatenate", "concatenate_hiddendim", "concatenate_hdMLP", "spatial_ada_ln"}, (
+        assert self.conditioning != "forecast" or self.conditioning_type in {
+            "cross_attn",
+            "additive",
+            "cross_attn_rev",
+            "concatenate",
+            "concatenate_hiddendim",
+            "concatenate_hdMLP",
+            "spatial_ada_ln",
+        }, (
             f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', 'concatenate', 'concatenate_hiddendim', 'concatenate_hdMLP', or 'spatial_ada_ln' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
             f"(got '{self.conditioning_type}')"
@@ -137,9 +150,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Spatial AdaLN: per-cell modulation using the conditioning token at each HEALPix cell.
         # Only instantiated for the 'spatial_ada_ln' conditioning type.
         if self.conditioning_type == "spatial_ada_ln":
-            self.spatial_ada_ln = SpatialAdaLN(
-                dim=_lat_dim, norm_eps=self.cf.get("norm_eps", 1e-4)
-            )
+            self.spatial_ada_ln = SpatialAdaLN(dim=_lat_dim, norm_eps=self.cf.get("norm_eps", 1e-4))
         else:
             self.spatial_ada_ln = None
 
@@ -353,7 +364,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             # Also double coords so 2D RoPE matches the doubled sequence length
             combined = torch.cat([net_input, c], dim=1)
             coords_combined = torch.cat([coords, coords], dim=1) if coords is not None else None
-            raw_out = self.net(combined, fstep=fstep, coords=coords_combined, noise_emb=noise_emb, conditioning=None)
+            raw_out = self.net(
+                combined,
+                fstep=fstep,
+                coords=coords_combined,
+                noise_emb=noise_emb,
+                conditioning=None,
+            )
             raw_out = raw_out[:, : x.shape[1], :]  # Slice back to (B, H, D')
             if self.latent_proj_down is not None:
                 raw_out = self.latent_proj_down(raw_out)
@@ -363,7 +380,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             # Concatenate along hidden dim: (B, H, D') cat (B, H, D') -> (B, H, 2D')
             # ForecastingEngine runs at 2D' throughout and projects back to D' via out_proj
             combined = torch.cat([net_input, c], dim=2)
-            raw_out = self.net(combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None)
+            raw_out = self.net(
+                combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
+            )
             if self.latent_proj_down is not None:
                 raw_out = self.latent_proj_down(raw_out)
             return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
@@ -372,7 +391,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             # Concatenate along hidden dim then project back: (B, H, D') cat (B, H, D') -> (B, H, 2D') -> Linear -> (B, H, D')
             combined = torch.cat([net_input, c], dim=2)
             projected = self.concat_hd_proj(combined)
-            raw_out = self.net(projected, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None)
+            raw_out = self.net(
+                projected, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
+            )
             if self.latent_proj_down is not None:
                 raw_out = self.latent_proj_down(raw_out)
             return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
@@ -383,13 +404,17 @@ class DiffusionForecastEngine(torch.nn.Module):
             # gate is applied to raw_out so the network can suppress or amplify each cell's
             # denoised contribution based on the conditioning quality at that cell.
             net_input_mod, spatial_gate = self.spatial_ada_ln(net_input, c)
-            raw_out = self.net(net_input_mod, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None)
+            raw_out = self.net(
+                net_input_mod, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
+            )
             raw_out = raw_out * spatial_gate
             if self.latent_proj_down is not None:
                 raw_out = self.latent_proj_down(raw_out)
             return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
 
-        raw_out = self.net(net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c)
+        raw_out = self.net(
+            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
+        )
         if self.latent_proj_down is not None:
             raw_out = self.latent_proj_down(raw_out)
         return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
@@ -499,9 +524,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         """
         # The encoder prepends register/class tokens to the healpix-cell latents,
         # so the sampled latent must include them to match the target latent shape.
-        num_tokens = (
-            self.cf.num_register_tokens + self.cf.num_class_tokens + self.num_healpix_cells
-        )
+        num_tokens = self.cf.num_register_tokens + self.cf.num_class_tokens + self.num_healpix_cells
         x = torch.randn(batch_size, num_tokens, self.cf.ae_global_dim_embed).to(device="cuda")
 
         # --- Training-aligned sigma bounds ---
@@ -628,7 +651,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         import matplotlib
 
         matplotlib.use("Agg")
-        import os
         import matplotlib.pyplot as plt
 
         steps = list(range(len(track["sigma"])))
@@ -670,7 +692,13 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # 4) d_cur norm and step norm
         axes[3].semilogy(steps, track["d_cur_norm"], "o-", markersize=3, label="||d_cur||")
-        axes[3].semilogy(steps, track["d_cur_step_norm"], "^-", markersize=3, label="||(t_next - t_hat) * d_cur||")
+        axes[3].semilogy(
+            steps,
+            track["d_cur_step_norm"],
+            "^-",
+            markersize=3,
+            label="||(t_next - t_hat) * d_cur||",
+        )
         axes[3].set_ylabel("norm (log scale)")
         axes[3].set_title("ODE drift norms")
         axes[3].legend(fontsize=8)
@@ -781,10 +809,11 @@ class DateTimeEncoder(torch.nn.Module):
     def __init__(self, conditioning: str):
         super().__init__()
         self.num_frequencies = 8
-        assert conditioning in ["date_time", "date", "time"], f"Unsupported conditioning: {conditioning}"
+        assert conditioning in ["date_time", "date", "time"], (
+            f"Unsupported conditioning: {conditioning}"
+        )
         self.date_only = conditioning == "date"
         self.time_only = conditioning == "time"
-
 
     def forward(self, timestamp: np.ndarray | np.datetime64) -> torch.Tensor:
         """
@@ -826,10 +855,26 @@ class DateTimeEncoder(torch.nn.Module):
         doy_phase = two_pi * doy_frac[:, None] * k
         tod_phase = two_pi * tod_frac[:, None] * k
 
-        doy_cos = np.cos(doy_phase).astype(np.float32) if not self.time_only else np.zeros_like(doy_phase).astype(np.float32)
-        doy_sin = np.sin(doy_phase).astype(np.float32) if not self.time_only else np.zeros_like(doy_phase).astype(np.float32)
-        tod_cos = np.cos(tod_phase).astype(np.float32) if not self.date_only else np.zeros_like(tod_phase).astype(np.float32)
-        tod_sin = np.sin(tod_phase).astype(np.float32) if not self.date_only else np.zeros_like(tod_phase).astype(np.float32)
+        doy_cos = (
+            np.cos(doy_phase).astype(np.float32)
+            if not self.time_only
+            else np.zeros_like(doy_phase).astype(np.float32)
+        )
+        doy_sin = (
+            np.sin(doy_phase).astype(np.float32)
+            if not self.time_only
+            else np.zeros_like(doy_phase).astype(np.float32)
+        )
+        tod_cos = (
+            np.cos(tod_phase).astype(np.float32)
+            if not self.date_only
+            else np.zeros_like(tod_phase).astype(np.float32)
+        )
+        tod_sin = (
+            np.sin(tod_phase).astype(np.float32)
+            if not self.date_only
+            else np.zeros_like(tod_phase).astype(np.float32)
+        )
 
         # Stack all components: (N, K, 4) -> (N, K*4)
         out = np.stack([doy_cos, doy_sin, tod_cos, tod_sin], axis=-1)
