@@ -16,6 +16,7 @@ equivalent latent-space curve is accumulated online here and plotted with the ve
 plotting classes from ``weathergen.evaluate`` so that both look alike.
 """
 
+import json
 import logging
 
 import numpy as np
@@ -119,13 +120,33 @@ class LatentRolloutRMSE:
             data = data.swap_dims({"forecast_step": "lead_time"})
             x_dim = "lead_time"
 
+        tag = create_filename(prefix=["rmse", "global"], middle=[self.run_id], suffix=["latent"])
+
         plotter = LinePlots(_PLOT_CFG, output_dir)
         plotter.plot(
             [data],
             [self.run_id],
-            tag=create_filename(prefix=["rmse", "global"], middle=[self.run_id], suffix=["latent"]),
+            tag=tag,
             x_dim=x_dim,
             y_dim="rmse",
             print_summary=True,
             title="RMSE | latent | z_pre_norm",
         )
+
+        # drop the plotted values next to the figure so the curve can be re-used numerically;
+        # "compare_" mirrors the prefix LinePlots.plot() puts on the figure file name
+        self._write_json(plotter.out_plot_dir / f"compare_{tag}.json", data)
+
+    def _write_json(self, path, data: xr.DataArray) -> None:
+        """Write the plotted curve as JSON, in the same layout the evaluate package uses."""
+
+        data = data.assign_attrs(
+            run_id=self.run_id,
+            metric="rmse",
+            space="latent",
+            variable="z_pre_norm",
+            step_hours=float(self.step_hours),
+        )
+        with open(path, "w") as f:
+            json.dump(data.to_dict(), f, indent=2)
+        logger.info(f"Wrote latent RMSE values to {path}")
