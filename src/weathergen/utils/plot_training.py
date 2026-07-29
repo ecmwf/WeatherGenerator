@@ -27,15 +27,16 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 MAX_FILENAME_LEN = 255
-LEGEND_FONT_SIZE = "x-small"
-_LEGEND_MAX_LABEL_LEN = 80
 PLOT_DPI_VALUE = 150
 
 
 def _add_legend(
     labels,
+    outside: bool,
+    font_size: str,
+    num_columns: int,
+    max_label_len: int,
     ax=None,
-    legend_outside: bool = False,
     loc=None,
     bbox_to_anchor=None,
     **kwargs,
@@ -49,25 +50,23 @@ def _add_legend(
     if ax is None:
         ax = plt.gca()
 
+    # avoid excessively long labels
     truncated = [
-        la if len(la) <= _LEGEND_MAX_LABEL_LEN else la[: _LEGEND_MAX_LABEL_LEN - 1] + "\u2026"
-        for la in labels
+        la if len(la) <= max_label_len else la[: max_label_len - 1] + "\u2026" for la in labels
     ]
-    n = len(truncated)
-    ncol = 1 if n <= 3 else (2 if n <= 8 else 3)
 
     if loc is None:
-        loc = "upper center" if legend_outside else "best"
-    if bbox_to_anchor is None and legend_outside:
+        loc = "upper center" if outside else "best"
+    if bbox_to_anchor is None and outside:
         bbox_to_anchor = (0.5, -0.13)
 
     legend_kwargs = {
         "loc": loc,
-        "ncol": ncol,
-        "fontsize": LEGEND_FONT_SIZE,
+        "ncol": num_columns,
+        "fontsize": font_size,
         "framealpha": 0.9,
         "edgecolor": "0.8",
-        "borderaxespad": 0.0,
+        "borderaxespad": 0.2,
         **kwargs,
     }
     if bbox_to_anchor is not None:
@@ -112,11 +111,11 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
         return False
 
     for k, v in run_id_dict.items():
-        if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
+        if not isinstance(k, str) or not isinstance(v, str):
             raise argparse.ArgumentTypeError(
                 (
                     "Each key must be a string and",
-                    f" each value must be a list of [job_id, experiment_name], but got: {k}: {v}",
+                    f" each value must be a string, but got {v}",
                 )
             )
 
@@ -151,10 +150,8 @@ def _read_yaml_config(yaml_file_path):
     train:
         plot:
             run_id:
-                slurm_id : SLURM_JOB (specify 0 if not available)
                 description: job description
             run_id:
-                slurm_id : SLURM_JOB (specify 0 if not available)
                 description : job description
             ...
 
@@ -179,9 +176,8 @@ def _read_yaml_config(yaml_file_path):
     # convert to legacy format
     config_dict = {}
     for k, v in config_dict_temp.items():
-        assert isinstance(v["slurm_id"], int), "slurm_id has to be int."
         assert isinstance(v["description"], str), "description has to be str."
-        config_dict[k] = [v["slurm_id"], v["description"]]
+        config_dict[k] = v["description"]
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
     _check_run_id_dict(config_dict)
@@ -222,7 +218,10 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
     """
     # return col names from training (should be identical to validation)
     cf = config.load_run_config(run_id, None, model_path=model_path)
-    return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
+    return [
+        stream_name.replace(",", "").replace("/", "_").replace(" ", "_")
+        for stream_name in cf.streams.keys()
+    ]
 
 
 ####################################################################################################
@@ -233,6 +232,9 @@ def plot_lr(
     plot_dir: Path,
     x_axis: str = "samples",
     legend_outside: bool = False,
+    legend_font_size: str = "x-small",
+    legend_num_columns: int = 3,
+    legend_max_label_len: int = 80,
 ):
     """
     Plot learning rate curves of training runs.
@@ -270,9 +272,7 @@ def plot_lr(
         y_vals[mask] = 0.0  # np.nan
 
         plt.plot(x_vals, y_vals, linestyle, color=colors[j % len(colors)])
-        legend_str += [
-            ("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
-        ]
+        legend_str += [("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id]]
 
     if len(legend_str) < 1:
         _logger.warning(
@@ -286,7 +286,13 @@ def plot_lr(
     plt.ylabel("lr")
     plt.xlabel(x_axis)
     plt.tight_layout()
-    _add_legend(legend_str, legend_outside=legend_outside)
+    _add_legend(
+        legend_str,
+        outside=legend_outside,
+        font_size=legend_font_size,
+        num_columns=legend_num_columns,
+        max_label_len=legend_max_label_len,
+    )
     rstr = "".join([f"{r}_" for r in runs_ids])
 
     if len(rstr) + 6 > MAX_FILENAME_LEN:
@@ -307,6 +313,9 @@ def plot_loss_avg(
     stage=TRAIN,
     x_scale_log=False,
     legend_outside: bool = False,
+    legend_font_size: str = "x-small",
+    legend_num_columns: int = 3,
+    legend_max_label_len: int = 80,
 ):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
@@ -326,9 +335,8 @@ def plot_loss_avg(
             y_vals[mask],
             color=colors[i_run % len(colors)],
         )
-        # legend_str += [ run_id + " : " + runs_ids[run_id][1]]
         legend_str += [
-            ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
+            ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id]
         ]
 
     plt.grid(True, which="both", ls="-")
@@ -341,7 +349,13 @@ def plot_loss_avg(
     plt.ylabel("loss")
     plt.xlabel("step")
     plt.tight_layout()
-    _add_legend(legend_str, legend_outside=legend_outside)
+    _add_legend(
+        legend_str,
+        outside=legend_outside,
+        font_size=legend_font_size,
+        num_columns=legend_num_columns,
+        max_label_len=legend_max_label_len,
+    )
     rstr = "".join([f"{r}_" for r in runs_ids])
 
     if len(rstr) + len(f"{str(stage)}_avg.png") > MAX_FILENAME_LEN:
@@ -370,6 +384,9 @@ def plot_loss_per_stream(
     y_lim: list[float] | None = None,
     x_scale_log: bool = False,
     legend_outside: bool = False,
+    legend_font_size: str = "x-small",
+    legend_num_columns: int = 3,
+    legend_max_label_len: int = 80,
 ):
     """
     Plot each stream in stream_names (using matching to data columns) for all run_ids
@@ -411,6 +428,7 @@ def plot_loss_per_stream(
                 legend_strs = []
                 min_val = np.finfo(np.float32).max
                 max_val = 0.0
+                title_col = None
                 for mode in modes:
                     legend_strs += [[]]
                     linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
@@ -433,6 +451,7 @@ def plot_loss_per_stream(
                             if len(col_split) < 4:
                                 if stream_name in col:
                                     data_cols += [col]
+                                    title_col = col if title_col is None else title_col
                             elif len(col_split) == 4:
                                 if (
                                     col_split[1].lower() == stream_name.lower()
@@ -440,6 +459,7 @@ def plot_loss_per_stream(
                                     and col_split[3] == channel
                                 ):
                                     data_cols += [col]
+                                    title_col = col if title_col is None else title_col
                             elif len(col_split) == 5:
                                 if (
                                     col_split[1].lower() == stream_name.lower()
@@ -448,6 +468,7 @@ def plot_loss_per_stream(
                                     and int(col_split[4]) in forecast_steps
                                 ):
                                     data_cols += [col]
+                                    title_col = col if title_col is None else title_col
 
                         for col in data_cols:
                             x_vals = np.array(run_data_mode[x_col])
@@ -466,9 +487,7 @@ def plot_loss_per_stream(
                                 + " : "
                                 + run_data.run_id
                                 + " : "
-                                + runs_ids[run_data.run_id][1]
-                                + ": "
-                                + col
+                                + runs_ids[run_data.run_id]
                             ]
 
                             # skip all-nan slices
@@ -501,11 +520,20 @@ def plot_loss_per_stream(
                 if x_lim is not None:
                     plt.xlim(x_lim)
 
-                plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
+                # if len(title_col) == 0 :
+                # import code; code.interact( local=locals())
+                title_loss = ".".join(title_col.split(".")[:-1])
+                plt.title(title_loss + " (" + ", ".join(modes) + ")")
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
                 plt.tight_layout()
-                _add_legend(legend_str, legend_outside=legend_outside)
+                _add_legend(
+                    legend_str,
+                    outside=legend_outside,
+                    font_size=legend_font_size,
+                    num_columns=legend_num_columns,
+                    max_label_len=legend_max_label_len,
+                )
 
                 # construct file name
                 run_ids_str = "".join([f"{r}_" for r in runs_ids])
@@ -544,6 +572,9 @@ def plot_loss_per_run(
     x_axis: str = "samples",
     x_scale_log: bool = False,
     legend_outside: bool = False,
+    legend_font_size: str = "x-small",
+    legend_num_columns: int = 3,
+    legend_max_label_len: int = 80,
 ):
     """
     Plot all stream_names (using matching to data columns) for given run_id
@@ -594,16 +625,15 @@ def plot_loss_per_run(
 
             x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
             # find the cols of the requested metric (e.g. mse) for all streams
-            data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
             data_cols = []
             for col in run_data_mode.columns:
                 col_split = col.split(".")
-                if len(col_split) < 4:
-                    continue
-                if col_split[2].lower() == err.lower() and col_split[3] == channels:
+                if (
+                    len(col_split) >= 4
+                    and col_split[2].lower() == err.lower()
+                    and col_split[3] in channels
+                ):
                     data_cols += [col]
-
-            data_cols = list(data_cols)
 
             for _, col in enumerate(data_cols):
                 for j, stream_name in enumerate(stream_names):
@@ -630,7 +660,7 @@ def plot_loss_per_run(
         plt.close()
         return
 
-    plt.title(run_id + " : " + run_desc[1])
+    plt.title(run_id + " : " + run_desc)
     plt.yscale("log")
     if x_scale_log:
         plt.xscale("log")
@@ -638,7 +668,13 @@ def plot_loss_per_run(
     plt.ylabel("loss")
     plt.xlabel("samples")
     plt.tight_layout()
-    _add_legend(legend_str, legend_outside=legend_outside)
+    _add_legend(
+        legend_str,
+        outside=legend_outside,
+        font_size=legend_font_size,
+        num_columns=legend_num_columns,
+        max_label_len=legend_max_label_len,
+    )
 
     sstr = "".join(
         [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
@@ -674,16 +710,14 @@ def plot_train(args=None):
                             train:
                                 plot:
                                     run_id:
-                                        slurm_id : SLURM_JOB (specify 0 if not available)
                                         description: job description
                                     run_id:
-                                        slurm_id : SLURM_JOB (specify 0 if not available)
                                         description : job description
                                             ...
 
                         A dictionary-string can also be specified on the command line, e.g.:
-                            "{'abcde': ['123456', 'experiment1'],
-                            'fghij': ['654321', 'experiment2']}"
+                            "{'abcde': 'experiment1',
+                            'fghij': 'experiment2'}"
                             """
     )
 
@@ -775,6 +809,34 @@ def plot_train(args=None):
         action="store_true",
         help="Use log scale for the x-axis (produces log-log plots)",
     )
+    parser.add_argument(
+        "--legend-font-size",
+        dest="legend_font_size",
+        default="x-small",
+        type=str,
+        help="Font size for the legend",
+    )
+    parser.add_argument(
+        "--legend-num-columns",
+        dest="legend_num_columns",
+        default=3,
+        type=int,
+        help="Number of columns for the legend",
+    )
+    parser.add_argument(
+        "--legend-max-label-len",
+        dest="legend_max_label_len",
+        default=80,
+        type=int,
+        help="Maximum character length of legend entries (truncation length of description)",
+    )
+    parser.add_argument(
+        "--with-losses-per-run",
+        dest="with_losses_per_run",
+        default=False,
+        action="store_true",
+        help="Plot losses per run across channels and streams",
+    )
 
     run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
@@ -833,31 +895,40 @@ def plot_train(args=None):
                     from_run_id=run_id,
                     mini_epoch=None,
                 )
-            for stream_info in cf.streams:
-                streams += [stream_info["name"]]
+            streams += list(cf.streams.keys())
         # ensure items are unique
         streams = list(set(streams))
         # remove "all" key that is a special flag and not an actual stream name
         streams.remove("all")
 
     # read logged data
-
     runs_data = [
         TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
         for run_id in runs_ids
     ]
 
     # determine which runs are still alive (as a process, though they might hang internally)
-    ret = subprocess.run(["squeue"], capture_output=True)
+    sq_arg = "--format='%.18i %.9P %.30j %.8u %.8T %.10M %.9l %.6D %R' --me"
+    ret = subprocess.run(["squeue", sq_arg], capture_output=True)
     lines = str(ret.stdout).split("\\n")
     runs_active = [
-        np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
+        any([run_id in line and "RUNNING" in line for line in lines[1:]])
+        for run_id in runs_ids.keys()
     ]
 
     x_scale_log = args.log_x
 
     # plot learning rate
-    plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir, legend_outside=args.legend_outside)
+    plot_lr(
+        runs_ids,
+        runs_data,
+        runs_active,
+        plot_dir=out_dir,
+        legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
+    )
 
     # plot average loss
     plot_loss_avg(
@@ -867,6 +938,9 @@ def plot_train(args=None):
         runs_active,
         stage=TRAIN,
         legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
     )
 
     # compare different runs
@@ -884,6 +958,9 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
@@ -900,6 +977,9 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
@@ -916,13 +996,30 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
         plot_dir=out_dir,
     )
 
     # plot all cols for all run_ids
-    for run_id, run_data in zip(runs_ids, runs_data, strict=False):
+    if args.with_losses_per_run:
+        for run_id, run_data in zip(runs_ids, runs_data, strict=False):
+            plot_loss_per_run(
+                ["train", "val"],
+                run_id,
+                runs_ids[run_id],
+                run_data,
+                get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
+                channels=args.channels,
+                plot_dir=out_dir,
+                legend_outside=args.legend_outside,
+                legend_font_size=args.legend_font_size,
+                legend_num_columns=args.legend_num_columns,
+                legend_max_label_len=args.legend_max_label_len,
+            )
         plot_loss_per_run(
-            ["train", "val"],
+            ["val"],
             run_id,
             runs_ids[run_id],
             run_data,
@@ -930,17 +1027,10 @@ def plot_train(args=None):
             channels=args.channels,
             plot_dir=out_dir,
             legend_outside=args.legend_outside,
+            legend_font_size=args.legend_font_size,
+            legend_num_columns=args.legend_num_columns,
+            legend_max_label_len=args.legend_max_label_len,
         )
-    plot_loss_per_run(
-        ["val"],
-        run_id,
-        runs_ids[run_id],
-        run_data,
-        get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
-        channels=args.channels,
-        plot_dir=out_dir,
-        legend_outside=args.legend_outside,
-    )
 
 
 if __name__ == "__main__":

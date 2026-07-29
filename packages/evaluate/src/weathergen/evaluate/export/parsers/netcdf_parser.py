@@ -139,7 +139,7 @@ class NetcdfParser(CfParser):
         # Original logic
         var_dict = find_pl(data.channel.values)
         data_vars = {}
-        #order of appending upoints should be ipoint, pressure_level, mem (if mem exists)
+
         for new_var, pls in var_dict.items():
             data_dims = ["ipoint"]
             if pls[0] is not None:
@@ -343,7 +343,12 @@ class NetcdfParser(CfParser):
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
         for var_name, da in ds.data_vars.items():
-            mapped_info = self.mapping.get(var_name, {})
+            try:
+                mapped_info = self.mapping[var_name]
+            except KeyError as e:
+                raise KeyError(
+                    f"Variable '{var_name}' not found in mapping. Update relevant config."
+                ) from e
             mapped_name = mapped_info.get("var", var_name)
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
@@ -381,7 +386,12 @@ class NetcdfParser(CfParser):
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
         dims_list = ["pressure", "valid_time", "latitude", "longitude"]
         for var_name, da in ds.data_vars.items():
-            mapped_info = self.mapping.get(var_name, {})
+            try:
+                mapped_info = self.mapping[var_name]
+            except KeyError as e:
+                raise KeyError(
+                    f"Variable '{var_name}' not found in mapping. Update relevant config."
+                ) from e
             mapped_name = mapped_info.get("var", var_name)
             dims = dims_list.copy()
             if mapped_info.get("level_type") == "sfc":
