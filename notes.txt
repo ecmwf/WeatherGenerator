@@ -1,0 +1,8 @@
+**Hourly Model training id: af90zz71
+
+on Santis inference run bobjzcde from atmofs03, with current nc exporter works (also plot inspection)
+
+on Santis current nc exporter is not working with muly9d4v, error:
+`AssertionError: Grid points between forecast steps are not consistent.Check that inference was not performed with masking`
+
+Issue: nc exporter does not support time_step lower than 6h
