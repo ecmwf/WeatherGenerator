@@ -204,19 +204,22 @@ class VerifParser(CfParser):
         # Original logic
         var_dict = find_pl(data.channel.values)
         data_vars = {}
-
+        # order of appending upoints should be ipoint, pressure_level, mem (if mem exists)
         for new_var, pls in var_dict.items():
             data_dims = ["ipoint"]
-            if "mem" in data.dims:
-                data_dims.append("mem")
             if pls[0] is not None:
+                data_dims.append("pressure_level")
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 old_vars = [f"{new_var}_{p}" for p in pls]
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
-                    dims=[*data_dims, "pressure_level"],
+                    dims=data_dims,
                     coords={"pressure_level": pls},
                 )
             else:
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=new_var).values,
                     dims=data_dims,
@@ -548,7 +551,6 @@ class VerifParser(CfParser):
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
             wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
-            print(wg_unit)
             verif_unit = mapped_info.get("verif_unit", None)
             if wg_unit != verif_unit:
                 # perform unit conversion

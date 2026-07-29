@@ -139,7 +139,7 @@ class NetcdfParser(CfParser):
         # Original logic
         var_dict = find_pl(data.channel.values)
         data_vars = {}
-
+        # order of appending upoints should be ipoint, pressure_level, mem (if mem exists)
         for new_var, pls in var_dict.items():
             data_dims = ["ipoint"]
             if pls[0] is not None:
