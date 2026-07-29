@@ -1,100 +1,45 @@
 
-train:
-  plot:
-    r8vzykrm:
-      slurm_id: 387093
-      description: "bug-fix non-cond-branch, with sigma_data=0.63"
-    nol9pfdg:
-      slurm_id: 387094
-      description: "bug-fix cond-branch w/o cond, with sigma_data=0.63"
-    # imqzsbte:
-    #   slurm_id: 387095
-    #   description: "bug-fix non-cond"
-    f8nd1c60:
-      slurm_id: 387097
-      description: "bug-fix cond-branch w/ cond"
-    # ux8yjktb:
-    #   slurm_id: 387095
-    #   description: "bug-fix cond-branch w/ non-cond"
-    # xxkmgsne:
-    #   slurm_id: 0
-    #   description: "bug-fix cond-branch w/ non-cond, lr_max=5e-6"
-    # jwexz9y4:
-    #   slurm_id: 0
-    #   description: "bug-fix cond-branch w/ non-cond, lr_max=2.5e-6"
-    u7etjsm0:
-      slurm_id: 385058
-      description: "old ERA5, lr_start=1e-6, lr_max=1e-5"
-    mot8sfay:
-      slurm_id: 385060
-      description: "old ERA5, lr_start=1e-6, lr_max=7e-6"
-    # zhon45xy:
-    #   slurm_id: 385064
-    #   description: "conditioning w/ ERA5, lr_start=1e-6, lr_max=1e-5"
-    # yimje7g3:
-    #   slurm_id: 385062
-    #   description: "conditioning w/ ERA5, lr_start=1e-6, lr_max=7e-6"
-    # bpeh160r:
-    #   slurm_id: 381190
-    #   description: "single samples, lr_start=1e-6, lr_max=1e-6"
-    # cigywmh2:
-    #   slurm_id: 380678
-    #   description: "single samples, lr_start=1e-6, lr_max=1e-5"
-    # kxe5zfla:
-    #   slurm_id: 380680
-    #   description: "single samples, lr_start=1e-6, lr_max=5e-5"
-    # fuz6l32i:
-    #   slurm_id: 382174
-    #   description: "conditioning w/ single samples, lr_start=1e-6, lr_max=5e-5"
-    # vujmw4g2:
-    #   slurm_id: 382207
-    #   description: "conditioning w/ ERA5, lr_start=1e-6, lr_max=5e-5"
-    # t8cm7bn9:
-    #   slurm_id: 382239
-    #   description: "MERGE no conditioning w/ ERA5, lr_start=1e-6, lr_max=5e-5"
-    # b9oyntjg:
-    #   slurm_id: 382235
-    #   description: "MERGE conditioning w/ ERA5, lr_start=1e-6, lr_max=5e-5"
-    # it6wj130:
-    #   slurm_id: 376473
-    #   description: "single samples, lr_start=1e-6, lr_max=1e-5"
-    # p54uvzl2:
-    #   slurm_id: 376808
-    #   description: "single samples, lr_start=1e-5, lr_max=1e-5"
-    # lq5djr4m:
-    #   slurm_id: 376811
-    #   description: "single samples, lr_start=1e-6, lr_max=1e-6"
-    # wcruesg4:
-    #   slurm_id: 376816
-    #   description: "single samples, lr_start=1e-7, lr_max=1e-6"
-    # k3qh6elp:
-    #   slurm_id: 377059
-    #   description: "single samples, lr_start=1e-6, lr_max=5e-6"
-    # w8hp1c2g:
-    #   slurm_id: 376855
-    #   description: "20y distribution, lr_start=1e-5, lr_max=1e-5"
-    # ss9z2rqi:
-    #   slurm_id: 376858
-    #   description: "20y distribution, lr_start=1e-6, lr_max=1e-6"
-    # g9iqgz0d:
-    #   slurm_id: 376860
-    #   description: "20y distribution, lr_start=1e-7, lr_max=1e-6"
-    # q5u9p8xo: 
-    #   slurm_id: 377063
-    #   description: "20y distribution, lr_start=1e-6, lr_max=5e-6"
-    # f8e97mqx:
-    #   slurm_id: 376862
-    #   description: "20y distribution, lr_start=1e-6, lr_max=1e-5"
-    # xqgy519d:
-    #   slurm_id: 0
-    #   description: "Old Matze Baseline 1e-5 (single samples)"
-    # rj2xksg0:
-    #   slurm_id: 0
-    #   description: "Old Matze Baseline 1e-5  (single samples)"
-    bbosl5wy:
-      slurm_id: 0
-      description: "Matze Baseline (ERA5)"
-    # y0l8egdr:
-    #   slurm_id: 0
-    #   description: "New Matze Baseline (single samples)"
 
+
+train :
+  plot :
+    perrjey5 :
+      slurm_id : 0
+      description: "N320-obs, with absolute coords, larger decoder, time_window_step=6h"
+    c71eo6pu :
+      slurm_id : 0
+      description: "perrjey5 contd : N320-obs, with absolute coords, larger decoder, time_window_step=6h"
+    xc1n4mw3 :
+      slurm_id : 0
+      description: "develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml"
+    kdl0orun :
+      slurm_id : 0
+      description: "develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml, streams_prepint, linear"
+    e4327u4h :
+      slurm_id : 0
+      description: "develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml, streams_prepint, transformer"
+    d5nrjup6 :
+      slurm_id : 0
+      description: "develop"
+    iqbifydo :
+      slurm_id : 0
+      description: "develop-ssl-diffusion-v1"
+    fsvwafcl :
+      slurm_id : 0
+      description: "develop-ssl-diffusion-v1, FSDP"
+    
+
+# # develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml
+# 2026-07-25 15:41:27,781 - __main__ - INFO - ==============================================================================================
+# 2026-07-25 15:41:27,781 - __main__ - INFO -   [train     ] 'train' | run_id=xc1n4mw3 | job_ids=[1043352, 1043353, 1043354, 1043355, 1043356, 1043357, 1043358, 1043359, 1043360, 1043361, 1043362, 1043363] | start_after=immediately | dir=/e/scratch/weatherai/slurm/slurm_weathergen_xc1n4mw3_dir
+# 2026-07-25 15:41:27,781 - __main__ - INFO - ===============================================================================================
+
+# # develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml, streams_prepint, linear
+# 2026-07-26 20:26:00,332 - __main__ - INFO - ==============================================================================================
+# 2026-07-26 20:26:00,332 - __main__ - INFO -   [train     ] 'train' | run_id=kdl0orun | job_ids=[1048208, 1048209, 1048210, 1048211, 1048212, 1048213, 1048214, 1048215, 1048216, 1048217, 1048218, 1048219] | start_after=immediately | dir=/e/scratch/weatherai/slurm/slurm_weathergen_kdl0orun_dir
+# 2026-07-26 20:26:00,332 - __main__ - INFO - ===============================================================================================
+
+# # # develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml, streams_prepint, transformer
+# 2026-07-26 20:24:28,379 - __main__ - INFO - ==============================================================================================
+# 2026-07-26 20:24:28,379 - __main__ - INFO -   [train     ] 'train' | run_id=e4327u4h | job_ids=[1048190, 1048191, 1048192, 1048193, 1048194, 1048195, 1048196, 1048197, 1048198, 1048199, 1048200, 1048201] | start_after=immediately | dir=/e/scratch/weatherai/slurm/slurm_weathergen_e4327u4h_dir
+# 2026-07-26 20:24:28,379 - __main__ - INFO - ===============================================================================================

@@ -281,7 +281,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                streams_datasets[stream_info["name"]] = [ds]
+                streams_datasets[stream_info["name"]].readers += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
@@ -366,23 +366,25 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def get_sources_size(self):
         return [
             0
-            if ds[0].get_source_num_channels() == 0
-            else ds[0].get_source_num_channels()
-            + ds[0].get_geoinfo_size() + ds[0].get_coords_size() + self.tokenizer.get_size_time_embedding()
+            if ds.readers[0].get_source_num_channels() == 0
+            else ds.readers[0].get_source_num_channels()
+            + ds.readers[0].get_geoinfo_size()
+            + ds.readers[0].get_coords_size()
+            + self.tokenizer.get_size_time_embedding()
             for ds in self.streams_datasets.values()
         ]
 
     def get_sources_num_channels(self):
-        return [ds[0].get_source_num_channels() for ds in self.streams_datasets.values()]
+        return [ds.readers[0].get_source_num_channels() for ds in self.streams_datasets.values()]
 
     def get_targets_num_channels(self):
-        return [ds[0].get_target_num_channels() for ds in self.streams_datasets.values()]
+        return [ds.readers[0].get_target_num_channels() for ds in self.streams_datasets.values()]
 
     def get_targets_coords_size(self):
         # TODO: avoid hard coding magic values
         # +6 at the end for stream_id and time encoding
         return [
-            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
             for ds in self.streams_datasets.values()
         ]
 
@@ -710,14 +712,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds
+                idx, num_forecast_steps, i_max, stream_ds.readers
             )
 
             # When teacher_time_offset > 0, load a separate set of data windows
             # shifted forward in time for the teacher (target) samples.
             if self.teacher_time_offset > 0:
                 (input_data_target, output_data_target) = self._get_data_windows(
-                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds
+                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds.readers
                 )
             else:
                 input_data_target = input_data
