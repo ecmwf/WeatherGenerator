@@ -48,6 +48,7 @@ from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatol
 
 _logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # timeseries
 # ---------------------------------------------------------------------------
@@ -1034,15 +1035,9 @@ def plot_data(
                 {
                     "plotter_cfg": plotter_cfg,
                     "output_basedir": output_dir,
-<<<<<<< HEAD
-                    "tars": tars,
-                    "preds": preds,
-                    "bias_data": bias_data,
-=======
                     "tars": tars_s,
                     "preds": preds_s,
                     "bias_data": bias_s,
->>>>>>> 1d66f4558cf2ddeaa76fb89d45b06a45d53a7208
                     "sample": sample,
                     "fstep": fstep,
                     "stream": stream,
@@ -1147,11 +1142,7 @@ def _fix_zero_lead_times_for_diffusion(scores_dict: dict) -> dict:
                     fs = da.coords["forecast_step"].values
                     lt_flat = np.asarray(lt).ravel()
                     fs_flat = np.asarray(fs).ravel()
-                    if (
-                        len(lt_flat) > 1
-                        and np.all(lt_flat == 0)
-                        and np.all(np.diff(fs_flat) > 0)
-                    ):
+                    if len(lt_flat) > 1 and np.all(lt_flat == 0) and np.all(np.diff(fs_flat) > 0):
                         new_lt = np.arange(1, len(fs_flat) + 1, dtype=lt.dtype)
                         scores_dict[metric][region][stream][run_id] = da.assign_coords(
                             lead_time=("forecast_step", new_lt)
