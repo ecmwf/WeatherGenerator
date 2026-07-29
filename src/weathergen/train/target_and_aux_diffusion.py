@@ -2,7 +2,7 @@ from typing import Any
 
 import torch
 
-from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.batch import ModelBatch, get_noise_level_rn
 from weathergen.model.model import ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights, set_to_eval
 from weathergen.train.target_and_aux_module_base import (
@@ -59,8 +59,8 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         # During validation (model in eval mode), use fixed noise level
         # so that sigma = exp(eta * p_std + p_mean) is deterministic
         if model.training:
-            noise_level_rn = (
-                batch.samples[0].meta_info["ERA5_in"].params["noise_level_rn"]
+            noise_level_rn = get_noise_level_rn(
+                batch.samples[0].meta_info
             )  # TODO: adjust for multiple streams
         else:
             noise_level_rn = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0

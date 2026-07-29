@@ -30,7 +30,7 @@ import numpy as np
 import torch
 
 from weathergen.common.config import Config, get_path_run
-from weathergen.datasets.batch import SampleMetaData
+from weathergen.datasets.batch import SampleMetaData, get_noise_level_rn
 from weathergen.model.engines import ForecastingEngine
 
 logger = logging.getLogger(__name__)
@@ -279,7 +279,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         if self.training:
             noise_level_rn = torch.tensor(
-                [meta_info["ERA5_in"].params["noise_level_rn"]], device=tokens.device
+                [get_noise_level_rn(meta_info)], device=tokens.device
             )
         else:
             # During validation, use fixed noise level (default: 0.0)
