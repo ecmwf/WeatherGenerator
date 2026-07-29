@@ -89,6 +89,20 @@ variables:
     wg_unit: Pa
     std_unit: Pa
     level_type: sfc
+  tp:
+    var: tp
+    long: total_precipitation
+    std: precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc
+  cp:
+    var: cp
+    long: convective_precipitation
+    std: convective_precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc 
   tp_imerg_0:
     var: tp_imerg_0
     long: imerg_total_precipitation
@@ -138,14 +152,6 @@ variables:
     wg_unit: J m**-2
     std_unit: J m-2
     level_type: sfc
-  tp:
-    var: tp
-    long: imerg_total_precipitation
-    std: precipitation_amount
-    wg_unit: m
-    std_unit: m
-    level_type: sfc
-  
 
 coordinates:
     sfc:
