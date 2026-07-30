@@ -6,3 +6,9 @@ on Santis current nc exporter is not working with muly9d4v, error:
 `AssertionError: Grid points between forecast steps are not consistent.Check that inference was not performed with masking`
 
 Issue: nc exporter does not support time_step lower than 6h
+
+inference command: 
+uv run --offline inference --from-run-id atmofs03 --options test_config.samples_per_mini_epoch=4 test_config.output.num_samples=4 training_config.forecast.num_steps=3
+
+inference 6h model (atmofs03): cr7mq4ki 4 samples 3fstep
+inference 1h model (af90zz71)
