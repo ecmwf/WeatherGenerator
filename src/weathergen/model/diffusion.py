@@ -114,6 +114,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
         self._fixed_noise_level: float | None = None
+        # Optional ODEDiagnostics (per-ODE-step maps/spectra), attached by the trainer; the decoder
+        # closure it needs is bound by model.py.
+        self.diagnostics = None
 
         self._noise = None
 
@@ -123,7 +126,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         fstep: int = None,
         meta_info: dict[str, SampleMetaData] = None,
         coords: torch.Tensor = None,
-        num_steps: int = 10,
+        num_steps: int | None = None,
     ) -> torch.Tensor:
         """
         Forward pass that routes to training_forward or inference_forward based on model status.
@@ -142,7 +145,10 @@ class DiffusionForecastEngine(torch.nn.Module):
             fstep: Forecast step index - required for both modes
             meta_info: Sample metadata dict containing timestamps - required for both modes
             coords: Optional coordinate tensor
-            num_steps: Number of diffusion steps for inference (default: 30)
+            num_steps: Number of diffusion ODE steps for inference. If None (the default, and what
+                model.py passes), it is read from config key ``fe_diffusion_num_steps``, which
+                itself defaults to 10 — preserving the historical hardcoded value bit-identically.
+                Set ``fe_diffusion_num_steps`` in the config (or via ``--options``) to override.
 
         Returns:
             torch.Tensor: Model output (denoised prediction during training,
@@ -181,6 +187,10 @@ class DiffusionForecastEngine(torch.nn.Module):
                 if fstep is None:
                     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
                 self.cur_token = tokens.detach() if tokens is not None else None
+                # num_steps is not threaded through by model.py, so an explicit arg is rare; fall
+                # back to the config key (default 10 = the historical hardcoded value).
+                if num_steps is None:
+                    num_steps = self.cf.get("fe_diffusion_num_steps", 10)
                 return self.inference_forward(
                     fstep=fstep,
                     num_steps=num_steps,
@@ -483,7 +493,8 @@ class DiffusionForecastEngine(torch.nn.Module):
             "sigma": [],
             "x_std": [],
             "denoised_std": [],
-            "l2_to_target": [],
+            "rmse_x_t": [],
+            "rmse_x0_hat": [],
             "cosine_to_target": [],
             "c_skip": [],
             "d_cur_norm": [],
@@ -495,6 +506,17 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Per-step intermediate denoised states (one per ODE step).
         # Only populated when return_trajectory=True.
         intermediate_x: list[torch.Tensor] = [] if return_trajectory else None
+
+        # Per-ODE-step maps/spectra. Needs a reference target (absent in rollout mode) and a
+        # single sample (ensemble batches members on dim 0, with no per-member target).
+        diag = self.diagnostics if (self.cur_token is not None and batch_size == 1) else None
+        if diag is not None:
+            diag.begin(self.cur_token)
+        elif self.diagnostics is not None:
+            logger.info(
+                "ODE diagnostics disabled: no reference target (rollout mode) or "
+                f"batch_size={batch_size} > 1."
+            )
 
         # Main sampling loop.
         x_next = x * t_steps[0]
@@ -515,6 +537,9 @@ class DiffusionForecastEngine(torch.nn.Module):
 
             # Euler step.
             denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep, coords=coords)
+            # Denoised (clean-latent) estimate x0_hat at t_cur, captured before the Heun
+            # correction below reassigns `denoised` to D(x_next, t_next).
+            x0_hat = denoised
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
@@ -536,11 +561,24 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["residual_std"].append((x_hat - denoised).std().item())
                 track["x"].append(x_next.cpu())
                 if self.cur_token is not None:
-                    track["l2_to_target"].append((x_next - self.cur_token).norm().item())
+                    # Per-element RMSE (‖·‖/√numel), size-independent and comparable to
+                    # sigma_data=1. Both the noisy state x_next (last step = terminal sample at
+                    # sigma=0) and the denoised estimate x0_hat=D(x_hat) at this sigma.
+                    _rn = self.cur_token.numel() ** 0.5
+                    track["rmse_x_t"].append((x_next - self.cur_token).norm().item() / _rn)
+                    track["rmse_x0_hat"].append((x0_hat - self.cur_token).norm().item() / _rn)
                     track["x"].append(self.cur_token.cpu())
+                if diag is not None:
+                    # x_hat is the noisy state at t_cur; x0_hat is D(x_hat) at t_cur.
+                    diag.on_step(i, t_hat.item(), x_hat, x0_hat)
 
             if return_trajectory:
                 intermediate_x.append(x_next)
+
+        if diag is not None:
+            # The actual decoded sample (sigma=0). force=True so it is always recorded regardless
+            # of every_n_steps; the denoiser is undefined at the terminal node.
+            diag.on_step(num_steps, t_steps[num_steps].item(), x_next, None, force=True)
 
         if log_diagnostics:
             self._plot_sampling_diagnostics(track, num_steps)
@@ -556,68 +594,60 @@ class DiffusionForecastEngine(torch.nn.Module):
         import matplotlib.pyplot as plt
 
         steps = list(range(len(track["sigma"])))
-        has_target = len(track["l2_to_target"]) > 0
-        n_plots = 7
+        has_target = len(track["rmse_x_t"]) > 0
+        n_plots = 4 if has_target else 3
 
         fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
+        i = 0
 
         # 1) Sigma schedule
-        axes[0].semilogy(steps, track["sigma"], "o-", markersize=3)
-        axes[0].set_ylabel("sigma (noise level)")
-        axes[0].set_title(
+        axes[i].semilogy(steps, track["sigma"], "o-", markersize=3)
+        axes[i].set_ylabel("sigma (noise level)")
+        axes[i].set_title(
             f"Sampling diagnostics  |  sigma_max_eff={track['sigma'][0]:.2f}, "
             f"sigma_data={self.sigma_data}, steps={num_steps}"
         )
-        axes[0].axhline(
+        axes[i].axhline(
             self.sigma_data, color="grey", ls="--", lw=0.8, label=f"sigma_data={self.sigma_data}"
         )
-        axes[0].legend(fontsize=8)
-        axes[0].grid(True, alpha=0.3)
+        axes[i].legend(fontsize=8)
+        axes[i].grid(True, alpha=0.3)
+        i += 1
 
-        # 2) Std of x_next and denoised estimate
-        axes[1].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
-        axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
+        # 2) Per-element RMSE to target: noisy state x_t vs denoised estimate x̂₀ (comparable to
+        # sigma_data=1). x̂₀ sits near the target from the first step; x_t only reaches it at the
+        # terminal node (last point = the returned sample at sigma=0).
+        if has_target:
+            axes[i].plot(steps, track["rmse_x_t"], "o-", markersize=3, color="tab:blue",
+                         label="rmse(x_t, z)  (noisy state)")
+            axes[i].plot(steps, track["rmse_x0_hat"], "s-", markersize=3, color="tab:red",
+                         label=r"rmse($\hat{x}_0$, z)  (denoised estimate)")
+            axes[i].set_ylabel("RMSE to target (per-element)")
+            axes[i].legend(fontsize=8)
+            axes[i].grid(True, alpha=0.3)
+            i += 1
+
+        # 3) Std of x_next and denoised estimate
+        axes[i].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
+        axes[i].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
         if self.cur_token is not None:
             target_std = self.cur_token.std().item()
-            axes[1].axhline(
+            axes[i].axhline(
                 target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}"
             )
-        axes[1].set_ylabel("std")
-        axes[1].legend(fontsize=8)
-        axes[1].grid(True, alpha=0.3)
+        axes[i].set_ylabel("std")
+        axes[i].legend(fontsize=8)
+        axes[i].grid(True, alpha=0.3)
+        i += 1
 
-        if has_target:
-            # 3) L2 error to target
-            axes[2].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
-            axes[2].set_ylabel("L2 error to target")
-            axes[2].grid(True, alpha=0.3)
-
-        # 4) d_cur norm and step norm
-        axes[3].semilogy(steps, track["d_cur_norm"], "o-", markersize=3, label="||d_cur||")
-        axes[3].semilogy(steps, track["d_cur_step_norm"], "^-", markersize=3, label="||(t_next - t_hat) * d_cur||")
-        axes[3].set_ylabel("norm (log scale)")
-        axes[3].set_title("ODE drift norms")
-        axes[3].legend(fontsize=8)
-        axes[3].grid(True, alpha=0.3)
-
-        # 5) Residual std: Std(x_hat - denoised)
-        axes[4].semilogy(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[4].set_ylabel("std (log scale)")
-        axes[4].set_title("Std(x_hat - denoised)")
-        axes[4].grid(True, alpha=0.3)
-
-        # 6) Residual std zoomed to [0, 1]
-        axes[5].plot(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[5].set_ylim(0, 1)
-        axes[5].set_ylabel("std (clipped to 1)")
-        axes[5].set_title("Std(x_hat - denoised)  [y ≤ 1]")
-        axes[5].grid(True, alpha=0.3)
-
-        # 7) Std of x_next over sampling steps
-        axes[6].semilogy(steps, track["x_std"], "o-", markersize=3, color="tab:blue")
-        axes[6].set_ylabel("std (log scale)")
-        axes[6].set_title("Std of x_next over denoising steps")
-        axes[6].grid(True, alpha=0.3)
+        # 4) ODE drift norms
+        axes[i].semilogy(steps, track["d_cur_norm"], "o-", markersize=3, label="||d_cur||")
+        axes[i].semilogy(steps, track["d_cur_step_norm"], "^-", markersize=3,
+                         label="||(t_next - t_hat) * d_cur||")
+        axes[i].set_ylabel("norm (log scale)")
+        axes[i].set_title("ODE drift norms")
+        axes[i].legend(fontsize=8)
+        axes[i].grid(True, alpha=0.3)
 
         axes[-1].set_xlabel("sampling step")
         fig.tight_layout()

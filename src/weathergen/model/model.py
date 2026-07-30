@@ -796,6 +796,17 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
+            # The ODE diagnostics decode intermediate sampler states, but the sampler lives inside
+            # the forecast engine, which has no access to the decoders. Hand it a closure bound to
+            # this step's batch before it runs.
+            diagnostics = getattr(self.forecast_engine, "diagnostics", None)
+            if diagnostics is not None:
+                # step bound as a default arg: the loop variable would otherwise be captured by
+                # reference and resolve to the last forecast step.
+                diagnostics.bind_decoder(
+                    lambda toks, step=step: self.decode_tokens(model_params, step, toks, batch)
+                )
+
             # apply forecasting engine
             tokens = self.forecast_engine(
                 tokens,
@@ -914,6 +925,23 @@ class Model(torch.nn.Module):
             for k, v in output.latent[0].items():
                 new_output.add_latent_prediction(0, k, v)
         return new_output
+
+    def decode_tokens(
+        self,
+        model_params: ModelParams,
+        step: int,
+        tokens: torch.Tensor,
+        batch: ModelBatch,
+    ) -> dict:
+        """Decode arbitrary latent tokens to physical space, outside the forward's bookkeeping.
+
+        Used by the ODE diagnostics, which need to decode intermediate sampler states (``x_t``,
+        ``x0_hat``, the latent target) that never enter the ModelOutput.
+        Returns ``{stream_name: (pred_per_batch_item, ...)}``.
+        """
+        return self.predict_decoders(
+            model_params, step, tokens, batch, ModelOutput(1), out_step=0
+        ).physical[0]
 
     def predict_latent(
         self,

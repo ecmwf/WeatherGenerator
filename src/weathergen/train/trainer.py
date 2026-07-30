@@ -25,6 +25,7 @@ from torch.distributed.tensor import DTensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.model import inference_diagnostics
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
     init_model_and_shard,
@@ -56,6 +57,16 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 # cfg_keys_to_filter = ["losses", "model_input", "target_input"]
+
+
+def _physical_loss_term(mode_cfg) -> str:
+    """Name of the LossPhysical term, i.e. the one carrying the physical targets and coords.
+
+    Same selection ``write_output`` makes; both consume ``target_aux_out.physical``.
+    """
+    terms = [name for name, term in mode_cfg.losses.items() if term.type == "LossPhysical"]
+    assert len(terms) == 1, f"Expected exactly one LossPhysical term, got {terms}"
+    return terms[0]
 
 
 def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
@@ -626,6 +637,12 @@ class Trainer(TrainerBase):
         all_losses: dict[str, list] = {}
         all_stddev: dict[str, list] = {}
 
+        # Per-ODE-step maps/spectra for the diffusion sampler (off unless diag_ode_maps).
+        ode_diag = inference_diagnostics.maybe_create(
+            cf, self.model, self.dataset_val.denormalize_target_channels
+        )
+        ode_diag_term = _physical_loss_term(mode_cfg) if ode_diag is not None else None
+
         # Latent rollout RMSE diagnostic (isolated side channel): the model records rolled-out
         # latents under "latent_rollout_pred" while record_latent_rollout is set; the truth
         # latents are encoded here from the isolated batch.latent_rmse_source. Accumulate only
@@ -667,6 +684,10 @@ class Trainer(TrainerBase):
 
                         batch.to_device(self.device)
 
+                        if ode_diag is not None:
+                            # Self-disables for every batch after the first.
+                            ode_diag.set_batch(bidx)
+
                         # evaluate model
                         with torch.autocast(
                             device_type=f"cuda:{cf.local_rank}",
@@ -705,6 +726,15 @@ class Trainer(TrainerBase):
                             # downstream loss calculator and validation IO aligned.
                             if is_diffusion:
                                 _expand_targets_to_match_preds(preds, targets_and_auxs)
+
+                        # Rendered here (not in the sampler): the ground truth, the point
+                        # coordinates and the idxs_inv permutation only exist in target_aux.
+                        # The target is identical across the trajectory (see
+                        # _expand_targets_to_match_preds), so take the first fstep.
+                        if ode_diag is not None and ode_diag.enabled:
+                            ode_diag.render(
+                                targets_and_auxs[ode_diag_term].physical[0][ode_diag.stream]
+                            )
 
                         _ = self.loss_calculator_val.compute_loss(
                             preds=preds,
