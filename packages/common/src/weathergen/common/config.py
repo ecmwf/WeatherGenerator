@@ -284,7 +284,7 @@ def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
     return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> tuple[list[Path], list]:
+def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> list[Path]:
     """
     Find all model results zarr stores from a given run_id.
     """
@@ -295,7 +295,6 @@ def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> tu
         )
 
     found_paths = []
-    epochs = []
 
     for rank in rank_list:
         if isinstance(rank, int):
@@ -313,12 +312,11 @@ def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> tu
 
             for ext in StoreType.extensions():
                 found_paths.extend(run_results.glob(f"{glob_str}.{ext}"))
-                epochs.append(mini_epoch_int)
 
     if not found_paths:
         raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {run_results}")
 
-    return found_paths, epochs
+    return found_paths
 
 
 def _apply_fixes(config: Config) -> Config:

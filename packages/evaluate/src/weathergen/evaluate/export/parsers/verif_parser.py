@@ -55,11 +55,12 @@ class VerifParser(CfParser):
         """
         for k, v in kwargs.items():
             setattr(self, k, v)
-
         super().__init__(config=config)
 
-        if not hasattr(self, "obs"):
-            raise ValueError("Observation data required for creating verif compliant NetCDFs")
+        if self.obs is None:
+            raise ValueError(
+                "Observation data (--obs) required for creating verif compliant NetCDFs"
+            )
 
         self.mapping = config.get("variables", {})
 
