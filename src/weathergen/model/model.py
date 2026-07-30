@@ -18,7 +18,9 @@ import astropy_healpix as hp
 import astropy_healpix.healpy
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed.nn.functional import all_gather
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
@@ -38,6 +40,11 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.spatial_parallel import (
+    reassemble_packed_cell_shards,
+    select_healpix_neighborhood_shard,
+    select_packed_cell_shard,
+)
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
@@ -321,6 +328,16 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
+        self.target_num_channels_by_stream = dict(
+            zip(cf.streams.keys(), targets_num_channels, strict=True)
+        )
+        self.target_coords_size_by_stream = dict(
+            zip(cf.streams.keys(), targets_coords_size, strict=True)
+        )
+        self.target_ensemble_size_by_stream = {
+            name: int(stream.get("pred_head", {}).get("ens_size", 1))
+            for name, stream in cf.streams.items()
+        }
 
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
@@ -329,6 +346,12 @@ class Model(torch.nn.Module):
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
         self.target_token_engines = None
+        self.decoder_spatial_parallel_group = None
+        self.decoder_spatial_parallel_rank = 0
+        self.decoder_spatial_parallel_size = 1
+        self.decoder_local_num_healpix_cells = self.num_healpix_cells
+        self.decoder_local_cell_start = 0
+        self.decoder_local_cell_end = self.num_healpix_cells
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
             "Local attention not adapted for register tokens"
@@ -376,6 +399,15 @@ class Model(torch.nn.Module):
         self.encoder = EncoderModule(
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
+        # Decoder cells follow the encoder's contiguous spatial-rank ownership.
+        # Keeping the same group also means a cell's nine-token HEALPix
+        # neighbourhood is sent to the rank that already owns that cell.
+        self.decoder_spatial_parallel_group = self.encoder.spatial_parallel_group
+        self.decoder_spatial_parallel_rank = self.encoder.spatial_parallel_rank
+        self.decoder_spatial_parallel_size = self.encoder.spatial_parallel_size
+        self.decoder_local_num_healpix_cells = self.encoder.local_num_healpix_cells
+        self.decoder_local_cell_start = self.encoder.local_cell_start
+        self.decoder_local_cell_end = self.encoder.local_cell_end
 
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
@@ -762,14 +794,25 @@ class Model(torch.nn.Module):
         # remove register  and class tokens
         tokens = tokens[:, self.num_aux_tokens :]
 
-        # get 1-ring neighborhood for prediction
+        # Get the 1-ring neighbourhoods for the HEALPix cells owned by this
+        # spatial rank. Each row contains the cell itself plus eight neighbours.
         batch_size = len(batch)
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-        idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
-        tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
-        # TODO: precompute in model_params?
+        local_hp_nbours = model_params.hp_nbours[
+            self.decoder_local_cell_start : self.decoder_local_cell_end
+        ]
+        tokens_nbors = select_healpix_neighborhood_shard(
+            tokens.reshape(s),
+            model_params.hp_nbours,
+            self.decoder_local_cell_start,
+            self.decoder_local_cell_end,
+        )
+        num_decoder_cells = batch_size * self.decoder_local_num_healpix_cells
         tokens_nbors_lens = torch.full(
-            (s[0] * s[1] + 1,), fill_value=9, dtype=torch.int32, device=tokens_nbors.device
+            (num_decoder_cells + 1,),
+            fill_value=local_hp_nbours.shape[1],
+            dtype=torch.int32,
+            device=tokens_nbors.device,
         )
         tokens_nbors_lens[0] = 0
 
@@ -782,15 +825,36 @@ class Model(torch.nn.Module):
             ]
             t_coords_lens = [len(t) for t in t_coords]
             t_coords = torch.cat(t_coords)
-
             if len(t_coords) == 0:
                 continue
+            tcls_global = torch.stack(
+                [
+                    sample.streams_data[stream_name].target_coords_lens[step]
+                    for sample in batch.samples
+                ]
+            )
+            t_coords, tcls = select_packed_cell_shard(
+                t_coords,
+                tcls_global.flatten(),
+                self.num_healpix_cells,
+                self.decoder_local_cell_start,
+                self.decoder_local_cell_end,
+            )
+
+            local_coords_empty = len(t_coords) == 0
+            tcls_compute = tcls
+            if local_coords_empty:
+                # FSDP-wrapped decoder modules must be entered by every spatial
+                # rank. Run one dummy coordinate through them, then discard it.
+                t_coords = tokens.new_zeros((1, self.target_coords_size_by_stream[stream_name]))
+                tcls_compute = torch.zeros_like(tcls)
+                tcls_compute[0] = 1
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
             tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
 
-            # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
+            # Skip when the coordinate embedding network has diverged.
             if torch.isnan(tc_tokens).any():
                 logger.warning(
                     (
@@ -798,28 +862,29 @@ class Model(torch.nn.Module):
                         f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
                     )
                 )
-                pred = torch.tensor([], device=tc_tokens.device)
-
-            # skip empty lengths
-            elif tc_tokens.shape[0] == 0:
-                pred = torch.tensor([], device=tc_tokens.device)
-
+                pred = tc_tokens.new_empty(
+                    (
+                        self.target_ensemble_size_by_stream[stream_name],
+                        0,
+                        self.target_num_channels_by_stream[stream_name],
+                    )
+                )
+                tcls = torch.zeros_like(tcls)
             else:
                 # lens for varlen attention
-                tcls = torch.cat(
+                tcs_lens = torch.cat(
                     [
-                        sample.streams_data[stream_name].target_coords_lens[step]
-                        for sample in batch.samples
+                        torch.zeros(1, dtype=torch.int32, device=tcls.device),
+                        tcls_compute,
                     ]
                 )
-                tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
                 if self.cf.decoder_type == "Linear":
                     pred = self.target_token_engines[stream_name](
                         tc_tokens,
-                        tokens.reshape(-1, s[-1]),  # collapse the batch and token dimensions
+                        tokens.reshape(-1, s[-1]),
                         tcs_lens,
-                    ).unsqueeze(0)  # add ensemble dim: shape is then [1, preds_per_coord, channels]
+                    ).unsqueeze(0)
                 else:
                     tc_tokens = self.target_token_engines[stream_name](
                         latent=tokens_nbors,
@@ -832,8 +897,50 @@ class Model(torch.nn.Module):
                     # final prediction head to map back to physical space
                     pred = self.pred_heads[stream_name](tc_tokens)
 
+                if local_coords_empty:
+                    pred = pred[:, :0]
+
+            pred = self._gather_decoder_predictions(pred, tcls)
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
             output.add_physical_prediction(step, stream_name, pred)
 
         return output
+
+    def _gather_decoder_predictions(
+        self, pred: torch.Tensor, local_cell_lens: torch.Tensor
+    ) -> torch.Tensor:
+        """Gather packed cell-level decoder output in sample/cell order."""
+
+        if self.decoder_spatial_parallel_size == 1:
+            return pred
+
+        gathered_lens = [
+            torch.empty_like(local_cell_lens) for _ in range(self.decoder_spatial_parallel_size)
+        ]
+        dist.all_gather(
+            gathered_lens,
+            local_cell_lens,
+            group=self.decoder_spatial_parallel_group,
+        )
+        packed_lens = [int(lens.sum().item()) for lens in gathered_lens]
+        max_len = max(packed_lens)
+        if pred.shape[1] < max_len:
+            pred = torch.cat(
+                [
+                    pred,
+                    pred.new_zeros(
+                        pred.shape[0],
+                        max_len - pred.shape[1],
+                        pred.shape[2],
+                    ),
+                ],
+                dim=1,
+            )
+        gathered_pred = all_gather(pred, group=self.decoder_spatial_parallel_group)
+
+        return reassemble_packed_cell_shards(
+            list(gathered_pred),
+            gathered_lens,
+            self.decoder_local_num_healpix_cells,
+        )

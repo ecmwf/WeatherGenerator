@@ -12,7 +12,11 @@ import pytest
 import torch
 
 from weathergen.datasets.healpix_domain import build_local_healpix_cell_splits
-from weathergen.model.spatial_parallel import select_packed_cell_shard
+from weathergen.model.spatial_parallel import (
+    reassemble_packed_cell_shards,
+    select_healpix_neighborhood_shard,
+    select_packed_cell_shard,
+)
 from weathergen.utils import distributed
 
 
@@ -144,3 +148,37 @@ def test_spatial_parallel_size_requires_whole_rank_groups(monkeypatch):
 
     with pytest.raises(ValueError, match="must be divisible"):
         distributed.get_encoder_spatial_parallel_size({"encoder_spatial_parallel_size": 6})
+
+
+def test_decoder_selects_nine_neighbours_for_each_rank_local_cell():
+    tokens = torch.arange(2 * 4 * 1 * 2).reshape(2, 4, 1, 2)
+    neighbours = torch.tensor(
+        [
+            [0, 1, 2, 3, 0, 1, 2, 3, 0],
+            [1, 0, 2, 3, 1, 0, 2, 3, 1],
+            [2, 0, 1, 3, 2, 0, 1, 3, 2],
+            [3, 0, 1, 2, 3, 0, 1, 2, 3],
+        ]
+    )
+
+    selected = select_healpix_neighborhood_shard(tokens, neighbours, 1, 3)
+    expected = tokens[:, neighbours[1:3]].flatten(0, 3)
+
+    assert selected.shape == (2 * 2 * 9, 2)
+    assert torch.equal(selected, expected)
+
+
+def test_decoder_reassembles_rank_shards_in_sample_cell_order():
+    # Rank packing is [sample 0 local cells, sample 1 local cells].
+    rank_0 = torch.tensor([[[0.0], [1.0], [4.0]]])
+    rank_1 = torch.tensor([[[2.0], [3.0], [5.0], [6.0]]])
+    rank_0_lens = torch.tensor([1, 1, 1, 0], dtype=torch.int32)
+    rank_1_lens = torch.tensor([1, 1, 1, 2], dtype=torch.int32)
+
+    assembled = reassemble_packed_cell_shards(
+        [rank_0, rank_1],
+        [rank_0_lens, rank_1_lens],
+        cells_per_shard=2,
+    )
+
+    assert assembled.squeeze().tolist() == [0, 1, 2, 3, 4, 5, 6]
