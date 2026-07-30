@@ -2,13 +2,12 @@
 
 This document describes the encoder spatial-parallel implementation introduced by
 [pkuyyj/WeatherGenerator PR #1](https://github.com/pkuyyj/WeatherGenerator/pull/1).
-It covers the three feature commits:
+It covers the two feature commits:
 
 | Commit | Purpose |
 | --- | --- |
 | `15dcff5a` | Add HEALPix encoder spatial parallelism |
 | `db4b477d` | Build encoder inputs on rank-local HEALPix domains |
-| `d6068904` | Keep complete level-1 HEALPix parents on one rank |
 
 Upstream evaluation changes and branch-synchronization-only changes in the PR history are
 outside the scope of this document.
@@ -44,7 +43,6 @@ model or the complete training step.
 | data-parallel rank | Index of a spatial group in the global job |
 | spatial rank | Rank index within a spatial group |
 | data HEALPix level | The configured `healpix_level`, normally level 5 |
-| parent level | Coarser HEALPix level whose complete cells must remain rank-local |
 | packed tokens | Variable-length tensor containing only existing stream tokens |
 | dense cell tensor | Fixed-size tensor with one position for every owned HEALPix cell |
 
@@ -83,56 +81,35 @@ At the default data level `L = 5`:
 N(5) = 12 × 4^5 = 12,288
 ```
 
-At parent level `P = 1`:
+### Contiguous equal ownership
+
+The configured data-level cells are divided directly into equal, consecutive rank-local
+intervals:
 
 ```text
-N(1) = 12 × 4 = 48
+cells_per_rank = N(L) / S
+
+cell_start = spatial_rank × cells_per_rank
+cell_end   = cell_start + cells_per_rank
 ```
 
-Every level-1 parent has:
+`N(L)` must be divisible by the spatial-parallel size. For level 5 and four spatial ranks:
 
-```text
-4^(L - P) = 4^(5 - 1) = 256
-```
-
-level-5 descendants.
-
-### Parent-aligned ownership
-
-`get_local_healpix_cell_range()` partitions parent cells evenly and converts the parent
-interval into a fine-cell interval:
-
-```text
-parents_per_rank       = N(P) / S
-descendants_per_parent = 4^(L - P)
-
-cell_start = spatial_rank × parents_per_rank × descendants_per_parent
-cell_end   = cell_start + parents_per_rank × descendants_per_parent
-```
-
-For level 5, parent level 1, and four spatial ranks:
-
-| Spatial rank | Level-1 parents | Level-5 cells | Number of level-5 cells |
-| ---: | ---: | ---: | ---: |
-| 0 | `[0, 12)` | `[0, 3072)` | 3072 |
-| 1 | `[12, 24)` | `[3072, 6144)` | 3072 |
-| 2 | `[24, 36)` | `[6144, 9216)` | 3072 |
-| 3 | `[36, 48)` | `[9216, 12288)` | 3072 |
-
-Thus, each of four ranks owns exactly 12 complete level-1 cells and all 256 level-5
-descendants of each parent.
-
-The equivalent ownership for common group sizes is:
-
-| Spatial ranks | Level-1 parents/rank | Level-5 cells/rank |
+| Spatial rank | Level-5 cells | Number of level-5 cells |
 | ---: | ---: | ---: |
-| 4 | 12 | 3072 |
-| 8 | 6 | 1536 |
-| 16 | 3 | 768 |
+| 0 | `[0, 3072)` | 3072 |
+| 1 | `[3072, 6144)` | 3072 |
+| 2 | `[6144, 9216)` | 3072 |
+| 3 | `[9216, 12288)` | 3072 |
 
-The parent-cell count must be divisible by the spatial-parallel size. At parent level 1,
-for example, a spatial size of 32 is rejected because 48 parents cannot be divided into
-whole, equal parent-cell domains.
+Common group sizes produce:
+
+| Spatial ranks | Level-5 cells/rank |
+| ---: | ---: |
+| 4 | 3072 |
+| 8 | 1536 |
+| 16 | 768 |
+| 32 | 384 |
 
 ### Why consecutive ranges are valid
 
@@ -142,9 +119,9 @@ The input mapping uses nested HEALPix ordering:
 ang2pix(2**healpix_level, theta, phi, nest=True)
 ```
 
-In nested ordering, all descendants of a parent occupy a consecutive fine-cell interval.
-Assigning consecutive, parent-aligned intervals therefore keeps a parent and all of its
-descendants on one rank.
+Nested ordering gives every data-level cell a stable integer ID. Assigning consecutive ID
+intervals means that concatenating rank-local tensors in spatial-rank order reconstructs the
+original global cell order. No coarser parent-cell constraint is required.
 
 ## Distributed topology and process groups
 
@@ -540,17 +517,13 @@ therefore requires checking this value explicitly.
 
 ## Configuration
 
-The two relevant options are:
+The relevant option is:
 
 ```yaml
 encoder_spatial_parallel_size: 4
-encoder_spatial_parallel_parent_level: 1
 ```
 
 `encoder_spatial_parallel_size` controls the number of ranks per spatial group.
-
-`encoder_spatial_parallel_parent_level` controls the coarsest ownership boundary that cannot be
-split. The default is level 1.
 
 Ready-to-use overrides are provided:
 
@@ -563,7 +536,6 @@ For a four-rank job in which all ranks cooperate on one encoder sample:
 
 ```yaml
 encoder_spatial_parallel_size: 4
-encoder_spatial_parallel_parent_level: 1
 ```
 
 The expected derived values are:
@@ -572,7 +544,6 @@ The expected derived values are:
 world_size: 4
 data_parallel_world_size: 1
 local level-5 cells/rank: 3072
-level-1 parents/rank: 12
 ```
 
 For an eight-rank job with two four-rank spatial groups:
@@ -595,14 +566,13 @@ In a four-rank spatial-only run, `data_parallel_world_size` must be 1, not 4.
 
 ### Startup log
 
-Every spatial rank logs its parent and fine-cell ranges. For level 5, parent level 1, and four
-ranks, expect:
+Every spatial rank logs its fine-cell range. For level 5 and four ranks, expect:
 
 ```text
-Encoder spatial rank 0/4 owns level-1 parents [0, 12) and constructs source HEALPix cells [0, 3072)
-Encoder spatial rank 1/4 owns level-1 parents [12, 24) and constructs source HEALPix cells [3072, 6144)
-Encoder spatial rank 2/4 owns level-1 parents [24, 36) and constructs source HEALPix cells [6144, 9216)
-Encoder spatial rank 3/4 owns level-1 parents [36, 48) and constructs source HEALPix cells [9216, 12288)
+Encoder spatial rank 0/4 constructs source HEALPix cells [0, 3072)
+Encoder spatial rank 1/4 constructs source HEALPix cells [3072, 6144)
+Encoder spatial rank 2/4 constructs source HEALPix cells [6144, 9216)
+Encoder spatial rank 3/4 constructs source HEALPix cells [9216, 12288)
 ```
 
 ### Tensor-shape checks
@@ -622,8 +592,7 @@ counts can be strongly imbalanced. The important invariants are:
 
 - every retained source token belongs to the rank's cell interval;
 - no source token belongs to two ranks;
-- the union of rank-local cell intervals covers the full grid;
-- all descendants of a configured parent cell share one owner.
+- the union of rank-local cell intervals covers the full grid.
 
 ### Memory checks
 
@@ -656,9 +625,6 @@ Compare:
 | --- | --- |
 | Local construction equivalence | Concatenated local cell lists equal global construction cell-by-cell |
 | Invalid local range | Out-of-range cell intervals are rejected |
-| Parent alignment | Every descendant of a level-1 parent has one rank owner |
-| Variable token ownership | All tokens under one level-1 parent go to one rank |
-| Invalid spatial size | A size that splits parent cells is rejected |
 | Packed-token selection | Complete cells are selected across multiple input-step/sample rows |
 | Coverage and gradients | Shards cover every packed token exactly once and preserve gradients |
 | Invalid packed ranges | Invalid cell intervals are rejected |
@@ -698,7 +664,7 @@ Memory that remains replicated or becomes global includes:
 - CUDA allocator cache.
 
 The rank with the most observations can determine the job's usable batch size. Equal numbers of
-HEALPix cells or parents do not imply equal numbers of stream tokens.
+HEALPix cells do not imply equal numbers of stream tokens.
 
 ## Troubleshooting
 
@@ -746,7 +712,7 @@ spatial group. Variable source-token counts must be resolved before this boundar
 
 Verify together:
 
-- the local range returned by `get_local_healpix_cell_range()`;
+- the identical contiguous local range computed by the sampler and encoder;
 - nested HEALPix mapping (`nest=True`);
 - local `tokens_lens` cell dimension;
 - rank order inside the spatial process group;
@@ -770,10 +736,10 @@ Confirm that:
 
 | File | Responsibility |
 | --- | --- |
-| `config/default_config.yml` | Default spatial size and parent level |
+| `config/default_config.yml` | Default spatial size |
 | `config/encoder_spatial_parallel_4.yml` | Four-rank override |
 | `config/encoder_spatial_parallel_8.yml` | Eight-rank override |
-| `src/weathergen/datasets/healpix_domain.py` | Parent-aligned cell ranges and local point grouping |
+| `src/weathergen/datasets/healpix_domain.py` | Rank-local point grouping |
 | `src/weathergen/datasets/multi_stream_data_sampler.py` | Shared spatial-group samples, local ownership, and runtime logging |
 | `src/weathergen/datasets/stream_data.py` | Separate source-local and target-global cell counts |
 | `src/weathergen/datasets/tokenizer_masking.py` | Local source tokenization range |
@@ -827,31 +793,13 @@ This commit moves the domain boundary into the data pipeline:
 This is the commit that enables embedding activation memory to scale with the local observation
 domain.
 
-### `d6068904`: Keep level-1 HEALPix parents rank-local
-
-This commit changes equal fine-cell slicing into parent-aligned slicing:
-
-- introduces `encoder_spatial_parallel_parent_level`;
-- computes local ranges from complete parent cells;
-- relies on nested HEALPix continuity for descendant ranges;
-- validates that the spatial size divides the parent-cell count;
-- handles completely empty local domains during point grouping;
-- logs both parent and fine-cell ownership;
-- updates four-rank and eight-rank configuration descriptions;
-- adds tests proving that parent descendants cannot cross rank boundaries;
-- adds a variable-token test demonstrating that all tokens from one parent share one owner;
-- rejects spatial configurations that would split a parent.
-
-With the default level-1 parent boundary and four ranks, this establishes the final invariant:
-each rank owns 12 complete level-1 cells and 3,072 consecutive level-5 cells.
-
 ## Review checklist
 
 Before merging or extending this feature, verify:
 
 - [ ] The effective spatial size is explicit in the run configuration.
 - [ ] `world_size % encoder_spatial_parallel_size == 0`.
-- [ ] The configured parent-cell count is divisible by the spatial size.
+- [ ] The data-level HEALPix cell count is divisible by the spatial size.
 - [ ] Every spatial group consumes identical samples.
 - [ ] Every source stream constructs only local cells.
 - [ ] Source and target cell dimensions remain intentionally different.
@@ -860,5 +808,5 @@ Before merging or extending this feature, verify:
 - [ ] The gather remains autograd-aware.
 - [ ] Empty local domains enter all FSDP modules in consistent order.
 - [ ] Effective batch size counts spatial groups, not individual spatial ranks.
-- [ ] Tests cover parent ownership, exact ordering, token coverage, and gradients.
+- [ ] Tests cover exact ordering, token coverage, and gradients.
 - [ ] Runtime validation compares allocated memory across all spatial ranks.
