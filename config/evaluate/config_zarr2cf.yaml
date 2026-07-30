@@ -152,7 +152,14 @@ variables:
     wg_unit: J m**-2
     std_unit: J m-2
     level_type: sfc
-
+  tcw:
+    var: tcw
+    long: total_column_water
+    std: atmosphere_mass_content_of_water_vapor # TODO: check
+    wg_unit: kg/m^2
+    std_unit: kg/m^2
+    level_type: sfc
+  
 coordinates:
     sfc:
         valid_time: valid_time

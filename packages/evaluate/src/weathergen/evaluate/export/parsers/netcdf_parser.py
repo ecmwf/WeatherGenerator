@@ -55,6 +55,7 @@ class NetcdfParser(CfParser):
         self,
         fstep_iterator_results: iter,
         ref_time: np.datetime64,
+        default_fstep: int,
         **kwargs,
     ):
         """
@@ -92,7 +93,7 @@ class NetcdfParser(CfParser):
                     "Check that inference was not performed with masking"
                 )
             da_fs = self.concatenate(da_fs)
-            da_fs = self.assign_frt(da_fs, ref_time)
+            da_fs = self.assign_frt(da_fs, ref_time, default_fstep)
             da_fs = self.add_attrs(da_fs)
             da_fs = self.add_metadata(da_fs)
             da_fs = self.add_encoding(da_fs)
@@ -254,7 +255,9 @@ class NetcdfParser(CfParser):
 
         return data
 
-    def assign_frt(self, ds: xr.Dataset, reference_time: np.datetime64) -> xr.Dataset:
+    def assign_frt(
+        self, ds: xr.Dataset, reference_time: np.datetime64, default_fstep: int
+    ) -> xr.Dataset:
         """
         Assign forecast reference time coordinate to the dataset.
 
@@ -272,8 +275,7 @@ class NetcdfParser(CfParser):
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
 
-        n_hours = self.fstep_hours.astype("int64")
-        ds["forecast_step"] = ds["forecast_step"] * n_hours
+        ds["forecast_step"] = ds["forecast_step"] * default_fstep
         return ds
 
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:

@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
+from omegaconf.listconfig import ListConfig
 from tqdm import tqdm
 
 from weathergen.common.config import (
@@ -269,19 +270,13 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
     source_ends = []
     with zarrio_reader(fname_zarr) as zio:
         for sample in tqdm(samples, desc="Getting source info"):
-            group_path = f"{sample}/{stream}/0/source"
-            source_group = zio.data_root.get(group_path)
-
-            if source_group is None:
-                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
-
-            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
-            source_start = np.min(times_arr)
-            source_end = np.max(times_arr)
-
-            _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
-            source_starts.append(source_start)
-            source_ends.append(source_end)
+            data = zio.get_data(sample, stream, 0).source.as_xarray()
+            source_starts.append(data.source_interval_start.values.astype("datetime64[ns]"))
+            source_ends.append(data.source_interval_end.values.astype("datetime64[ns]"))
+            _logger.debug(
+                f"Sample {sample}: source_interval_start={source_starts[-1]}, "
+                f"source_interval_end={source_ends[-1]}"
+            )
 
     return source_starts, source_ends
 
@@ -291,6 +286,29 @@ def get_streams(stream, fname_zarr):
         zio_streams = zio.streams
     streams = zio_streams if stream is None else [stream]
     return streams
+
+
+def get_default_fstep(kwargs, epoch):
+    try:
+        inference_config = load_run_config(kwargs.run_id, mini_epoch=epoch, model_path=None)
+        default_fstep = inference_config.training_config.forecast.time_step
+        # preprocess to integer hours
+        default_fstep = default_fstep.split(" ")[0]
+        # backwards compatibility if fstep in '06:00:00' format
+        if ":" in default_fstep:
+            default_fstep = default_fstep.split(":")[0]
+            default_fstep = int(default_fstep)
+        else:
+            default_fstep = int(default_fstep) // 3600000  # convert miliseconds to hours
+    except FileNotFoundError:
+        _logger.warning(
+            "Could not retrieve default forecast step from inference config."
+            "Using fstep_hours from kwargs instead. "
+            f"Amend if {kwargs.fstep_hours} is incorrect."
+        )
+        default_fstep = kwargs.fstep_hours
+
+    return default_fstep
 
 
 def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:

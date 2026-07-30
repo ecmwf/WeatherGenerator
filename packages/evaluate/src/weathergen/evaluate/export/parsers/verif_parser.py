@@ -79,6 +79,7 @@ class VerifParser(CfParser):
         ref_time: np.datetime64,
         source_interval_start: np.datetime64 = None,
         source_interval_end: np.datetime64 = None,
+        default_fstep: str = None,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -99,6 +100,8 @@ class VerifParser(CfParser):
             )
             return
 
+        self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end, default_fstep)
+
         da_fs = []
         for result in fstep_iterator_results:
             if result is None:
@@ -116,7 +119,6 @@ class VerifParser(CfParser):
         if da_fs:
             if self.zarr_coords is None:
                 self.zarr_coords = get_grid_points(da_fs[0])
-                self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end)
             # check consistency of grid points across forecast steps
             if len(da_fs) > 1:
                 assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
@@ -124,7 +126,7 @@ class VerifParser(CfParser):
                     "Check that inference was not performed with masking"
                 )
             da_fs = self.concatenate(da_fs)
-            da_fs = self.assign_frt(da_fs, ref_time)
+            da_fs = self.assign_frt(da_fs, ref_time, default_fstep)
             da_fs = self.add_attrs(da_fs)
             vars_to_merge = {verif_var: None for verif_var in self.mapping.keys()}
 
@@ -144,6 +146,7 @@ class VerifParser(CfParser):
         self,
         source_interval_start: np.datetime64,
         source_interval_end: np.datetime64,
+        default_fstep: str = None,
     ) -> np.timedelta64:
         """
         Compute the time difference between source interval start and end in hours.
@@ -159,7 +162,9 @@ class VerifParser(CfParser):
                 Time difference between source interval start and end in hours.
         """
         zarr_dt = (source_interval_end - source_interval_start).astype("timedelta64[h]")
-
+        if zarr_dt == np.timedelta64(0, "h"):
+            _logger.error(
+                "Source interval start and end are the same. Check Zarr data directly. ")
         return zarr_dt
 
     def get_output_filename(self, variable: str) -> Path:
@@ -314,9 +319,29 @@ class VerifParser(CfParser):
 
             # remove unnecessary
             new_ds = new_ds.drop_sel(channel=["10u", "10v"])
-            return new_ds
-        else:
-            return ds
+            ds = new_ds
+
+        if "tp" in self.channels:
+            if self.zarr_dt < np.timedelta64(1, "h"):
+                _logger.warning(
+                    f"Observation time resolution {self.zarr_dt} is less than 1 hour. "
+                    "WeatherGenerator output will be aggregated to 1 hour intervals"
+                    "This feature has not undergone rigourous testing, check output"
+                )
+                int_factor = int(np.timedelta64(1, "h") / self.zarr_dt)
+                # initialise empty
+                precip_accumulate = np.full(ds.data_vars["tp"].shape, np.nan, dtype=np.float32)
+                accumulate = np.zeros(ds.ipoint.shape[0])
+                for i, leadtime in enumerate(ds.coords["leadtime"].values):
+                    for j in range(int_factor):
+                        back_time = leadtime - self.zarr_dt + (j + 1) * self.zarr_dt
+                        accumulate += ds.data_vars["tp"].sel(time=back_time).squeeze()
+                    precip_accumulate[:, i, :] = accumulate
+                ds["tp"] = xr.DataArray(
+                    precip_accumulate, dims=ds.data_vars["tp"].dims, attrs=ds.data_vars["tp"].attrs
+                )
+
+        return ds
 
     def regrid(self, ds: xr.Dataset, verif_var: str) -> xr.Dataset:
         """
@@ -433,7 +458,9 @@ class VerifParser(CfParser):
 
         return data
 
-    def assign_frt(self, ds: xr.Dataset, reference_time: np.datetime64) -> xr.Dataset:
+    def assign_frt(
+        self, ds: xr.Dataset, reference_time: np.datetime64, default_fstep: int
+    ) -> xr.Dataset:
         """
         Assign forecast reference time coordinate to the dataset.
 
@@ -441,6 +468,7 @@ class VerifParser(CfParser):
         ----------
             ds : xarray Dataset to assign coordinates to.
             reference_time : Forecast reference time to assign.
+            default_fstep : Default forecast step to use if not available in the dataset.
 
         Returns
         -------
@@ -450,8 +478,7 @@ class VerifParser(CfParser):
 
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
-        n_hours = self.fstep_hours.astype("int64")
-        ds["forecast_step"] = ds["forecast_step"] * n_hours
+        ds["forecast_step"] = ds["forecast_step"] * default_fstep
         return ds
 
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:
@@ -544,7 +571,6 @@ class VerifParser(CfParser):
             mapped_units = mapped_info.get("wg_unit", {})
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
-
             wg_unit = mapped_units.get(self.stream, "DEFAULT")
             verif_unit = mapped_info.get("verif_unit", None)
             if wg_unit != verif_unit:
@@ -557,6 +583,8 @@ class VerifParser(CfParser):
 
             if "long" in mapped_info:
                 attributes["long_name"] = mapped_info["long"]
+            
+            print(f"Mapping variable '{var_name}' to '{mapped_name}' with attributes {attributes} and coordinates {coords}.")
             variables[mapped_name] = xr.DataArray(
                 data=da.values,
                 dims=da.dims,
@@ -656,6 +684,8 @@ class VerifParser(CfParser):
             ds = xr.concat(
                 var_list, dim="time", data_vars="minimal", coords="minimal", join="exact"
             )
+            # order by location
+            ds = ds.sortby("location")
             out_fname = self.get_output_filename(verif_var)
             _logger.info(f"Saving to {out_fname}.")
             ds.to_netcdf(out_fname)

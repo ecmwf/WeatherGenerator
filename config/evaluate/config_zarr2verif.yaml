@@ -34,7 +34,7 @@ variables:
     var: tp
     long: Total precipitation amount
     wg_unit:  {CERRA:   kg/m^2,
-               MEPS:    kg/m^2,
+               MEPS:    m,
                NORA3:   kg/m^2,
                ERA5:    m,
                DEFAULT: kg/m^2}
@@ -89,6 +89,9 @@ coordinates:
         ncells: ncells
 
 dimensions:
+    valid_time:
+      verif: time
+      std: time
     lat: 
       verif: latitude
       std: latitude
@@ -102,7 +105,7 @@ dimensions:
       std: pressure
       verif_unit: hPa
     forecast_reference_time: 
-      verif: time
+      verif: forecast_reference_time
       std: forecast_reference_time
     forecast_step:
       verif: leadtime
