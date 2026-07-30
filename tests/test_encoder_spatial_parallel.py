@@ -16,6 +16,7 @@ from weathergen.model.spatial_parallel import (
     reassemble_packed_cell_shards,
     select_healpix_neighborhood_shard,
     select_packed_cell_shard,
+    split_cell_lens_by_shard,
 )
 from weathergen.utils import distributed
 
@@ -182,3 +183,17 @@ def test_decoder_reassembles_rank_shards_in_sample_cell_order():
     )
 
     assert assembled.squeeze().tolist() == [0, 1, 2, 3, 4, 5, 6]
+
+
+def test_decoder_derives_rank_lens_from_global_target_lens():
+    global_lens = torch.tensor(
+        [
+            [1, 0, 2, 3],
+            [0, 4, 1, 2],
+        ],
+        dtype=torch.int32,
+    )
+
+    shards = split_cell_lens_by_shard(global_lens, num_shards=2)
+
+    assert [shard.tolist() for shard in shards] == [[1, 0, 0, 4], [2, 3, 1, 2]]

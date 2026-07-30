@@ -44,6 +44,7 @@ from weathergen.model.spatial_parallel import (
     reassemble_packed_cell_shards,
     select_healpix_neighborhood_shard,
     select_packed_cell_shard,
+    split_cell_lens_by_shard,
 )
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
@@ -328,16 +329,9 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
-        self.target_num_channels_by_stream = dict(
-            zip(cf.streams.keys(), targets_num_channels, strict=True)
-        )
         self.target_coords_size_by_stream = dict(
             zip(cf.streams.keys(), targets_coords_size, strict=True)
         )
-        self.target_ensemble_size_by_stream = {
-            name: int(stream.get("pred_head", {}).get("ens_size", 1))
-            for name, stream in cf.streams.items()
-        }
 
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
@@ -854,53 +848,56 @@ class Model(torch.nn.Module):
             tc_embed = self.embed_target_coords[stream_name]
             tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
 
-            # Skip when the coordinate embedding network has diverged.
-            if torch.isnan(tc_tokens).any():
-                logger.warning(
-                    (
-                        f"Skipping prediction for {stream_name} because",
-                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
-                    )
+            # A rank-local NaN must stop every peer before any rank enters the
+            # FSDP-wrapped prediction engine and head.
+            has_nan = torch.isnan(tc_tokens).any().to(dtype=torch.int32)
+            if self.decoder_spatial_parallel_size > 1:
+                dist.all_reduce(
+                    has_nan,
+                    op=dist.ReduceOp.MAX,
+                    group=self.decoder_spatial_parallel_group,
                 )
-                pred = tc_tokens.new_empty(
-                    (
-                        self.target_ensemble_size_by_stream[stream_name],
-                        0,
-                        self.target_num_channels_by_stream[stream_name],
-                    )
+            if has_nan.item():
+                raise FloatingPointError(
+                    f"NaN in target-coordinate embedding for {stream_name} at step {step}"
                 )
-                tcls = torch.zeros_like(tcls)
+
+            # lens for varlen attention
+            tcs_lens = torch.cat(
+                [
+                    torch.zeros(1, dtype=torch.int32, device=tcls.device),
+                    tcls_compute,
+                ]
+            )
+
+            if self.cf.decoder_type == "Linear":
+                if self.cf.ae_local_num_queries != 1:
+                    raise NotImplementedError("Linear decoder requires ae_local_num_queries == 1")
+                local_tokens = tokens.reshape(s)[
+                    :,
+                    self.decoder_local_cell_start : self.decoder_local_cell_end,
+                ].reshape(-1, s[-1])
+                pred = self.target_token_engines[stream_name](
+                    tc_tokens,
+                    local_tokens,
+                    tcs_lens,
+                ).unsqueeze(0)
             else:
-                # lens for varlen attention
-                tcs_lens = torch.cat(
-                    [
-                        torch.zeros(1, dtype=torch.int32, device=tcls.device),
-                        tcls_compute,
-                    ]
+                tc_tokens = self.target_token_engines[stream_name](
+                    latent=tokens_nbors,
+                    output=tc_tokens,
+                    latent_lens=tokens_nbors_lens,
+                    output_lens=tcs_lens,
+                    coordinates=t_coords,
                 )
 
-                if self.cf.decoder_type == "Linear":
-                    pred = self.target_token_engines[stream_name](
-                        tc_tokens,
-                        tokens.reshape(-1, s[-1]),
-                        tcs_lens,
-                    ).unsqueeze(0)
-                else:
-                    tc_tokens = self.target_token_engines[stream_name](
-                        latent=tokens_nbors,
-                        output=tc_tokens,
-                        latent_lens=tokens_nbors_lens,
-                        output_lens=tcs_lens,
-                        coordinates=t_coords,
-                    )
+                # final prediction head to map back to physical space
+                pred = self.pred_heads[stream_name](tc_tokens)
 
-                    # final prediction head to map back to physical space
-                    pred = self.pred_heads[stream_name](tc_tokens)
+            if local_coords_empty:
+                pred = pred[:, :0]
 
-                if local_coords_empty:
-                    pred = pred[:, :0]
-
-            pred = self._gather_decoder_predictions(pred, tcls)
+            pred = self._gather_decoder_predictions(pred, tcls_global)
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
             output.add_physical_prediction(step, stream_name, pred)
@@ -908,20 +905,16 @@ class Model(torch.nn.Module):
         return output
 
     def _gather_decoder_predictions(
-        self, pred: torch.Tensor, local_cell_lens: torch.Tensor
+        self, pred: torch.Tensor, global_cell_lens: torch.Tensor
     ) -> torch.Tensor:
         """Gather packed cell-level decoder output in sample/cell order."""
 
         if self.decoder_spatial_parallel_size == 1:
             return pred
 
-        gathered_lens = [
-            torch.empty_like(local_cell_lens) for _ in range(self.decoder_spatial_parallel_size)
-        ]
-        dist.all_gather(
-            gathered_lens,
-            local_cell_lens,
-            group=self.decoder_spatial_parallel_group,
+        gathered_lens = split_cell_lens_by_shard(
+            global_cell_lens,
+            self.decoder_spatial_parallel_size,
         )
         packed_lens = [int(lens.sum().item()) for lens in gathered_lens]
         max_len = max(packed_lens)

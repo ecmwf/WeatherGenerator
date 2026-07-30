@@ -108,3 +108,16 @@ def reassemble_packed_cell_shards(
             rank_offsets[rank] += sample_len
         sample_predictions.append(torch.cat(sample_shards, dim=1))
     return torch.cat(sample_predictions, dim=1)
+
+
+def split_cell_lens_by_shard(cell_lens: torch.Tensor, num_shards: int) -> list[torch.Tensor]:
+    """Split global ``(sample, cell)`` lengths into contiguous rank-local grids."""
+
+    if cell_lens.ndim != 2:
+        raise ValueError("cell_lens must have shape (sample, cell)")
+    if num_shards < 1 or cell_lens.shape[1] % num_shards:
+        raise ValueError(
+            f"number of cells ({cell_lens.shape[1]}) must be divisible by num_shards ({num_shards})"
+        )
+
+    return [shard.flatten() for shard in torch.chunk(cell_lens, num_shards, dim=1)]
