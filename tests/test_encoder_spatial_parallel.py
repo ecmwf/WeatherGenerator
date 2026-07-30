@@ -64,6 +64,18 @@ def test_local_healpix_construction_rejects_invalid_range():
         )
 
 
+def test_local_healpix_construction_handles_empty_domain():
+    cell_splits = build_local_healpix_cell_splits(
+        np.array([0, 1, 2], dtype=np.int64),
+        num_cells=12,
+        cell_start=6,
+        cell_end=9,
+    )
+
+    assert len(cell_splits) == 3
+    assert all(cell.dtype == np.int64 and cell.size == 0 for cell in cell_splits)
+
+
 def test_select_packed_cell_shard_preserves_cell_boundaries_across_rows():
     cell_lens = torch.tensor(
         [

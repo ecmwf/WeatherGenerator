@@ -29,6 +29,9 @@ def build_local_healpix_cell_splits(
     local_domain_mask = (cell_ids >= cell_start) & (cell_ids < cell_end)
     local_point_idxs = np.flatnonzero(local_domain_mask)
     local_cell_ids = cell_ids[local_point_idxs]
+    cell_splits = [np.array([], dtype=np.int64) for _ in range(cell_end - cell_start)]
+    if local_point_idxs.size == 0:
+        return cell_splits
 
     stable_args = {"stable": True} if int(np.__version__.split(".")[0]) >= 2 else {}
     local_order = np.argsort(local_cell_ids, **stable_args)
@@ -37,7 +40,6 @@ def build_local_healpix_cell_splits(
     split_offsets = np.flatnonzero(np.diff(sorted_cell_ids))
     point_idxs_by_occupied_cell = np.split(sorted_point_idxs, split_offsets + 1)
 
-    cell_splits = [np.array([], dtype=np.int64) for _ in range(cell_end - cell_start)]
     for cell_id, point_idxs in zip(
         np.unique(sorted_cell_ids),
         point_idxs_by_occupied_cell,
