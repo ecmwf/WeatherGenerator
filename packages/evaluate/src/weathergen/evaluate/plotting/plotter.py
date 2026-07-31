@@ -71,6 +71,7 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
 _logger.debug(f"Taking cartopy paths from {work_dir}")
 
+
 @dataclass
 class DistStats:
     """Summary statistics for a 1-D distribution."""

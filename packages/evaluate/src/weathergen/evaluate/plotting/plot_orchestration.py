@@ -449,7 +449,9 @@ def _scatter_plot_single(
 # ---------------------------------------------------------------------------
 
 
-def _pad_frames_for_mp4(frames: list[np.ndarray], macro_block_size: int = 16) -> list[np.ndarray]:
+def _pad_frames_for_mp4(
+    frames: list[np.typing.NDArray], macro_block_size: int = 16
+) -> list[np.typing.NDArray]:
     """Pad frames to a common size aligned to ``macro_block_size``.
 
     Frames come from ``savefig(bbox_inches="tight")``, so their pixel dimensions can
@@ -538,11 +540,9 @@ def _build_single_animation(
         images = [Image.open(p).convert("RGB") for p in image_paths]
         # GIF frames are palette-indexed (256 colors max) — this is a hard
         # format limit, so gradients like colorbars can never be truly
-        # continuous here. 
+        # continuous here.
         palette = images[0].quantize(colors=256, method=Image.Quantize.MAXCOVERAGE)
-        frames = [
-            img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images
-        ]
+        frames = [img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images]
         frames[0].save(
             out_path,
             save_all=True,
@@ -557,8 +557,10 @@ def _build_single_animation(
         fps = 1000 / duration_ms if duration_ms > 0 else 2
         imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
     else:
-        raise ValueError(f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'.")
-    
+        raise ValueError(
+            f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'."
+        )
+
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
 
