@@ -193,7 +193,9 @@ query aggregation and global assimilation
 | Dense per-cell latent after gather | No |
 | Query aggregation | No |
 | Global assimilation | No |
-| Target construction, prediction, and loss | No |
+| Target construction | No |
+| Prediction | Yes; see [`decoder_spatial_parallelism.md`](decoder_spatial_parallelism.md) |
+| Physical loss after prediction gather | No |
 | Model parameters/FSDP state | Controlled separately by FSDP |
 
 The implementation reduces GPU source-token and activation memory, but does not yet perform
