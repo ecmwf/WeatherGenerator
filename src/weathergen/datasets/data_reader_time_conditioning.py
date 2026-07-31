@@ -56,7 +56,14 @@ class DataReaderTimeConditioning(DataReaderBase):
         self.geoinfo_idx = []
 
         self.conditioning_type = stream_info.get("conditioning_type", "time_based")
-        self.value_type = stream_info.get("value_type", "hour")
+        value_type = stream_info.get("value_type", "hour")
+        if isinstance(value_type, list):
+            self.value_types = value_type
+        else:
+            self.value_types = [value_type]
+
+        self.source_channels = [f"time_conditioning_{vt}" for vt in self.value_types]
+        self.target_channels = []
 
         self.constant_value = stream_info.get("value", 0.0)
         self.min_val = stream_info.get("min", 0.0)
@@ -75,20 +82,22 @@ class DataReaderTimeConditioning(DataReaderBase):
         dt_range = self.time_window_handler.window(idx)
         dt = dt_range.start
 
-        if self.conditioning_type == "time_based":
-            if self.value_type == "hour":
-                hours = dt.astype("datetime64[h]").astype(int) % 24
-                minutes = dt.astype("datetime64[m]").astype(int) % 60
-                total_hours = hours + minutes / 60.0
-                value = np.array([total_hours / 24.0], dtype=np.float32)
-            elif self.value_type == "day":
-                days = dt.astype("datetime64[D]").astype(int) % 365
-                value = np.array([days / 365.0], dtype=np.float32)
+        values = []
+        for vt in self.value_types:
+            if self.conditioning_type == "time_based":
+                if vt == "hour":
+                    hours = dt.astype("datetime64[h]").astype(int) % 24
+                    minutes = dt.astype("datetime64[m]").astype(int) % 60
+                    total_hours = hours + minutes / 60.0
+                    value = total_hours / 24.0
+                elif vt == "day":
+                    days = dt.astype("datetime64[D]").astype(int) % 365
+                    value = days / 365.0
+                else:
+                    raise ValueError(f"Unknown value_type: {vt}")
+                values.append(value)
             else:
-                raise ValueError(f"Unknown value_type: {self.value_type}")
-
-        else:
-            raise ValueError(f"Unknown conditioning_type: {self.conditioning_type}")
+                raise ValueError(f"Unknown conditioning_type: {self.conditioning_type}")
 
         coords = np.zeros((1, 2), dtype=np.float32)
         geoinfos = np.zeros((1, 0), dtype=np.float32)
