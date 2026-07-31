@@ -534,23 +534,11 @@ def _build_single_animation(
     anim_parts.append(var)
     out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
 
-    if animation_format.lower() == "mp4":
-        frames = _pad_frames_for_mp4([imageio.imread(p) for p in image_paths])
-        fps = 1000 / duration_ms if duration_ms > 0 else 2
-        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
-    else:
+    if animation_format.lower() == "gif":
         images = [Image.open(p).convert("RGB") for p in image_paths]
         # GIF frames are palette-indexed (256 colors max) — this is a hard
         # format limit, so gradients like colorbars can never be truly
-        # continuous here. Quantizing each frame independently (PIL's
-        # default) additionally dithers every frame against its own palette,
-        # which makes it look scattered and flicker between frames. Quantize
-        # once against a shared palette, with dithering off, for the best
-        # approximation the format allows. MAXCOVERAGE (rather than the
-        # frequency-weighted MEDIANCUT) avoids spending most of the palette
-        # on tiny noise variations within large flat/background regions,
-        # which otherwise starves smooth gradients like colorbars down to a
-        # handful of visibly-banded steps.
+        # continuous here. 
         palette = images[0].quantize(colors=256, method=Image.Quantize.MAXCOVERAGE)
         frames = [
             img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images
@@ -564,7 +552,13 @@ def _build_single_animation(
         )
         for img in images:
             img.close()
-
+    elif animation_format.lower() == "mp4":
+        frames = _pad_frames_for_mp4([imageio.imread(p) for p in image_paths])
+        fps = 1000 / duration_ms if duration_ms > 0 else 2
+        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
+    else:
+        raise ValueError(f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'.")
+    
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
 
