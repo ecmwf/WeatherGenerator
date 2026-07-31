@@ -78,9 +78,22 @@ class NetcdfParser(CfParser):
                 result = result.as_xarray().squeeze()
             if "channel" not in result.indexes:
                 result = result.expand_dims("channel")
-            result = result.sel(channel=self.channels)
-            result = self.reshape(result)
-            da_fs.append(result)
+                
+            # Get unique valid_time
+            unique_times = np.sort(np.unique(result.valid_time.values))
+
+            for vt in unique_times:
+                                
+                sub = result.sel(channel=self.channels,
+                              valid_time = vt)
+
+                if len(unique_times) > 1:
+                    # Assign same grid point index to all ipoint
+                    new_ipoint = sub.ipoint.copy(data = np.arange(sub.sizes["ipoint"]))
+                    sub = sub.assign_coords(ipoint=new_ipoint)
+                    
+                sub = self.reshape(sub)
+                da_fs.append(sub)
 
         _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {self.data_type}.")
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
@@ -93,6 +106,7 @@ class NetcdfParser(CfParser):
                 )
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
+            print(da_fs)
             da_fs = self.add_attrs(da_fs)
             da_fs = self.add_metadata(da_fs)
             da_fs = self.add_encoding(da_fs)
@@ -137,6 +151,7 @@ class NetcdfParser(CfParser):
         grid_type = self.grid_type
 
         # Original logic
+        #print("*** Sel xarray: ", data)
         var_dict = find_pl(data.channel.values)
         data_vars = {}
         # order of appending upoints should be ipoint, pressure_level, mem (if mem exists)
@@ -161,9 +176,13 @@ class NetcdfParser(CfParser):
                 )
 
         reshaped_dataset = xr.Dataset(data_vars)
+        #print("*** Reshaped xarray coords: ", data.coords["ipoint"])
         reshaped_dataset = reshaped_dataset.assign_coords(
             ipoint=data.coords["ipoint"],
         )
+        # print(reshaped_dataset)
+        # print(reshaped_dataset.lat.values)
+        # print(grid_type)
         # order using pressure_level coord
         if "pressure_level" in reshaped_dataset.coords:
             reshaped_dataset = reshaped_dataset.sortby("pressure_level")
@@ -183,6 +202,7 @@ class NetcdfParser(CfParser):
             reshaped_dataset = reshaped_dataset.rename_dims({"ipoint": "ncells"})
             reshaped_dataset = reshaped_dataset.rename_vars({"ipoint": "ncells"})
 
+        #print(reshaped_dataset.lat)
         return reshaped_dataset
 
     def regrid(self, ds: xr.Dataset) -> xr.Dataset:

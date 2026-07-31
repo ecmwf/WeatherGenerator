@@ -10,5 +10,5 @@ Issue: nc exporter does not support time_step lower than 6h
 inference command: 
 uv run --offline inference --from-run-id atmofs03 --options test_config.samples_per_mini_epoch=4 test_config.output.num_samples=4 training_config.forecast.num_steps=3
 
-inference 6h model (atmofs03): cr7mq4ki 4 samples 3fstep
-inference 1h model (af90zz71)
+inference 6h model (atmofs03): h8ymb6sh (Santis) -- cr7mq4ki (Jupiter)
+inference 1h model (af90zz71): muly9d4v (Santis) -- // 
