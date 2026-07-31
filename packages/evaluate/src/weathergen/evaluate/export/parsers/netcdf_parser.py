@@ -86,7 +86,8 @@ class NetcdfParser(CfParser):
                 sub = result.sel(channel=self.channels, valid_time=vt)
 
                 if len(unique_times) > 1:
-                    # Reassign ipoint so that the same spatial point indices are used for each unique valid_time
+                    # Reassign ipoint so that the same spatial point indices are used
+                    # for each unique valid_time
                     new_ipoint = sub.ipoint.copy(data=np.arange(sub.sizes["ipoint"]))
                     sub = sub.assign_coords(ipoint=new_ipoint)
 
