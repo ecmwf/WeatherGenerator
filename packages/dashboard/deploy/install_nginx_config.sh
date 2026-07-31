@@ -27,7 +27,7 @@ tmp_conf="$(mktemp)"
 trap 'rm -f "$tmp_conf"' EXIT
 
 export SERVER_NAME STREAMLIT_UPSTREAM CERT_FILE KEY_FILE
-python - "$TEMPLATE" "$tmp_conf" <<'PY'
+uv run python - "$TEMPLATE" "$tmp_conf" <<'PY'
 import os
 import sys
 from pathlib import Path
