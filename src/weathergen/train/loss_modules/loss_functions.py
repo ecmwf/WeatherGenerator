@@ -292,6 +292,14 @@ def cosine_latitude(target_coords, min_value=1e-3, max_value=1.0):
     return (max_value - min_value) * torch.cos(latitudes_radian) + min_value
 
 
+def o96_latitude(target_coords, min_value=1e-3, max_value=1.0):
+    latitudes_radian = target_coords[:, 0] * np.pi / 180
+    cos_lat = torch.cos(latitudes_radian)
+    n_lat = 400 - torch.abs(target_coords[:, 0]) * (400 - 20) / 90
+    weights = cos_lat / n_lat
+    return (max_value - min_value) * weights + min_value
+
+
 def gamma_decay(num_forecast_steps, gamma):
     fsteps = np.arange(num_forecast_steps)
     weights = gamma**fsteps
