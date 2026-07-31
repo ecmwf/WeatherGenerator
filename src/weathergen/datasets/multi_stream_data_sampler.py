@@ -250,44 +250,49 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            filenames_cfg = stream_info.get("filenames")
-            if filenames_cfg is None:
-                # No file required (e.g. synthetic streams)
+            filenames_cfg = stream_info.get("filenames", [pathlib.Path()])
+            conditioning_cfg = stream_info.get("conditioning", False)
+
+            if conditioning_cfg:
+                if filenames_cfg is None or len(filenames_cfg) == 0:
+                    ds_type = stream_info["type"]
+                    if is_root():
+                        logger.info(
+                            f"Opening conditioning dataset with type: {ds_type}"
+                            + f" from stream config {stream_name}.",
+                        )
+                    ds = dataset(filename=None, **kwargs)
+                    streams_datasets[stream_name].readers += [ds]
+                    continue
+                else:
+                    pass
+
+            for fname in filenames_cfg:
+                fname = pathlib.Path(fname)
+                # dont check if file exists since zarr stores might be directories
+                if fname.exists():
+                    # check if fname is a valid path to allow for simple overwriting
+                    filename = fname
+                else:
+                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
+
+                    filename = next((f for f in filenames if f.exists()), None)
+                    if filename is None:
+                        msg = (
+                            f"Did not find input data for {stream_info['type']} "
+                            f"stream '{stream_name}': {filenames}."
+                        )
+                        raise FileNotFoundError(msg)
+
                 ds_type = stream_info["type"]
                 if is_root():
                     logger.info(
                         f"Opening dataset with type: {ds_type}"
                         + f" from stream config {stream_name}.",
                     )
-                ds = dataset(filename=None, **kwargs)
+                ds = dataset(filename=filename, **kwargs)
+
                 streams_datasets[stream_name].readers += [ds]
-            else:
-                for fname in filenames_cfg:
-                    fname = pathlib.Path(fname)
-                    # dont check if file exists since zarr stores might be directories
-                    if fname.exists():
-                        # check if fname is a valid path to allow for simple overwriting
-                        filename = fname
-                    else:
-                        filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
-
-                        filename = next((f for f in filenames if f.exists()), None)
-                        if filename is None:
-                            msg = (
-                                f"Did not find input data for {stream_info['type']} "
-                                f"stream '{stream_name}': {filenames}."
-                            )
-                            raise FileNotFoundError(msg)
-
-                    ds_type = stream_info["type"]
-                    if is_root():
-                        logger.info(
-                            f"Opening dataset with type: {ds_type}"
-                            + f" from stream config {stream_name}.",
-                        )
-                    ds = dataset(filename=filename, **kwargs)
-
-                    streams_datasets[stream_name].readers += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
@@ -811,7 +816,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             conditioning_values = (
                 np.stack(step_values, axis=0) if step_values else np.zeros((0, 1), dtype=np.float32)
             )
-            batch.add_scalar_conditioning(stream_name, conditioning_values)
+            batch.add_scalar_conditioning_stream(stream_name, conditioning_values)
         return batch
 
     def _build_field_conditioning_data(
@@ -842,9 +847,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         )
                         stream_data = StreamData(step_dt, 1, 1, self.num_healpix_cells)
                         stream_data.add_source(self._stage, 0, rdata, src_lens, src_cells, False)
-                # Field conditioning is the same for all views within a batch step
-                for sample in batch.source_samples.samples:
-                    sample.add_conditioning_stream_data(stream_name, step, stream_data)
+                batch.add_field_conditioning_stream(stream_name, step, stream_data)
         return batch
 
     def __iter__(self) -> ModelBatch:

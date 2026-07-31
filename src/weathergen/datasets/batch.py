@@ -182,7 +182,7 @@ class Sample:
         self, stream_name: str, step: int, stream_data: StreamData | None
     ) -> None:
         """
-        Add StreamData for field conditioning stream @stream_name at forecast step @step
+        Add StreamData for field conditioning stream @stream_name at forecast step @step to sample
         """
         if stream_name not in self.conditioning_streams_data:
             self.conditioning_streams_data[stream_name] = []
@@ -193,12 +193,13 @@ class Sample:
 
     def get_conditioning_stream_data(self, stream_name: str, step: int) -> StreamData | None:
         """
-        Get StreamData for field conditioning stream @stream_name at forecast step @step
+        Get StreamData for field conditioning stream @stream_name at forecast step @step from sample
         """
         steps = self.conditioning_streams_data.get(stream_name)
         if steps is None or step >= len(steps):
             return None
         return steps[step]
+
 
 class BatchSamples:
     """
@@ -434,7 +435,7 @@ class ModelBatch:
             )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
-    def add_scalar_conditioning(self, stream_name, conditioning_values):
+    def add_scalar_conditioning_stream(self, stream_name, conditioning_values):
         """
         Add scalar conditioning values for all samples in the batch for a specific stream.
         """
@@ -443,7 +444,16 @@ class ModelBatch:
                 sample.add_meta_info(stream_name, SampleMetaData(params={}))
             sample.meta_info[stream_name].conditioning = conditioning_values
 
-    def get_scalar_conditioning(self, stream_name: str, step: int) -> np.typing.NDArray | None:
+    def add_field_conditioning_stream(self, stream_name, step: int, stream_data: StreamData):
+        """
+        Add field conditioning values for all samples in the batch for a specific stream.
+        """
+        for sample in self.source_samples.samples:
+            sample.add_conditioning_stream_data(stream_name, step, stream_data)
+
+    def get_scalar_conditioning_values(
+        self, stream_name: str, step: int
+    ) -> np.typing.NDArray | None:
         """
         Get scalar conditioning values for all samples at a specific forecast step.
 
@@ -456,6 +466,23 @@ class ModelBatch:
             if meta is None or meta.conditioning is None or step >= len(meta.conditioning):
                 return None
             values.append(meta.conditioning[step])
+        return np.stack(values, axis=0) if values else None
+
+    def get_field_conditioning_values(
+        self, stream_name: str, step: int
+    ) -> np.typing.NDArray | None:
+        """
+        Get field conditioning values for all samples at a specific forecast step.
+
+        Returns np.ndarray of shape (num_samples, ...) or None if not available
+        for any sample.
+        """
+        values = []
+        for sample in self.samples:
+            stream_data = sample.get_conditioning_stream_data(stream_name, step)
+            if stream_data is None:
+                return None
+            values.append(stream_data.data)
         return np.stack(values, axis=0) if values else None
 
     def is_empty(self):
