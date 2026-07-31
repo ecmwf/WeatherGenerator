@@ -1,0 +1,6 @@
+[server]
+# Streamlit is only exposed locally. nginx terminates HTTPS on ports 80/443
+# and forwards requests to this address.
+address = "127.0.0.1"
+port = 8501
+headless = true

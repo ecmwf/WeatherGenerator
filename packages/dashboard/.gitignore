@@ -1,0 +1,9 @@
+# Local deployment secrets and generated certificates.
+.env
+.streamlit/secrets.toml
+.streamlit/*.crt
+.streamlit/*.key
+.streamlit/*.pem
+
+deploy/certs/*
+!deploy/certs/.gitkeep
