@@ -79,14 +79,14 @@ class NetcdfParser(CfParser):
             if "channel" not in result.indexes:
                 result = result.expand_dims("channel")
 
-            # Get unique valid_time
+            # Get unique valid times
             unique_times = np.sort(np.unique(result.valid_time.values))
 
             for vt in unique_times:
                 sub = result.sel(channel=self.channels, valid_time=vt)
 
                 if len(unique_times) > 1:
-                    # Assign same grid point index to all ipoint
+                    # Reassign ipoint so that the same spatial point indices are used for each unique valid_time
                     new_ipoint = sub.ipoint.copy(data=np.arange(sub.sizes["ipoint"]))
                     sub = sub.assign_coords(ipoint=new_ipoint)
 
