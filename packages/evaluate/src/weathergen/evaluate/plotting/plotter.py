@@ -71,7 +71,6 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
 _logger.debug(f"Taking cartopy paths from {work_dir}")
 
-
 @dataclass
 class DistStats:
     """Summary statistics for a 1-D distribution."""
@@ -685,7 +684,7 @@ class Plotter:
         opts : dict
             Parsed map kwargs from ``_parse_map_kwargs``.
         tag : str
-            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``).
+            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``, ``'score_maps_<metric>'``).
 
         Returns
         -------
@@ -693,6 +692,11 @@ class Plotter:
             The resolved colormap.
         """
 
+        # Score maps always use a continuous blue->red colormap (overrides config)
+        if str(tag).startswith("score_maps"):
+            return mpl.colors.LinearSegmentedColormap.from_list(
+                "score_maps_blue_red", ["blue", "red"]
+            )
         # Bias maps always use coolwarm for visual consistency (overrides config)
         if str(tag).startswith("bias"):
             return plt.get_cmap("coolwarm")
