@@ -78,20 +78,18 @@ class NetcdfParser(CfParser):
                 result = result.as_xarray().squeeze()
             if "channel" not in result.indexes:
                 result = result.expand_dims("channel")
-                
+
             # Get unique valid_time
             unique_times = np.sort(np.unique(result.valid_time.values))
 
             for vt in unique_times:
-                                
-                sub = result.sel(channel=self.channels,
-                              valid_time = vt)
+                sub = result.sel(channel=self.channels, valid_time=vt)
 
                 if len(unique_times) > 1:
                     # Assign same grid point index to all ipoint
-                    new_ipoint = sub.ipoint.copy(data = np.arange(sub.sizes["ipoint"]))
+                    new_ipoint = sub.ipoint.copy(data=np.arange(sub.sizes["ipoint"]))
                     sub = sub.assign_coords(ipoint=new_ipoint)
-                    
+
                 sub = self.reshape(sub)
                 da_fs.append(sub)
 
@@ -177,7 +175,7 @@ class NetcdfParser(CfParser):
         reshaped_dataset = reshaped_dataset.assign_coords(
             ipoint=data.coords["ipoint"],
         )
-        
+
         # order using pressure_level coord
         if "pressure_level" in reshaped_dataset.coords:
             reshaped_dataset = reshaped_dataset.sortby("pressure_level")
