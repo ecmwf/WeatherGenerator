@@ -1,0 +1,18 @@
+train :
+  plot :
+    yc9osoe5:
+      slurm_id: 0
+      description: "AdamW"
+      eval: vgbndhco
+    z5keukgi:
+      slurm_id: 0
+      description: "Muon"
+      eval: vgbndhco
+    kvwf3o80:
+      slurm_id: 0
+      description: "AdamW"
+      eval: vgbndhco
+    rlh7bf85:
+      slurm_id: 0
+      description: "Muon"
+      eval: vgbndhco
