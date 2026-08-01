@@ -135,7 +135,7 @@ class LatentRolloutRMSE:
 
         # drop the plotted values next to the figure so the curve can be re-used numerically;
         # "compare_" mirrors the prefix LinePlots.plot() puts on the figure file name
-        self._write_json(plotter.out_plot_dir / f"compare_{tag}.json", data)
+        self._write_json(plotter.out_plot_dir_lines / f"compare_{tag}.json", data)
 
     def _write_json(self, path, data: xr.DataArray) -> None:
         """Write the plotted curve as JSON, in the same layout the evaluate package uses."""

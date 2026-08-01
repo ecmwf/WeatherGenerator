@@ -507,7 +507,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             (source_cells, source_cells_lens) = self.tokenizer.get_source(
                 stream_info, rdata, token_data, (time_win.start, time_win.end), mask
             )
-            stream_data.add_source(step, rdata, source_cells_lens, source_cells)
+            stream_data.add_source(
+                self._stage, step, rdata, source_cells_lens, source_cells, rdata.is_spoof
+            )
 
         return stream_data
 

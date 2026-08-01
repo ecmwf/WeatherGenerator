@@ -449,7 +449,12 @@ def maybe_create(cf, model, denormalize: Callable[[str, torch.Tensor], torch.Ten
     from weathergen.common.config import get_path_run
 
     stream_name = cf.get("diag_stream", "ERA5")
-    streams = {s["name"]: s for s in cf.streams}
+    # cf.streams is a dict keyed by stream name on this branch (develop-ssl); older code passed a
+    # list of stream dicts. Support both so the diagnostics work regardless of config shape.
+    if hasattr(cf.streams, "items"):
+        streams = {name: info for name, info in cf.streams.items()}
+    else:
+        streams = {s["name"]: s for s in cf.streams}
     if stream_name not in streams:
         logger.warning(f"diag_stream={stream_name!r} not in {list(streams)}; ignoring.")
         return None

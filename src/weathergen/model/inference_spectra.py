@@ -143,6 +143,27 @@ def canonical_grid_order(lats: np.typing.NDArray, lons: np.typing.NDArray) -> np
     return np.lexsort((np.asarray(lons) % 360.0, -np.asarray(lats)))
 
 
+def _detect_reduced_gaussian(lats: np.typing.NDArray, n_points: int) -> str | None:
+    """Return ``"reduced"`` if the points are the ECMWF reduced Gaussian grid ``sht_psd`` supports.
+
+    ``detect_grid_type`` (evaluate pkg) only knows octahedral and regular grids; ERA5's native grid
+    is a classic reduced Gaussian (N320 = 542080 points / 640 latitudes) that matches neither.
+    ``sht_psd``'s ``grid_type="reduced"`` path is N320-specific, so gate on nlat == 640 and confirm
+    the exact point count via anemoi's grid table (already the dependency that path relies on).
+    """
+    nlat = len(np.unique(lats))
+    if nlat != 640:  # sht_psd's reduced path is hard-wired to N320
+        return None
+    try:
+        from anemoi.transform.grids.named import lookup
+
+        expected = len(np.asarray(lookup("N320")["latitudes"]))
+    except Exception as exc:  # noqa: BLE001 - anemoi missing / offline / unknown grid
+        logger.warning(f"Reduced Gaussian (N320) PSD unavailable: {exc}")
+        return None
+    return "reduced" if n_points == expected else None
+
+
 def physical_psd(
     values: np.typing.NDArray,
     lats: np.typing.NDArray,
@@ -159,9 +180,27 @@ def physical_psd(
     lats = np.asarray(lats)
     lons = np.asarray(lons)
 
-    grid_type = detect_grid_type(lats, lons, values.shape[-1])
+    # detect_grid_type warns "PSD via SHT skipped" for any grid it doesn't know -- including ERA5's
+    # reduced Gaussian, which we DO handle below -- so silence that one call to avoid a misleading
+    # log; messaging is re-emitted here only if both detectors fail.
+    psd_logger = logging.getLogger("weathergen.evaluate.scores.psd")
+    _prev_level = psd_logger.level
+    psd_logger.setLevel(logging.ERROR)
+    try:
+        grid_type = detect_grid_type(lats, lons, values.shape[-1])
+    finally:
+        psd_logger.setLevel(_prev_level)
     if grid_type is None:
-        return None
+        # ERA5's native reduced Gaussian N320 is recognised by neither octahedral nor regular
+        # detection; sht_psd handles it via grid_type="reduced". Recognise it here instead of
+        # silently skipping the physical spectrum.
+        grid_type = _detect_reduced_gaussian(lats, values.shape[-1])
+        if grid_type is None:
+            logger.warning(
+                f"Physical PSD skipped: {values.shape[-1]} points / {len(np.unique(lats))} "
+                "latitudes is not a recognised global grid (octahedral, regular, or N320)."
+            )
+            return None
 
     nlat = len(np.unique(lats))
     expected = sum(_octahedral_lons_per_lat(nlat)) if grid_type == "octahedral" else None
