@@ -81,7 +81,7 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
             data_arr = data_arr[:, :, 0]
         else:
             data_dims.append("mem")
-            
+
     data_coords = {
         "ipoint": np.arange(npoints),
         "channel": channels,
@@ -347,12 +347,11 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
     for stream in streams:
         grid_type = get_grid_type(data_type, stream, first_zarr)
-        stream_channels  = get_channels(channels_cfg, stream, first_zarr)
+        stream_channels = get_channels(channels_cfg, stream, first_zarr)
         kwargs["stream"] = stream
         kwargs["grid_type"] = grid_type
         kwargs["channels"] = stream_channels
         kwargs["data_type"] = data_type
-
         for rank_file in rank_files:
             rank_label = rank_file.stem.split("rank")[-1]  # e.g. "0000"
             _logger.info(f"RUN {run_id}: Processing rank {rank_label} ({rank_file.name})")
