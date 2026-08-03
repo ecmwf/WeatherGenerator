@@ -297,6 +297,7 @@ def o96_latitude(target_coords, min_value=1e-3, max_value=1.0):
     cos_lat = torch.cos(latitudes_radian)
     n_lat = 400 - torch.abs(target_coords[:, 0]) * (400 - 20) / 90
     weights = cos_lat / n_lat
+    weights = weights / weights.mean()
     return (max_value - min_value) * weights + min_value
 
 
