@@ -85,8 +85,10 @@ class EmbeddingEngine(torch.nn.Module):
     def forward(self, batch, pe_embed):
         num_steps_input = batch.get_num_steps()
 
+        # zeros, not empty: if a stream's tokens are ever skipped below, the unwritten rows must
+        # not be uninitialized memory (sporadic NaNs); the assert further down catches the skip.
         num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
-        tokens_all = torch.empty(
+        tokens_all = torch.zeros(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
@@ -112,6 +114,14 @@ class EmbeddingEngine(torch.nn.Module):
 
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
+
+        num_tokens_embedded = sum(x.shape[0] for x in x_embeds)
+        assert num_tokens_embedded == num_tokens, (
+            f"Embedded tokens ({num_tokens_embedded}) do not cover the token buffer "
+            f"({num_tokens}): a stream counted in batch.tokens_lens was skipped during "
+            "embedding (e.g. Identity embed for a diagnostic stream). Its rows would be "
+            "zero-filled and the per-cell token counts misaligned."
+        )
 
         if x_embeds == []:
             # if all streams are empty, return empty tensor with correct shape and dtype
