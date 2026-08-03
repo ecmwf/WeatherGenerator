@@ -401,7 +401,8 @@ class Model(torch.nn.Module):
         if cf.fe_num_blocks > 0:
             if cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
                 assert cf.get("fe_diffusion_model_conditioning_type", None) is not None, (
-                    "Diffusion conditioning embedding dimension must be specified when using diffusion model conditioning"
+                    "Diffusion conditioning embedding dimension must be specified when "
+                    + "using diffusion model conditioning"
                 )
                 self.forecast_engine = ForecastingEngine(
                     cf,
@@ -704,7 +705,7 @@ class Model(torch.nn.Module):
 
         num_params_fe = get_num_parameters(
             self.forecast_engine.net.fe_blocks
-            if self.cf.fe_diffusion_model
+            if self.cf.get("fe_diffusion_model")
             else self.forecast_engine.fe_blocks
         )
 
@@ -796,13 +797,14 @@ class Model(torch.nn.Module):
             and self.cf.get("fe_diffusion_model_conditioning", None) == "forecast"
         ):
             tokens = tokens.reshape(shape)
-            # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
+            # tokens[:,0] = t (most recent), tokens[:,1] = t-1, ..., tokens[:,-1] = t-(T-1) (oldest)
             if self.cf.stage == "inference":
                 print("Using most recent steps as conditioning tokens for inference.")
                 # conditioning_tokens = tokens[:, :-1].sum(axis=1)
                 conditioning_tokens = tokens[:, 1:].sum(axis=1)
             else:
-                # Conditioning: all older context steps [t-1, ..., t-(T-1)]; denoising target: t (newest)
+                # Conditioning: all older context steps [t-1, ..., t-(T-1)];
+                # denoising target: t (newest)
                 conditioning_tokens = tokens[:, 1:].sum(axis=1)
                 conditioning_tokens = conditioning_tokens + torch.randn_like(
                     conditioning_tokens
@@ -811,7 +813,8 @@ class Model(torch.nn.Module):
                     "fe_diffusion_classifier_free_guidance_prob", 0.0
                 ):  # occasionally dropout conditioning for classifier free guidance
                     conditioning_tokens = torch.zeros_like(conditioning_tokens)
-            # X_t (tokens[:, 0], most recent) is the diffusion denoising target; older steps are conditioning.
+            # X_t (tokens[:, 0], most recent) is the diffusion denoising target;
+            # older steps are conditioning.
             batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = conditioning_tokens
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
             tokens = tokens[:, 0]
@@ -879,7 +882,9 @@ class Model(torch.nn.Module):
                     # inference_forward always starts from pure noise regardless.
                     final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
                     batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = final_abs
-                    tokens = None  # NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
+                    # NOTE: This is precautionary, might need to be handled differently.
+                    # It should not be the same as conditioning tokens.
+                    tokens = None
                     continue
 
                 # Unified diffusion decoding path — handles both:
@@ -889,7 +894,7 @@ class Model(torch.nn.Module):
                     "diffusion_rollout", False
                 ):
                     if isinstance(tokens, list):
-                        # diffusion_rollout=True: discard intermediate ODE steps, keep the final state.
+                        # diffusion_rollout=True: discard intermediate steps, keep the final state.
                         tokens = tokens[-1]  # (1, healpix_cells, embed_dim)
                     cond = batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                     predict_residual = self.cf.get("fe_diffusion_predict_residual", False)
@@ -901,7 +906,8 @@ class Model(torch.nn.Module):
                         model_params, step, member_final_tokens, batch, tmp_output, out_step=0
                     )
                     # pred_tuple has N entries (one per member / "batch" item).
-                    # Concatenate along dim 0: (N, n_points, channels), wrap in 1-tuple (batch_size=1).
+                    # Concatenate along dim 0: (N, n_points, channels),
+                    # wrap in 1-tuple (batch_size=1).
                     for sname, pred_tuple in tmp_output.physical[0].items():
                         output.add_physical_prediction(
                             step, sname, (torch.cat(list(pred_tuple), dim=0),)
