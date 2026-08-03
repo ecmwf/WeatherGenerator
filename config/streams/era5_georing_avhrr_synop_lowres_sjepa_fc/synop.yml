@@ -18,11 +18,6 @@ SurfaceCombined :
   geoinfo_channels : ['stalt', 'lsm', 'cos_sza', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   token_size : 256
-  masking_override :
-    model_input :
-      masking_strategy: "random"
-      masking_strategy_config :
-        rate: 0.5
   tokenize_spacetime : False
   max_num_targets: -1
   # diagnostic: True

@@ -79,7 +79,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 4
+  num_workers: 10
   rng_seed: ???
   repeat_data_in_mini_epoch : False
   persistent_workers: False

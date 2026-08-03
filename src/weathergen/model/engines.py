@@ -1171,6 +1171,10 @@ class DeepSSLFusion(nn.Module):
 
     def __init__(self, num_levels: int, dim_embed: int, hidden_factor: int = 2):
         super().__init__()
+        # Intermediate encoder levels are tapped before the encoder's final LayerNorm, so they
+        # arrive on very different (and much larger) scales than the final level. Normalize each
+        # level before concatenating so the fusion and the downstream SSL head see a common scale.
+        self.level_norms = nn.ModuleList([nn.LayerNorm(dim_embed) for _ in range(num_levels)])
         self.proj = nn.Sequential(
             nn.Linear(num_levels * dim_embed, hidden_factor * dim_embed, bias=False),
             nn.GELU(),
@@ -1178,7 +1182,8 @@ class DeepSSLFusion(nn.Module):
         )
 
     def forward(self, levels: list[torch.Tensor]) -> torch.Tensor:
-        return self.proj(torch.cat(levels, dim=-1))
+        normed = [norm(level) for norm, level in zip(self.level_norms, levels, strict=True)]
+        return self.proj(torch.cat(normed, dim=-1))
 
 
 @dataclasses.dataclass

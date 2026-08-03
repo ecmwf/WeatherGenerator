@@ -42,10 +42,6 @@ AVHRR :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   coords_channels : ['latitude', 'longitude']
   loss_weight : 1.0
-  masking_override :
-    model_input :
-      masking_strategy_config :
-        rate: 1.0
   token_size : 256
   forcing: True
   embed : 
@@ -70,10 +66,6 @@ METOP_IASI_PC :
   filenames : ['observations-od-ai-0001-2011-2023-iasi-pc-bufr-v1.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  masking_override :
-    model_input :
-      masking_strategy_config :
-        rate: 1.0
   token_size : 256
   forcing: True
   embed : 

@@ -131,6 +131,11 @@ train_logging:
   checkpoint: 500
   log_grad_norms: False
 
+  loss_spike_detection:
+    enabled: True
+    skip_batch: True     # also makes the skip explicit instead of relying on GradScaler
+    loss_threshold: 0.01
+
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
   # For forecasting, supports sequences of latents with per-step and aggregate metrics
