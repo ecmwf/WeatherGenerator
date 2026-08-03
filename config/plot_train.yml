@@ -16,3 +16,11 @@ train :
       slurm_id: 0
       description: "Muon"
       eval: vgbndhco
+    n0j2uiad:
+      slurm_id: 0
+      description: "AdamW finetune"
+      eval: vgbndhco
+    v02kr7zh:
+      slurm_id: 0
+      description: "Muon finetune"
+      eval: vgbndhco
