@@ -132,8 +132,8 @@ train_logging:
   log_grad_norms: False
 
   loss_spike_detection:
-    enabled: True
-    skip_batch: True     # also makes the skip explicit instead of relying on GradScaler
+    enabled: False
+    skip_batch: False # also makes the skip explicit instead of relying on GradScaler
     loss_threshold: 0.01
 
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
