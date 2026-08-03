@@ -21,6 +21,7 @@ dependencies = [
     "earthkit-data==0.17.0",
     "earthkit-utils==0.1.2",
     "imageio[ffmpeg]>=2.37.2",
+    "scipy>=1.12",
     ]
 
 [dependency-groups]

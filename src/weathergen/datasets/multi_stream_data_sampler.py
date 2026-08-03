@@ -281,7 +281,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                streams_datasets[stream_info["name"]] = [ds]
+                streams_datasets[stream_info["name"]].readers += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
@@ -366,23 +366,25 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def get_sources_size(self):
         return [
             0
-            if ds[0].get_source_num_channels() == 0
-            else ds[0].get_source_num_channels()
-            + ds[0].get_geoinfo_size() + ds[0].get_coords_size() + self.tokenizer.get_size_time_embedding()
+            if ds.readers[0].get_source_num_channels() == 0
+            else ds.readers[0].get_source_num_channels()
+            + ds.readers[0].get_geoinfo_size()
+            + ds.readers[0].get_coords_size()
+            + self.tokenizer.get_size_time_embedding()
             for ds in self.streams_datasets.values()
         ]
 
     def get_sources_num_channels(self):
-        return [ds[0].get_source_num_channels() for ds in self.streams_datasets.values()]
+        return [ds.readers[0].get_source_num_channels() for ds in self.streams_datasets.values()]
 
     def get_targets_num_channels(self):
-        return [ds[0].get_target_num_channels() for ds in self.streams_datasets.values()]
+        return [ds.readers[0].get_target_num_channels() for ds in self.streams_datasets.values()]
 
     def get_targets_coords_size(self):
         # TODO: avoid hard coding magic values
         # +6 at the end for stream_id and time encoding
         return [
-            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
             for ds in self.streams_datasets.values()
         ]
 
@@ -710,14 +712,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds
+                idx, num_forecast_steps, i_max, stream_ds.readers
             )
 
             # When teacher_time_offset > 0, load a separate set of data windows
             # shifted forward in time for the teacher (target) samples.
             if self.teacher_time_offset > 0:
                 (input_data_target, output_data_target) = self._get_data_windows(
-                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds
+                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds.readers
                 )
             else:
                 input_data_target = input_data
@@ -801,9 +803,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # Get first target step's times (using self.output_offset as the first output step index)
                 if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
                     target_times_array = sdata.target_times_raw[self.output_offset]
-                    target_metadata.add_params({'timestamp': (
-                        target_times_array[0] if len(target_times_array) > 0 else None
-                    )})
+                    target_metadata.add_params(
+                        {
+                            "timestamp": (
+                                target_times_array[0] if len(target_times_array) > 0 else None
+                            )
+                        }
+                    )
 
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
@@ -818,22 +824,29 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
-        #add target times in source for diffusion model date/time conditioning
+        # add target times in source for diffusion model date/time conditioning
         if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
-            #TODO: Might need upgrading fro num_samples > 1
+            # TODO: Might need upgrading fro num_samples > 1
 
             # Assert singular source and target samples
-            assert len(batch.source_samples.samples) == 1, "Only single source sample supported for diffusion model conditioning."
-            assert len(batch.target_samples.samples) == 1, "Only single target sample supported for diffusion model conditioning."
-            
+            assert len(batch.source_samples.samples) == 1, (
+                "Only single source sample supported for diffusion model conditioning."
+            )
+            assert len(batch.target_samples.samples) == 1, (
+                "Only single target sample supported for diffusion model conditioning."
+            )
+
             source_sample = batch.source_samples.samples[0]
             target_sample = batch.target_samples.samples[0]
-            
+
             # Copy target timestamps to source metadata for all streams
             for stream_name in [s["name"] for s in self.streams]:
-                if stream_name in target_sample.meta_info and stream_name in source_sample.meta_info:
-                    target_timestamp = target_sample.meta_info[stream_name].params.get('timestamp')
-                    source_sample.meta_info[stream_name].add_params({'timestamp': target_timestamp})
+                if (
+                    stream_name in target_sample.meta_info
+                    and stream_name in source_sample.meta_info
+                ):
+                    target_timestamp = target_sample.meta_info[stream_name].params.get("timestamp")
+                    source_sample.meta_info[stream_name].add_params({"timestamp": target_timestamp})
 
         return batch
 

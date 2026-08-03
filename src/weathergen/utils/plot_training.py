@@ -525,7 +525,9 @@ def plot_loss_per_stream(
 
                 # if len(title_col) == 0 :
                 # import code; code.interact( local=locals())
-                title_loss = ".".join(title_col.split(".")[:-1]) if title_col is not None else stream_name
+                title_loss = (
+                    ".".join(title_col.split(".")[:-1]) if title_col is not None else stream_name
+                )
                 plt.title(title_loss + " (" + ", ".join(modes) + ")")
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")

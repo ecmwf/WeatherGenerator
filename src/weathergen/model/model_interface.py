@@ -83,7 +83,8 @@ def init_model_and_shard(
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
     if "q_aux" in cf.freeze_modules:
-        model.encoder.q_aux.requires_grad = False
+        if model.encoder.q_aux is not None:
+            model.encoder.q_aux.requires_grad = False
 
     if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
@@ -93,7 +94,7 @@ def init_model_and_shard(
             find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
-            static_graph=cf.get("ddp_static_graph", True),
+            static_graph=cf.get("ddp_static_graph", False),
         )
 
     elif with_ddp and with_fsdp:
@@ -129,7 +130,7 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
-        if cf.fe_diffusion_model:
+        if cf.get("fe_diffusion_model", False):
             model_fe_blocks = model.forecast_engine.net.fe_blocks
         else:
             model_fe_blocks = model.forecast_engine.fe_blocks
@@ -224,7 +225,7 @@ def init_model_and_shard(
 
     if is_root():
         log_trainable_summary(model)
-    
+
     # Optionally overlay the physical decoder from a separate checkpoint. This runs after the
     # primary load so it takes precedence for decoder weights while keeping the encoder /
     # forecast engine from the primary checkpoint (e.g. inference with a latent-diffusion run
@@ -237,9 +238,7 @@ def init_model_and_shard(
                 f"Loading decoder weights from id={decoder_run_id} "
                 f"at mini_epoch {decoder_mini_epoch}."
             )
-        model = load_decoder_from_checkpoint(
-            cf, model, device, decoder_run_id, decoder_mini_epoch
-        )
+        model = load_decoder_from_checkpoint(cf, model, device, decoder_run_id, decoder_mini_epoch)
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -287,7 +286,10 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
-            if sharded_meta_param is None or type(sharded_meta_param) is not torch.distributed.tensor.DTensor:
+            if (
+                sharded_meta_param is None
+                or type(sharded_meta_param) is not torch.distributed.tensor.DTensor
+            ):
                 logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
                 continue
             sharded_tensor = distribute_tensor(

@@ -131,16 +131,6 @@ class WeatherGenReader(Reader):
             )
             return None
 
-<<<<<<< HEAD
-        clim_fn = next(
-            (
-                item.get("filenames")
-                for item in self.inference_cfg.get("streams", [])
-                if item.get("name") == stream
-            ),
-            None,
-        )
-=======
         streams = self.inference_cfg.get("streams", {})
         if isinstance(streams, list | oc.ListConfig):
             streams = {s["name"]: s for s in streams}
@@ -151,7 +141,6 @@ class WeatherGenReader(Reader):
         except KeyError:
             clim_fn = None
 
->>>>>>> 1d66f4558cf2ddeaa76fb89d45b06a45d53a7208
         if isinstance(clim_fn, oc.ListConfig) and len(clim_fn) == 1:
             climatology_partial_filename = clim_fn[0]
         else:

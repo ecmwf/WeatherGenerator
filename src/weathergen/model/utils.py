@@ -58,9 +58,9 @@ def apply_fct_to_blocks(model, blocks, fct):
         # avoid the whole model element which has name ''
         if (re.fullmatch(blocks, name) is not None) and (name != ""):
             fct(module)
-            logger.info(f"Applied function {fct.__name__} to block {name}")
+            logger.debug(f"Applied function {fct.__name__} to block {name}")
         else:
-            logger.info(f"Did not apply function {fct.__name__} to block {name}")
+            logger.debug(f"Did not apply function {fct.__name__} to block {name}")
 
 
 def broadcast_matching_params(model, blocks, src=0):
