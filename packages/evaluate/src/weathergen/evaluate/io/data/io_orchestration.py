@@ -31,12 +31,13 @@ from numpy.typing import NDArray
 
 from weathergen.evaluate.io.data.dataarray_builders import (
     EnsembleSelect,
+    Regridder,
     build_gridded_dataarrays,
     build_scatter_dataarrays,
 )
 from weathergen.evaluate.io.data.dataarray_postprocessing import (
-    _add_lead_time_coord,
-    _select_channels,
+    add_lead_time_coord,
+    select_channels,
 )
 from weathergen.evaluate.io.data.io_workers import (
     _compute_early_channel_selection,
@@ -77,11 +78,17 @@ class IOState:
     lat: NDArray
     lon: NDArray
     n_workers: int
+    regridder: Regridder | None = None  # shared Regridder instance (caches matrices + opts)
     backend: str = "loky"
     rank: str = "0000"
     offset: np.timedelta64 | None = (
         None  # fallback offset in hours for init_time when source_interval is missing
     )
+    sample_labels: list[int] | None = None  # global sample indices for coordinate labeling
+
+    def get_sample_labels(self) -> list[int]:
+        """Return global sample labels (falls back to local samples if not set)."""
+        return self.sample_labels if self.sample_labels is not None else self.samples
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +246,7 @@ def dispatch_parallel(
     return results
 
 
-def _build_io_state(
+def build_io_state(
     run_id: str,
     fname_zarr: Path,
     stream: str,
@@ -253,6 +260,7 @@ def _build_io_state(
     n_io_workers: int,
     ens_select: EnsembleSelect,
     rank: str = "",
+    sample_labels: list[int] | None = None,
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -272,6 +280,12 @@ def _build_io_state(
 
     lat = coords[:, 0]
     lon = coords[:, 1]
+
+    regrid_opts = stream_cfg.get("regrid") if is_gridded else {}
+    if isinstance(regrid_opts, bool) and regrid_opts:
+        regrid_opts = {"target_grid": [1.5, 1.5]}
+
+    regridder = Regridder(regrid_opts) if regrid_opts else None
 
     return IOState(
         run_id=run_id,
@@ -293,6 +307,8 @@ def _build_io_state(
         n_workers=n_io_workers,
         rank=rank,
         offset=offset,
+        regridder=regridder,
+        sample_labels=sample_labels,
     )
 
 
@@ -385,7 +401,35 @@ def _assemble_substep(
     forecast_step_val: int,
     fstep_idx: int,  # index into results[i][2] for scatter obs_times
 ) -> tuple[xr.DataArray, xr.DataArray]:
-    """Build and post-process (select, scale, add lead_time) one sub-step's DataArrays."""
+    """Build and post-process (select, scale, add lead_time) one sub-step's DataArrays.
+    Parameters
+    ----------
+    state
+        The shared I/O state.
+    results
+        The per-sample raw results from _parallel_read, needed for scatter coords and obs_times.
+    tars_list
+        List of target arrays for this sub-step, one per sample.
+    preds_list
+        List of prediction arrays for this sub-step, one per sample.
+    per_sample_valid_times
+        List of valid_time for each sample, aligned with tars_list and preds_list.
+    init_times
+        Array of initialisation times for each sample, aligned with tars_list and preds_list.
+    forecast_step_val
+        The forecast step value to assign to the output DataArrays (either fs or fstep_counter
+        depending on whether this sub-step is split from a larger fstep or not).
+    fstep_idx
+        The index into results[i][2] to extract the obs_time for this sub-step when
+        building scatter DataArrays.  For gridded DataArrays this is always 0 since
+        there's only one valid_time per fstep.
+    Returns
+    -------
+    tuple[xr.DataArray, xr.DataArray]
+        The assembled and post-processed target and prediction DataArrays for this
+        sub-step, ready for channel selection, scaling, and (for gridded) regridding.
+
+    """
     if state.is_gridded:
         da_tar, da_pred = build_gridded_dataarrays(
             tars_list,
@@ -398,6 +442,8 @@ def _assemble_substep(
             init_times,
             forecast_step_val,
             state.ens_select,
+            regridder=state.regridder,
+            run_id=state.run_id,
         )
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
@@ -410,7 +456,7 @@ def _assemble_substep(
         da_tar, da_pred = build_scatter_dataarrays(
             tars_list,
             preds_list,
-            state.samples,
+            state.get_sample_labels(),
             state.read_channels,
             per_sample_valid_times,
             init_times,
@@ -421,13 +467,13 @@ def _assemble_substep(
             per_sample_obs_times=per_sample_obs_times,
         )
 
-    da_tar, da_pred = _select_channels(
+    da_tar, da_pred = select_channels(
         da_tar, da_pred, state.stream, state.channels, state.stream_cfg
     )
 
     if state.is_gridded:
-        da_tar = _add_lead_time_coord(da_tar)
-        da_pred = _add_lead_time_coord(da_pred)
+        da_tar = add_lead_time_coord(da_tar)
+        da_pred = add_lead_time_coord(da_pred)
         da_pred = scale_z_channels(da_pred, state.stream)
         da_tar = scale_z_channels(da_tar, state.stream)
 
@@ -572,7 +618,8 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     _logger.info(
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
         f"Loading {len(state.samples)} samples × "
-        f"{len(state.fsteps)} fsteps = {n_total} items via ZipStore-parallel zarr I/O "
+        f"{len(state.fsteps)} windows = {n_total} items \n"
+        f"via ZipStore-parallel zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
 
@@ -658,7 +705,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     if state.n_workers > 1:
         get_reusable_executor().shutdown(wait=True)
 
-    _logger.info(
+    _logger.debug(
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: ZipStore-parallel I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
