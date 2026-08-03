@@ -251,7 +251,7 @@ training_config:
         },
         },
         target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : 0.09,
+          { ema_ramp_up_ratio : null,
             ema_halflife_in_thousands: 300000,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
