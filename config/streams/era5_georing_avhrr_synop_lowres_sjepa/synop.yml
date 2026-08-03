@@ -14,15 +14,10 @@ SurfaceCombined :
   # filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
   # filenames : ['observations-ea-ofb-0001-1979-2022-combined-surface-v5-fixed-land-spatial80-min1km-lat60S70N-lsm09-min10.zarr', 'observations-ea-ofb-0001-2023-combined-surface-v5-fixed-land-heldout20-min1km-lat60S70N-lsm09-min10.zarr']
   source: ['obsvalue_tsts_0', 'obsvalue_t2m_0', 'obsvalue_td2m_0', 'obsvalue_u10m_0', 'obsvalue_v10m_0', 'obsvalue_pmsl_0', 'obsvalue_ps_0']
-  target: [ ] 
+  target: ['obsvalue_tsts_0', 'obsvalue_t2m_0', 'obsvalue_td2m_0', 'obsvalue_u10m_0', 'obsvalue_v10m_0', 'obsvalue_pmsl_0', 'obsvalue_ps_0']
   geoinfo_channels : ['stalt', 'lsm', 'cos_sza', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   token_size : 256
-  masking_override :
-    model_input :
-      masking_strategy: "random"
-      masking_strategy_config :
-        rate: 0.5
   tokenize_spacetime : False
   max_num_targets: -1
   # diagnostic: True
