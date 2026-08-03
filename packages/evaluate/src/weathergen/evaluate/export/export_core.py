@@ -343,7 +343,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             f"Invalid init_time_reference: {init_time_reference}. "
             "Must be 'source_start' or 'source_end'."
         )
-
+    print(init_time_reference)
     if data_type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
 
@@ -443,11 +443,13 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                             # of the source (conditioning) window, selected via
                             # `init_time_reference` (e.g. a 00-05 UTC window has
                             # init = 00:00 for "source_start" or 05:00 for "source_end").
+                            print(init_time_reference, source_start, source_end)
                             init_time = (
                                 source_start
                                 if init_time_reference == "source_start"
                                 else source_end
                             )
+                            print(init_time, source_start, source_end)
                             processed_sample = parser.process_sample(
                                 iter(sample_results[global_s]),
                                 ref_time=init_time,

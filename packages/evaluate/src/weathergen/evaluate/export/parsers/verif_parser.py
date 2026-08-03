@@ -100,8 +100,6 @@ class VerifParser(CfParser):
             )
             return
 
-        self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end, default_fstep)
-
         da_fs = []
         for result in fstep_iterator_results:
             if result is None:
@@ -110,7 +108,8 @@ class VerifParser(CfParser):
             if not isinstance(result, xr.DataArray):
                 result = result.as_xarray().squeeze()
             result = result.sel(channel=self.channels)
-            result = self.preprocess(result)
+            print(result)
+            result = self.preprocess(result, source_interval_end)
             result = self.reshape(result)
             da_fs.append(result)
 
@@ -135,7 +134,7 @@ class VerifParser(CfParser):
                 if da_var is None:
                     continue
                 da_var = self.add_encoding(da_var)
-                obs_result = self.obs_preprocess(da_var, verif_var)
+                obs_result = self.obs_preprocess(da_var, verif_var, source_interval_end)
                 obs_result = self.add_encoding(obs_result)
                 merged = self.merge(da_var, obs_result)
                 merged = self.add_metadata(merged, verif_var)
@@ -144,27 +143,29 @@ class VerifParser(CfParser):
 
     def get_zarr_dt(
         self,
-        source_interval_start: np.datetime64,
         source_interval_end: np.datetime64,
-        default_fstep: str = None,
+        valid_time: np.datetime64,
     ) -> np.timedelta64:
         """
-        Compute the time difference between source interval start and end in hours.
+        Compute the positive time gap between source interval end and valid time.
         Parameters
         ----------
-            source_interval_start : np.datetime64
-                Start of the source (conditioning) window.
             source_interval_end : np.datetime64
                 End of the source (conditioning) window.
+            valid_time : np.datetime64
+                Valid time for the forecast.
         Returns
         -------
             np.timedelta64
-                Time difference between source interval start and end in hours.
+                Positive gap between source interval end and valid time in hours.
         """
-        zarr_dt = (source_interval_end - source_interval_start).astype("timedelta64[h]")
-        if zarr_dt == np.timedelta64(0, "h"):
-            _logger.error(
-                "Source interval start and end are the same. Check Zarr data directly. ")
+        zarr_dt = (valid_time - source_interval_end).astype("timedelta64[h]")
+        if zarr_dt <= np.timedelta64(0, "h"):
+            raise ValueError(
+                "No positive window between source_interval_end and valid_time: "
+                f"source_interval_end={source_interval_end}, valid_time={valid_time}, "
+                f"computed_window={zarr_dt}."
+            )
         return zarr_dt
 
     def get_output_filename(self, variable: str) -> Path:
@@ -250,7 +251,7 @@ class VerifParser(CfParser):
 
         return reshaped_dataset
 
-    def obs_preprocess(self, ds_var, verif_var: str) -> xr.DataArray:
+    def obs_preprocess(self, ds_var, verif_var: str, source_interval_end) -> xr.DataArray:
         """
         Preprocess the observation data for the given variable and valid times.
         This includes computing derived variables like MSLP and total precipitation if needed.
@@ -278,10 +279,11 @@ class VerifParser(CfParser):
 
         for i, leadtime in enumerate(ds_var.coords["leadtime"].values):
             valid_time = ds_var.coords["time"] + np.timedelta64(int(leadtime), "h")
+            zarr_dt = self.get_zarr_dt(source_interval_end, valid_time)
             if verif_var == "mslp":
                 obs_dataarray[:, i, :] = compute_mslp(obs_data, valid_time)
             if verif_var == "tp":
-                obs_dataarray[:, i, :] = compute_precip(obs_data, self.zarr_dt, valid_time)
+                obs_dataarray[:, i, :] = compute_precip(obs_data, zarr_dt, valid_time)
             else:
                 obs_dataarray[:, i, :] = obs_data.data_vars[obs_name].sel(time=valid_time)
 
@@ -290,7 +292,7 @@ class VerifParser(CfParser):
 
         return obs_dataarray
 
-    def preprocess(self, ds: xr.Dataset) -> xr.Dataset:
+    def preprocess(self, ds: xr.Dataset, source_interval_end) -> xr.Dataset:
         """
         Preprocess variables and only keep relevant ones for WG output
         Parameters
@@ -320,15 +322,18 @@ class VerifParser(CfParser):
             # remove unnecessary
             new_ds = new_ds.drop_sel(channel=["10u", "10v"])
             ds = new_ds
-
         if "tp" in self.channels:
-            if self.zarr_dt < np.timedelta64(1, "h"):
+            print("SIE", source_interval_end, "VT", ds.valid_time.values)
+            zarr_dt = self.get_zarr_dt(source_interval_end, ds.valid_time.values[0])
+            self.zarr_dt = zarr_dt
+            if zarr_dt < np.timedelta64(1, "h"):
                 _logger.warning(
-                    f"Observation time resolution {self.zarr_dt} is less than 1 hour. "
+                    f"Observation time resolution {zarr_dt} is less than 1 hour. "
                     "WeatherGenerator output will be aggregated to 1 hour intervals"
                     "This feature has not undergone rigourous testing, check output"
                 )
-                int_factor = int(np.timedelta64(1, "h") / self.zarr_dt)
+                int_factor = int(np.timedelta64(1, "h") / zarr_dt)
+                print(int_factor)
                 # initialise empty
                 precip_accumulate = np.full(ds.data_vars["tp"].shape, np.nan, dtype=np.float32)
                 accumulate = np.zeros(ds.ipoint.shape[0])

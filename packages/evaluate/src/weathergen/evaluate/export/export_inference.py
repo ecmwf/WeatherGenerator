@@ -152,9 +152,8 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--epoch",
-        nargs="+",
-        default=None,
         type=int,
+        default=0,
         help="Epoch number to identify the Zarr store",
     )
 
