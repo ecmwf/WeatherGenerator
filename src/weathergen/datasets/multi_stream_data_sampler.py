@@ -832,7 +832,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 if rdata.is_empty():
                     stream_data = None
                 else:
-                    token_data_list = self.tokenizer.get_tokens_windows(stream_info, [rdata], False)
+                    token_data_list = self.tokenizer.get_tokens_windows(stream_info, [rdata], True)
                     token_data = token_data_list[0]
                     if token_data[0] is None:
                         stream_data = None
