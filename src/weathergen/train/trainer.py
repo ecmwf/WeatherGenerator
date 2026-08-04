@@ -50,7 +50,6 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -89,7 +88,6 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
-        self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
         self.t_training_start: float = 0
         self.training_loop_annotation_context = contextlib.nullcontext
 
@@ -540,13 +538,6 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
-            self.perf_tracker.step(
-                batch,
-                self.cf.general.istep,
-                log_fn=lambda m: self.train_logger.log_metrics(
-                    TRAIN, m, step=self.cf.general.istep
-                ),
-            )
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
                 self.collapse_monitor._compute_collapse_metrics(

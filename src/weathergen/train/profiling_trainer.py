@@ -24,9 +24,11 @@ import torch
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.train.trainer import Trainer
+from weathergen.train.utils import TRAIN
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import ThroughputTracker, nvtx_range
 from weathergen.utils.profiling import (
+    BatchTracker,
     PerformanceLoggingConfig,
     ProfilingConfig,
     memory_snapshot_session,
@@ -44,7 +46,9 @@ class ProfilingTrainer(Trainer):
 
     The training step itself is inherited unchanged from `Trainer`: only the iteration
     seams (`mini_epochs`, `train_batches`) are overridden, so the measured code path and
-    the code path of a normal run cannot drift apart.
+    the code path of a normal run cannot drift apart. Everything that measures a step hangs
+    off `train_batches`, which regains control once the step for the batch it yielded is
+    done — `Trainer` therefore knows about no measurement tool at all.
 
     `profiling` traces the profiled stretch (`schedule.num_steps` training steps) on the
     root rank, while the other ranks run the same steps untraced so that collectives stay
@@ -53,8 +57,9 @@ class ProfilingTrainer(Trainer):
     ends once the stretch is done, without validating or checkpointing, so that the traces
     cover the training step and nothing else.
 
-    `performance_logging` covers the whole run on all ranks, and is cheap: a run with only
-    this enabled trains exactly as a plain `Trainer` run would, and just logs more.
+    `performance_logging` builds the `BatchTracker`s (see `get_trackers`) that measure every
+    step of the whole run on every rank. It is cheap: a run with only this enabled trains
+    exactly as a plain `Trainer` run would, and just logs more.
     """
 
     def __init__(self, train_logging: Config):
@@ -62,6 +67,7 @@ class ProfilingTrainer(Trainer):
 
         self.profiling_cfg = ProfilingConfig()
         self.performance_cfg = PerformanceLoggingConfig()
+        self.trackers: list[BatchTracker] = []
         self.profiling_done: bool = False
 
     def init(self, cf: Config, devices: list) -> None:
@@ -71,14 +77,30 @@ class ProfilingTrainer(Trainer):
         self.performance_cfg = PerformanceLoggingConfig.from_config(self.cf)
         logger.info(f"Profiling run: {self.profiling_cfg}, {self.performance_cfg}")
 
-        if self.performance_cfg.throughput:
-            self.perf_tracker = ThroughputTracker(
-                device=torch.device(self.devices[0]),
-                warmup_steps=self.performance_cfg.throughput_warmup_steps,
-                batch_size_per_gpu=self.batch_size_per_gpu,
-            )
+        self.trackers = self.get_trackers()
         if self.profiling_cfg.nvtx_annotate:
             self.training_loop_annotation_context = nvtx_range
+
+    def get_trackers(self) -> list[BatchTracker]:
+        """
+        Build the per-step measurement tools the `performance_logging` config asks for.
+
+        This is where a new tracking tool is added: implement `BatchTracker` and append it
+        here. The trainer only ever calls `step` on them, once per training step and on
+        every rank, so a tracker is free to sync across ranks.
+        """
+        trackers: list[BatchTracker] = []
+
+        if self.performance_cfg.throughput:
+            trackers.append(
+                ThroughputTracker(
+                    device=torch.device(self.devices[0]),
+                    warmup_steps=self.performance_cfg.throughput_warmup_steps,
+                    batch_size_per_gpu=self.batch_size_per_gpu,
+                )
+            )
+
+        return trackers
 
     @property
     def stops_after_profiling(self) -> bool:
@@ -94,6 +116,35 @@ class ProfilingTrainer(Trainer):
         yield mini_epoch_base
 
     def train_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
+        """Measure every training step, and trace the profiled stretch of them."""
+        yield from self._tracked(self._profiled(dataset_iter))
+
+    def _tracked(
+        self, batches: Iterator[tuple[int, ModelBatch]]
+    ) -> Iterator[tuple[int, ModelBatch]]:
+        """
+        Step the trackers once per training step, on every rank.
+
+        Control returns here after `train()` has finished the step for the batch that was
+        yielded, which is what lets the measurement live outside the training step.
+        """
+        if not self.trackers:
+            yield from batches
+            return
+
+        for bidx, batch in batches:
+            istep = self.cf.general.istep  # train() increments it as part of the step
+            yield bidx, batch
+            for tracker in self.trackers:
+                tracker.step(
+                    batch,
+                    istep,
+                    log_fn=lambda m, istep=istep: self.train_logger.log_metrics(
+                        TRAIN, m, step=istep
+                    ),
+                )
+
+    def _profiled(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
         """Trace the profiled stretch, then continue (or stop) as configured."""
         if self.profiling_done or not self.profiling_cfg.enabled:
             # the stretch is profiled once per run, not once per mini_epoch

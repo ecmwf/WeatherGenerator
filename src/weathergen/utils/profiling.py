@@ -24,6 +24,7 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from typing import Protocol
 
 import torch
 from torch.profiler import ProfilerActivity, profile, record_function
@@ -36,6 +37,21 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
 MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
+
+
+class BatchTracker(Protocol):
+    """
+    What `ProfilingTrainer` expects of a per-step measurement tool.
+
+    `step` is called once per training step, after that step has completed, on every rank
+    (`ThroughputTracker` and anything else that syncs across ranks relies on that). It is
+    given the batch that was just trained on, the step index it was trained at, and a
+    `log_fn` that writes a metrics dict to the train logger at that step.
+    """
+
+    def step(
+        self, batch, istep: int, log_fn: Callable[[dict[str, float]], None] | None = None
+    ) -> None: ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -92,12 +108,12 @@ class ProfilingConfig:
     # collect traces, which requires the ProfilingTrainer
     enabled: bool = False
     # end the run once the profiled stretch is done, instead of training as configured
-    stop_after_profiling: bool = True
+    stop_after_profiling: bool = False
     # how long the profiled stretch is, and how it is split into wait/warmup/active
     schedule: ProfilingSchedule = ProfilingSchedule()
-    # collectors, independent of each other
-    pytorch_profiler: bool = True
-    memory_snapshot: bool = True
+    # collectors, independent of each other; each one is opted into explicitly
+    pytorch_profiler: bool = False
+    memory_snapshot: bool = False
     nvtx_annotate: bool = False
 
     @classmethod
