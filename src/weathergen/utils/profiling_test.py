@@ -67,19 +67,19 @@ def test_performance_logging_is_independent_of_profiling():
 
 
 def test_config_without_the_sections():
-    """Run configs from before the sections existed (e.g. when continuing) fall back."""
-    cfg = OmegaConf.create({})
+    """
+    Neither section is in default_config.yml, so every run config may be missing them.
 
-    assert ProfilingConfig.from_config(cfg) == ProfilingConfig()
-    assert PerformanceLoggingConfig.from_config(cfg) == PerformanceLoggingConfig()
-
-
-def test_config_defaults_match_default_config():
-    """The dataclass defaults are a copy of the config defaults; keep them in sync."""
+    That includes configs of runs that predate a key and are continued, which is why the
+    dataclass defaults are the only defaults.
+    """
     default_cfg = OmegaConf.load(_DEFAULT_CONFIG_PTH)
 
+    assert "profiling" not in default_cfg
+    assert "performance_logging" not in default_cfg
     assert ProfilingConfig.from_config(default_cfg) == ProfilingConfig()
     assert PerformanceLoggingConfig.from_config(default_cfg) == PerformanceLoggingConfig()
+    assert ProfilingConfig.from_config(OmegaConf.create({})) == ProfilingConfig()
 
 
 def test_performance_config_measures_everything():

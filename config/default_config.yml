@@ -127,49 +127,6 @@ train_logging:
   checkpoint: 250
   log_grad_norms: False
 
-# tracing a bounded stretch of training; expensive, and handled by the ProfilingTrainer
-# (src/weathergen/train/profiling_trainer.py). See config/config_performance.yml.
-profiling:
-
-  # collect traces; without this, none of the options below have any effect
-  enabled: False
-
-  # end the run once the profiled steps are done, without validating or checkpointing, so
-  # that the traces cover the training step and nothing else. Set to False to trace the
-  # beginning of an otherwise normal run.
-  stop_after_profiling: False
-
-  # the profiled stretch, in training steps: (wait_iteration + warmup_iteration +
-  # active_iteration) * repeat steps are run, the collectors below skip the wait and warmup
-  # ones, and a stop_after_profiling run ends after them.
-  wait_iteration: 1
-  warmup_iteration: 1
-  active_iteration: 1
-  repeat: 1
-
-  # PyTorch profiler: chrome trace and memory timeline per cycle, root rank only
-  pytorch_profiler:
-    enabled: False
-
-  # CUDA memory history snapshot, root rank only, recorded from the first active step on.
-  # View at https://pytorch.org/memory_viz . Independent of pytorch_profiler.
-  memory_snapshot:
-    enabled: False
-
-  # annotate batches and model blocks with nvtx ranges, for nsys
-  nvtx_annotate: False
-
-# how the run itself performs: cheap metrics over the whole run, logged next to the
-# training metrics on all ranks. Also handled by the ProfilingTrainer, but independent of
-# profiling: a run with only these enabled trains exactly as it would without them.
-performance_logging:
-
-  # throughput metrics (performance.throughput.*)
-  throughput:
-    enabled: False
-    # steps to skip before reporting, so that startup does not skew the numbers
-    warmup_steps: 2
-
 # parameters for data loading
 data_loading :
 

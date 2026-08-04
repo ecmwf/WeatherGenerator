@@ -1,27 +1,53 @@
 # Overwrite config for measuring a training run, e.g.
 #   train --config config/config_performance.yml
-# As written, the run ends once the profiled stretch below is done, and its chrome trace,
-# memory timeline and memory snapshot are written to
-# <shared_working_dir>/logs/<run_id>/profiling_traces.
+# Both sections below are handled by the ProfilingTrainer
+# (src/weathergen/train/profiling_trainer.py), which replaces the Trainer as soon as either
+# of them asks for something. They are absent from default_config.yml: every key falls back
+# to the default given in its comment (ProfilingConfig / PerformanceLoggingConfig in
+# src/weathergen/utils/profiling.py), so an overwrite config only sets what it changes.
 #
-# To measure a full-length run instead, set `stop_after_profiling: False` (traces of the
-# first steps, then training continues normally), or `profiling.enabled: False` to keep
-# only the throughput metrics, which cost close to nothing.
+# As written, the run ends once the profiled stretch is done, and its chrome trace, memory
+# timeline and memory snapshot are written to
+# <shared_working_dir>/logs/<run_id>/profiling_traces.
+
+# tracing a bounded stretch of training; expensive
 profiling:
+
+  # collect traces; without this, nothing else in this section has any effect (default False)
   enabled: True
+
+  # end the run once the profiled stretch is done, without validating or checkpointing, so
+  # that the traces cover the training step and nothing else. Leave at the default False to
+  # trace the beginning of an otherwise normal run.
   stop_after_profiling: True
 
+  # the profiled stretch, in training steps: (wait_iteration + warmup_iteration +
+  # active_iteration) * repeat steps are run, the collectors below skip the wait and warmup
+  # ones, and a stop_after_profiling run ends after them. Each defaults to 1.
   wait_iteration: 1
   warmup_iteration: 1
   active_iteration: 3
   repeat: 1
 
+  # PyTorch profiler: chrome trace and memory timeline per cycle, root rank only
   pytorch_profiler:
-    enabled: True
+    enabled: True  # default False
 
+  # CUDA memory history snapshot, root rank only, recorded from the first active step on.
+  # View at https://pytorch.org/memory_viz . Independent of pytorch_profiler.
   memory_snapshot:
-    enabled: True
+    enabled: True  # default False
 
+  # annotate batches and model blocks with nvtx ranges, for nsys
+  # nvtx_annotate: False
+
+# how the run itself performs: cheap metrics over the whole run, logged next to the training
+# metrics on all ranks. Independent of profiling — a run with only these enabled trains
+# exactly as it would without them, so they can be left on for a full-length run.
 performance_logging:
+
+  # throughput metrics (performance.throughput.*)
   throughput:
-    enabled: True
+    enabled: True  # default False
+    # steps to skip before reporting, so that startup does not skew the numbers
+    # warmup_steps: 2

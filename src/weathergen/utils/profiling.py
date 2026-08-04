@@ -101,8 +101,9 @@ class ProfilingConfig:
     """
     The `profiling` section of a run config: tracing a bounded stretch of training.
 
-    Defaults mirror `config/default_config.yml`; they are repeated here so that run configs
-    predating a key (e.g. when continuing an older run) still work.
+    The section is deliberately absent from `config/default_config.yml` — the defaults below
+    are the only ones, so a run config that predates a key (e.g. when continuing an older
+    run) needs no migration. `config/config_performance.yml` documents the keys.
     """
 
     # collect traces, which requires the ProfilingTrainer
@@ -145,7 +146,8 @@ class PerformanceLoggingConfig:
 
     Unlike profiling, these metrics are cheap, cover the whole run and are logged next to
     the training metrics rather than written to a trace. Throughput is the only one so far;
-    peak memory is meant to join it.
+    peak memory is meant to join it. As with `ProfilingConfig`, the defaults below are the
+    only ones; the section is not in `config/default_config.yml`.
     """
 
     throughput: bool = False
