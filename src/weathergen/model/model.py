@@ -705,7 +705,7 @@ class Model(torch.nn.Module):
 
         num_params_fe = get_num_parameters(
             self.forecast_engine.net.fe_blocks
-            if self.cf.get("fe_diffusion_model")
+            if self.cf.get("fe_diffusion_model", False)
             else self.forecast_engine.fe_blocks
         )
 

@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
 import xarray as xr
 
@@ -60,14 +61,40 @@ class LinePlots:
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
         self.baseline = plotter_cfg.get("baseline")
-        self.out_plot_dir_lines = Path(output_basedir) / "line_plots"
-        self.out_plot_dir_ratio = Path(output_basedir) / "ratio_plots"
-        if not os.path.exists(self.out_plot_dir_lines):
-            _logger.info(f"Creating dir {self.out_plot_dir_lines}")
-            os.makedirs(self.out_plot_dir_lines, exist_ok=True)
-        if not os.path.exists(self.out_plot_dir_ratio):
-            _logger.info(f"Creating dir {self.out_plot_dir_ratio}")
-            os.makedirs(self.out_plot_dir_ratio, exist_ok=True)
+        self._base_dir_lines = Path(output_basedir) / "line_plots"
+        self._base_dir_ratio = Path(output_basedir) / "ratio_plots"
+        self._base_dir_psd = Path(output_basedir) / "psd_plots"
+
+        self.out_plot_dir_lines = self._base_dir_lines
+        self.out_plot_dir_ratio = self._base_dir_ratio
+        self.out_plot_dir_psd = self._base_dir_psd
+        # heat_map uses self.out_plot_dir (alias for line_plots dir)
+        self.out_plot_dir = self._base_dir_lines
+
+        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
+            os.makedirs(d, exist_ok=True)
+
+    def set_subdir(self, metric: str, region: str) -> None:
+        """Set a metric/region subdirectory for all output paths.
+
+        After calling this, plots will be saved into e.g.
+        ``<basedir>/line_plots/<metric>/<region>/``.
+
+        Parameters
+        ----------
+        metric : str
+            Current metric name.
+        region : str
+            Current region name.
+        """
+        subdir = Path(metric) / region
+        self.out_plot_dir_lines = self._base_dir_lines / subdir
+        self.out_plot_dir_ratio = self._base_dir_ratio / subdir
+        self.out_plot_dir_psd = self._base_dir_psd / subdir
+        self.out_plot_dir = self.out_plot_dir_lines
+
+        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
+            os.makedirs(d, exist_ok=True)
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
@@ -214,17 +241,12 @@ class LinePlots:
             )
 
         elif self.plot_ensemble == "members":
-            print(f"\n[members] {label}")
             for j in range(ens.ens.size):
-                member = ens.isel(ens=j)
-                print(f"  ens={j}: {member.values}")
                 plt.plot(
                     ens[x_dim],
-                    member.values,
+                    ens.isel(ens=j).values,
                     color=color,
-                    alpha=0.5,
-                    linestyle="--",
-                    linewidth=0.8,
+                    alpha=0.2,
                 )
         else:
             _logger.warning(
@@ -278,6 +300,7 @@ class LinePlots:
         print_summary: bool = False,
         title: str | None = None,
         colors: list[str | None] | None = None,
+        line: float | None = None,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -296,6 +319,9 @@ class LinePlots:
             Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
+        line:
+            If provided, draw a horizontal reference line at the given y-value
+            (e.g. the optimal value of a metric).
         Returns
         -------
             None
@@ -350,8 +376,9 @@ class LinePlots:
             x_dim_opts,
             y_dim,
             print_summary,
+            line=line,
             title=title,
-            out_plot_dir=self.out_plot_dir_lines,
+            out_plot_dir=self.out_plot_dir,
         )
 
     def _plot_base(
@@ -702,3 +729,86 @@ class LinePlots:
         parts = ["heat_map", metric, tag]
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
+
+    # ------------------------------------------------------------------
+    # PSD summary plot
+    # ------------------------------------------------------------------
+
+    def psd_plot(
+        self,
+        psd_datasets: list[dict],
+        labels: list[str],
+        tag: str = "",
+        variable: str = "",
+        forecast_step: str = "",
+    ) -> None:
+        """Create a PSD summary plot overlaying multiple runs.
+
+        Each entry in *psd_datasets* is a dict with keys
+        ``frequencies``, ``psd_target``, ``psd_prediction``, ``psd_method``.
+
+        Parameters
+        ----------
+        psd_datasets : list[dict]
+            One dict per run, each containing the PSD arrays stored by
+            ``Scores.calc_psd`` in ``.attrs``.
+        labels : list[str]
+            Human-readable label for each run.
+        tag : str
+            Filename tag.
+        """
+        out_dir = Path(self.out_plot_dir_psd)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use the target from the first run as reference
+        freq = np.asarray(psd_datasets[0]["frequencies"])
+        tar_psd = np.asarray(psd_datasets[0]["psd_target"])
+
+        fig, (ax_spec, ax_ratio) = plt.subplots(
+            2,
+            1,
+            figsize=self.fig_size or (10, 8),
+            gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
+        )
+
+        # Upper panel: log-log spectra
+        ax_spec.loglog(freq, tar_psd, color="black", lw=1.5, label="Target")
+        colors = plt.cm.tab10.colors
+        for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
+            c = colors[i % len(colors)]
+            ax_spec.loglog(
+                np.asarray(ds["frequencies"]),
+                np.asarray(ds["psd_prediction"]),
+                color=c,
+                lw=1.5,
+                label=label,
+            )
+        ax_spec.set_ylabel("Power")
+        psd_method = psd_datasets[0].get("psd_method", "sht")
+        title_parts = [f"PSD ({psd_method})"]
+        if variable:
+            title_parts.append(variable)
+        if forecast_step:
+            title_parts.append(f"step {forecast_step}")
+        ax_spec.set_title(" – ".join(title_parts))
+        ax_spec.legend(frameon=False, fontsize=7)
+        ax_spec.grid(True, which="both", ls="--", alpha=0.4)
+
+        # Lower panel: ratio (pred / target)
+        for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
+            c = colors[i % len(colors)]
+            pred = np.asarray(ds["psd_prediction"])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = np.where(tar_psd > 0, pred / tar_psd, np.nan)
+            ax_ratio.semilogx(freq, ratio, color=c, lw=1.2, label=label)
+        ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
+        ax_ratio.set_ylabel("Pred / Target")
+        ax_ratio.set_xlabel("Frequency (1/deg)")
+        ax_ratio.set_ylim(0, 2)
+        ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+
+        name = tag or "psd"
+        fname = out_dir / f"{name}.{self.image_format}"
+        _logger.debug(f"Saving PSD summary plot to {fname}")
+        fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
+        plt.close(fig)
