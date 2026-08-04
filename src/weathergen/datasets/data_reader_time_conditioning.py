@@ -81,6 +81,8 @@ class DataReaderTimeConditioning(DataReaderBase):
 
         values = []
         for vt in self.value_types:
+            # The values for time conditioning below denote fractional values of the
+            # day or year, normalized to [0, 1].
             if self.conditioning_type == "time_based":
                 if vt == "hour":
                     hours = dt.astype("datetime64[h]").astype(int) % 24
