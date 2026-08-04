@@ -343,7 +343,9 @@ class Trainer(TrainerBase):
             "num_workers": cf.data_loading.num_workers,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
-        # loader_params["num_workers"]=  0
+        loader_params["num_workers"] = cf.data_loading.get(
+            "num_workers_validation", cf.data_loading.num_workers
+        )
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
@@ -1291,8 +1293,8 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation{stage_suffix} ({self.cf.general.run_id}) : {mini_epoch:03d} : 
-                        {np.nanmean(avg_loss)}"""
+                        f"""validation{stage_suffix} ({self.cf.general.run_id}) : 
+                        {mini_epoch:03d} : {np.nanmean(avg_loss)}"""
                     )
 
                 elif stage == TRAIN:
