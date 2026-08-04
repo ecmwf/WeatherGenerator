@@ -268,4 +268,5 @@ def needs_climatology(metrics_dict: dict) -> bool:
         True if any metric requires climatology, False otherwise
     """
     metrics = [m for metrics in metrics_dict.values() for m in metrics.keys()]
-    return any(m in ["acc", "rps", "rpss"] for m in metrics)
+    req_clim = ["acc", "rps", "rpss", "seeps"]
+    return any(m in req_clim for m in metrics)

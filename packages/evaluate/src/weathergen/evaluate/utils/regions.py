@@ -23,18 +23,6 @@ class RegionLibrary:
     Predefined bounding boxes for known regions.
     """
 
-<<<<<<< HEAD
-    REGIONS: ClassVar[dict[str, tuple[float, float, float, float]]] = {
-        "global": (-90.0, 90.0, -180.0, 180.0),
-        "nhem": (0.0, 90.0, -180.0, 180.0),
-        "shem": (-90.0, 0.0, -180.0, 180.0),
-        "tropics": (-30.0, 30.0, -180.0, 180.0),
-        "belgium": (49, 52, 2, 7),
-        "europe": (35, 70, -10, 40),
-        "uwc-west": (39.0, 63.0, -26.0, 41.0),
-        "arome": (37.0, 56.0, -12.0, 16.0),
-        "icon": (42.0, 51.0, -1.0, 18.0),
-=======
     REGIONS: ClassVar[dict[str, tuple[float, float, float, float, ccrs.Projection]]] = {
         "global": (-90.0, 90.0, -180.0, 180.0, ccrs.Robinson()),
         "nhem": (0.0, 90.0, -180.0, 180.0, ccrs.PlateCarree()),
@@ -52,7 +40,6 @@ class RegionLibrary:
         "uwc-west": (39.0, 63.0, -26.0, 41.0, ccrs.PlateCarree()),
         "arome": (37.0, 56.0, -12.0, 16.0, ccrs.PlateCarree()),
         "icon": (42.0, 51.0, -1.0, 18.0, ccrs.PlateCarree()),
->>>>>>> 1d66f4558cf2ddeaa76fb89d45b06a45d53a7208
     }
 
 

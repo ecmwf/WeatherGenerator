@@ -152,7 +152,7 @@ def _compute_ranges(
     score_ranges_dict: dict = {}
     for region, _, score_results, _, metric_names in raw_results:
         for metric, result in zip(metric_names, score_results, strict=False):
-            if result is None:
+            if result is None or "channel" not in result.coords:
                 continue
             score_ranges_dict.setdefault(metric, {}).setdefault(region, {})
             for ch in result.coords["channel"].values:

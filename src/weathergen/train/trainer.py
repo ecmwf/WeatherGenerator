@@ -35,8 +35,8 @@ from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
-from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.optimizer import build_optimizer
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
@@ -104,9 +104,7 @@ def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
         # output_idxs is consumed by validation IO via batch.get_output_idxs(), but we
         # keep the dataclass internally consistent in case other consumers read it.
         if t_aux.output_idxs is not None and len(t_aux.output_idxs) == n_tgt:
-            t_aux.output_idxs = [
-                t_aux.output_idxs[i // repeat] for i in range(n_pred)
-            ]
+            t_aux.output_idxs = [t_aux.output_idxs[i // repeat] for i in range(n_pred)]
 
 
 class Trainer(TrainerBase):
@@ -269,7 +267,7 @@ class Trainer(TrainerBase):
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
-        [stream.update({"max_num_targets": -1}) for stream in cf.streams]
+        [stream.update({"max_num_targets": -1}) for _, stream in cf.streams.items()]
 
         # create data loader
         # only one needed since we only run the validation code path
@@ -345,7 +343,9 @@ class Trainer(TrainerBase):
             "num_workers": cf.data_loading.num_workers,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
-        # loader_params["num_workers"]=  0
+        loader_params["num_workers"] = cf.data_loading.get(
+            "num_workers_validation", cf.data_loading.num_workers
+        )
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
@@ -429,7 +429,6 @@ class Trainer(TrainerBase):
             )
             for optimizer, lr_cfg in zip(self.optimizers, lr_cfgs, strict=True)
         ]
-
 
         # Restore optimizer momentum buffers when continuing from a checkpoint
         if run_id_contd is not None and self.cf.general.istep != 0:
@@ -599,7 +598,7 @@ class Trainer(TrainerBase):
 
             # gradient clipping
             for optimizer in self.optimizers:
-                self.grad_scaler.unscale_(optimizer) 
+                self.grad_scaler.unscale_(optimizer)
 
             total_norm = torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
@@ -714,7 +713,8 @@ class Trainer(TrainerBase):
             with torch.no_grad():
                 # print progress bar but only in interactive mode, i.e. when without ddp
                 with tqdm.tqdm(
-                    total=len(self.data_loader_validation), disable=self.cf.with_ddp
+                    total=len(self.data_loader_validation) * self.cf.world_size,
+                    disable=self.cf.rank > 0,
                 ) as pbar:
                     for bidx, batch in enumerate(dataset_val_iter):
                         batch.to_device(self.device)
@@ -725,7 +725,6 @@ class Trainer(TrainerBase):
                             dtype=self.mixed_precision_dtype,
                             enabled=cf.with_mixed_precision,
                         ):
-
                             if self.ema_model is None:
                                 preds = self.model(
                                     self.model_params,
@@ -786,7 +785,7 @@ class Trainer(TrainerBase):
                                     targets_and_auxs,
                                 )
 
-                        pbar.update(batch_size)
+                        pbar.update(batch_size * self.cf.world_size)
 
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                             break
@@ -1230,7 +1229,7 @@ class Trainer(TrainerBase):
             skip_flag = torch.tensor(
                 [int(should_skip)], dtype=torch.int32, device=self.device or torch.device("cpu")
             )
-            torch.distributed.broadcast(skip_flag, src=0)
+            torch.distributed.all_reduce(skip_flag, op=torch.distributed.ReduceOp.MAX)
             should_skip = bool(skip_flag.item())
 
         return should_skip
@@ -1245,10 +1244,11 @@ class Trainer(TrainerBase):
         if not self.loss_spike_cfg.enabled:
             return False
 
+        # each rank checks its local loss; the skip decision is then all-reduced (OR) so
+        # that a spike / non-finite loss on any rank skips the batch on all ranks
         should_skip = False
-        if not is_root():
-            return self._sync_loss_spike_skip(should_skip)
-
+        local_anomaly = False
+        baseline, ratio = float("nan"), float("nan")
         is_finite = np.isfinite(loss_value)
         min_history = int(self.loss_spike_cfg.min_history)
         if len(self.loss_spike_history) >= min_history:
@@ -1256,14 +1256,19 @@ class Trainer(TrainerBase):
             ratio = loss_value / baseline if baseline > 0 else np.inf
             is_large_enough = loss_value >= float(self.loss_spike_cfg.loss_threshold)
             is_spike = ratio >= float(self.loss_spike_cfg.ratio_threshold)
-            if (is_finite and is_large_enough and is_spike) or not is_finite:
-                self._write_loss_spike_record(loss_value, baseline, ratio, batch, mini_epoch, bidx)
-                should_skip = bool(self.loss_spike_cfg.skip_batch)
+            local_anomaly = (is_finite and is_large_enough and is_spike) or not is_finite
+            should_skip = local_anomaly and bool(self.loss_spike_cfg.skip_batch)
+
+        should_skip = self._sync_loss_spike_skip(should_skip)
+
+        # logging stays rank-0-only; record fields are rank 0's local values
+        if is_root() and (local_anomaly or should_skip):
+            self._write_loss_spike_record(loss_value, baseline, ratio, batch, mini_epoch, bidx)
 
         if is_finite and not should_skip:
             self.loss_spike_history.append(float(loss_value))
 
-        return self._sync_loss_spike_skip(should_skip)
+        return should_skip
 
     def _log_instant_grad_norms(self, stage: Stage):
         """
@@ -1294,8 +1299,8 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation{stage_suffix} ({self.cf.general.run_id}) : {mini_epoch:03d} : 
-                        {np.nanmean(avg_loss)}"""
+                        f"""validation{stage_suffix} ({self.cf.general.run_id}) : 
+                        {mini_epoch:03d} : {np.nanmean(avg_loss)}"""
                     )
 
                 elif stage == TRAIN:
