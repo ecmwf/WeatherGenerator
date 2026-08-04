@@ -196,7 +196,8 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
 
-    is_model_sharded = cf.with_ddp and cf.with_fsdp
+    # Determine shardedness from the model instance itself, NOT from the global config flags:
+    is_model_sharded = any(type(p) is torch.distributed.tensor.DTensor for p in model.parameters())
     if is_model_sharded:
         # model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
         # params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
@@ -221,6 +222,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
                 sharded_meta_param is None
                 or type(sharded_meta_param) is not torch.distributed.tensor.DTensor
             ):
+                logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
                 continue
             sharded_tensor = distribute_tensor(
                 full_tensor,
