@@ -572,7 +572,7 @@ class Model(torch.nn.Module):
 
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
-        self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+        self.latent_pre_norm = nn.Identity()
 
         ssl_losses_cfgs = [
             v
@@ -583,7 +583,7 @@ class Model(torch.nn.Module):
         # TODO: support multiple LossLatentSSLStudentTeacher terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
         for ssl_target_losses in ssl_losses_cfgs:
-            self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+            self.latent_pre_norm = nn.Identity()
             for loss, loss_conf in ssl_target_losses.loss_fcts.items():
                 if loss == "iBOT":
                     self.latent_heads[loss] = self._create_latent_pred_head(

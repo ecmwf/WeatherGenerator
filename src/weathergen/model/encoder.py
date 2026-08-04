@@ -24,7 +24,6 @@ from weathergen.model.engines import (
 
 # from weathergen.model.model import ModelParams
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
-from weathergen.model.positional_encoding import positional_encoding_harmonic
 
 
 class EncoderModule(torch.nn.Module):
@@ -111,6 +110,11 @@ class EncoderModule(torch.nn.Module):
             q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
+        # dedicated auxiliary (register + class) tokens; trained parameter matching checkpoint
+        s_aux = (1, self.num_register_tokens + self.num_class_tokens, cf.ae_global_dim_embed)
+        q_aux = torch.rand(s_aux, requires_grad=True) / cf.ae_global_dim_embed
+        self.q_aux = torch.nn.Parameter(q_aux, requires_grad=True)
+
         # query aggregation engine
         self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
 
@@ -139,11 +143,17 @@ class EncoderModule(torch.nn.Module):
             use_reentrant=False,
         )
 
-        tokens_global = self.ln(tokens_global)
-        if self.cf.get("fe_diffusion_soft_clamp_channels", None) is not None:
-            tokens_global[..., self.cf.fe_diffusion_soft_clamp_channels] = torch.tanh(
-                tokens_global[..., self.cf.fe_diffusion_soft_clamp_channels]
-            ) * 2.0
+        # The extra latent normalization (and soft-clamp) are used only by the diffusion
+        # forecast pipeline so the diffusion target has unit variance. For the deterministic
+        # model the encoder output must stay the trailing-LN'd latent the decoders were
+        # trained on: re-normalizing here with a non-affine LayerNorm would strip the trained
+        # affine scale/shift of `ae_global_trailing_layer_norm` and corrupt the latent.
+        if self.cf.get("fe_diffusion_model", False):
+            tokens_global = self.ln(tokens_global)
+            if self.cf.get("fe_diffusion_soft_clamp_channels", None) is not None:
+                tokens_global[..., self.cf.fe_diffusion_soft_clamp_channels] = torch.tanh(
+                    tokens_global[..., self.cf.fe_diffusion_soft_clamp_channels]
+                ) * 2.0
 
         return tokens_global, posteriors
 
@@ -300,10 +310,8 @@ class EncoderModule(torch.nn.Module):
         num_steps_input = batch.get_num_steps()
         rs = num_steps_input * len(batch)
 
-        # create register and latent tokens and prepend to latent spatial tokens
-        num_extra_tokens = self.num_register_tokens + self.num_class_tokens
-        pos_enc = positional_encoding_harmonic
-        tokens_global_register_class = pos_enc(self.q_cells.repeat(rs, num_extra_tokens, 1))
+        # create dedicated auxiliary tokens and prepend them to the spatial tokens
+        tokens_global_register_class = self.q_aux.repeat(rs, 1, 1)
 
         # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:
