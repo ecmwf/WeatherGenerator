@@ -131,9 +131,7 @@ train_logging:
 data_loading :
 
   num_workers: 12
-  # base seed for all RNGs (data loading, torch, python); set for reproducible runs,
-  # leave null to derive from time. Rank 0's seed is used on all ranks.
-  rng_seed: null
+  rng_seed: ???
   repeat_data_in_mini_epoch : False
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
