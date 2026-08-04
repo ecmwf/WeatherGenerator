@@ -17,7 +17,6 @@ dependencies = [
  'tqdm',
  'matplotlib',
  'packaging',
- 'wheel',
  'psutil',
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
@@ -27,7 +26,13 @@ dependencies = [
  "anemoi-datasets",
  "weathergen-common",
  "weathergen-evaluate",
- "weathergen-readers-extra"
+ "weathergen-readers-extra",
+ "pytest>=9.0.2",
+ # older version have no precompiled linux-aarch64 cp312 wheel
+ "numcodecs>=0.16",
+ # This seems necessary for build isolation?
+ 'wheel',
+ 'setuptools',
 ]
 
 
@@ -52,6 +57,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/weathergen"]
 
+
 [dependency-groups]
 # The development dependencies
 dev = [
@@ -71,16 +77,16 @@ dev = [
 # uv and python can only filter dependencies by platform, not by capability.
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
 # We need to support:
-# x86_64: cpu (unit tests) + gpu 
+# x86_64: cpu (unit tests) + gpu
 # aarch64: gpu
 [project.optional-dependencies]
 
 cpu = [
-  'torch==2.6.0',
+  'torch==2.9.1',
 ]
 
 gpu = [
-  "torch==2.6.0; sys_platform == 'linux'",
+  "torch==2.9.1; sys_platform == 'linux'",
   # flash-attn also has a torch dependency.
   "flash-attn",
 ]
@@ -161,18 +167,25 @@ enable = ["W0201", "W0141"]
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
 # Also, trying to resolve some permissions issue, see 44.
+# symlink: faster than copy (ex: torch), but leads to files being deleted
+# when the cache is in SCRATCH with a deletion policy.
 link-mode = "symlink"
-# This guarantees that the build is deterministic and will not be impacted 
-# by future releases of dependencies or sub-dependencies. 
+# This guarantees that the build is deterministic and will not be impacted
+# by future releases of dependencies or sub-dependencies.
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
-exclude-newer = "2026-02-27T00:00:00Z"
+exclude-newer = "2026-04-27T00:00:00Z"
+
+# torch 2.9.1 pulls nvidia-nccl-cu12==2.27.5. Override
+# torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
+override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]
 
 # The minimum version of uv required.
-# It is tightly controlled because the format of uv.lock has changed 
+# It is tightly controlled because the format of uv.lock has changed
+# and we rely on newer options (extra-build-dependencies)
 # over revisions, causing reformats to happen without reason.
 # Also, relatively recent versions are required to support workspaces.
-required-version = ">=0.7.0"
+required-version = ">=0.10.0"
 
 # The supported environments
 # TODO: add macos and windows (CPU only, for running tests)
@@ -190,12 +203,12 @@ conflicts = [
   ],
 ]
 
-
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
-
+[tool.uv.extra-build-dependencies]
+anemoi-datasets = ["setuptools<76", "wheel"]
+cfunits = ["setuptools<76", "wheel"]
+antlr4-python3-runtime = ["setuptools<76", "wheel"]
+# Cartopy  requires setuptools >= 77
+cartopy = ["setuptools<78", "wheel"]
 
 [tool.pyrefly]
 project-includes = ["src/"]
@@ -231,31 +244,27 @@ weathergen-readers-extra = { workspace = true }
 
 
 flash-attn = [
-# The build of Cathal O'Brien is not compatible with the libc build on santis.
-# Hardcode the reference to the swiss cluster for the time being.
-# TODO: open issue
-#  { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-# This version was rebuilt locally on santis and uploaded.
-  { url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
+  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+  { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.8.3+cu12torch2.9cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
   # There is no official support for flash-attn on macos
 ]
 
-
 torch = [
 # Explicit pin for GPU
-  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-linux_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"', extra="gpu" },
-  { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", marker = 'sys_platform == "linux"  and platform_machine == "x86_64"', extra="gpu" },
+  { url = "https://download-r2.pytorch.org/whl/cu126/torch-2.9.1+cu126-cp312-cp312-manylinux_2_28_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"', extra="gpu" },
+  { url = "https://download-r2.pytorch.org/whl/cu126/torch-2.9.1+cu126-cp312-cp312-manylinux_2_28_x86_64.whl", marker = 'sys_platform == "linux"  and platform_machine == "x86_64"', extra="gpu" },
 # Explicit pin for CPU.
-  { url = "https://download.pytorch.org/whl/cpu/torch-2.6.0%2Bcpu-cp312-cp312-linux_x86_64.whl",marker = "sys_platform == 'linux' and platform_machine == 'x86_64'",extra = "cpu" },
-  { url = "https://download.pytorch.org/whl/cpu/torch-2.6.0%2Bcpu-cp312-cp312-manylinux_2_28_aarch64.whl",marker = "sys_platform == 'linux' and platform_machine == 'aarch64'",extra = "cpu" },
-  { url = "https://download.pytorch.org/whl/cpu/torch-2.6.0-cp312-none-macosx_11_0_arm64.whl",marker = "sys_platform == 'darwin'", extra="cpu" },
+  { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.9.1+cpu-cp312-cp312-manylinux_2_28_aarch64.whl",marker = "sys_platform == 'linux' and platform_machine == 'aarch64'",extra = "cpu" },
+  { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.9.1+cpu-cp312-cp312-manylinux_2_28_x86_64.whl",marker = "sys_platform == 'linux' and platform_machine == 'x86_64'",extra = "cpu" },
+
   # No acceleration for now.
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
-# branch = "feature/any-zarr-version-in-pyproject/"
+# TODO: switch back to this branch, but this is a larger update and the tag name is incorrect
+# anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
 anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
+
 
 [tool.pytest.ini_options]
 log_cli = true
@@ -273,4 +282,3 @@ members = [
 # Explicitly not depending on 'packages/dashboard' : this causes issues when deploying
 # the streamlit dashboard.
 ]
-

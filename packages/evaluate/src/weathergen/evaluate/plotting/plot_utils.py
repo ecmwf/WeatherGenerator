@@ -11,12 +11,30 @@ import datetime
 import logging
 import re
 from collections.abc import Iterable, Sequence
+from enum import Enum
 
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
 _logger = logging.getLogger(__name__)
+
+
+class PlotSubdir(str, Enum):
+    """Known plot subdirectory names produced by the plotting pipeline.
+
+    Being a ``str`` subclass, members compare and format exactly like plain
+    strings (e.g. ``PlotSubdir.line_plots == "line_plots"``), so they can be
+    used as drop-in replacements wherever the raw directory name is expected
+    (e.g. ``Path(base) / PlotSubdir.line_plots``).
+    """
+
+    line_plots = "line_plots"
+    ratio_plots = "ratio_plots"
+    psd_plots = "psd_plots"
+    score_cards = "score_cards"
+    bar_plots = "bar_plots"
+    qq_plots = "qq_plots"
 
 
 # Shared helpers
@@ -390,6 +408,9 @@ def plot_metric_region(
 
                 title = f"{metric.upper()} | {stream} | {ch}"
 
+                ref_line_dict = {"ssr_adj": 1.0}
+                line = ref_line_dict.get(metric)
+
                 plotter.plot(
                     selected_data,
                     labels,
@@ -399,6 +420,7 @@ def plot_metric_region(
                     print_summary=print_summary,
                     title=title,
                     colors=colors,
+                    line=line,
                 )
 
 
@@ -768,13 +790,87 @@ def quantile_plot_metric_region(
                     )
 
 
+def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict] | None:
+    """Extract PSD curve data from DataArray attrs for a given fstep/channel.
+
+    Returns a single-element list of dicts ready for the plotter, or None if keys are missing.
+    """
+    attrs = data_ch.attrs
+    fp = f"fstep_{fstep}/"
+
+    for prefix in (f"{fp}{ch}/", fp):
+        if f"{prefix}frequencies" in attrs and f"{prefix}psd_target" in attrs:
+            return [
+                {
+                    "frequencies": np.array(attrs[f"{prefix}frequencies"]),
+                    "psd_target": np.array(attrs[f"{prefix}psd_target"]),
+                    "psd_prediction": np.array(attrs[f"{prefix}psd_prediction"]),
+                    "psd_method": attrs.get(f"{fp}psd_method", attrs.get("psd_method", "sht")),
+                }
+            ]
+    return None
+
+
+def psd_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+) -> None:
+    """Create PSD plots for all streams and channels for a given metric and region.
+
+    PSD curves (frequencies, target PSD, prediction PSD) are stored in
+    ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        for ch in channels_set:
+            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+                if ch not in np.atleast_1d(data.channel.values):
+                    continue
+
+                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
+                if data_ch.isnull().all():
+                    continue
+
+                attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
+                if not attr_fsteps:
+                    _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
+                    continue
+
+                label = runs[run_id].get("label", run_id)
+
+                for fstep in attr_fsteps:
+                    psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
+                    if psd_datasets is None:
+                        continue
+
+                    method_tag = psd_datasets[0].get("psd_method", "sht")
+                    name = create_filename(
+                        prefix=[metric, method_tag, region],
+                        middle=[run_id],
+                        suffix=[stream, ch, f"fstep{fstep}"],
+                    )
+                    plotter.psd_plot(
+                        psd_datasets,
+                        [label],
+                        tag=name,
+                        variable=ch,
+                        forecast_step=str(fstep),
+                    )
+    _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
+
+
 def create_filename(
     *,
     prefix: Sequence[str] = (),
     middle: Iterable[str] = (),
     suffix: Sequence[str] = (),
     sep: str = "_",
-    max_len: int = 196,
+    max_len: int = 255,
 ):
     """
     Join strings as: prefix + middle + suffix, truncating only `middle`
@@ -823,4 +919,4 @@ def create_filename(
             f"to keep length <= {max_len}."
         )
 
-    return sep.join(pref + truncated_middle + suf)
+    return sep.join(prefix + truncated_middle + suffix)
