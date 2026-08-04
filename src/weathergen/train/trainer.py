@@ -12,9 +12,7 @@ import contextlib
 import copy
 import logging
 import time
-from contextlib import nullcontext
-from functools import partial
-from itertools import islice
+from collections.abc import Iterator
 from math import sqrt
 
 import numpy as np
@@ -24,7 +22,6 @@ from omegaconf import OmegaConf
 
 # FSDP2
 from torch.distributed.tensor import DTensor
-from torch.profiler import ProfilerActivity, profile
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
@@ -53,19 +50,14 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range
-from weathergen.utils.profiling import (
-    export_memory_snapshot,
-    start_record_memory_history,
-    stop_record_memory_history,
-    trace_handler,
-    wrap_module_forward_with_profiling,
-)
+from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
+
+# cfg_keys_to_filter = ["losses", "model_input", "target_input"]
 
 
 class Trainer(TrainerBase):
@@ -174,15 +166,6 @@ class Trainer(TrainerBase):
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
-
-        if cf.train_logging.get("track_performance_metrics"):
-            self.perf_tracker = ThroughputTracker(
-                device=torch.device(self.devices[0]),
-                warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
-                batch_size_per_gpu=self.batch_size_per_gpu,
-            )
-        if cf.get("profiling", {}).get("nvtx_annotate", False):
-            self.training_loop_annotation_context = nvtx_range
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -391,17 +374,14 @@ class Trainer(TrainerBase):
         if is_root():
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
-        self._training_loop(mini_epoch_base)
-        self.save_model(self.training_cfg.num_mini_epochs)
 
-    def _training_loop(self, mini_epoch_base: int):
         # run validation before training if requested
         self.validate_before_training()
 
         # training loop
         self.t_training_start = time.time()
 
-        for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
+        for mini_epoch in self.mini_epochs(mini_epoch_base):
             if is_root():
                 logger.info(
                     f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train."
@@ -419,6 +399,18 @@ class Trainer(TrainerBase):
                     f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
                 )
             self.save_model(mini_epoch)
+
+        # log final model
+        self.save_model(self.training_cfg.num_mini_epochs)
+
+    def mini_epochs(self, mini_epoch_base: int) -> Iterator[int]:
+        """
+        Yield the mini_epochs that run() iterates over.
+
+        Subclass seam: overriding this changes how long a run lasts without duplicating
+        run(). See weathergen.train.profiling_trainer.ProfilingTrainer.
+        """
+        yield from range(mini_epoch_base, self.training_cfg.num_mini_epochs)
 
     def validate_before_training(self):
         """
@@ -457,10 +449,138 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
-        for bidx, batch in enumerate(dataset_iter):
-            self._train_batch(batch, bidx, mini_epoch)
+        for bidx, batch in self.train_batches(dataset_iter):
+            with self.training_loop_annotation_context(f"batch_{bidx}"):
+                if cf.data_loading.get("memory_pinning", False):
+                    # pin memory for faster CPU-GPU transfer
+                    batch = batch.pin_memory()
+
+                batch.to_device(self.device)
+
+                with torch.autocast(
+                    device_type=f"cuda:{cf.local_rank}",
+                    dtype=self.mixed_precision_dtype,
+                    enabled=cf.with_mixed_precision,
+                ):
+                    preds = self.model(
+                        model_params=self.model_params,
+                        batch=batch.get_source_samples(),
+                    )
+
+                    targets_and_auxs = {}
+                    for loss_name, target_aux in self.target_and_aux_calculators.items():
+                        # find targets for this target-aux calculator
+                        target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                        # apply target-aux calculator
+                        targets_and_auxs[loss_name] = target_aux.compute(
+                            self.cf.general.istep,
+                            batch.get_target_samples(target_idxs),
+                            self.model_params,
+                            self.model,
+                        )
+
+                loss = self.loss_calculator.compute_loss(
+                    preds=preds,
+                    targets_and_aux=targets_and_auxs,
+                    metadata=extract_batch_metadata(batch),
+                )
+
+                # TODO re-enable this, need to think on how to make it compatible with
+                # student-teacher training
+                # if cf.latent_noise_kl_weight > 0.0:
+                #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
+                #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+
+                [
+                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators.items()
+                ]
+                [
+                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators_val.items()
+                ]
+
+                # backward pass
+                self.optimizer.zero_grad()
+                self.grad_scaler.scale(loss).backward()
+
+                # gradient clipping
+                self.grad_scaler.unscale_(self.optimizer)
+                total_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
+                )
+
+                # log gradient norms
+                if self.log_grad_norms:
+                    if bidx % self.train_logging.terminal == 0:
+                        self.last_grad_norm = self._get_tensor_item(total_norm)
+                    if bidx % self.train_logging.metrics == 0:
+                        self._log_instant_grad_norms(TRAIN)
+
+                # optimizer step
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+
+                # update learning rate
+                self.lr_scheduler.step()
+
+                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+                step = batch_size_total * self.cf.general.istep
+
+                [
+                    target_aux.update_state_post_opt_step(step, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators.items()
+                ]
+                [
+                    target_aux.update_state_post_opt_step(step, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators_val.items()
+                ]
+
+            # EMA update
+            if self.validate_with_ema:
+                self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
+
+            self.perf_tracker.step(
+                batch,
+                self.cf.general.istep,
+                log_fn=lambda m: self.train_logger.log_metrics(
+                    TRAIN, m, step=self.cf.general.istep
+                ),
+            )
+            # Compute collapse monitoring metrics
+            if self.collapse_monitor.should_compute(self.cf.general.istep):
+                self.collapse_monitor._compute_collapse_metrics(
+                    self.cf,
+                    batch_size_total,
+                    self.target_and_aux_calculators,
+                    preds,
+                    targets_and_auxs,
+                )
+
+            self._log_terminal(bidx, mini_epoch, TRAIN)
+            if bidx % self.train_logging.metrics == 0:
+                self._log(TRAIN)
+                # Log collapse metrics
+                if self.collapse_monitor.should_log(self.cf.general.istep):
+                    self._log_collapse_metrics(TRAIN)
+
+            # save model checkpoint (with designation _latest)
+            if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
+                self.save_model(-1)
+
+            self.cf.general.istep += 1
 
         self.dataset.advance()
+
+    def train_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
+        """
+        Yield the (index, batch) pairs that train() steps over.
+
+        Subclass seam: overriding this bounds the loop or wraps it in a context (e.g. a
+        profiler) while the training step itself stays in train(), so there is only ever
+        one copy of it. See weathergen.train.profiling_trainer.ProfilingTrainer.
+        """
+        yield from enumerate(dataset_iter)
 
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
@@ -592,123 +712,6 @@ class Trainer(TrainerBase):
             }
         else:
             return {}
-
-    def _train_batch(self, batch: ModelBatch, bidx: int, mini_epoch: int):
-        with self.training_loop_annotation_context(f"batch_{bidx}"):
-            if self.cf.data_loading.get("memory_pinning", False):
-                # pin memory for faster CPU-GPU transfer
-                batch = batch.pin_memory()
-            batch.to_device(self.device)
-            with torch.autocast(
-                device_type=f"cuda:{self.cf.local_rank}",
-                dtype=self.mixed_precision_dtype,
-                enabled=self.cf.with_mixed_precision,
-            ):
-                preds = self.model(
-                    self.model_params,
-                    batch.get_source_samples(),
-                )
-
-                targets_and_auxs = {}
-                for loss_name, target_aux in self.target_and_aux_calculators.items():
-                    # find targets for this target-aux calculator
-                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
-                    # apply target-aux calculator
-                    targets_and_auxs[loss_name] = target_aux.compute(
-                        self.cf.general.istep,
-                        batch.get_target_samples(target_idxs),
-                        self.model_params,
-                        self.model,
-                    )
-
-            loss = self.loss_calculator.compute_loss(
-                preds=preds,
-                targets_and_aux=targets_and_auxs,
-                metadata=extract_batch_metadata(batch),
-            )
-
-            # TODO re-enable this, need to think on how to make it compatible with
-            # student-teacher training
-            # if self.cf.latent_noise_kl_weight > 0.0:
-            #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
-            #     loss_values.loss += self.cf.latent_noise_kl_weight * kl.mean()
-
-            [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators_val.items()
-            ]
-
-            # backward pass
-            self.optimizer.zero_grad()
-            self.grad_scaler.scale(loss).backward()
-
-            # gradient clipping
-            self.grad_scaler.unscale_(self.optimizer)
-            total_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
-            )
-
-            # log gradient norms
-            if self.log_grad_norms:
-                if bidx % self.train_logging.terminal == 0:
-                    self.last_grad_norm = self._get_tensor_item(total_norm)
-                if bidx % self.train_logging.metrics == 0:
-                    self._log_instant_grad_norms(TRAIN)
-
-            # optimizer step
-            self.grad_scaler.step(self.optimizer)
-            self.grad_scaler.update()
-
-            # update learning rate
-            self.lr_scheduler.step()
-
-            batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-            step = batch_size_total * self.cf.general.istep
-
-            [
-                target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators_val.items()
-            ]
-
-        # EMA update
-        if self.validate_with_ema:
-            self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
-
-        self.perf_tracker.step(
-            batch,
-            self.cf.general.istep,
-            log_fn=lambda m: self.train_logger.log_metrics(TRAIN, m, step=self.cf.general.istep),
-        )
-        # Compute collapse monitoring metrics
-        if self.collapse_monitor.should_compute(self.cf.general.istep):
-            self.collapse_monitor._compute_collapse_metrics(
-                self.cf,
-                batch_size_total,
-                self.target_and_aux_calculators,
-                preds,
-                targets_and_auxs,
-            )
-
-        self._log_terminal(bidx, mini_epoch, TRAIN)
-        if bidx % self.train_logging.metrics == 0:
-            self._log(TRAIN)
-            # Log collapse metrics
-            if self.collapse_monitor.should_log(self.cf.general.istep):
-                self._log_collapse_metrics(TRAIN)
-
-        # save model checkpoint (with designation _latest)
-        if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
-            self.save_model(-1)
-
-        self.cf.general.istep += 1
 
     def save_model(self, mini_epoch: int, name=None):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
@@ -853,155 +856,3 @@ class Trainer(TrainerBase):
         if metrics and is_root():
             metrics["num_samples"] = self.cf.general.istep
             self.train_logger.log_metrics(stage, metrics)
-
-
-class ProfilingTrainer(Trainer):
-    def __init__(self, train_logging: Config):
-        super().__init__(train_logging)
-
-        self.max_profile_steps: int = 0
-        self.schedule = None
-        self.prof = nullcontext()
-
-    PROFILING_DEFAULTS = {
-        "wait_iteration": 1,
-        "warmup_iteration": 1,
-        "active_iteration": 1,
-        "repeat": 1,
-    }
-
-    def init(self, cf: Config, devices: list):
-        super().init(cf, devices)
-
-        profiling_cfg = OmegaConf.merge(cf.profiling, self.PROFILING_DEFAULTS)
-
-        self.max_profile_steps = (
-            profiling_cfg.wait_iteration
-            + profiling_cfg.warmup_iteration
-            + profiling_cfg.active_iteration
-        ) * profiling_cfg.repeat
-
-        self.schedule = torch.profiler.schedule(
-            wait=profiling_cfg.wait_iteration,
-            warmup=profiling_cfg.warmup_iteration,
-            active=profiling_cfg.active_iteration,
-            repeat=profiling_cfg.repeat,
-        )
-        if is_root():
-            config.get_path_profiling_traces(cf).mkdir(exist_ok=True, parents=True)
-
-        handler = partial(trace_handler, cf)
-
-        # Determine profiler setup
-        if is_root():
-            self.prof = profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                record_shapes=True,
-                profile_memory=True,
-                with_stack=True,
-                with_modules=True,
-                with_flops=True,
-                schedule=torch.profiler.schedule(
-                    wait=profiling_cfg.wait_iteration,
-                    warmup=profiling_cfg.warmup_iteration,
-                    active=profiling_cfg.active_iteration,
-                    repeat=profiling_cfg.repeat,
-                ),
-                on_trace_ready=handler,
-            )
-        else:
-            self.prof = nullcontext()
-
-    def save_model(self, mini_epoch: int, name=None):
-        # Skip save in profiling mode.
-        return
-
-    def _training_loop(self, mini_epoch_base: int):
-        # run validation before training if requested
-        self.validate_before_training()
-        wrap_module_forward_with_profiling(self.model, prefix="model")
-
-        end = min(mini_epoch_base + 1, self.training_cfg.num_mini_epochs)
-        for mini_epoch in range(mini_epoch_base, end):
-            logger.info(f"Mini_epoch {mini_epoch} of {end}: train.")
-
-            self.train(mini_epoch)
-
-    def train(self, mini_epoch):
-        """
-        Profiling the training using torch profiler.
-        """
-
-        cf = self.cf
-        self.model.train()
-
-        apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
-
-        dataset_iter = iter(self.data_loader)
-
-        self.optimizer.zero_grad()
-
-        # training loop
-        self.t_start = time.time()
-
-        if is_root():
-            # Start recording memory snapshot history
-            start_record_memory_history()
-
-        with self.prof:
-            for bidx, batch in enumerate(islice(dataset_iter, self.max_profile_steps)):
-                self._train_batch(batch, bidx, mini_epoch)
-                if hasattr(self.prof, "step"):
-                    self.prof.step()
-
-            # Print only on rank 0
-            if is_root() and hasattr(self.prof, "key_averages"):
-                logger.info("\n" + "=" * 80)
-                logger.info("PROFILING SUMMARY")
-                logger.info("=" * 80)
-
-                logger.info("\n--- Top Operations by FLOPs ---")
-                logger.info(
-                    self.prof.key_averages().table(
-                        sort_by="flops", row_limit=20, top_level_events_only=False
-                    )
-                )
-
-                logger.info("\n--- Operations Grouped by Module ---")
-                logger.info(
-                    self.prof.key_averages(group_by_stack_n=5).table(
-                        sort_by="cuda_time_total", row_limit=30
-                    )
-                )
-
-                logger.info("\n--- Memory Usage ---")
-                logger.info(
-                    self.prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=20)
-                )
-
-        if is_root():
-            # Create the memory snapshot file
-            export_memory_snapshot(cf)
-
-            # Stop recording memory snapshot history
-            stop_record_memory_history()
-
-        torch.distributed.barrier()
-
-        if is_root():
-            logger.info("Training loop profiling is complete.")
-            logger.info(
-                "The memory snapshot, memory usage distribution, and PyTorch profiler"
-                "trace can be found in the profiler_logs folder."
-            )
-
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-
-
-def get_trainer(cf) -> Trainer:
-    profiling = cf.get("profiling")
-    if profiling and cf.profiling.enabled:
-        return ProfilingTrainer(cf.train_logging)
-    else:
-        return Trainer(cf.train_logging)

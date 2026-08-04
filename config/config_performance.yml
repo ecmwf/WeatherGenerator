@@ -1,0 +1,27 @@
+# Overwrite config for measuring a training run, e.g.
+#   train --config config/config_performance.yml
+# As written, the run ends once the profiled stretch below is done, and its chrome trace,
+# memory timeline and memory snapshot are written to
+# <shared_working_dir>/logs/<run_id>/profiling_traces.
+#
+# To measure a full-length run instead, set `stop_after_profiling: False` (traces of the
+# first steps, then training continues normally), or `profiling.enabled: False` to keep
+# only the throughput metrics, which cost close to nothing.
+profiling:
+  enabled: True
+  stop_after_profiling: True
+
+  wait_iteration: 1
+  warmup_iteration: 1
+  active_iteration: 3
+  repeat: 1
+
+  pytorch_profiler:
+    enabled: True
+
+  memory_snapshot:
+    enabled: True
+
+performance_logging:
+  throughput:
+    enabled: True
