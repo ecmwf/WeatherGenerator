@@ -885,7 +885,7 @@ class Model(torch.nn.Module):
                     # NOTE: This is precautionary, might need to be handled differently.
                     # It should not be the same as conditioning tokens.
                     tokens = None
-src/weathergen/model/model.py                    continue
+                    continue
 
                 # Unified diffusion decoding path — handles both:
                 #  • rollout (diffusion_rollout=True): tokens is a list; take the final ODE state
