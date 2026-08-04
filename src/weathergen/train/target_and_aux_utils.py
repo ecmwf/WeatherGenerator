@@ -61,9 +61,7 @@ def get_target_aux_calculator(
                 setattr(model, attr, None)
         torch.cuda.empty_cache()
 
-        target_aux = DiffusionLatentTargetEncoder(
-            model, is_model_sharded=(cf.with_ddp and cf.with_fsdp)
-        )
+        target_aux = DiffusionLatentTargetEncoder(model, is_model_sharded=False)
 
     elif target_and_aux_calc == "EMATeacher":
         # work around for problems with FSDP2
