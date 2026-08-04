@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .optimizer import AdamW, Muon
+from .optimizer import AdamW, Muon, OptimizerBase
 from .utils import build_optimizer
 
-__all__ = [AdamW, Muon, build_optimizer]
+__all__ = [AdamW, Muon, OptimizerBase, build_optimizer]

@@ -161,7 +161,7 @@ training_config:
     # which optimizer to use: "adamw" or "muon"
     # muon only optimizes 2D weight matrices of hidden layers; all other
     # parameters (biases, norms, ...) are still optimized with adamw
-    name: muon
+    name: adamw
     grad_clip: 1.0
     weight_decay: 0.1
     log_grad_norms: False
@@ -171,9 +171,8 @@ training_config:
       beta2 : 0.9875  # == 0.90 on 2 nodes x 4 gpus
       eps : 2e-08
     muon:
-      # peak lr override for muon; null shares adamw's lr schedule (relies on
-      # adjust_lr_fn=match_rms_adamw's per-matrix scaling instead of a fixed multiplier)
-      lr_max: null
+      # muon shares adamw's lr schedule: adjust_lr_fn=match_rms_adamw rescales the lr per
+      # matrix so that the RMS of muon's update matches adamw's at the same nominal lr
       momentum: 0.95
       nesterov: True
       ns_steps: 5

@@ -258,8 +258,6 @@ def plot_lr(
 
     linestyle = "-"
 
-    optimizer_linestyles = ["-", "--", ":", "-."]
-
     legend_str = []
     for j, run_data in enumerate(runs_data):
         if run_data.train.is_empty():
@@ -269,28 +267,12 @@ def plot_lr(
         data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
         x_vals = run_data.train[x_col]
-        color = colors[j % len(colors)]
+        y_vals = np.array(run_data.train[data_cols])
+        mask = y_vals > 1000.0
+        y_vals[mask] = 0.0  # np.nan
 
-        for k, col in enumerate(data_cols):
-            # "learning_rate" (the primary/adamw optimizer) -> "adamw";
-            # "learning_rate_muon" -> "muon"; etc.
-            optimizer_name = col.removeprefix("learning_rate").lstrip("_") or "adamw"
-
-            y_vals = np.array(run_data.train[col])
-            mask = y_vals > 1000.0
-            y_vals[mask] = 0.0  # np.nan
-
-            ls = (
-                optimizer_linestyles[k % len(optimizer_linestyles)]
-                if len(data_cols) > 1
-                else linestyle
-            )
-            plt.plot(x_vals, y_vals, ls, color=color)
-
-            label = f"{run_id}_{optimizer_name}" if len(data_cols) > 1 else run_id
-            legend_str += [
-                ("R" if runs_active[j] else "X") + " : " + label + " : " + runs_ids[run_id]
-            ]
+        plt.plot(x_vals, y_vals, linestyle, color=colors[j % len(colors)])
+        legend_str += [("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id]]
 
     if len(legend_str) < 1:
         _logger.warning(

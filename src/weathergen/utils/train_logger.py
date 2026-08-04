@@ -100,30 +100,18 @@ class TrainLogger:
         losses_all: dict,
         stddev_all: dict,
         avg_loss: list[float] = None,
-        lr: float | dict[str, float] = None,
+        lr: float = None,
         elapsed_training_time_seconds: float | None = None,
     ) -> None:
         """
         Log training or validation data.
-
-        lr: either a single float (one optimizer), or a dict mapping optimizer name
-            to its current lr (multiple optimizers, e.g. {"adamw": ..., "muon": ...}).
-            When a dict, "adamw" (if present, else the first entry) is additionally
-            logged under the plain "learning_rate" key for backwards compatibility.
         """
         metrics: dict[str, float] = dict(num_samples=samples)
 
         if stage == "train":
             val = np.nan if np.isnan(avg_loss).all() else np.nanmean(avg_loss)
             metrics["loss_avg_mean"] = val
-            if isinstance(lr, dict):
-                primary_name = "adamw" if "adamw" in lr else next(iter(lr))
-                metrics["learning_rate"] = lr[primary_name]
-                for name, value in lr.items():
-                    if name != primary_name:
-                        metrics[f"learning_rate_{name}"] = value
-            else:
-                metrics["learning_rate"] = lr
+            metrics["learning_rate"] = lr
             metrics["num_samples"] = int(samples)
             if elapsed_training_time_seconds is not None:
                 metrics["elapsed_training_time_seconds"] = elapsed_training_time_seconds
@@ -167,11 +155,8 @@ class TrainLogger:
         result_dir_base = config.get_path_run(cf)
 
         # define cols for training
-        # "learning_rate" is matched as a substring pattern (not just the cols1 exact name) so
-        # that any per-optimizer "learning_rate_<name>" columns (e.g. "learning_rate_muon") are
-        # also picked up, without needing to list every optimizer name here.
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
-        cols1_patterns = ["loss_avg", "learning_rate"] + cols_patterns
+        cols1_patterns = ["loss_avg"] + cols_patterns
 
         metrics_train = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
 

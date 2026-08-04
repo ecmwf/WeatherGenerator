@@ -75,12 +75,10 @@ class Trainer(TrainerBase):
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
-        self.lr_schedulers: list[LearningRateScheduler] = []
+        self.lr_scheduler: LearningRateScheduler | None = None
         self.model = None
         self.model_params = None
-        self.optimizers: list[torch.optim.Optimizer] = []
-        self.optimizer_names: list[str] = []
-        self._muon_effective_lr_factor: float | None = None
+        self.optimizer: torch.optim.Optimizer | None = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
         self.target_and_aux_calculators_val = None
@@ -99,26 +97,6 @@ class Trainer(TrainerBase):
         Get total, effective batch size across all DDP ranks
         """
         return self.world_size_original * batch_size_per_gpu
-
-    def _current_lrs(self) -> dict[str, float]:
-        """
-        Current lr of each optimizer, keyed by name (e.g. {"adamw": ...} or
-        {"muon": ..., "adamw": ...}).
-
-        For muon, "muon" is the actual applied lr: the scheduled lr multiplied by a
-        representative (median, across muon params) adjust_lr_fn factor. torch.optim.Muon
-        applies this factor per-parameter, inside step(), based on each matrix's shape -- it
-        never updates param_groups[...]["lr"], so the raw scheduled lr alone (identical to
-        adamw's, since both share the same schedule) understates the actual per-parameter step
-        size by ~10-25x for this model's matrix sizes and isn't what's really applied.
-        """
-        lrs = {
-            name: scheduler.get_lr()
-            for name, scheduler in zip(self.optimizer_names, self.lr_schedulers, strict=True)
-        }
-        if "muon" in lrs and self._muon_effective_lr_factor is not None:
-            lrs["muon"] = lrs["muon"] * self._muon_effective_lr_factor
-        return lrs
 
     def init(self, cf: Config, devices):
         # pylint: disable=attribute-defined-outside-init
@@ -344,14 +322,12 @@ class Trainer(TrainerBase):
                 self.model.print_num_parameters()
 
         kappa = self.get_batch_size_total(self.batch_size_per_gpu)
-        shared_lr_cfg = self.training_cfg.learning_rate_scheduling
-
-        built = build_optimizer(self.model, self.training_cfg.optimizer, shared_lr_cfg, kappa)
-        self.optimizers = built.optimizers
-        self.optimizer_names = built.optimizer_names
-        self._muon_effective_lr_factor = built.muon_effective_lr_factor
-        lr_cfgs = built.lr_cfgs
-
+        self.optimizer = build_optimizer(
+            self.model,
+            self.training_cfg.optimizer,
+            self.training_cfg.learning_rate_scheduling,
+            kappa,
+        )
         if cf.get("training_config").get("optimizer").get("grad_scaling", True):
             self.grad_scaler = torch.amp.GradScaler("cuda")
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"
@@ -360,20 +336,17 @@ class Trainer(TrainerBase):
         # TODO: conf should be read-only, do not modify the conf in flight
         len_ds = len(self.dataset)
         lr_steps = int((len_ds * self.training_cfg.num_mini_epochs) / self.batch_size_per_gpu)
-        self.lr_schedulers = [
-            LearningRateScheduler(
-                optimizer,
-                self.batch_size_per_gpu,
-                cf.world_size,
-                cf.general.istep,
-                lr_steps,
-                lr_cfg,
-            )
-            for optimizer, lr_cfg in zip(self.optimizers, lr_cfgs, strict=True)
-        ]
+        self.lr_scheduler = LearningRateScheduler(
+            self.optimizer,
+            self.batch_size_per_gpu,
+            cf.world_size,
+            cf.general.istep,
+            lr_steps,
+            self.training_cfg.learning_rate_scheduling,
+        )
 
         if self.cf.general.istep > 0 and is_root():
-            logger.info(f"Continuing run with learning rate: {self.lr_schedulers[0].get_lr()}")
+            logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
@@ -460,8 +433,7 @@ class Trainer(TrainerBase):
 
         dataset_iter = iter(self.data_loader)
 
-        for optimizer in self.optimizers:
-            optimizer.zero_grad()
+        self.optimizer.zero_grad()
 
         # training loop
         self.t_start = time.time()
@@ -517,13 +489,11 @@ class Trainer(TrainerBase):
                 ]
 
                 # backward pass
-                for optimizer in self.optimizers:
-                    optimizer.zero_grad()
+                self.optimizer.zero_grad()
                 self.grad_scaler.scale(loss).backward()
 
                 # gradient clipping
-                for optimizer in self.optimizers:
-                    self.grad_scaler.unscale_(optimizer)
+                self.grad_scaler.unscale_(self.optimizer)
                 total_norm = torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
                 )
@@ -536,13 +506,11 @@ class Trainer(TrainerBase):
                         self._log_instant_grad_norms(TRAIN)
 
                 # optimizer step
-                for optimizer in self.optimizers:
-                    self.grad_scaler.step(optimizer)
+                self.grad_scaler.step(self.optimizer)
                 self.grad_scaler.update()
 
                 # update learning rate
-                for lr_scheduler in self.lr_schedulers:
-                    lr_scheduler.step()
+                self.lr_scheduler.step()
 
                 batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
                 step = batch_size_total * self.cf.general.istep
@@ -695,36 +663,33 @@ class Trainer(TrainerBase):
 
     def _get_full_optimizer_state_dict(self):
         is_rank_zero = is_root()
-        full_state_dicts = []
-        for optimizer in self.optimizers:
-            sharded_sd = optimizer.state_dict()
-            sharded_state = sharded_sd["state"]
-            full_state = {}
-            for group_id, sharded_group in sharded_state.items():
-                group_state = {}
-                for attr, sharded_tensor in sharded_group.items():
-                    if isinstance(sharded_tensor, DTensor):
-                        # "exp_avg" in AdamW / momentum buffer in Muon is `DTensor`
-                        full_tensor = sharded_tensor.full_tensor()
-                    else:
-                        # "step" in AdamW is plain tensor
-                        full_tensor = sharded_tensor
-                    if is_rank_zero:
-                        group_state[attr] = full_tensor.cpu()
-                    else:
-                        del full_tensor
-                if is_rank_zero:
-                    full_state[group_id] = group_state
+        sharded_sd = self.optimizer.state_dict()
+        sharded_state = sharded_sd["state"]
+        full_state = {}
+        for group_id, sharded_group in sharded_state.items():
+            group_state = {}
+            for attr, sharded_tensor in sharded_group.items():
+                if isinstance(sharded_tensor, DTensor):
+                    # "exp_avg" in AdamW is `DTensor`
+                    full_tensor = sharded_tensor.full_tensor()
                 else:
-                    del group_state
+                    # "step" in AdamW is plain tensor
+                    full_tensor = sharded_tensor
+                if is_rank_zero:
+                    group_state[attr] = full_tensor.cpu()
+                else:
+                    del full_tensor
             if is_rank_zero:
-                full_state_dicts.append(
-                    {
-                        "param_groups": sharded_sd["param_groups"],
-                        "state": full_state,
-                    }
-                )
-        return full_state_dicts if is_rank_zero else []
+                full_state[group_id] = group_state
+            else:
+                del group_state
+        if is_rank_zero:
+            return {
+                "param_groups": sharded_sd["param_groups"],
+                "state": full_state,
+            }
+        else:
+            return {}
 
     def save_model(self, mini_epoch: int, name=None):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
@@ -788,7 +753,7 @@ class Trainer(TrainerBase):
                     losses_all,
                     stddev_all,
                     avg_loss=avg_loss,
-                    lr=self._current_lrs(),
+                    lr=self.lr_scheduler.get_lr(),
                     elapsed_training_time_seconds=elapsed_time,
                 )
 
@@ -840,13 +805,10 @@ class Trainer(TrainerBase):
                     # samples per sec
                     dt = time.time() - self.t_start
                     len_dataset = len(self.data_loader) // self.batch_size_per_gpu
-                    lr_str = ", ".join(
-                        f"{name}={lr:.2E}" for name, lr in self._current_lrs().items()
-                    )
                     pstr = (
                         f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
                         + f"{self.cf.general.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
-                        + f"(lr={lr_str}, "
+                        + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
                     if self.log_grad_norms:
                         pstr += f"gradient norm={self.last_grad_norm:.3f}, "
