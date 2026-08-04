@@ -321,7 +321,10 @@ def _masked_l1_loss_per_sample(
     mask_f = mask.to(per_token_loss.dtype)
     token_counts = mask_f.sum(dim=-1)
     valid_samples = token_counts > 0
-    per_sample_loss = (per_token_loss * mask_f).sum(dim=-1) / token_counts.clamp(min=1.0)
+    # torch.where (not multiply): NaN at mask-excluded positions must not poison the sum.
+    per_sample_loss = torch.where(mask.bool(), per_token_loss, 0.0).sum(dim=-1) / (
+        token_counts.clamp(min=1.0)
+    )
 
     return per_sample_loss[valid_samples].mean()
 
