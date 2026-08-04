@@ -705,7 +705,7 @@ class Model(torch.nn.Module):
 
         num_params_fe = get_num_parameters(
             self.forecast_engine.net.fe_blocks
-            if self.cf.get("fe_diffusion_model")
+            if self.cf.get("fe_diffusion_model", False)
             else self.forecast_engine.fe_blocks
         )
 
@@ -885,7 +885,7 @@ class Model(torch.nn.Module):
                     # NOTE: This is precautionary, might need to be handled differently.
                     # It should not be the same as conditioning tokens.
                     tokens = None
-                    continue
+src/weathergen/model/model.py                    continue
 
                 # Unified diffusion decoding path — handles both:
                 #  • rollout (diffusion_rollout=True): tokens is a list; take the final ODE state
