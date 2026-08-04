@@ -230,6 +230,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         streams_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
             stream_info["data_paths"] = cf.get("data_paths", [])
+            ds_type = stream_info["type"]
             # list of sources for current stream
             streams_datasets[stream_name] = _Stream(stream_info, [])
             kwargs = {
@@ -238,7 +239,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 "stage": self._stage,
             }
             dataset: type[AnyDataReader] | None = None
-            match stream_info["type"]:
+            match ds_type:
                 case "obs":
                     dataset = DataReaderObs
                 case "anemoi":
@@ -250,25 +251,22 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            filenames_cfg = stream_info.get("filenames", [pathlib.Path()])
-            conditioning_cfg = stream_info.get("conditioning", False)
-
-            if conditioning_cfg:
-                if filenames_cfg is None or len(filenames_cfg) == 0:
-                    ds_type = stream_info["type"]
-                    if is_root():
-                        logger.info(
-                            f"Opening conditioning dataset with type: {ds_type}"
-                            + f" from stream config {stream_name}.",
-                        )
-                    ds = dataset(filename=None, **kwargs)
-                    streams_datasets[stream_name].readers += [ds]
-                    continue
-                else:
-                    pass
-
-            for fname in filenames_cfg:
+            for fname in stream_info.get("filenames", pathlib.Path()):
                 fname = pathlib.Path(fname)
+                # skip if explicitly pointing to current directory
+                if fname is None or fname == pathlib.Path():
+                    if dataset.conditioning:
+                        if is_root():
+                            logger.info(
+                                f"Opening conditioning dataset with type: {ds_type}"
+                                + f" from stream config {stream_name}.",
+                            )
+                        ds = dataset(filename=None, **kwargs)
+                        streams_datasets[stream_name].readers += [ds]
+                        continue
+                    else:
+                        msg = f"Did not find input data for {ds_type} stream '{stream_name}'."
+                        raise FileNotFoundError(msg)
                 # dont check if file exists since zarr stores might be directories
                 if fname.exists():
                     # check if fname is a valid path to allow for simple overwriting
@@ -279,12 +277,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     filename = next((f for f in filenames if f.exists()), None)
                     if filename is None:
                         msg = (
-                            f"Did not find input data for {stream_info['type']} "
+                            f"Did not find input data for {ds_type} "
                             f"stream '{stream_name}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
 
-                ds_type = stream_info["type"]
                 if is_root():
                     logger.info(
                         f"Opening dataset with type: {ds_type}"
