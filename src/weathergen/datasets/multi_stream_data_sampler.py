@@ -251,7 +251,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            for fname in stream_info.get("filenames", pathlib.Path()):
+            for fname in stream_info.get("filenames", [pathlib.Path()]):
                 fname = pathlib.Path(fname)
                 # skip if explicitly pointing to current directory
                 if fname is None or fname == pathlib.Path():
