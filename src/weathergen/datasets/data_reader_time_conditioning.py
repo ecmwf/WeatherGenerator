@@ -48,30 +48,27 @@ class DataReaderTimeConditioning(DataReaderBase):
     ) -> None:
         super().__init__(tw_handler, stream_info)
 
-        self.source_channels = []
-        self.target_channels = []
         self.source_idx = []
         self.target_idx = []
-        self.geoinfo_channels = []
         self.geoinfo_idx = []
 
+        self.conditioning = stream_info.get("conditioning", True)
         self.conditioning_type = stream_info.get("conditioning_type", "time_based")
-        value_type = stream_info.get("value_type", "hour")
+        value_type = stream_info.get("value_type")
         if isinstance(value_type, list):
             self.value_types = value_type
-        else:
+        elif value_type is not None:
             self.value_types = [value_type]
+        else:
+            raise ValueError("value_type in time_conditioning must be specified in stream_info")
 
         self.source_channels = [f"time_conditioning_{vt}" for vt in self.value_types]
         self.target_channels = []
-
-        self.constant_value = stream_info.get("value", 0.0)
-        self.min_val = stream_info.get("min", 0.0)
-        self.max_val = stream_info.get("max", 1.0)
-
+        self.geoinfo_channels = []
         self.target_channel_weights = []
-        self.mean = np.array([0.0], dtype=np.float32)
-        self.stdev = np.array([1.0], dtype=np.float32)
+
+        self.mean = np.zeros(len(self.source_channels), dtype=np.float32)
+        self.stdev = np.ones(len(self.source_channels), dtype=np.float32)
         self.mean_geoinfo = np.zeros(0, dtype=np.float32)
         self.stdev_geoinfo = np.ones(0, dtype=np.float32)
 
@@ -106,7 +103,7 @@ class DataReaderTimeConditioning(DataReaderBase):
         rdata = ReaderData(
             coords=coords,
             geoinfos=geoinfos,
-            data=value.reshape(1, 1),
+            data=np.array(values, dtype=np.float32).reshape(1, -1),
             datetimes=datetimes,
         )
         check_reader_data(rdata, dt_range)
