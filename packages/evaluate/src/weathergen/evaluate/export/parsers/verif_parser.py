@@ -204,26 +204,31 @@ class VerifParser(CfParser):
         # Original logic
         var_dict = find_pl(data.channel.values)
         data_vars = {}
-
+        # order of appending upoints should be ipoint, pressure_level, mem (if mem exists)
         for new_var, pls in var_dict.items():
+            data_dims = ["ipoint"]
             if pls[0] is not None:
+                data_dims.append("pressure_level")
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 old_vars = [f"{new_var}_{p}" for p in pls]
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
-                    dims=["ipoint", "pressure_level"],
+                    dims=data_dims,
                     coords={"pressure_level": pls},
                 )
             else:
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=new_var).values,
-                    dims=["ipoint"],
+                    dims=data_dims,
                 )
 
         reshaped_dataset = xr.Dataset(data_vars)
         reshaped_dataset = reshaped_dataset.assign_coords(
             ipoint=data.coords["ipoint"],
         )
-
         # order using pressure_level coord
         if "pressure_level" in reshaped_dataset.coords:
             reshaped_dataset = reshaped_dataset.sortby("pressure_level")
@@ -545,7 +550,7 @@ class VerifParser(CfParser):
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
-            wg_unit = mapped_units.get(self.stream, "DEFAULT")
+            wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
             verif_unit = mapped_info.get("verif_unit", None)
             if wg_unit != verif_unit:
                 # perform unit conversion
