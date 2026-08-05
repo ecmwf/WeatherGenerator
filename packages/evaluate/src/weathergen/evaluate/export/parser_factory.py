@@ -1,7 +1,8 @@
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.parsers.netcdf_parser import GribParser, NetcdfParser
+from weathergen.evaluate.export.parsers.grib_parser import GribParser
+from weathergen.evaluate.export.parsers.netcdf_parser import NetcdfParser
 from weathergen.evaluate.export.parsers.quaver_parser import QuaverParser
 from weathergen.evaluate.export.parsers.verif_parser import VerifParser
 
