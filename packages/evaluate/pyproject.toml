@@ -9,6 +9,7 @@ dependencies = [
     "cartopy>=0.24.1",
     "xskillscore",
     "xhistogram",
+    "scores",
     "panel",
     "omegaconf",
     "plotly>=6.2.0",
@@ -23,6 +24,8 @@ dependencies = [
     "imageio[ffmpeg]>=2.37.2",
     "cfgrib",
     "scipy>=1.12",
+    "scores",
+    "pypdf>=4.0",
     ]
 
 [tool.uv.sources]
@@ -33,7 +36,7 @@ cfgrib = { git = "https://github.com/ecmwf/cfgrib", rev = "322f38818bdd236a4fc4b
 dev = [
  "pytest>=8.3",
  "pytest-mock>=3.14.1",
- "ruff==0.9.7",
+ "ruff==0.12.2",
  "pyrefly==0.36.0",
 ]
 

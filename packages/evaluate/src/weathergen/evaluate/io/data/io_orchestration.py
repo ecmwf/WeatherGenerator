@@ -31,6 +31,7 @@ from numpy.typing import NDArray
 
 from weathergen.evaluate.io.data.dataarray_builders import (
     EnsembleSelect,
+    Regridder,
     build_gridded_dataarrays,
     build_scatter_dataarrays,
 )
@@ -77,12 +78,17 @@ class IOState:
     lat: NDArray
     lon: NDArray
     n_workers: int
-    regrid_opts: dict  # options for regridding gridded DataArrays; ignored for scatter
+    regridder: Regridder | None = None  # shared Regridder instance (caches matrices + opts)
     backend: str = "loky"
     rank: str = "0000"
     offset: np.timedelta64 | None = (
         None  # fallback offset in hours for init_time when source_interval is missing
     )
+    sample_labels: list[int] | None = None  # global sample indices for coordinate labeling
+
+    def get_sample_labels(self) -> list[int]:
+        """Return global sample labels (falls back to local samples if not set)."""
+        return self.sample_labels if self.sample_labels is not None else self.samples
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +246,7 @@ def dispatch_parallel(
     return results
 
 
-def _build_io_state(
+def build_io_state(
     run_id: str,
     fname_zarr: Path,
     stream: str,
@@ -254,6 +260,7 @@ def _build_io_state(
     n_io_workers: int,
     ens_select: EnsembleSelect,
     rank: str = "",
+    sample_labels: list[int] | None = None,
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -278,6 +285,8 @@ def _build_io_state(
     if isinstance(regrid_opts, bool) and regrid_opts:
         regrid_opts = {"target_grid": [1.5, 1.5]}
 
+    regridder = Regridder(regrid_opts) if regrid_opts else None
+
     return IOState(
         run_id=run_id,
         zarr_path=zarr_path,
@@ -298,7 +307,8 @@ def _build_io_state(
         n_workers=n_io_workers,
         rank=rank,
         offset=offset,
-        regrid_opts=regrid_opts,
+        regridder=regridder,
+        sample_labels=sample_labels,
     )
 
 
@@ -314,7 +324,6 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
-    regrid_opts: dict,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -332,7 +341,6 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
-        regrid_opts=regrid_opts,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -434,7 +442,8 @@ def _assemble_substep(
             init_times,
             forecast_step_val,
             state.ens_select,
-            regrid_opts=state.regrid_opts,
+            regridder=state.regridder,
+            run_id=state.run_id,
         )
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
@@ -447,7 +456,7 @@ def _assemble_substep(
         da_tar, da_pred = build_scatter_dataarrays(
             tars_list,
             preds_list,
-            state.samples,
+            state.get_sample_labels(),
             state.read_channels,
             per_sample_valid_times,
             init_times,
@@ -549,7 +558,6 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
-            regrid_opts=state.regrid_opts,
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
@@ -610,7 +618,8 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     _logger.info(
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
         f"Loading {len(state.samples)} samples × "
-        f"{len(state.fsteps)} fsteps = {n_total} items via ZipStore-parallel zarr I/O "
+        f"{len(state.fsteps)} windows = {n_total} items \n"
+        f"via ZipStore-parallel zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
 
@@ -622,7 +631,6 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
-        regrid_opts=state.regrid_opts,
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
@@ -697,7 +705,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     if state.n_workers > 1:
         get_reusable_executor().shutdown(wait=True)
 
-    _logger.info(
+    _logger.debug(
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: ZipStore-parallel I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
