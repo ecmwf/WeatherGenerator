@@ -1,6 +1,7 @@
 import omegaconf
 
 from weathergen.common.config import Config, merge_configs
+from weathergen.common.run_state import RunState
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import init_model_and_shard
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
@@ -9,7 +10,14 @@ from weathergen.train.teacher_utils import load_encoder_from_checkpoint, prepare
 
 
 def get_target_aux_calculator(
-    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
+    cf: Config,
+    run_state: RunState,
+    loss_cfg: omegaconf.OmegaConf,
+    dataset,
+    model,
+    device,
+    batch_size_per_gpu,
+    **kwargs,
 ):
     """
     Create target aux calculator
@@ -39,13 +47,12 @@ def get_target_aux_calculator(
 
         meta_ema_model, _ = init_model_and_shard(
             cf,
+            run_state,
             dataset,
             None,
             None,
             "student",
             device,
-            with_ddp=False,
-            with_fsdp=False,
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
 
@@ -60,10 +67,10 @@ def get_target_aux_calculator(
             meta_ema_model,
             halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
             rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
-            is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            is_model_sharded=run_state.is_sharded,
         )
 
-        batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
+        batch_size = run_state.world_size_original * batch_size_per_gpu
         target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
 
         # Optional: warm start encoder from checkpoint

@@ -24,6 +24,7 @@ from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
+from weathergen.common.run_state import RunState
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -59,8 +60,8 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
-    def __init__(self, train_logging: Config):
-        TrainerBase.__init__(self)
+    def __init__(self, train_logging: Config, runstate: RunState, devices: list[str]):
+        TrainerBase.__init__(self, runstate, devices)
 
         self.train_logging = train_logging
 
@@ -95,9 +96,9 @@ class Trainer(TrainerBase):
         """
         Get total, effective batch size across all DDP ranks
         """
-        return self.world_size_original * batch_size_per_gpu
+        return self.runstate.world_size_original * batch_size_per_gpu
 
-    def init(self, cf: Config, devices):
+    def init(self, cf: Config):
         # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
@@ -145,13 +146,6 @@ class Trainer(TrainerBase):
 
         self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 
-        self.devices = devices
-
-        # Get world_size of previous, to be continued run before
-        # world_size gets overwritten by current setting during init_ddp()
-        self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
-        cf.world_size_original = self.world_size_original
-
         self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 
         # create output directory
@@ -185,18 +179,24 @@ class Trainer(TrainerBase):
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
-                self.cf, loss_cfg, self.dataset, self.model, self.device, batch_size
+                self.cf,
+                self.runstate,
+                loss_cfg,
+                self.dataset,
+                self.model,
+                self.device,
+                batch_size,
             ).to_device(self.device)
 
         return target_and_aux_calculators
 
-    def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
+    def inference(self, cf, run_id_contd, mini_epoch_contd):
         # general initalization
-        self.init(cf, devices)
+        self.init(cf)
 
         cf = self.cf
         device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{cf.local_rank}")
+        self.device = torch.device(f"{device_type}:{self.runstate.local_rank}")
         self.ema_model = None
 
         # create data loader
@@ -224,13 +224,12 @@ class Trainer(TrainerBase):
 
         self.model, self.model_params = init_model_and_shard(
             cf,
+            self.runstate,
             self.dataset,
             run_id_contd,
             mini_epoch_contd,
             self.test_cfg.training_mode,
-            devices[0],
-            cf.with_ddp,
-            cf.with_fsdp,
+            self.devices[0],
         )
 
         # get target_aux calculators for different loss terms
@@ -239,7 +238,8 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
         if is_root():
-            config.save(self.cf, mini_epoch=0)
+            self.runstate.save(cf.general.run_id, 0)
+            config.save(self.cf)
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -247,13 +247,13 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
+    def run(self, cf, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
-        self.init(cf, devices)
+        self.init(cf)
         cf = self.cf
 
         device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{cf.local_rank}")
+        self.device = torch.device(f"{device_type}:{self.runstate.local_rank}")
 
         # Update collapse monitor device
         self.collapse_monitor.device = self.device
@@ -275,13 +275,12 @@ class Trainer(TrainerBase):
 
         self.model, self.model_params = init_model_and_shard(
             cf,
+            self.runstate,
             self.dataset,
             run_id_contd,
             mini_epoch_contd,
             self.training_cfg.training_mode,
-            devices[0],
-            cf.with_ddp,
-            cf.with_fsdp,
+            self.devices[0],
         )
 
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
@@ -294,20 +293,19 @@ class Trainer(TrainerBase):
         if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
                 cf,
+                self.runstate,
                 self.dataset,
                 run_id_contd,
                 mini_epoch_contd,
                 cf.training_config.training_mode,
-                devices[0],
-                cf.with_ddp,
-                cf.with_fsdp,
+                self.devices[0],
             )
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
                 halflife_steps=validate_with_ema_cfg.get("ema_halflife_in_thousands", 1e-3),
                 rampup_ratio=validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
-                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+                is_model_sharded=self.runstate.is_sharded,
             )
 
         # get target_aux calculators for different loss terms
@@ -317,7 +315,7 @@ class Trainer(TrainerBase):
         # if with_fsdp then parameter count is unreliable
         if is_root():
             # ddp-wrapped model does not expose this function
-            if not cf.with_ddp:
+            if not self.runstate.with_ddp:
                 self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
@@ -349,13 +347,13 @@ class Trainer(TrainerBase):
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             self.batch_size_per_gpu,
-            cf.world_size,
-            cf.general.istep,
+            self.runstate.world_size,
+            self.runstate.istep,
             lr_steps,
             self.training_cfg.learning_rate_scheduling,
         )
 
-        if self.cf.general.istep > 0 and is_root():
+        if self.runstate.istep > 0 and is_root():
             logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
         # Instantiate loss calculator modules to compute losses
@@ -364,22 +362,25 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
 
         # recover mini_epoch when continuing run
-        if self.world_size_original is None:
-            mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
+        if self.runstate.world_size_original is None:
+            mini_epoch_base = int(self.runstate.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                max(1, len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu))
+                len(self.dataset) // (self.runstate.world_size_original * self.batch_size_per_gpu)
             ) * self.batch_size_per_gpu
             mini_epoch_base = int(
-                self.cf.general.istep
+                self.runstate.istep
                 / (
                     min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
-                    * self.world_size_original
+                    * self.runstate.world_size_original
                 )
             )
 
         if is_root():
-            config.save(self.cf, None)
+            config.save(self.cf)
+            self.runstate.save(self.cf.general.run_id, 0)
+            # Also save with suffix "_latest"
+            self.runstate.save(self.cf.general.run_id, -1)
             logger.info(config.format_cf(self.cf))
 
         # run validation before training if requested
@@ -456,7 +457,7 @@ class Trainer(TrainerBase):
                 batch.to_device(self.device)
 
                 with torch.autocast(
-                    device_type=f"cuda:{cf.local_rank}",
+                    device_type=f"cuda:{self.runstate.local_rank}",
                     dtype=self.mixed_precision_dtype,
                     enabled=cf.with_mixed_precision,
                 ):
@@ -471,7 +472,7 @@ class Trainer(TrainerBase):
                         target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
                         # apply target-aux calculator
                         targets_and_auxs[loss_name] = target_aux.compute(
-                            self.cf.general.istep,
+                            self.runstate.istep,
                             batch.get_target_samples(target_idxs),
                             self.model_params,
                             self.model,
@@ -483,18 +484,12 @@ class Trainer(TrainerBase):
                     metadata=extract_batch_metadata(batch),
                 )
 
-                # TODO re-enable this, need to think on how to make it compatible with
-                # student-teacher training
-                # if cf.latent_noise_kl_weight > 0.0:
-                #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
-                #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
-
                 [
-                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    target_aux.update_state_pre_backward(self.runstate.istep, batch, self.model)
                     for _, target_aux in self.target_and_aux_calculators.items()
                 ]
                 [
-                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    target_aux.update_state_pre_backward(self.runstate.istep, batch, self.model)
                     for _, target_aux in self.target_and_aux_calculators_val.items()
                 ]
 
@@ -523,7 +518,7 @@ class Trainer(TrainerBase):
                 self.lr_scheduler.step()
 
                 batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-                step = batch_size_total * self.cf.general.istep
+                step = batch_size_total * self.runstate.istep
 
                 [
                     target_aux.update_state_post_opt_step(step, batch, self.model)
@@ -536,20 +531,17 @@ class Trainer(TrainerBase):
 
             # EMA update
             if self.validate_with_ema:
-                self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
+                self.ema_model.update(step, batch_size_total)
 
             self.perf_tracker.step(
                 batch,
-                self.cf.general.istep,
-                log_fn=lambda m: self.train_logger.log_metrics(
-                    TRAIN, m, step=self.cf.general.istep
-                ),
+                self.runstate.istep,
+                log_fn=lambda m: self.train_logger.log_metrics(TRAIN, m, step=self.runstate.istep),
             )
             # Compute collapse monitoring metrics
-            if self.collapse_monitor.should_compute(self.cf.general.istep):
+            if self.collapse_monitor.should_compute(self.runstate.istep):
                 self.collapse_monitor._compute_collapse_metrics(
-                    self.cf,
-                    batch_size_total,
+                    step,
                     self.target_and_aux_calculators,
                     preds,
                     targets_and_auxs,
@@ -559,14 +551,14 @@ class Trainer(TrainerBase):
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log collapse metrics
-                if self.collapse_monitor.should_log(self.cf.general.istep):
+                if self.collapse_monitor.should_log(self.runstate.istep):
                     self._log_collapse_metrics(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
-            self.cf.general.istep += 1
+            self.runstate.istep += 1
 
         self.dataset.advance()
 
@@ -585,14 +577,14 @@ class Trainer(TrainerBase):
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
+                total=len(self.data_loader_validation), disable=self.runstate.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     batch.to_device(self.device)
 
                     # evaluate model
                     with torch.autocast(
-                        device_type=f"cuda:{cf.local_rank}",
+                        device_type=f"cuda:{self.runstate.local_rank}",
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
@@ -611,7 +603,7 @@ class Trainer(TrainerBase):
                         for loss_name, target_aux in self.target_and_aux_calculators_val.items():
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
-                                self.cf.general.istep,
+                                self.runstate.istep,
                                 batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
@@ -659,7 +651,7 @@ class Trainer(TrainerBase):
         maybe_sharded_sd = (
             self.model.state_dict() if self.ema_model is None else self.ema_model.state_dict()
         )
-        if self.cf.with_ddp and self.cf.with_fsdp:
+        if self.runstate.is_sharded:
             cpu_state_dict = {}
             for param_name, sharded_param in maybe_sharded_sd.items():
                 full_param = sharded_param.full_tensor()
@@ -726,8 +718,8 @@ class Trainer(TrainerBase):
             if is_root():
                 logger.info(f"Saved model to {file_out}")
 
-            # save config
-            config.save(self.cf, mini_epoch)
+            # save runstate
+            self.runstate.save(self.cf.general.run_id, mini_epoch)
 
     def _log(self, stage: Stage):
         """
@@ -748,14 +740,14 @@ class Trainer(TrainerBase):
             loss_calculator.stddev_unweighted_hist,
         )
 
-        samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
+        samples = self.runstate.istep * self.get_batch_size_total(self.batch_size_per_gpu)
 
         if is_root():
             # plain logger
             if stage == VAL:
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
-            elif self.cf.general.istep >= 0:
+            elif self.runstate.istep >= 0:
                 elapsed_time = time.time() - self.t_training_start
                 self.train_logger.add_logs(
                     stage,
@@ -808,7 +800,7 @@ class Trainer(TrainerBase):
                 if stage == VAL:
                     logger.info(
                         f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
-                        {np.nanmean(avg_loss)}"""
+                         {np.nanmean(avg_loss)}"""
                     )
 
                 elif stage == TRAIN:
@@ -817,7 +809,7 @@ class Trainer(TrainerBase):
                     len_dataset = len(self.data_loader) // self.batch_size_per_gpu
                     pstr = (
                         f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
-                        + f"{self.cf.general.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
+                        + f"{self.runstate.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
                     if self.log_grad_norms:
@@ -842,5 +834,5 @@ class Trainer(TrainerBase):
         """
         metrics = self.collapse_monitor.get_cached_metrics()
         if metrics and is_root():
-            metrics["num_samples"] = self.cf.general.istep
+            metrics["num_samples"] = self.runstate.istep
             self.train_logger.log_metrics(stage, metrics)

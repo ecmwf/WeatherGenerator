@@ -98,21 +98,20 @@ def run_inference(args):
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     devices = Trainer.init_torch()
-    cf = Trainer.init_ddp(cf)
+    cf, runstate = Trainer.init_ddp(cf)
+    runstate.load(args.run_id, args.mini_epoch)
 
     init_loggers(cf.general.run_id)
 
-    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
+    logger.info(f"DDP initialization: rank={runstate.rank}, world_size={runstate.world_size}")
 
-    cf.general.run_history += [(args.from_run_id, cf.general.istep)]
-
-    trainer = Trainer(cf.train_logging)
+    trainer = Trainer(cf.train_logging, runstate, devices)
     try:
-        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+        trainer.inference(cf, args.from_run_id, args.mini_epoch)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if cf.world_size == 1:
+        if runstate.world_size == 1:
             pdb.post_mortem(tb)
 
 
@@ -135,23 +134,19 @@ def run_continue(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    mp_method = cf.general.get("multiprocessing_method", "fork")
-    devices = Trainer.init_torch(multiprocessing_method=mp_method)
-    cf = Trainer.init_ddp(cf)
+    devices = Trainer.init_torch()
+    cf, runstate = Trainer.init_ddp(cf)
+    runstate.load(args.run_id, args.mini_epoch)
 
     init_loggers(cf.general.run_id)
 
-    # track history of run to ensure traceability of results
-    cf.general.run_history += [(args.from_run_id, cf.general.istep)]
-
-    trainer = Trainer(cf.train_logging)
-
+    trainer = Trainer(cf.train_logging, runstate, devices)
     try:
-        trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+        trainer.run(cf, args.from_run_id, args.mini_epoch)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if cf.world_size == 1:
+        if runstate.world_size == 1:
             pdb.post_mortem(tb)
 
 
@@ -172,27 +167,28 @@ def run_train(args):
     cf.data_loading.rng_seed = int(time.time())
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
-    cf = Trainer.init_ddp(cf)
+
+    cf, runstate = Trainer.init_ddp(cf)
 
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
     init_loggers(cf.general.run_id)
 
-    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
+    logger.info(f"DDP initialization: rank={runstate.rank}, world_size={runstate.world_size}")
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.train_logging)
+    trainer = Trainer(cf.train_logging, runstate, devices)
 
     try:
-        trainer.run(cf, devices)
+        trainer.run(cf)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if cf.world_size == 1:
+        if runstate.world_size == 1:
             pdb.post_mortem(tb)
 
 

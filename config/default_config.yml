@@ -102,23 +102,10 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 general:
 
-  # mutable parameters
-  istep: 0
-  rank: ???
-  world_size: ???
-
-  # local_rank, 
-  # with_ddp,
-  # data_path_*, 
-  # model_path, 
-  # run_path, 
-  # path_shared_
-  
   multiprocessing_method: "fork"
 
   desc: ""
   run_id: ???
-  run_history: []
 
 # logging frequency in the training loop (in number of batches)
 train_logging:

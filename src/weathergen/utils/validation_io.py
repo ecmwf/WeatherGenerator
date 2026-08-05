@@ -16,6 +16,7 @@ import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.utils.distributed import get_rank
 
 _logger = logging.getLogger(__name__)
 
@@ -169,6 +170,7 @@ def write_output(
         sample_start,
         forecast_offset,
     )
-    with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
+    rank = get_rank()
+    with zarrio_writer(config.get_path_results(cf, mini_epoch, rank)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)

@@ -16,6 +16,7 @@ import torch.distributed as dist
 import torch.multiprocessing
 
 from weathergen.common.config import Config
+from weathergen.common.run_state import RunState
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.distributed import is_root
 
@@ -23,8 +24,10 @@ PORT = 1345
 
 
 class TrainerBase:
-    def __init__(self):
+    def __init__(self, runstate: RunState, devices: list[str]):
         self.cf: Config | None = None
+        self.runstate: RunState = runstate
+        self.devices: list[str] = devices
 
     @staticmethod
     def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="fork"):
@@ -63,7 +66,7 @@ class TrainerBase:
         return devices
 
     @staticmethod
-    def init_ddp(cf):
+    def init_ddp(cf) -> tuple[Config, RunState]:
         """Initializes the distributed environment."""
         rank = 0
         local_rank = 0
@@ -136,9 +139,14 @@ class TrainerBase:
                     dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
                     cf.data_loader_rng_seed = l_seed.item()
 
-        cf.world_size = world_size
-        cf.rank = rank
-        cf.local_rank = local_rank
-        cf.with_ddp = world_size > 1
+        with_ddp = world_size > 1
+        runstate = RunState(
+            world_size=world_size,
+            world_size_original=world_size,
+            rank=rank,
+            local_rank=local_rank,
+            with_ddp=with_ddp,
+            is_sharded=with_ddp and cf.with_fsdp,
+        )
 
-        return cf
+        return cf, runstate
