@@ -657,18 +657,23 @@ class Regridder:
                 regrid_da = self.regional_gaussian_regular_da(da)
             elif self.degree >= 0.1 and self.region is not None:
                 _logger.info("Regridding using earthkit then regional mask")
-                regrid_da = self.gaussian_regular_da(da)
-                # apply regional mask
-                lat_min, lat_max, lon_min, lon_max = self.region
-                # get closest points in original dataset with some buffer
-                region_mask = (
-                    (regrid_da.latitude >= lat_min - 1)
-                    & (regrid_da.latitude <= lat_max + 1)
-                    & (regrid_da.longitude >= lon_min - 1)
-                    & (regrid_da.longitude <= lon_max + 1)
-                )
-                regrid_da = regrid_da.where(region_mask, drop=True)
-
+                try:
+                    regrid_da = self.gaussian_regular_da(da)
+                    # apply regional mask
+                    lat_min, lat_max, lon_min, lon_max = self.region
+                    # get closest points in original dataset with some buffer
+                    region_mask = (
+                        (regrid_da.latitude >= lat_min - 1)
+                        & (regrid_da.latitude <= lat_max + 1)
+                        & (regrid_da.longitude >= lon_min - 1)
+                        & (regrid_da.longitude <= lon_max + 1)
+                    )
+                    regrid_da = regrid_da.where(region_mask, drop=True)
+                except ValueError as e:
+                    _logger.error(
+                        f"Error during regridding: {e}, using verif 2d method as fallback."
+                    )
+                    regrid_da = self.regional_gaussian_regular_da(da)
         elif self.input_grid_type == "regular_ll" and self.output_grid_type == "gaussian":
             regrid_da = self.regular_gaussian_da(da)
         elif self.input_grid_type == self.output_grid_type:
