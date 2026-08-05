@@ -72,6 +72,7 @@ class VerifParser(CfParser):
         obs_data_channels = ["10u", "10v", "sp", "2t", "msl", "tp"]
         self.channels = list(set(self.channels) & set(obs_data_channels))
         self.zarr_dt: np.timedelta64 | None = None
+        self.filename_template: str | None = None
 
     def process_sample(
         self,

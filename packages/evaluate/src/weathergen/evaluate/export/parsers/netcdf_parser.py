@@ -50,6 +50,7 @@ class NetcdfParser(CfParser):
         super().__init__(config=config, grid_type=self.grid_type)
 
         self.mapping = config.get("variables", {})
+        self.zarr_coords: np.typing.NDArray | None = None
 
     def process_sample(
         self,
