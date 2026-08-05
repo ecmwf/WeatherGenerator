@@ -230,7 +230,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         streams_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
             stream_info["data_paths"] = cf.get("data_paths", [])
-            ds_type = stream_info["type"]
+            ds_type = stream_info["type"]    
             # list of sources for current stream
             streams_datasets[stream_name] = _Stream(stream_info, [])
             kwargs = {
@@ -251,11 +251,19 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            for fname in stream_info.get("filenames", [pathlib.Path()]):
+            filenames_cfg = stream_info.get("filenames", [pathlib.Path()])
+
+            if filenames_cfg is None:
+                filenames_cfg = [pathlib.Path()]
+            else:
+                pass
+
+        
+            for fname in filenames_cfg:
                 fname = pathlib.Path(fname)
                 # skip if explicitly pointing to current directory
-                if fname is None or fname == pathlib.Path():
-                    if dataset.conditioning:
+                if fname == pathlib.Path():
+                    if stream_info.get("conditioning", False):
                         if is_root():
                             logger.info(
                                 f"Opening conditioning dataset with type: {ds_type}"

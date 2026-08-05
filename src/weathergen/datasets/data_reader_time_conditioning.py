@@ -52,7 +52,6 @@ class DataReaderTimeConditioning(DataReaderBase):
         self.target_idx = []
         self.geoinfo_idx = []
 
-        self.conditioning = stream_info.get("conditioning", True)
         self.conditioning_type = stream_info.get("conditioning_type", "time_based")
         value_type = stream_info.get("value_type")
         if isinstance(value_type, list):
