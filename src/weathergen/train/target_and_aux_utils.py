@@ -61,10 +61,6 @@ def get_target_aux_calculator(
                 setattr(model, attr, None)
         torch.cuda.empty_cache()
 
-        # The encoder above is always built unsharded (with_ddp=False, with_fsdp=False),
-        # so it has no FSDP2 reshard() method. is_model_sharded must therefore be False,
-        # regardless of the main model's sharding, to avoid calling encoder.reshard() in
-        # update_state_post_opt_step (raises AttributeError on a plain Model under FSDP).
         target_aux = DiffusionLatentTargetEncoder(model, is_model_sharded=False)
 
     elif target_and_aux_calc == "EMATeacher":
