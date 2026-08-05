@@ -393,7 +393,6 @@ class NetcdfParser(CfParser):
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
             attributes = {
-                "GRIB_shortName": mapped_name,  # if GRIB
                 "standard_name": mapped_info.get("std", var_name),
                 "units": mapped_info.get("std_unit", "unknown"),
             }
