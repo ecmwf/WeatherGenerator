@@ -605,4 +605,3 @@ class NetcdfParser(CfParser):
         _logger.info(f"Saving to {out_fname}.")
         ds.to_netcdf(out_fname)
         _logger.info(f"Saved NetCDF file to {out_fname}.")
-

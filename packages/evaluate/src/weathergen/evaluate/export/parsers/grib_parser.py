@@ -1,13 +1,16 @@
 # pylint: disable=bad-builtin
 
 import logging
-import xarray as xr
+
 import numpy as np
+import xarray as xr
 from cfgrib.xarray_to_grib import to_grib
+
 from weathergen.evaluate.export.parsers.netcdf_parser import NetcdfParser
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
 
 class GribParser(NetcdfParser):
     """

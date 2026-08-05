@@ -436,7 +436,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                                 source_interval_start=source_start,
                                 source_interval_end=init_time,
                                 region=region,
-                        )
+                            )
                             processed_samples.append(processed_sample)
                             # Free memory immediately.
                             del sample_results[global_s]

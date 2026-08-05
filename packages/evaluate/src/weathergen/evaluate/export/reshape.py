@@ -221,11 +221,7 @@ class Regridder:
         """
         if self.output_grid_type == "regular_ll":
             earthkit_output = [self.degree, self.degree]
-            if self.degree == 0.1:
-                grid_shape = [int(1800 + 1), int(3600)]
-            else:
-                grid_shape = [int(180 // self.degree + 1), int(360 // self.degree)]
-            print(grid_shape)
+            grid_shape = [int(180 / self.degree) + 1, int(360 / self.degree)]
             return earthkit_output, grid_shape
         elif self.output_grid_type in ["N", "O"]:
             earthkit_output = self.output_grid_type + str(int(self.degree))
@@ -357,7 +353,6 @@ class Regridder:
             # set in regridded_values
             new_index = list(item)
             new_index[pos : pos + 1] = [slice(None), slice(None)]
-            print(regridded_slice.shape, new_index)
             regridded_values[tuple(new_index)] = regridded_slice
 
         dims = list(data.dims)
