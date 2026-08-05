@@ -69,7 +69,7 @@ class LearningRateScheduler:
 
         assert lr_cfg.lr_final_decay >= lr_cfg.lr_final
 
-        if lr_cfg.parallel_scaling_policy == "const":
+        if lr_cfg.parallel_scaling_policy == "constant":
             kappa = 1
         elif lr_cfg.parallel_scaling_policy == "sqrt":
             kappa = np.sqrt(batch_size * self.world_size)
