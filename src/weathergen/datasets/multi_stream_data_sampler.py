@@ -97,6 +97,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mode_cfg = mode_cfg
         self._stage = stage
+        # `inference_only` applies to the active mode config (test/inference).
+        # Read from `mode_cfg` so training/validation are not affected by test flags.
+        self.inference_only = mode_cfg.get("inference_only", False)
 
         self.mini_epoch = 0
         self.mask_value = 0.0
@@ -468,14 +471,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 continue
 
             if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+                (tc, tc_l, tc_raw, tc_times) = self.tokenizer.get_target_coords(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(
+                    self._stage, timestep_idx, tc, tc_l, rdata.is_spoof,
+                    target_coords_raw=tc_raw, times_raw=tc_times,
+                )
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
@@ -595,15 +601,21 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
             if rdata.is_empty():
-                # work around for https://github.com/pytorch/pytorch/issues/158719
-                # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(step_forecast_dt)
-                rdata = spoof(
-                    self.healpix_level,
-                    time_win.start,
-                    stream_ds[0].get_geoinfo_size(),
-                    len(stream_ds[0].mean[stream_ds[0].target_idx]),
-                )
+                # The forecast timestep is outside the dataset range. Fall back to the
+                # source timestep's target data so that the model can still predict on the
+                # full spatial grid (respecting max_num_targets subsampling). Target values
+                # are from base_idx rather than the actual forecast time, so mark as spoof.
+                rdata = collect_datasources(stream_ds, base_idx, "target", self.rng)
+                if rdata.is_empty():
+                    # Last resort: fully synthetic spoof (work around for
+                    # https://github.com/pytorch/pytorch/issues/158719).
+                    time_win = self.time_window_handler.window(step_forecast_dt)
+                    rdata = spoof(
+                        self.healpix_level,
+                        time_win.start,
+                        stream_ds[0].get_geoinfo_size(),
+                        len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                    )
                 rdata.is_spoof = True
 
             output_data += [rdata]
@@ -643,9 +655,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         batch.source_samples.tokens_lens = get_tokens_lens(
             stream_names, batch.source_samples, source_input_steps
         )
-        batch.target_samples.tokens_lens = get_tokens_lens(
-            stream_names, batch.target_samples, target_input_steps
-        )
+        # In inference_only mode targets are not loaded, so skip tokens_lens for targets
+        if not self.inference_only:
+            batch.target_samples.tokens_lens = get_tokens_lens(
+                stream_names, batch.target_samples, target_input_steps
+            )
 
         return batch
 
@@ -726,30 +740,33 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
-            for tidx, target_mask in enumerate(target_masks.masks):
-                # depending on the mode, the the streamdata obj to have the target mask applied to
-                # the inputs. Hence the target mask is also the source mask here.
-                sdata = self._build_stream_data(
-                    target_select,
-                    idx,
-                    num_forecast_steps,
-                    stream_info,
-                    target_masks.metadata[tidx].params.get("num_steps_input", 1),
-                    input_data,
-                    output_data,
-                    input_tokens,
-                    output_tokens,
-                    output_mask=target_mask,
-                    input_mask=target_mask,
-                )
-                target_metadata = target_masks.metadata[tidx]
-                # also want to add the mask to the metadata
-                target_metadata.mask = target_mask
-                # Map target to all source students
-                student_indices = [
-                    s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx
-                ]
-                batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
+            if not self.inference_only:
+                for tidx, target_mask in enumerate(target_masks.masks):
+                    # depending on the mode, the the streamdata obj to have the target mask applied
+                    # to the inputs. Hence the target mask is also the source mask here.
+                    sdata = self._build_stream_data(
+                        target_select,
+                        idx,
+                        num_forecast_steps,
+                        stream_info,
+                        target_masks.metadata[tidx].params.get("num_steps_input", 1),
+                        input_data,
+                        output_data,
+                        input_tokens,
+                        output_tokens,
+                        output_mask=target_mask,
+                        input_mask=target_mask,
+                    )
+                    target_metadata = target_masks.metadata[tidx]
+                    # also want to add the mask to the metadata
+                    target_metadata.mask = target_mask
+                    # Map target to all source students
+                    student_indices = [
+                        s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx
+                    ]
+                    batch.add_target_stream(
+                        tidx, student_indices, stream_name, sdata, target_metadata
+                    )
 
         source_in_steps = input_steps.max().item()
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
@@ -782,21 +799,43 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             # use while loop due to the scattered nature of the data in time and to
             # ensure batches are not empty
+            num_attempts = 0
+            max_attempts = perms.shape[0]
             while True:
                 idx: TIndex = perms[idx_raw % perms.shape[0]]
                 idx_raw += 1
+                num_attempts += 1
 
                 batch = self._get_batch(idx, num_forecast_steps)
 
-                # ensure the batch is valid, i.e. not completely empty and no NaN values
-                # student teacher has no classical targets
+                # Check for invalid batches: empty sources, NaN values, or empty targets
+                # (if applicable).
                 mode = self.mode_cfg.get("training_mode")
-                not_valid = batch.sources_empty() or batch.is_nan()
-                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
-
-                # skip completely empty batch item or when all targets are empty -> no grad
+                sources_empty = batch.sources_empty()
+                sources_nan = batch.is_nan()
+                targets_empty = (
+                    not self.inference_only and "masking" in mode and batch.targets_empty()
+                )
+                not_valid = sources_empty or sources_nan or targets_empty
                 if not_valid:
-                    logger.warning(f"Skipping empty batch with idx={idx}.")
+                    if sources_empty:
+                        logger.info(f"Skipping batch at idx={idx}: sources are empty.")
+                    if sources_nan:
+                        logger.info(f"Skipping batch at idx={idx}: sources contain NaN values.")
+                    if targets_empty:
+                        logger.info(
+                            f"Skipping batch at idx={idx}: targets are empty "
+                            "(inference_only=False, training_mode includes masking)."
+                        )
+                # Skip invalid batches or raise an error if no valid batch is found
+                # after max_attempts.
+                if not_valid:
+                    if num_attempts > max_attempts:
+                        raise RuntimeError(
+                            f"Could not find a valid non-empty batch after {num_attempts} "
+                            "attempts. All data may be missing or targets unavailable"
+                            " for this epoch."
+                        )
                 else:
                     break
 

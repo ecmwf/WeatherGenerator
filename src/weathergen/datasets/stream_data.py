@@ -299,6 +299,8 @@ class StreamData:
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
         is_spoof: bool,
+        target_coords_raw=None,
+        times_raw=None,
     ) -> None:
         """
         Add data for target for one input.
@@ -328,6 +330,10 @@ class StreamData:
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
+        if target_coords_raw is not None:
+            self.target_coords_raw[fstep] = target_coords_raw
+        if times_raw is not None:
+            self.target_times_raw[fstep] = times_raw
 
         self.target_is_spoof[fstep] = is_spoof
 

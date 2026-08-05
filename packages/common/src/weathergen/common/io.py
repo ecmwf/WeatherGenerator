@@ -583,6 +583,16 @@ class OutputBatchData:
     sample_start: int
     forecast_offset: int
 
+    # Optional separate coordinates / lens for predictions (used when predictions cover
+    # a different set of locations than targets, e.g. spoof / out-of-range forecast steps).
+    # When None, predictions fall back to targets_coords / targets_times / targets_lens.
+    # fstep, stream, tensor(sample x datapoint, 2 + geoinfos)
+    preds_coords: list[list] | None = None
+    # fstep, stream, (sample x datapoint)
+    preds_times: list[list] | None = None
+    # fstep, stream, list[int]
+    preds_lens: list[list[list[int]]] | None = None
+
     @functools.cached_property
     def samples(self):
         """Continous indices of all samples accross all batches."""
@@ -657,22 +667,41 @@ class OutputBatchData:
         )
 
     def _extract_targets_predictions(self, stream_idx, offset_key, key, source_interval):
-        datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
-        data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
+        n_ch = len(self.target_channels[stream_idx])
 
-        if (datapoints.stop - datapoints.start) == 0:
-            target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
-            preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
+        # --- target ---
+        t_dp = self._get_datapoints_per_sample(offset_key, stream_idx)
+        target_coords = self._extract_coordinates(
+            stream_idx, offset_key, t_dp,
+            coords_src=self.targets_coords,
+            times_src=self.targets_times,
+        )
+        if (t_dp.stop - t_dp.start) == 0:
+            target_data = np.zeros((0, n_ch), dtype=np.float32)
         else:
-            target_data = self.targets[offset_key.forecast_step][stream_idx][datapoints]
+            target_data = self.targets[offset_key.forecast_step][stream_idx][t_dp]
+
+        # --- prediction (may use separate coords/lens when preds_* fields are set) ---
+        pred_coords_src = self.preds_coords if self.preds_coords is not None else self.targets_coords
+        pred_times_src = self.preds_times if self.preds_times is not None else self.targets_times
+        pred_lens_src = self.preds_lens if self.preds_lens is not None else self.targets_lens
+        p_dp = self._get_datapoints_from_lens(pred_lens_src, offset_key, stream_idx)
+        pred_coords = self._extract_coordinates(
+            stream_idx, offset_key, p_dp,
+            coords_src=pred_coords_src,
+            times_src=pred_times_src,
+        )
+        if (p_dp.stop - p_dp.start) == 0:
+            preds_data = np.zeros((0, n_ch), dtype=np.float32)
+        else:
             preds_data = self.predictions[offset_key.forecast_step][stream_idx].transpose(1, 2, 0)[
-                datapoints
+                p_dp
             ]
 
-        assert len(data_coords.channels) == target_data.shape[1], (
+        assert n_ch == target_data.shape[1], (
             "Number of channel names does not align with target data."
         )
-        assert len(data_coords.channels) == preds_data.shape[1], (
+        assert n_ch == preds_data.shape[1], (
             "Number of channel names does not align with prediction data."
         )
 
@@ -681,22 +710,25 @@ class OutputBatchData:
             key,
             source_interval,
             target_data,
-            **dataclasses.asdict(data_coords),
+            **dataclasses.asdict(target_coords),
         )
         prediction_dataset = OutputDataset(
             "prediction",
             key,
             source_interval,
             preds_data,
-            **dataclasses.asdict(data_coords),
+            **dataclasses.asdict(pred_coords),
         )
 
         return target_dataset, prediction_dataset
 
     def _get_datapoints_per_sample(self, offset_key, stream_idx):
-        lens = self.targets_lens[offset_key.forecast_step][stream_idx]
+        return self._get_datapoints_from_lens(self.targets_lens, offset_key, stream_idx)
 
-        # empty target/prediction
+    def _get_datapoints_from_lens(self, lens_data, offset_key, stream_idx):
+        lens = lens_data[offset_key.forecast_step][stream_idx]
+
+        # empty
         if len(lens) == 0:
             start = 0
             n_samples = 0
@@ -711,8 +743,20 @@ class OutputBatchData:
 
         return slice(start, start + n_samples)
 
-    def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
-        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints]
+    def _extract_coordinates(
+        self,
+        stream_idx,
+        offset_key,
+        datapoints,
+        coords_src=None,
+        times_src=None,
+    ) -> DataCoordinates:
+        if coords_src is None:
+            coords_src = self.targets_coords
+        if times_src is None:
+            times_src = self.targets_times
+
+        _coords = coords_src[offset_key.forecast_step][stream_idx][datapoints]
 
         # ensure _coords has size (?,2)
         if len(_coords) == 0:
@@ -726,7 +770,7 @@ class OutputBatchData:
                 "geoinformation channels are not implemented yet."
                 + "will be truncated to be of size 0."
             )
-        times = self.targets_times[offset_key.forecast_step][stream_idx][
+        times = times_src[offset_key.forecast_step][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?
         channels = self.target_channels[stream_idx]

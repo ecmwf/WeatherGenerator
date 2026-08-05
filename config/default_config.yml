@@ -227,6 +227,9 @@ validation_config:
   # run validation before training starts (mainly for model development)
   validate_before_training: False
 
+test_config:
+  # When True, targets are not loaded and loss/metric logging is skipped entirely.
+  inference_only: False
 
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
