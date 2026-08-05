@@ -167,6 +167,7 @@ class BatchSamples:
     output_steps: int
     output_idxs: list[int]
     device: str | None
+    step_offset: int
 
     def __init__(
         self, stream_names: list[str], num_samples: int, output_steps, output_idxs
@@ -176,6 +177,7 @@ class BatchSamples:
         self.output_steps = output_steps
         self.output_idxs = output_idxs
         self.device = None
+        self.step_offset = 0
 
     def __len__(self) -> int:
         return len(self.samples)

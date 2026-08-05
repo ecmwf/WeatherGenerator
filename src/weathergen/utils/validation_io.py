@@ -21,7 +21,17 @@ _logger = logging.getLogger(__name__)
 
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
+    cf,
+    val_cfg,
+    batch_size,
+    mini_epoch,
+    batch_idx,
+    dn_data,
+    batch,
+    model_output,
+    target_aux_out,
+    timestep_idxs: list[int] | None = None,
+    fstep_offset: int = 0,
 ):
     """
     Interface for writing model output
@@ -40,8 +50,10 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
-    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
-    forecast_offset = timestep_idxs[0]
+    if timestep_idxs is None:
+        timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+    output_idxs = batch.get_output_idxs()
+    forecast_offset = output_idxs[0] if len(output_idxs) > 0 else 0
     targets_lens = []
 
     # TODO Maybe stopping at forecast_steps explained #1657
@@ -52,18 +64,19 @@ def write_output(
         targets_times_all += [[]]
         targets_lens += [[]]
         for sname in cf.streams.keys():
+            t_chunk_idx = t_idx - fstep_offset
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                targets = target_aux_out.physical[t_idx][sname]["target"]
-                # for-loop to make sure we have a consistent number of samples
-                preds_s = [np.zeros((1, 0, t.shape[1])) for t in targets]
-                targets_s = [np.zeros((0, t.shape[1])) for t in targets]
-                t_coords_s = [np.zeros((0, 2)) for t in targets]
-                t_times_s = [np.array([]).astype("datetime64[ns]") for t in targets]
+                preds = model_output.get_physical_prediction(t_chunk_idx, sname)
+                preds_shape = preds[0].shape
+                preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in preds]
+                targets_s = [np.zeros((0, preds_shape[2])) for _ in preds]
+                t_coords_s = [np.zeros((0, 2)) for _ in preds]
+                t_times_s = [np.array([]).astype("datetime64[ns]") for _ in preds]
 
             else:
-                preds = model_output.get_physical_prediction(t_idx, sname)
+                preds = model_output.get_physical_prediction(t_chunk_idx, sname)
                 targets = target_aux_out.physical[t_idx][sname]["target"]
 
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
@@ -168,6 +181,7 @@ def write_output(
         geoinfo_channels,
         sample_start,
         forecast_offset,
+        forecast_steps_override=timestep_idxs,
     )
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():
