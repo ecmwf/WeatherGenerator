@@ -1,26 +1,10 @@
 train :
   plot :
-    yc9osoe5:
+    lbvv2ltd:
       slurm_id: 0
       description: "AdamW"
       eval: vgbndhco
-    z5keukgi:
+    kt070z3n:
       slurm_id: 0
       description: "Muon"
-      eval: vgbndhco
-    kvwf3o80:
-      slurm_id: 0
-      description: "AdamW"
-      eval: vgbndhco
-    rlh7bf85:
-      slurm_id: 0
-      description: "Muon"
-      eval: vgbndhco
-    n0j2uiad:
-      slurm_id: 0
-      description: "AdamW finetune"
-      eval: vgbndhco
-    v02kr7zh:
-      slurm_id: 0
-      description: "Muon finetune"
       eval: vgbndhco
