@@ -270,7 +270,16 @@ training_config:
   target_input: {
     "forecasting" : {
       masking_strategy: "forecast",
-      masking_strategy_config: {diffusion_rn: True},
+      # The target draw is the authoritative diffusion noise level (see Masker.
+      # build_samples_for_stream), so it has to carry the same distribution spec as
+      # model_input -- without it the draw silently falls back to log_normal N(0,1)
+      # while diffusion.py and the latent-diffusion loss both read it as log_sigma.
+      masking_strategy_config: {
+        diffusion_rn: True,
+        noise_distribution: *noise_distribution,
+        sigma_min: *sigma_min,
+        sigma_max: *sigma_max
+        },
       num_steps_input: 1,
       num_samples: 1,
       }
