@@ -238,7 +238,9 @@ def init_model_and_shard(
                 f"Loading decoder weights from id={decoder_run_id} "
                 f"at mini_epoch {decoder_mini_epoch}."
             )
-        model = load_decoder_from_checkpoint(cf, model, device, decoder_run_id, decoder_mini_epoch)
+        model = load_decoder_from_checkpoint(
+            cf, model, device, decoder_run_id, with_ddp, with_fsdp, decoder_mini_epoch
+        )
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -252,7 +254,7 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
         run_id : model_id of the trained model
-        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
+        mini_epoch : The mini_epoch to load.
     """
 
     path_run = get_path_model(run_id=run_id)
@@ -265,7 +267,6 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
 
-    # Determine shardedness from the model instance itself, NOT from the global config flags:
     is_model_sharded = with_ddp and with_fsdp
     if is_model_sharded:
         # model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
@@ -358,7 +359,9 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
 _DECODER_PREFIXES = ("embed_target_coords", "target_token_engines", "pred_heads")
 
 
-def load_decoder_from_checkpoint(cf, model, device, run_id: str, mini_epoch=-1):
+def load_decoder_from_checkpoint(
+    cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, mini_epoch=-1
+):
     """Overlay only the physical decoder weights from a separate checkpoint.
 
     Filters the checkpoint to ``embed_target_coords.*``, ``target_token_engines.*`` and
@@ -392,7 +395,7 @@ def load_decoder_from_checkpoint(cf, model, device, run_id: str, mini_epoch=-1):
         )
         return model
 
-    is_model_sharded = cf.with_ddp and cf.with_fsdp
+    is_model_sharded = with_ddp and with_fsdp
     if is_model_sharded:
         meta_sharded_sd = model.state_dict()
         maybe_sharded_sd = {}
