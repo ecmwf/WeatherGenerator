@@ -66,7 +66,7 @@ class TrainerBase:
         return devices
 
     @staticmethod
-    def init_seeds(seed: int, cf: Config) -> Config:
+    def init_seeds(cf: Config) -> Config:
         """
         Seed the torch, Python, and global NumPy RNGs.
 
@@ -75,9 +75,6 @@ class TrainerBase:
         Data loading randomness is diversified per rank/worker/mini-epoch in
         MultiStreamDataSampler.
         """
-        torch.manual_seed(seed)  # also seeds the RNGs of all CUDA devices
-        random.seed(seed)
-        np.random.seed(seed % 2**32)
         # rng seed: use value from config if provided, otherwise derive from time;
         # in the distributed case, rank 0's seed is communicated to all ranks below
         if cf.data_loading.get("rng_seed", None) is None:
@@ -85,6 +82,9 @@ class TrainerBase:
         # seed 0 breaks the multiplicative per-rank/worker seed derivation in
         # MultiStreamDataSampler and negative seeds are invalid for numpy
         cf.data_loading.rng_seed = max(int(cf.data_loading.rng_seed), 1)
+        torch.manual_seed(cf.data_loading.rng_seed)  # also seeds the RNGs of all CUDA devices
+        random.seed(cf.data_loading.rng_seed)
+        np.random.seed(cf.data_loading.rng_seed % 2**32)
 
         return cf
 
