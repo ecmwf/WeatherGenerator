@@ -2,22 +2,17 @@ site_name: WeatherGenerator-FastEvaluation
 site_url: https://wgen-fasteval.readthedocs.io/
 repo_url: https://github.com/ecmwf/WeatherGenerator/tree/develop/packages/evaluate
 site_author: WeatherGenerator contributors
-#copyright: "&copy; {{ build_date_utc.strftime('%Y') }} WeatherGenerator contributors"
 copyright: "2025 - 2026, WeatherGenerator contributors"
 
 theme:
   name: readthedocs
   locale: en
   highlightjs: true  
-  # font:
-  #   text: "Inter"
-  #   headings: "Familjen Grotesk"
-  # CHECK GDPR login
+
 plugins:
   - search
   - mkdocstrings:
       handlers:
-        # See: https://mkdocstrings.github.io/python/usage/
         python:
           options:
             docstring_style: sphinx
@@ -29,6 +24,6 @@ extra_css:
   - ./_static/custom.css
 
 nav:
-  - "Introduction": README.md
-  - "Configuration File": guide/config.md
+  - "Introduction": ../../README.md
+  - "Configuration Reference": guide/config.md
   - "Examples": examples/index.md
