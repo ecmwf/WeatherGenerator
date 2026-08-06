@@ -289,8 +289,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = meta_info["LATENT_CONDITIONING_TOKENS"]
 
         if self.training:
+            noise_stream = self.cf.get("diffusion", {}).get("noise_stream", "ERA5")
             noise_level_rn = torch.tensor(
-                [meta_info["ERA5_in"].params["noise_level_rn"]], device=tokens.device
+                [meta_info[noise_stream].params["noise_level_rn"]], device=tokens.device
             )
         else:
             # During validation, use fixed noise level (default: 0.0)
