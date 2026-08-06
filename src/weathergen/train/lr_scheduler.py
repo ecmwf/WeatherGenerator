@@ -109,9 +109,6 @@ class LearningRateScheduler:
                 pct_start=pct_start,
                 div_factor=self.lr_max_scaled / lr_cfg.lr_start,
                 final_div_factor=lr_final_decay_scaled / lr_cfg.lr_start,
-                # cycle_momentum defaults to True and otherwise silently overwrites the
-                # optimizer's tuned betas/momentum (e.g. adamw's kappa-scaled beta1, or
-                # muon's momentum) between OneCycleLR's base_momentum/max_momentum
                 cycle_momentum=False,
             )
         else:
