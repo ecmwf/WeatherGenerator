@@ -97,6 +97,7 @@ def run_inference(args):
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     devices = Trainer.init_torch()
+    cf = Trainer.init_seeds(cf)
     cf = Trainer.init_ddp(cf)
 
     init_loggers(cf.general.run_id)
@@ -136,6 +137,7 @@ def run_continue(args):
 
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
+    cf = Trainer.init_seeds(cf)
     cf = Trainer.init_ddp(cf)
 
     init_loggers(cf.general.run_id)
@@ -170,6 +172,7 @@ def run_train(args):
 
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
+    cf = Trainer.init_seeds(cf)
     cf = Trainer.init_ddp(cf)
 
     # this line should probably come after the processes have been sorted out else we get lots
