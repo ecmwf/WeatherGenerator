@@ -12,8 +12,9 @@ from weathergen.train.target_and_aux_module_base import (
 
 
 class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
-    def __init__(self, encoder, is_model_sharded=True):
+    def __init__(self, cf, encoder, is_model_sharded=True):
         # Todo: make sure this is a frozen clone or forward without gradients in compute()
+        self.cf = cf
         self.encoder = encoder
 
         apply_fct_to_blocks(self.encoder, ".*", freeze_weights)
@@ -59,8 +60,9 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         # During validation (model in eval mode), use fixed noise level
         # so that sigma = exp(eta * p_std + p_mean) is deterministic
         if model.training:
+            noise_stream = self.cf.get("diffusion", {}).get("noise_stream", "ERA5")
             noise_level_rn = (
-                batch.samples[0].meta_info["ERA5_in"].params["noise_level_rn"]
+                batch.samples[0].meta_info[noise_stream].params["noise_level_rn"]
             )  # TODO: adjust for multiple streams
         else:
             noise_level_rn = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0
