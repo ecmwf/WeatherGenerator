@@ -28,7 +28,7 @@ A working template to copy and edit is `config/eval_config.yml`
    - [Regridding](#73-regridding)
    - [Climatology](#74-climatology)
 8. [Metrics reference](#8-metrics-reference)
-   - [Special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram)
+   - [Special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram-and-seeps)
 9. [Regions reference](#9-regions-reference)
 10. [Score caching (JSON files)](#10-score-caching-json-files)
 11. [CSV format for pre-computed scores](#11-csv-format-for-pre-computed-scores)
@@ -591,8 +591,8 @@ evaluation:
 | `pss` | Peirce Skill Score. Override threshold with `thresh`. |
 | `fbi` | Frequency Bias Index. Override threshold with `thresh`. |
 | `grad_amplitude` | Ratio of spatial variability (gradient amplitude) between prediction and target. Requires a regular lat/lon grid. |
-| `qq_analysis` | Quantile–quantile analysis. Produces Q-Q plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
-| `psd` | Power Spectral Density. Produces PSD plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
+| `qq_analysis` | Quantile–quantile analysis. Produces Q-Q plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram-and-seeps). |
+| `psd` | Power Spectral Density. Produces PSD plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram-and-seeps). |
 
 ### Metrics requiring alignment between consecutive forecast steps
 
@@ -622,7 +622,7 @@ evaluation:
 |------|-------------|
 | `ssr` | Spread–Skill Ratio |
 | `crps` | Continuous Ranked Probability Score (via the [scores](https://scores.readthedocs.io/) package). Supports standard, fair, and threshold-weighted variants — see parameters below. |
-| `rank_histogram` | Rank Histogram (Talagrand diagram). Produces a bar chart, not a score line plot — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
+| `rank_histogram` | Rank Histogram (Talagrand diagram). Produces a bar chart, not a score line plot — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram-and-seeps). |
 | `spread` | Ensemble Spread |
 
 ### Special output metrics: `psd`, `qq_analysis`, `rank_histogram` and `seeps`
