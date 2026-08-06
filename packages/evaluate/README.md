@@ -1,4 +1,4 @@
-![WeatherGenerator logo](../../../assets/wg_logo.svg)
+![WeatherGenerator logo](https://raw.githubusercontent.com/ecmwf/WeatherGenerator/refs/heads/sorcha/dev/1696/assets/wg_logo.svg)
 
 # The `WeatherGenerator-FastEvaluation` package
 
