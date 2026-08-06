@@ -4,7 +4,7 @@ train :
       slurm_id: 0
       description: "AdamW"
       eval: vgbndhco
-    kt070z3n:
+    ht5srum5:
       slurm_id: 0
       description: "Muon"
       eval: vgbndhco
