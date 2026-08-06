@@ -30,7 +30,7 @@ import numpy as np
 import torch
 
 from weathergen.common.config import Config, get_path_run
-from weathergen.datasets.batch import SampleMetaData, get_noise_level_rn
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
 logger = logging.getLogger(__name__)
@@ -289,8 +289,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = meta_info["LATENT_CONDITIONING_TOKENS"]
 
         if self.training:
+            noise_stream = self.cf.get("diffusion", {}).get("noise_stream", "ERA5")
             noise_level_rn = torch.tensor(
-                [get_noise_level_rn(meta_info)], device=tokens.device
+                [meta_info[noise_stream].params["noise_level_rn"]], device=tokens.device
             )
         else:
             # During validation, use fixed noise level (default: 0.0)

@@ -15,28 +15,6 @@ import torch
 from weathergen.common.config import Config
 from weathergen.datasets.stream_data import StreamData
 
-# Stream names searched (in order) when looking up the diffusion noise level.
-# The hardcoded input stream may be named differently across configs, so we fall
-# back to the "ERA5" stream when "ERA5_in" is absent or lacks the noise parameter.
-NOISE_LEVEL_STREAM_FALLBACKS = ("ERA5_in", "ERA5")
-
-
-def get_noise_level_rn(meta_info: dict) -> float:
-    """Retrieve the diffusion ``noise_level_rn`` from sample meta_info.
-
-    Looks up the parameter in the ``ERA5_in`` stream first and falls back to the
-    ``ERA5`` stream when the ``ERA5_in`` stream is absent or does not carry the
-    parameter. Raises ``KeyError`` if neither stream provides it.
-    """
-    for stream_name in NOISE_LEVEL_STREAM_FALLBACKS:
-        stream_meta = meta_info.get(stream_name)
-        if stream_meta is not None and "noise_level_rn" in stream_meta.params:
-            return stream_meta.params["noise_level_rn"]
-    raise KeyError(
-        "noise_level_rn not found in meta_info for any of the streams "
-        f"{NOISE_LEVEL_STREAM_FALLBACKS}"
-    )
-
 
 @dataclass
 class SampleMetaData:
