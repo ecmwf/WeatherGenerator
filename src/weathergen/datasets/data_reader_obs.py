@@ -51,7 +51,6 @@ class DataReaderObs(DataReaderBase):
         self.colnames = list(self.data.attrs["colnames"])
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
-        data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
 
         # determine source / target channels and corresponding idx using include and exclude lists
 
@@ -91,18 +90,18 @@ class DataReaderObs(DataReaderBase):
 
         # geoinfo channels
         sname = stream_info["name"]
-        if stream_info.get("geoinfo_channels") is not None:
-            self.geoinfo_idx, self.geoinfo_channels = [], []
-            for c in stream_info.get("geoinfo_channels"):
-                if c not in self.colnames:
-                    _logger.warning(f"{sname} : geoinfo {c} specified in config but not present.")
-                else:
-                    self.geoinfo_idx.append(self.colnames.index(c))
-                    self.geoinfo_channels.append(c)
-        else:
-            self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
-            self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
-        _logger.info(f"{stream_info['name']} geoinfos : {self.geoinfo_channels}")
+        geoinfo_channels = stream_info.get("geoinfo_channels")
+        assert geoinfo_channels is not None, (
+            f"{sname}: 'geoinfo_channels' must be specified in the stream config."
+        )
+        self.geoinfo_idx, self.geoinfo_channels = [], []
+        for c in geoinfo_channels:
+            if c not in self.colnames:
+                _logger.warning(f"{sname} : geoinfo {c} specified in config but not present.")
+            else:
+                self.geoinfo_idx.append(self.colnames.index(c))
+                self.geoinfo_channels.append(c)
+        _logger.info(f"{sname} geoinfos : {self.geoinfo_channels}")
 
         # load additional properties (mean, var)
         self._load_properties()
