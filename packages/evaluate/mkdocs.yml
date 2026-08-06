@@ -24,6 +24,6 @@ extra_css:
   - ./_static/custom.css
 
 nav:
-  - "Introduction": ../../README.md
-  - "Configuration Reference": guide/config.md
-  - "Examples": examples/index.md
+  - "Introduction": '../../README.md'
+  - "Configuration Reference": 'guide/config.md'
+  - "Examples": 'examples/index.md'
