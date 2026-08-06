@@ -89,6 +89,20 @@ variables:
     wg_unit: Pa
     std_unit: Pa
     level_type: sfc
+  tp:
+    var: tp
+    long: total_precipitation
+    std: precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc
+  cp:
+    var: cp
+    long: convective_precipitation
+    std: convective_precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc 
   tp_imerg_0:
     var: tp_imerg_0
     long: imerg_total_precipitation
@@ -96,7 +110,7 @@ variables:
     wg_unit: m
     std_unit: m
     level_type: sfc
-   hcc:
+  hcc:
     var: hcc
     long: high_cloud_cover
     std: cloud_area_fraction_high
@@ -138,7 +152,6 @@ variables:
     wg_unit: J m**-2
     std_unit: J m-2
     level_type: sfc
-  
 
 coordinates:
     sfc:
@@ -148,6 +161,7 @@ coordinates:
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
+        mem: mem
     pl:
         pressure_level: pressure
         valid_time: valid_time
@@ -156,6 +170,7 @@ coordinates:
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
+        mem: mem
 
 dimensions:
     valid_time:
@@ -184,3 +199,8 @@ dimensions:
     ncells:
       wg: ncells
       std: ncells
+    mem:
+      wg: mem
+      std: realization
+      long: realization
+      std_unit: 1

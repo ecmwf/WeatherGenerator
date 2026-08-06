@@ -104,8 +104,9 @@ def parse_args(args: list) -> argparse.Namespace:
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["N320", "ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
-        help="Stream name to retrieve data for",
+        choices=["N320", "ERA5", "ERA5pl", "ERA5ml", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
+        help="Stream name to retrieve data for, if not provided retrieves all",
+        default=None,
     )
 
     parser.add_argument(
@@ -158,9 +159,21 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--rank",
-        type=int,
-        default=0,
-        help="Rank number to identify the Zarr store",
+        type=str,
+        default="all",
+        help="Rank(s) to process. Use '0' for a single rank, 'all' for every rank file, "
+        "or a comma-separated list like '0,1,2'.",
+    )
+
+    parser.add_argument(
+        "--init-time-reference",
+        type=str,
+        choices=["source_start", "source_end"],
+        default="source_start",
+        help="Which end of the source (conditioning) window to use as the forecast "
+        "initialisation time written to the output metadata (e.g. GRIB 'date'/'time'). "
+        "'source_start' (default) uses the beginning of the window "
+        "(e.g. 00 UTC for a 00-05 UTC window); 'source_end' uses the end of the window.",
     )
 
     parser.add_argument(
@@ -287,6 +300,16 @@ def export_from_args(args: list) -> None:
 
     if kwargs.get("expver") == "NEW":
         kwargs["expver"] = generate_new_expver()
+
+    # Normalise rank
+    raw_rank = kwargs.get("rank", "all")
+    if raw_rank == "all":
+        kwargs["rank"] = "all"
+    elif "," in str(raw_rank):
+        kwargs["rank"] = [int(r.strip()) for r in str(raw_rank).split(",")]
+    else:
+        kwargs["rank"] = int(raw_rank)
+
     _logger.info(kwargs)
 
     # Ensure output directory exists
@@ -296,8 +319,11 @@ def export_from_args(args: list) -> None:
     for dtype in args.type:
         _logger.info(
             f"Starting processing {dtype} for run ID {kwargs['run_id']}. "
-            f"Processing {kwargs['samples'] if kwargs['samples'] is not None else 'all'} samples \
-and {kwargs['fsteps'] if kwargs['fsteps'] is not None else 'all'} forecast steps."
+            f"Processing {kwargs['samples'] if kwargs['samples'] is not None else 'all'} samples, "
+            f"from {kwargs['rank'] if kwargs['rank'] is not None else 'all'} ranks, "
+            f"from {kwargs['epoch'] if kwargs['epoch'] is not None else 'all'} epochs, "
+            f"{kwargs['fsteps'] if kwargs['fsteps'] is not None else 'all'} forecast steps, "
+            f"and {kwargs['stream'] if kwargs['stream'] is not None else 'all'} streams."
         )
 
         export_model_outputs(dtype, config, **kwargs)

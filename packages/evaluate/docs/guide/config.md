@@ -590,7 +590,6 @@ evaluation:
 | `ets` | Equitable Threat Score. Default threshold per-variable (see `score.py`). Override with `thresh`. |
 | `pss` | Peirce Skill Score. Override threshold with `thresh`. |
 | `fbi` | Frequency Bias Index. Override threshold with `thresh`. |
-| `seeps` | Stable Equitable Error in Probability Space ([Rodwell et al., 2011](https://journals.ametsoc.org/view/journals/mwre/140/8/mwr-d-11-00301.1.pdf)). |
 | `grad_amplitude` | Ratio of spatial variability (gradient amplitude) between prediction and target. Requires a regular lat/lon grid. |
 | `qq_analysis` | Quantile–quantile analysis. Produces Q-Q plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
 | `psd` | Power Spectral Density. Produces PSD plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
@@ -615,17 +614,18 @@ evaluation:
 | `rpss` | Ranked Probability Skill Score |
 | `fact` | Forecast Activity (standard deviation of forecast anomaly) |
 | `tact` | Target Activity (standard deviation of target anomaly) |
+| `seeps` | Stable Equitable Error in Probability Space ([Rodwell et al., 2011](https://journals.ametsoc.org/view/journals/mwre/140/8/mwr-d-11-00301.1.pdf)). Reported as the positively-oriented skill `1 − SEEPS_error` (**higher is better**; 1 = perfect). |
 
 ### Probabilistic metrics (require ensemble dimension)
 
 | Name | Description |
 |------|-------------|
 | `ssr` | Spread–Skill Ratio |
-| `crps` | Continuous Ranked Probability Score (via xskillscore) |
+| `crps` | Continuous Ranked Probability Score (via the [scores](https://scores.readthedocs.io/) package). Supports standard, fair, and threshold-weighted variants — see parameters below. |
 | `rank_histogram` | Rank Histogram (Talagrand diagram). Produces a bar chart, not a score line plot — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
 | `spread` | Ensemble Spread |
 
-### Special output metrics: `psd`, `qq_analysis`, `rank_histogram`
+### Special output metrics: `psd`, `qq_analysis`, `rank_histogram` and `seeps`
 
 The three metrics below do **not** produce standard score-vs-lead-time line plots. They are
 handled by dedicated plotting functions and generate different output file types.
@@ -676,6 +676,53 @@ evaluation:
     - ets:
         thresh: 0.001     # custom threshold (e.g. for precipitation)
 ```
+
+#### `crps` parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `method` | `"ecdf"` | CRPS variant. `"ecdf"` — standard CRPS from the empirical CDF. `"fair"` — debiased fair CRPS. `"tw_tail"` — threshold-weighted tail CRPS. `"tw_interval"` — threshold-weighted interval CRPS. |
+| `fair` | `false` | If `true`, overrides `method` with `"fair"` (debiased CRPS). Shorthand for `method: "fair"`. |
+| `threshold` | — | *(tw_tail only)* Threshold value. |
+| `tail` | `"upper"` | *(tw_tail only)* Which tail to weight: `"upper"` or `"lower"`. |
+| `lower_threshold` | — | *(tw_interval only)* Lower bound of the interval. |
+| `upper_threshold` | — | *(tw_interval only)* Upper bound of the interval. |
+
+```yaml
+evaluation:
+  metrics:
+    - crps                           # standard CRPS (ecdf method)
+    - crps:
+        fair: true                   # fair/debiased CRPS
+    - crps:
+        method: "tw_tail"
+        threshold: 0.1
+        tail: "upper"                # weight upper tail (e.g. heavy precip)
+    - crps:
+        method: "tw_interval"
+        lower_threshold: 0.0
+        upper_threshold: 10.0
+```
+
+#### `seeps` score
+The underlying [`scores`](https://scores.readthedocs.io/) implementation computes the Rodwell et al.
+SEEPS **error** (negatively oriented, 0 = perfect). WeatherGenerator reports the
+**positively-oriented** form `1 − SEEPS_error` (**higher is better**), matching the convention used
+for reporting SEEPS at ECMWF (e.g. the [AIFS "it's raining data" blog](https://www.ecmwf.int/en/about/media-centre/aifs-blog/2024/its-raining-data)).
+A perfect forecast scores 1, a climatology/no-skill forecast scores ~0, and values can be negative
+where the forecast is worse than the penalty-matrix reference.
+
+The `seeps` metric accepts two parameters:
+```yaml
+evaluation:
+  metrics:
+    - seeps:
+        minimum_dry_prob: 0.1
+        maximum_dry_prob: 0.85
+```
+Points where the climatological probability of a dry timestep (less than 0.2mm of rain) is below this minimum or above this maximum are excluded from the score computation. 
+The default values given above are used in the literature and should typically not be changed. The other two parameters inherent in the method (the threshold for dryness, 
+here 0.2mm and the conditional probability of heavy rain given a wet timestep, here 2/3) are baked into the climatological weights and cannot be changed by the user.  
 
 ---
 
@@ -739,11 +786,21 @@ At runtime, the code checks whether a JSON file already exists for the requested
 combination. If it does, the stored scores are loaded; otherwise they are computed and
 saved for future use.
 
-> **Known limitation:** The cache does **not** check whether configuration parameters have
-> changed since the JSON was written. If you change anything that affects score values —
-> such as `rank`, `regrid` settings, metric thresholds, or the set of ensemble members —
-> you must **manually delete the relevant JSON files** to force recomputation. Stale cached
-> scores will otherwise be silently reused.
+### Cache invalidation
+
+The evaluation code automatically detects configuration changes and forces recomputation
+when necessary. Cached scores are **automatically recomputed** when any of the following
+change:
+- `regrid`, `ensemble`, `rank`, `agg_dims`,
+
+They are **recomputed only for the missing values** when the following parameters change:
+- `derived_channels`, `forecast_steps`, `channels`, `sample`
+
+**Manual cache invalidation required:**
+The cache does **not** track changes to other parameters, so you must manually delete
+the relevant JSON files, e.g. if any of these change:
+- Climatology files
+- Underlying Zarr data content (without forecast step changes)
 
 ---
 
