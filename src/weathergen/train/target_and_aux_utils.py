@@ -40,7 +40,7 @@ def get_target_aux_calculator(
             cf,
             dataset,
             cf.get("load_chkpt", {}).get("run_id", None),
-            cf.get("load_chkpt", {}).get("epoch", -1),
+            cf.get("load_chkpt", {}).get("mini_epoch", -1),
             "student",
             device,
             with_ddp=False,
