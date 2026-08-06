@@ -9,35 +9,11 @@
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 16
-fe_num_heads: 16
-fe_dropout_rate: 0.2
-fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0
-# currently fixed to 1.0 (due to limitations with flex_attention and triton)
-forecast_att_dense_rate: 1.0
+fe_impute_latent_noise_std: 1e-4
 
 healpix_level: 5
 
-# performance
-with_mixed_precision: True
-with_flash_attention: True
-compile_model: False
-with_fsdp: False
-ddp_find_unused_parameters: False #True
-attention_dtype: bf16
-mixed_precision_dtype: bf16
-mlp_norm_eps: 1e-5
-norm_eps: 1e-4
-
-latent_noise_kl_weight: 0.0 # 1e-5
-latent_noise_gamma: 2.0
-latent_noise_saturate_encodings: 5 
-latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True
-
-freeze_modules: "" # ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
+freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*|.*ERA5.*|.*tte.*"
 
 norm_type: "LayerNorm"
 
@@ -79,7 +55,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 10
+  num_workers: 4
   rng_seed: ???
   repeat_data_in_mini_epoch : False
   persistent_workers: False
@@ -108,7 +84,7 @@ training_config:
     enabled: false
 
 
-  num_mini_epochs: 32
+  num_mini_epochs: 8
   samples_per_mini_epoch: 8192
   shuffle: True
 
@@ -174,7 +150,7 @@ training_config:
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
+      num_steps: 8
       offset: 1
       policy: "fixed"
 

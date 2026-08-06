@@ -1,11 +1,28 @@
 streams_directory: "./config/streams/jepa_forecast_multi_data_od/"
 
+fe_num_blocks: 16
+fe_layer_norm_after_blocks: [7]
+
+data_loading:
+  num_workers: 6
+  persistent_workers: False
+  prefetch_factor: 1
+  memory_pinning: False
+
 general:
 
   # mutable parameters
+  istep: 0
   rank: ???
   world_size: ???
 
+train_logging:
+  terminal: 100
+
 training_config:
-  num_mini_epochs: 32
+
+  start_date: 2016-01-01T00:00
+  end_date: 2022-12-31T00:00
+
+  num_mini_epochs: 48
   samples_per_mini_epoch: 8192

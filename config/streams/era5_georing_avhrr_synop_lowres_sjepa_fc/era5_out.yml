@@ -1,0 +1,113 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+ERA5 :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-n320-1979-2024-1h-v2-with-era51.zarr']
+  stream_id : 1
+  source : [ ]
+  target_exclude : ['z', 'w_10', 'w_50', 'w_100', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_1000', 'slor', 'sdor', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
+  geoinfo_channels : ['z', 'lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
+  loss_weight : 1.
+  location_weight : cosine_latitude
+  token_size : 32
+  tokenize_spacetime : False
+  max_num_targets: 542080
+  # max_num_targets: 24576
+  diagnostic: True
+  # frequencency : 06:00:00
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 4
+    dim_embed : 512
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 512
+  target_readout :
+    num_layers : 4
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1
+  # channel_weights :
+  #   2t : 2.0
+  #   10u : 2.0
+  #   10v : 2.0
+  #   q_10: 1.0
+  #   q_50: 1.0
+  #   q_100: 1.0
+  #   q_150: 1.0
+  #   q_200: 1.0
+  #   q_250: 1.0
+  #   q_300: 1.0
+  #   q_400: 1.0
+  #   q_500: 1.0
+  #   q_600: 1.0
+  #   q_700: 1.0
+  #   q_850: 1.0
+  #   q_925: 1.0
+  #   q_1000: 1.0
+  #   t_10: 2.0
+  #   t_50: 2.0
+  #   t_100: 2.0
+  #   t_150: 2.0
+  #   t_200: 2.0
+  #   t_250: 2.0
+  #   t_300: 2.0
+  #   t_400: 2.0
+  #   t_500: 2.0
+  #   t_600: 2.0
+  #   t_700: 2.0
+  #   t_850: 2.0
+  #   t_925: 2.0
+  #   t_1000: 2.0
+  #   u_10: 1.0
+  #   u_50: 1.0
+  #   u_100: 1.0
+  #   u_150: 1.0
+  #   u_200: 1.0
+  #   u_250: 1.0
+  #   u_300: 1.0
+  #   u_400: 1.0
+  #   u_500: 1.0
+  #   u_600: 1.0
+  #   u_700: 1.0
+  #   u_850: 1.0
+  #   u_925: 1.0
+  #   u_1000: 1.0
+  #   v_10: 1.0
+  #   v_50: 1.0
+  #   v_100: 1.0
+  #   v_150: 1.0
+  #   v_200: 1.0
+  #   v_250: 1.0
+  #   v_300: 1.0
+  #   v_400: 1.0
+  #   v_500: 1.0
+  #   v_600: 1.0
+  #   v_700: 1.0
+  #   v_850: 1.0
+  #   v_925: 1.0
+  #   v_1000: 1.0
+  #   z_10: 3.0
+  #   z_50: 3.0
+  #   z_100: 3.0
+  #   z_150: 3.0
+  #   z_200: 3.0
+  #   z_250: 3.0
+  #   z_300: 3.0
+  #   z_400: 3.0
+  #   z_500: 3.0
+  #   z_600: 3.0
+  #   z_700: 3.0
+  #   z_850: 3.0
+  #   z_925: 3.0
+  #   z_1000: 3.0

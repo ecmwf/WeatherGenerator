@@ -16,5 +16,5 @@ training_config:
 
   context_loss:
     enabled: true
-    weight: 0.4
-    warmup_steps: 2000             # linear warmup from 0 to weight over this many steps
+    weight: 1.0
+    warmup_steps: 1000             # linear warmup from 0 to weight over this many steps

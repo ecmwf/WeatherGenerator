@@ -690,7 +690,7 @@ class Model(torch.nn.Module):
             np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
         )
 
-        if self.encoder.q_aux:
+        if self.encoder.q_aux is not None:
             num_params_q_aux = (
                 np.prod(self.encoder.q_aux.shape) if self.encoder.q_aux.requires_grad else 0
             )
@@ -736,7 +736,7 @@ class Model(torch.nn.Module):
         print(f" Local assimilation engine: {num_params_ae_local:,}")
         print(f" Local-global adapter: {num_params_ae_adapter:,}")
         print(f" Learnable spatial queries: {num_params_q_cells:,}")
-        if self.encoder.q_aux:
+        if self.encoder.q_aux is not None:
             print(f" Learnable auxiliary queries: {num_params_q_aux:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")

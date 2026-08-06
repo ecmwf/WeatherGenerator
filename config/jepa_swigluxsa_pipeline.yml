@@ -4,7 +4,7 @@ parallelize: false
 stages:
   - name: multipretrain
     stage: train
-    base_config: ./config/config_jepa_multi_data_all_years.yml
+    base_config: ./config/config_jepa_multi_data_all_years_swigluxsa.yml
     chain_jobs: 8
     nodes: 2
 

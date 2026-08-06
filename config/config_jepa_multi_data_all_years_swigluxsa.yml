@@ -74,8 +74,8 @@ healpix_level: 5
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
 rope_2D: True 
-# mlp_type: swiglu
-# use_xsa: True
+mlp_type: swiglu
+use_xsa: True
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -131,11 +131,6 @@ train_logging:
   checkpoint: 500
   log_grad_norms: False
 
-  loss_spike_detection:
-    enabled: False
-    skip_batch: False # also makes the skip explicit instead of relying on GradScaler
-    loss_threshold: 0.01
-
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
   # For forecasting, supports sequences of latents with per-step and aggregate metrics
@@ -168,7 +163,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 10
+  num_workers: 6
   rng_seed: ???
 
 
@@ -232,7 +227,6 @@ training_config:
 
   losses : {
     "physical": {
-      enabled: True,
       type: LossPhysical,
       loss_fcts: { "mse": { 
           target_source_correspondence: {0 : {0 : "subset"} },
@@ -245,7 +239,7 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 1, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 24, "with_qk_lnorm": True, "intermediate_dim": 1536, 
+            "num_blocks": 6, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 1024, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
         },

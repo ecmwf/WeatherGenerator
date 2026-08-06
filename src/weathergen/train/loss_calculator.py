@@ -92,7 +92,7 @@ class LossCalculator:
             target = targets_and_aux[loss_term_name]
             for weight, calculator in calc_term:
                 loss_values = calculator.compute_loss(
-                    preds=preds, targets=target, metadata=metadata
+                    preds=preds, targets=target, metadata=metadata, istep=istep
                 )
                 if weight > 0.0:
                     loss = loss + weight * loss_values.loss
