@@ -18,7 +18,7 @@ plugins:
             docstring_style: sphinx
 markdown_extensions:
   - markdown_include.include:
-      base_path: packages/evaluate/docs
+      base_path: packages/evaluate
   - admonition
 extra_css:
   - ./_static/custom.css

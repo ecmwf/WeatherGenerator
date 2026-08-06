@@ -1,4 +1,4 @@
-![WeatherGenerator logo](../../assets/wg_logo.svg)
+![WeatherGenerator logo](../../../assets/wg_logo.svg)
 
 # The `WeatherGenerator-FastEvaluation` package
 
@@ -63,7 +63,7 @@ uv run evaluate --config <path to config file>
 
 The default config file is at: `WeatherGenerator/configs/evaluate/eval_config.yml`
 
-More instructions can be found under [Configuration File](./docs/guide/config.md)
+More instructions can be found under [Configuration File](./guide/config.md)
 
 ---
 
