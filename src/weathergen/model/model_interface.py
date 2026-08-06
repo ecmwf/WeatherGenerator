@@ -193,14 +193,14 @@ def init_model_and_shard(
     if run_id_contd is not None:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
-        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
+        model = load_model(cf, model, device, run_id_contd, with_ddp, with_fsdp, mini_epoch_contd)
         loaded_from_run_id = run_id_contd
     elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
         mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
             logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
-        model = load_model(cf, model, device, run_id, mini_epoch)
+        model = load_model(cf, model, device, run_id, with_ddp, with_fsdp, mini_epoch)
         loaded_from_run_id = run_id
     else:
         if with_ddp and with_fsdp:
@@ -248,7 +248,7 @@ def init_model_and_shard(
     return model, model_params
 
 
-def load_model(cf, model, device, run_id: str, mini_epoch=-1):
+def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, mini_epoch: int):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
         run_id : model_id of the trained model
@@ -266,7 +266,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     )
 
     # Determine shardedness from the model instance itself, NOT from the global config flags:
-    is_model_sharded = any(type(p) is torch.distributed.tensor.DTensor for p in model.parameters())
+    is_model_sharded = with_ddp and with_fsdp
     if is_model_sharded:
         # model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
         # params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
