@@ -1,0 +1,88 @@
+#optional: if commented out all is taken care of by the default settings
+# NB. global options apply to all run_ids 
+
+#global_plotting_options:
+#  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
+#  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+#  animation_format: "gif" #options: "mp4", "gif"
+#  dpi_val : 300
+#  fps: 2
+#  n_bins: 50 #number of bins for histograms. 
+#  log_x: true #use log scale for x axis in histograms. 
+#  log_y: true #use log scale for y axis in histograms. 
+#  ERA5:
+#    use_datashader: false
+#    marker_size: 2
+#    scale_marker_size: 1
+#    marker: "o"
+#    add_healpix_grid: false
+#    healpix_nside: 4
+#    # alpha: 0.5
+#    2t: 
+#      vmin: 250
+#      vmax: 300
+#    10u:
+#      vmin: -40
+#      vmax: 40
+
+
+# max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
+
+evaluation:
+  # Real-time ERA5 targets are synthetic decoder-query placeholders until a
+  # verifying analysis is available. Do not calculate skill metrics from them.
+  metrics: []
+  # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
+  summary_plots : false
+  ratio_plots : false
+  heat_maps : false
+  summary_dir: "./plots/"
+  plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: false
+  score_cards: false
+  bar_plots: false
+  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
+  # baseline: "ar40mckx"
+
+
+default_streams:
+  ERA5:
+    regions: ["global"]
+    channels: ["10ff", "2t", "10u", "10v", "z_500", "t_850", "u_850", "v_850", "q_300", "q_500", "q_700", "q_850", "q_1000"]
+    # Enable this only after replacing the placeholder target with a matching
+    # verifying analysis.
+    evaluation: false
+    plotting:
+      sample: "all"
+      forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
+      plot_maps: true
+      plot_bias: false
+      plot_target: false
+      plot_histograms: false
+      plot_animations: true
+      
+run_ids :
+  # bfa6kwdb:
+  #   label: "first ever real time inference"
+  #   results_base_dir : "./results/bfa6kwdb/"
+          
+  # xs6pbwf2:
+  #   label: "attempted with analysis failed"
+  #   results_base_dir : "./results/xs6pbwf2/"
+
+  # c90dzytj:
+  #   label: "attempted with analysis 2"
+  #   results_base_dir : "./results/c90dzytj/"
+
+  # tb5o72y4:
+  #   label: "working with analysis, 5 day forecast"
+  #   results_base_dir : "./results/tb5o72y4/"
+
+  y6bits8u:
+    label: "working with analysis, 5 day forecast, 20260806T0000Z"
+    results_base_dir : "./results/y6bits8u/"
+

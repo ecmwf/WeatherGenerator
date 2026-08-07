@@ -26,6 +26,7 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.data_reader_offgrid import DataReaderOffgrid
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -36,7 +37,7 @@ from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 
-type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
+type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs | DataReaderOffgrid
 type StreamName = str
 
 logger = logging.getLogger(__name__)
@@ -228,6 +229,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     dataset = DataReaderObs
                 case "anemoi":
                     dataset = DataReaderAnemoi
+                case "offgrid":
+                    dataset = DataReaderOffgrid
                 case "fesom":
                     dataset = DataReaderFesom
                 case type_name:

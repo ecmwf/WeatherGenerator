@@ -1,0 +1,20 @@
+# One explicit near-real-time inference sample for checkpoint af90zz71.
+#
+# The real-time satellite snapshot ends at 2026-08-05T11:00Z and therefore
+# supplies the model input window [05:00Z, 11:00Z). The explicit end date
+# below provides target coordinates for a 20-step forecast. Missing future
+# targets are synthetic placeholders, so output targets and loss metrics are
+# not valid forecast verification.
+
+data_loading:
+  num_workers: 1
+
+test_config:
+  samples_per_mini_epoch: 1
+  shuffle: false
+  start_date: 2026-08-05T23:00:00
+  end_date: 2026-08-11T17:00:00
+  output:
+    num_samples: 1
+    normalized_samples: false
+    streams: [ERA5]
