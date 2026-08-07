@@ -269,20 +269,20 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
 
     is_model_sharded = with_ddp and with_fsdp
     if is_model_sharded:
-        # model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
-        # params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
-        # if model_has_prefix_module and not params_has_prefix_module:
-        #     # add "module." prefix
-        #     params_temp = {}
-        #     for k in params.keys():
-        #         params_temp["module." + k] = params[k]
-        #     params = params_temp
-        # elif not model_has_prefix_module and params_has_prefix_module:
-        #     # remove "module." prefix
-        #     params_temp = {}
-        #     for k in params.keys():
-        #         params_temp[k.replace("module.", "")] = params[k]
-        #     params = params_temp
+        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
+        params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
+        if model_has_prefix_module and not params_has_prefix_module:
+            # add "module." prefix
+            params_temp = {}
+            for k in params.keys():
+                params_temp["module." + k] = params[k]
+            params = params_temp
+        elif not model_has_prefix_module and params_has_prefix_module:
+            # remove "module." prefix
+            params_temp = {}
+            for k in params.keys():
+                params_temp[k.replace("module.", "")] = params[k]
+            params = params_temp
 
         meta_sharded_sd = model.state_dict()
         maybe_sharded_sd = {}
