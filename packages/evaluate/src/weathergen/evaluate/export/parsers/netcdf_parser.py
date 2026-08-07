@@ -78,9 +78,21 @@ class NetcdfParser(CfParser):
                 result = result.as_xarray().squeeze()
             if "channel" not in result.indexes:
                 result = result.expand_dims("channel")
-            result = result.sel(channel=self.channels)
-            result = self.reshape(result)
-            da_fs.append(result)
+
+            # Get unique valid times
+            unique_times = np.sort(np.unique(result.valid_time.values))
+
+            for vt in unique_times:
+                sub = result.sel(channel=self.channels, valid_time=vt)
+
+                if len(unique_times) > 1:
+                    # Reassign ipoint so that the same spatial point indices are used
+                    # for each unique valid_time
+                    new_ipoint = sub.ipoint.copy(data=np.arange(sub.sizes["ipoint"]))
+                    sub = sub.assign_coords(ipoint=new_ipoint)
+
+                sub = self.reshape(sub)
+                da_fs.append(sub)
 
         _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {self.data_type}.")
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
@@ -164,6 +176,7 @@ class NetcdfParser(CfParser):
         reshaped_dataset = reshaped_dataset.assign_coords(
             ipoint=data.coords["ipoint"],
         )
+
         # order using pressure_level coord
         if "pressure_level" in reshaped_dataset.coords:
             reshaped_dataset = reshaped_dataset.sortby("pressure_level")

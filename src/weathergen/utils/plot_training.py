@@ -347,7 +347,7 @@ def plot_loss_avg(
         plt.xscale("log")
     plt.title("average loss")
     plt.ylabel("loss")
-    plt.xlabel("step")
+    plt.xlabel("samples")
     plt.tight_layout()
     _add_legend(
         legend_str,
