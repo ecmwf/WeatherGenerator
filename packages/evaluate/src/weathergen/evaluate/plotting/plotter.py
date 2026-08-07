@@ -387,14 +387,13 @@ class Plotter:
         color_tar = "black"
         color_pred = "#00897B"  # teal / green-blue
 
-        # Create figure with two subplots: histogram + ratio
-        fig, (ax_hist, ax_ratio) = plt.subplots(
-            2,
-            1,
-            sharex=True,
-            figsize=self.fig_size or (8, 6),
-            gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
-        )
+        # Create figure with three rows: histogram, ratio, and stats text
+        fig = plt.figure(figsize=self.fig_size or (8, 8), constrained_layout=True)
+        gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 0.5])
+        ax_hist = fig.add_subplot(gs[0])
+        ax_ratio = fig.add_subplot(gs[1], sharex=ax_hist)
+        ax_text = fig.add_subplot(gs[2])
+        ax_text.set_axis_off()
 
         # Upper panel: histogram curves
         ax_hist.plot(
@@ -435,14 +434,15 @@ class Plotter:
             f"Wasserstein distance: {w_dist:.4g}\n{t_s.summary('Target:')}\n{p_s.summary('Pred:')}"
         )
 
-        fig.text(
+        ax_text.text(
             0.5,
-            -0.02,
+            0.5,
             stat_text,
             ha="center",
-            va="top",
+            va="center",
             fontsize=7,
             family="monospace",
+            transform=ax_text.transAxes,
             bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
         )
 
@@ -474,7 +474,7 @@ class Plotter:
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving histogram to {fname}")
-        fig.savefig(fname, bbox_inches="tight")
+        fig.savefig(fname)
         plt.close(fig)
 
         return name
@@ -990,7 +990,7 @@ class Plotter:
         # canvas so fine structure is visible; sparse grids use the default.
         figsize = self.fig_size
         if figsize is None and data.size >= 200_000:
-            figsize = (15, 7)
+            figsize = (16,8)
 
         proj = ccrs.PlateCarree()
         if regionname:
@@ -1002,7 +1002,7 @@ class Plotter:
                 # If regionname isn't in the library, fall back to PlateCarree
                 _logger.warning(f"Region '{regionname}' not found in library, using PlateCarree.")
                 proj = ccrs.PlateCarree()
-        fig = plt.figure(figsize=figsize, dpi=self.dpi_val)
+        fig = plt.figure(figsize=figsize, dpi=self.dpi_val, constrained_layout=True)
         ax = fig.add_subplot(1, 1, 1, projection=proj)
         try:
             ax.coastlines(linewidth=0.3)
@@ -1092,7 +1092,7 @@ class Plotter:
         name = self._build_map_filename(varname, regionname, tag, data)
         fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
         _logger.debug(f"Saving map to {fname}")
-        plt.savefig(fname, bbox_inches="tight")
+        plt.savefig(fname, pad_inches=0)
         plt.close()
 
         return name

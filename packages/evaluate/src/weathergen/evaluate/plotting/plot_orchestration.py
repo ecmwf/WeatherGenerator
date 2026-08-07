@@ -512,7 +512,13 @@ def _build_single_animation(
     if animation_format.lower() == "mp4":
         frames = [imageio.imread(p) for p in image_paths]
         fps = 1000 / duration_ms if duration_ms > 0 else 2
-        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
+        imageio.mimsave(
+            out_path,
+            frames,
+            fps=fps,
+            macro_block_size=8,
+            ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],
+        )
     else:
         images = [Image.open(p) for p in image_paths]
         images[0].save(
