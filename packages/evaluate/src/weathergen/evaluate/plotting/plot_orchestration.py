@@ -283,7 +283,7 @@ def run_score_map_pipeline(
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
         "fig_size": cfg.get("fig_size", None),
-        "animation_format": cfg.get("animation_format", "gif"),
+        "animation_format": cfg.get("animation_format", "mp4"),
         "fps": cfg.get("fps", 2),
     }
     output_basedir = str(reader.runplot_dir)
@@ -449,6 +449,31 @@ def _scatter_plot_single(
 # ---------------------------------------------------------------------------
 
 
+def _pad_frames_for_mp4(frames: list[np.ndarray], macro_block_size: int = 16) -> list[np.ndarray]:
+    """Pad frames to a common size aligned to ``macro_block_size``.
+
+    Frames come from ``savefig(bbox_inches="tight")``, so their pixel dimensions can
+    vary slightly from one fstep to the next. ffmpeg requires each dimension to be a
+    multiple of 16 and otherwise resizes every frame independently (noisy warnings,
+    and inconsistent target sizes if frames within one animation differ). Padding
+    once to a shared, aligned size up front avoids both.
+    """
+    target_h = -(-max(f.shape[0] for f in frames) // macro_block_size) * macro_block_size
+    target_w = -(-max(f.shape[1] for f in frames) // macro_block_size) * macro_block_size
+    padded = []
+    for f in frames:
+        pad_h = target_h - f.shape[0]
+        pad_w = target_w - f.shape[1]
+        if pad_h or pad_w:
+            top, left = pad_h // 2, pad_w // 2
+            pad_width = [(top, pad_h - top), (left, pad_w - left)]
+            if f.ndim == 3:
+                pad_width.append((0, 0))
+            f = np.pad(f, pad_width, mode="edge")
+        padded.append(f)
+    return padded
+
+
 def _build_single_animation(
     output_dir: Path,
     run_id: str,
@@ -509,27 +534,31 @@ def _build_single_animation(
     anim_parts.append(var)
     out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
 
-    if animation_format.lower() == "mp4":
-        frames = [imageio.imread(p) for p in image_paths]
-        fps = 1000 / duration_ms if duration_ms > 0 else 2
-        imageio.mimsave(
-            out_path,
-            frames,
-            fps=fps,
-            macro_block_size=8,
-            ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],
-        )
-    else:
-        images = [Image.open(p) for p in image_paths]
-        images[0].save(
+    if animation_format.lower() == "gif":
+        images = [Image.open(p).convert("RGB") for p in image_paths]
+        # GIF frames are palette-indexed (256 colors max) — this is a hard
+        # format limit, so gradients like colorbars can never be truly
+        # continuous here. 
+        palette = images[0].quantize(colors=256, method=Image.Quantize.MAXCOVERAGE)
+        frames = [
+            img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images
+        ]
+        frames[0].save(
             out_path,
             save_all=True,
-            append_images=images[1:],
+            append_images=frames[1:],
             duration=duration_ms,
             loop=0,
         )
         for img in images:
             img.close()
+    elif animation_format.lower() == "mp4":
+        frames = _pad_frames_for_mp4([imageio.imread(p) for p in image_paths])
+        fps = 1000 / duration_ms if duration_ms > 0 else 2
+        imageio.mimsave(out_path, frames, fps=fps, macro_block_size=8, ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"])
+    else:
+        raise ValueError(f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'.")
+    
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
 
@@ -865,7 +894,7 @@ def plot_data(
 
     plotter_cfg = {
         "image_format": global_plotting_opts.get("image_format", "png"),
-        "animation_format": global_plotting_opts.get("animation_format", "gif"),
+        "animation_format": global_plotting_opts.get("animation_format", "mp4"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size"),
         "fps": global_plotting_opts.get("fps", 2),
