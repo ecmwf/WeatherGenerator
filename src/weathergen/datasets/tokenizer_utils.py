@@ -517,6 +517,12 @@ def get_target_coords_local(
     zi = 75
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
 
+
+    a[..., 98] = np.sin(coords[:, 0])
+    a[..., 97] = np.cos(coords[:, 0])
+    a[..., 96] = np.sin(coords[:, 1])
+    a[..., 95] = np.cos(coords[:, 1])
+
     # remaining geoinfos (zenith angle etc)
     zi = 99
     a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
