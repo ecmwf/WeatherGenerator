@@ -379,11 +379,33 @@ class Masker:
         for i_cfg, (_, target_cfg) in enumerate(target_cfgs.items()):
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
+                masking_config = target_cfg.get("masking_strategy_config", {})
                 # determine if forcing dataset => mask is empty
                 if is_stream_forcing(stream_info, self.stage):
-                    target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                    # A forcing stream (e.g. observations with ``target: []``) produces no
+                    # physical prediction target, so the model builds no decoder/readout for it
+                    # and no target VALUES are loaded into the batch. However, for
+                    # student-teacher / latent-loss training the latent target is the frozen
+                    # encoder applied to the target sample, whose network input is gated by this
+                    # target cell mask. A zero mask would drop the stream's source tokens from
+                    # the latent target entirely. Generate the normal (e.g. all-ones "forecast")
+                    # target cell mask so the stream's source tokens ARE encoded into the latent
+                    # target (and the per-sample diffusion noise level is sampled), while still
+                    # loading no target values (empty target channels).
+                    needs_target_network_input = (
+                        "student_teacher" in training_mode or "latent_loss" in training_mode
+                    )
+                    if needs_target_network_input:
+                        target_mask, mask_params = self._get_mask(
+                            num_cells=num_cells,
+                            strategy=target_cfg.get("masking_strategy"),
+                            masking_strategy_config=masking_config,
+                            target_relationship_mask=("independent", None),
+                            channel_names=source_channel_names,
+                        )
+                    else:
+                        target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
-                    masking_config = target_cfg.get("masking_strategy_config", {})
                     # targets are never randomly dropped
                     target_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
@@ -438,13 +460,6 @@ class Masker:
                 # determine if diagnostic dataset or randomly dropped => mask is empty
                 if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
-                    # Propagate noise_level_rn from the corresponding target metadata so that
-                    # diffusion.py can access it via the source sample's meta_info during forward.
-                    target_noise_level = target_masks.metadata[target_idx].params.get(
-                        "noise_level_rn"
-                    )
-                    if target_noise_level is not None:
-                        mask_params = {"noise_level_rn": target_noise_level}
                 else:
                     source_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
@@ -453,6 +468,16 @@ class Masker:
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                         channel_names=source_channel_names,
                     )
+
+                # One noise level per source/target pair. diffusion.py reads it off the source
+                # metadata to noise the latents, the latent-diffusion loss reads it off the target
+                # metadata to weight the residual; they have to be the same draw. The target is
+                # authoritative, so any value drawn for the source above is discarded here. This
+                # also covers sources whose mask is forced empty (diagnostic streams, randomly
+                # dropped sources), which never draw a noise level of their own.
+                target_noise_level = target_masks.metadata[target_idx].params.get("noise_level_rn")
+                if target_noise_level is not None:
+                    mask_params["noise_level_rn"] = target_noise_level
 
                 corr = target_idx
                 source_masks.add_mask(
