@@ -462,7 +462,8 @@ class Trainer(TrainerBase):
                 ):
                     preds = self.model(
                         model_params=self.model_params,
-                        batch=batch.get_source_samples(),
+                        input=batch.get_source_samples(),
+                        forecast_steps=batch.get_output_idxs()
                     )
 
                     targets_and_auxs = {}
@@ -600,11 +601,13 @@ class Trainer(TrainerBase):
                             preds = self.model(
                                 self.model_params,
                                 batch.get_source_samples(),
+                                batch.get_output_idxs(),
                             )
                         else:
                             preds = self.ema_model.forward_eval(
                                 self.model_params,
                                 batch.get_source_samples(),
+                                batch.get_output_idxs(),
                             )
 
                         targets_and_auxs = {}

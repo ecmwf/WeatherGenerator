@@ -686,23 +686,28 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
-    def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
+    def forward(
+        self,
+        model_params: ModelParams,
+        input: BatchSamples | ModelOutput,
+        forecast_steps: list[int],
+    ) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
         Args:
             model_params : Query and embedding parameters
-            batch
+            input : the batch's source samples, or the previous chunk's output
+            forecast_steps : global forecast steps of the chunk to roll out
         Returns:
             A list containing all prediction results
         """
-        source_samples, tokens, posteriors = self._get_initial_conditions(batch, model_params)
+        source_samples, tokens, posteriors = self._get_initial_conditions(input, model_params)
 
         # output_idxs start with output_offset
         global_steps = source_samples.get_output_idxs()
         forecast_offset = global_steps[0]
         final_step = global_steps[-1]
-        forecast_steps = global_steps
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
