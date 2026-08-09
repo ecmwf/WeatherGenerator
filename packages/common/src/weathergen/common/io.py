@@ -663,11 +663,12 @@ class OutputBatchData:
         To be useable in extraction these have to be adjusted to bridge the differences
         compared to the semantics of the data.
             - `sample` is adjusted from a global continous index to a per batch index
-            - `forecast_step` is adjusted from including `forecast_offset` to indexing
-               the data (always starts at 0)
+            - `forecast_step` is adjusted from a global step to an index into this chunk's data
         """
         return ItemKey(
-            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
+            key.sample - self.sample_start,
+            key.forecast_step - self.forecast_steps[0],  # as in ModelOutput.chunk_idx()
+            key.stream,
         )
 
     def _extract_targets_predictions(self, stream_idx, offset_key, key, source_interval):
