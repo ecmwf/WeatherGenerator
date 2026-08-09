@@ -197,6 +197,7 @@ def write_output(
         latents=latents_all,
         sample_start=sample_start,
         forecast_offset=forecast_offset,
+        forecast_steps=list(range(len(preds_all) + forecast_offset)),
     )
 
     store_path = config.get_path_results(cf, mini_epoch)
