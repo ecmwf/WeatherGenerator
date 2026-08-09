@@ -7,6 +7,7 @@ Provides clean separation between:
 """
 
 import copy
+import typing
 from dataclasses import dataclass
 
 import numpy as np
@@ -176,6 +177,11 @@ class BatchSamples:
         self.output_steps = output_steps
         self.output_idxs = output_idxs
         self.device = None
+        self.latent = []
+
+    @property
+    def batch_samples(self) -> typing.Self:
+        return self
 
     def __len__(self) -> int:
         return len(self.samples)
