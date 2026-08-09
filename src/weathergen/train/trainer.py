@@ -191,6 +191,14 @@ class Trainer(TrainerBase):
 
         return target_and_aux_calculators
 
+    def _get_forecast_step_chunks(self, output_idxs: list[int], chunk_size: int) -> list[list[int]]:
+        """Split the forecast steps into contiguous chunks of at most chunk_size steps."""
+        assert chunk_size >= 1, f"forecast.chunk_size must be >= 1, got {chunk_size}."
+        return [
+            output_idxs[start : start + chunk_size]
+            for start in range(0, len(output_idxs), chunk_size)
+        ]
+
     def _process_validation_chunks(
         self,
         batch,
@@ -200,8 +208,12 @@ class Trainer(TrainerBase):
         bidx,
         targets_and_auxs,
     ) -> ModelOutput:
-        """Run the rollout and assemble the predictions for the whole batch."""
+        """Run the rollout in chunks and assemble the predictions for the whole batch."""
+        forecast_cfg = mode_cfg.get("forecast", {})
+
         output_idxs = batch.get_output_idxs()
+        chunk_size = forecast_cfg.get("chunk_size", len(output_idxs))
+        chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
         should_write_output = bidx < num_samples_write
@@ -217,33 +229,47 @@ class Trainer(TrainerBase):
                     "Configure validation losses or set output.num_samples=0."
                 )
 
-        if self.ema_model is None:
-            forecast_chunk = self.model(
-                self.model_params,
-                batch.get_source_samples(),
-                output_idxs,
-            )
-        else:
-            forecast_chunk = self.ema_model.forward_eval(
-                self.model_params,
-                batch.get_source_samples(),
-                output_idxs,
-            )
+        physical, latent = [], []
+        forecast_chunk = batch.get_source_samples()
+        for chunk in chunks:
+            if self.ema_model is None:
+                forecast_chunk = self.model(
+                    self.model_params,
+                    forecast_chunk,
+                    chunk,
+                )
+            else:
+                forecast_chunk = self.ema_model.forward_eval(
+                    self.model_params,
+                    forecast_chunk,
+                    chunk,
+                )
 
-        if should_write_output:
-            write_output(
-                self.cf,
-                mode_cfg,
-                batch_size,
-                mini_epoch,
-                bidx,
-                denormalize_data_fct,
-                batch,
-                forecast_chunk,
-                targets_and_auxs,
-            )
+            if should_write_output:
+                write_output(
+                    self.cf,
+                    mode_cfg,
+                    batch_size,
+                    mini_epoch,
+                    bidx,
+                    denormalize_data_fct,
+                    batch,
+                    forecast_chunk,
+                    targets_and_auxs,
+                )
 
-        return forecast_chunk
+            physical += forecast_chunk.physical
+            latent += forecast_chunk.latent
+
+        # Data for validation purposes => accumulates in memory!?
+        preds_full = ModelOutput(output_idxs, output_idxs[0], batch.get_source_samples())
+        assert len(physical) == len(preds_full.physical), (
+            f"Chunks cover {len(physical)} forecast steps, expected {len(preds_full.physical)}."
+        )
+        preds_full.physical = physical
+        preds_full.latent = latent
+
+        return preds_full
 
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
