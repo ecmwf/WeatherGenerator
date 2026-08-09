@@ -699,7 +699,7 @@ class Model(torch.nn.Module):
         source_samples, tokens, posteriors = self._get_initial_conditions(batch, model_params)
 
         # output_idxs start with output_offset
-        global_steps = batch.get_output_idxs()
+        global_steps = source_samples.get_output_idxs()
         forecast_offset = global_steps[0]
         final_step = global_steps[-1]
         forecast_steps = global_steps
@@ -722,9 +722,9 @@ class Model(torch.nn.Module):
 
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
+            output = self.predict_decoders(model_params, step, tokens, source_samples, output)
             # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output)
+            output = self.predict_latent(model_params, step, tokens, source_samples, output)
 
         return output
 
