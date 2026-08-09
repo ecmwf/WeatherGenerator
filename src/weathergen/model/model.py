@@ -22,7 +22,7 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.batch import BatchSamples, ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
@@ -52,12 +52,29 @@ class ModelOutput:
     Representation of model output
     """
 
-    physical: list[dict[StreamName, torch.Tensor]]
-    latent: list[dict[str, torch.Tensor | LatentState]]
+    def __init__(
+        self,
+        forecast_steps: list[int],
+        forecast_offset: int,
+        source_samples: BatchSamples,
+    ) -> None:
+        self.forecast_offset = forecast_offset
+        # the first chunk keeps its leading forecast_offset steps as empty slots, so that
+        # concatenating the chunks of a rollout stays indexed by global forecast step
+        base = 0 if forecast_steps[0] == forecast_offset else forecast_steps[0]
+        self.forecast_steps = list(range(base, forecast_steps[-1] + 1))
 
-    def __init__(self, len_output: int) -> None:
-        self.physical = [{} for _ in range(len_output)]
-        self.latent = [{} for _ in range(len_output)]
+        self.physical: list[dict[StreamName, torch.Tensor]] = [{} for _ in self.forecast_steps]
+        self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
+        self.batch_samples = source_samples
+
+    def chunk_idx(self, fstep: int) -> int:
+        """Index of forecast step fstep into chunk-local data, e.g. predictions."""
+        return fstep - self.forecast_steps[0]
+
+    def batch_idx(self, fstep: int) -> int:
+        """Index of forecast step fstep into batch-global data, e.g. target coordinates."""
+        return fstep
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
@@ -680,7 +697,9 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        output = ModelOutput(batch.get_output_len())
+        # output_idxs start with output_offset
+        forecast_offset = batch.get_output_idxs()[0]
+        output = ModelOutput(batch.get_output_idxs(), forecast_offset, batch)
 
         tokens, posteriors = self.encoder(model_params, batch)
         output.add_latent_prediction(0, "posteriors", posteriors)
