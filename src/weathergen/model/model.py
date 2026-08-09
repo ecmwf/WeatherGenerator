@@ -728,6 +728,21 @@ class Model(torch.nn.Module):
 
         return output
 
+    def _get_initial_conditions(self, input: BatchSamples | ModelOutput, model_params: ModelParams):
+        """Source samples and latent tokens to start a chunk of the rollout from."""
+        source_samples, latent = input.batch_samples, input.latent
+
+        if len(latent) == 0:
+            tokens, posteriors = self.encoder(model_params, source_samples)
+            # recover batch dimension and separate input_steps
+            shape = (len(source_samples), source_samples.get_num_steps(), *tokens.shape[1:])
+            # collapse along input step dimension
+            tokens = tokens.reshape(shape).sum(axis=1)
+        else:
+            tokens, posteriors = latent[-1]["latent_state"].z_pre_norm, None
+
+        return source_samples, tokens, posteriors
+
     def predict_latent(
         self,
         model_params: ModelParams,
