@@ -699,9 +699,12 @@ class Model(torch.nn.Module):
         source_samples, tokens, posteriors = self._get_initial_conditions(batch, model_params)
 
         # output_idxs start with output_offset
-        forecast_offset = batch.get_output_idxs()[0]
-        output = ModelOutput(batch.get_output_idxs(), forecast_offset, batch)
-        
+        global_steps = batch.get_output_idxs()
+        forecast_offset = global_steps[0]
+        final_step = global_steps[-1]
+        forecast_steps = global_steps
+
+        output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
         if posteriors is not None:
             output.add_latent_prediction(0, "posteriors", posteriors)
@@ -709,8 +712,8 @@ class Model(torch.nn.Module):
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
         # roll-out in latent space, iterate and generate output over requested output steps
-        for step in batch.get_output_idxs():
-            without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
+        for step in forecast_steps:
+            without_grad = p_fwd and self.training and step != final_step
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding
                 with torch.no_grad():
