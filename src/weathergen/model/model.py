@@ -696,18 +696,15 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
+        source_samples, tokens, posteriors = self._get_initial_conditions(batch, model_params)
 
         # output_idxs start with output_offset
         forecast_offset = batch.get_output_idxs()[0]
         output = ModelOutput(batch.get_output_idxs(), forecast_offset, batch)
-
-        tokens, posteriors = self.encoder(model_params, batch)
-        output.add_latent_prediction(0, "posteriors", posteriors)
-
-        # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_source_steps(), *tokens.shape[1:])
-        # collapse along input step dimension
-        tokens = tokens.reshape(shape).sum(axis=1)
+        
+        # posteriors come from encoding the source window, so they exist only on the first chunk
+        if posteriors is not None:
+            output.add_latent_prediction(0, "posteriors", posteriors)
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
