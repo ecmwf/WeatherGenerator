@@ -732,21 +732,25 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         step: int,
         tokens: torch.Tensor,
-        batch: ModelBatch,
+        batch: BatchSamples,
         output: ModelOutput,
     ) -> ModelOutput:
         """
         Compute latent predictions
+
+        step is the global forecast step, output converts it to the spaces it needs.
         """
+        chunk_idx = output.chunk_idx(step)
+        batch_idx = output.batch_idx(step)
 
         # safe latent prediction
-        tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
+        tokens_post_norm = self.latent_pre_norm(tokens) if batch_idx == 0 else None
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
-        output.add_latent_prediction(step, "latent_state", latent_state)
+        output.add_latent_prediction(chunk_idx, "latent_state", latent_state)
 
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
-            output.add_latent_prediction(step, name, head(latent_state))
+            output.add_latent_prediction(chunk_idx, name, head(latent_state))
 
         return output
 
@@ -755,7 +759,7 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         step: int,
         tokens: torch.Tensor,
-        batch: ModelBatch,
+        batch: BatchSamples,
         output: ModelOutput,
     ) -> ModelOutput:
         """
@@ -766,7 +770,7 @@ class Model(torch.nn.Module):
 
         Args:
             model_params : Query and embedding parameters
-            fstep : Number of forecast steps
+            step : Global forecast step, output converts it to the spaces it needs
             tokens : Tokens from global assimilation engine
             streams_data : Used to initialize target coordinates tokens and index information
                 List of StreamData len(streams_data) == batch_size_per_gpu
@@ -774,6 +778,9 @@ class Model(torch.nn.Module):
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
+        chunk_idx = output.chunk_idx(step)
+        batch_idx = output.batch_idx(step)
+
         # Empty dicts evaluate to False in python
         if not self.pred_heads:
             return output
@@ -796,7 +803,7 @@ class Model(torch.nn.Module):
         for stream_name in self.streams.keys():
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
-                batch.samples[i_b].streams_data[stream_name].target_coords[step]
+                batch.samples[i_b].streams_data[stream_name].target_coords[batch_idx]
                 for i_b in range(batch_size)
             ]
             t_coords_lens = [len(t) for t in t_coords]
@@ -827,7 +834,7 @@ class Model(torch.nn.Module):
                 # lens for varlen attention
                 tcls = torch.cat(
                     [
-                        sample.streams_data[stream_name].target_coords_lens[step]
+                        sample.streams_data[stream_name].target_coords_lens[batch_idx]
                         for sample in batch.samples
                     ]
                 )
@@ -853,6 +860,6 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-            output.add_physical_prediction(step, stream_name, pred)
+            output.add_physical_prediction(chunk_idx, stream_name, pred)
 
         return output
