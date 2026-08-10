@@ -604,7 +604,13 @@ class OutputBatchData:
         assert self.forecast_offset in (0, 1)
         if self.forecast_steps_override is not None:
             forecast_steps = np.array(self.forecast_steps_override)
-            if self.forecast_offset == 1:
+            if self.forecast_offset == 1 and len(forecast_steps) > 0:
+                # Only the first validation chunk should expose the synthetic source step 0.
+                # Later chunks carry absolute forecast steps only, otherwise source output is
+                # written repeatedly and collides in the zarr store.
+                if forecast_steps[0] == self.forecast_offset:
+                    return np.concatenate(([0], forecast_steps))
+            if self.forecast_offset == 1 and len(forecast_steps) == 0:
                 return np.concatenate(([0], forecast_steps))
             return forecast_steps
         return np.arange(len(self.targets) + self.forecast_offset)
