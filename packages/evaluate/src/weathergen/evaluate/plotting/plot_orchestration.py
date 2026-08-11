@@ -49,6 +49,7 @@ from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
 
@@ -112,6 +113,9 @@ def run_score_timeseries_pipeline(
         max_workers=reader.eval_cfg.get("max_workers", None),
     )
 
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
+
     # --- Parallel score computation across (region, fstep) pairs ---
     score_tasks: list[dict] = []
     for fstep in fsteps:
@@ -130,6 +134,12 @@ def run_score_timeseries_pipeline(
         )
         preds_with_hour = preds_fs.assign_coords(source_end_hour=source_end_hour)
         tars_with_hour = tars_fs.assign_coords(source_end_hour=source_end_hour)
+        # get_score groups every DataArray argument, so the climatology is grouped too.
+        clim_with_hour = (
+            aligned_clim_data[fstep].assign_coords(source_end_hour=source_end_hour)
+            if aligned_clim_data
+            else None
+        )
 
         for region in regions:
             # PSD is a spatial metric incompatible with sample+ipoint aggregation
@@ -140,14 +150,23 @@ def run_score_timeseries_pipeline(
 
             metric_names = list(region_metrics.keys())
             metric_params = list(region_metrics.values())
+            # Masked here: the worker only labels its results with `region`.
+            bbox = RegionBoundingBox.from_region_name(region)
+            preds_r = bbox.apply_mask(preds_with_hour)
+            tars_r = bbox.apply_mask(tars_with_hour)
+            if preds_r.sizes.get("ipoint") == 0:
+                continue
             score_tasks.append(
                 dict(
                     fstep=fstep,
                     region=region,
                     metric_names=metric_names,
                     metric_params=metric_params,
-                    preds_with_hour=preds_with_hour,
-                    tars_with_hour=tars_with_hour,
+                    preds_with_hour=preds_r,
+                    tars_with_hour=tars_r,
+                    clim_with_hour=(
+                        bbox.apply_mask(clim_with_hour) if clim_with_hour is not None else None
+                    ),
                     unique_hours=unique_hours,
                 )
             )
@@ -183,6 +202,7 @@ def _compute_timeseries_scores_for_fstep(
     metric_params: list,
     preds_with_hour: xr.DataArray,
     tars_with_hour: xr.DataArray,
+    clim_with_hour: xr.DataArray | None,
     unique_hours: list[int],
 ) -> tuple[int, str, dict[str, xr.DataArray]]:
     """Compute grouped scores for one (region, fstep) pair (parallelisable worker).
@@ -195,7 +215,7 @@ def _compute_timeseries_scores_for_fstep(
     metric_scores: dict[str, xr.DataArray] = {}
     for metric_name, parameters in zip(metric_names, metric_params, strict=False):
         score = get_score(
-            VerifiedData(preds_with_hour, tars_with_hour, None, None, None),
+            VerifiedData(preds_with_hour, tars_with_hour, None, None, clim_with_hour),
             metric_name,
             agg_dims=agg_dims,
             group_by_coord=group_by_coord,
