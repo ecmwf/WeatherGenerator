@@ -27,13 +27,19 @@ def _draw_all() -> tuple[float, float, float]:
     )
 
 
+def _make_cf(rng_seed=None) -> OmegaConf:
+    cf = OmegaConf.create({"data_loading": {} if rng_seed is None else {"rng_seed": rng_seed}})
+    OmegaConf.set_struct(cf, False)
+    return cf
+
+
 def test_init_seeds_is_reproducible():
     """Seeding with the same value yields identical draws from every global RNG."""
-    TrainerBase.init_seeds(42)
+    TrainerBase.init_seeds(_make_cf(42))
     first = _draw_all()
     weight_first = torch.nn.Linear(8, 8).weight.detach().clone()
 
-    TrainerBase.init_seeds(42)
+    TrainerBase.init_seeds(_make_cf(42))
     second = _draw_all()
     weight_second = torch.nn.Linear(8, 8).weight.detach().clone()
 
@@ -44,54 +50,43 @@ def test_init_seeds_is_reproducible():
 
 def test_init_seeds_differs_for_different_seeds():
     """Different seeds diversify the RNG streams (guards against a no-op seed)."""
-    TrainerBase.init_seeds(1)
+    TrainerBase.init_seeds(_make_cf(1))
     first = _draw_all()
-    TrainerBase.init_seeds(2)
+    TrainerBase.init_seeds(_make_cf(2))
     second = _draw_all()
 
     assert first != second
 
 
-def _make_cf(rng_seed) -> OmegaConf:
-    cf = OmegaConf.create({"data_loading": {"rng_seed": rng_seed}})
-    OmegaConf.set_struct(cf, False)
-    return cf
-
-
-def test_init_ddp_respects_config_seed():
+def test_init_seeds_respects_config_seed():
     """A seed supplied in the config is kept (not overwritten by the time fallback)."""
-    cf = _make_cf(777)
-    TrainerBase.init_ddp(cf)
+    cf = TrainerBase.init_seeds(_make_cf(777))
     assert cf.data_loading.rng_seed == 777
 
 
-def test_init_ddp_fills_missing_seed():
+def test_init_seeds_fills_missing_seed():
     """A missing seed is filled with a positive fallback so runs are seeded by default."""
-    cf = OmegaConf.create({"data_loading": {}})
-    OmegaConf.set_struct(cf, False)
-    TrainerBase.init_ddp(cf)
+    cf = TrainerBase.init_seeds(_make_cf())
     assert isinstance(cf.data_loading.rng_seed, int)
     assert cf.data_loading.rng_seed >= 1
 
 
-def test_init_ddp_clamps_nonpositive_seed():
+def test_init_seeds_clamps_nonpositive_seed():
     """Seed 0 / negative seeds are clamped to >= 1 (0 breaks per-rank seed derivation)."""
     for seed in (0, -5):
-        cf = _make_cf(seed)
-        TrainerBase.init_ddp(cf)
+        cf = TrainerBase.init_seeds(_make_cf(seed))
         assert cf.data_loading.rng_seed == 1
 
 
-def test_init_ddp_seeds_rngs_from_config():
-    """init_ddp wires the config seed all the way into the global RNGs."""
+def test_init_ddp_keeps_resolved_seed():
+    """init_ddp leaves the seed resolved by init_seeds alone (single-process case)."""
     if not torch.distributed.is_available():
         return
 
-    cf = _make_cf(2024)
-    TrainerBase.init_ddp(cf)
-    via_ddp = _draw_all()
+    cf = TrainerBase.init_seeds(_make_cf(2024))
+    cf = TrainerBase.init_ddp(cf)
 
-    TrainerBase.init_seeds(2024)
-    via_seeds = _draw_all()
-
-    assert via_ddp == via_seeds
+    assert cf.data_loading.rng_seed == 2024
+    assert cf.world_size == 1
+    assert cf.rank == 0
+    assert not cf.with_ddp
