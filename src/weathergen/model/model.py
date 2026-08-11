@@ -73,6 +73,7 @@ class ModelOutput:
         self.physical: list[dict[StreamName, torch.Tensor]] = [{} for _ in self.forecast_steps]
         self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
         self.batch_samples = source_samples
+        self.latent_deep = None
 
     def chunk_idx(self, fstep: int) -> int:
         """Index of forecast step fstep into chunk-local data, e.g. predictions."""
