@@ -66,9 +66,16 @@ num_register_tokens: 0
 
 healpix_level: 5
 
-# Split the model's HEALPix/location dimension across this many consecutive
-# distributed ranks.
-spatial_parallel_size: 4
+distributed:
+  data_parallel:
+    # Set at runtime from the launched world size.
+    with_ddp: False
+    with_fsdp: True
+    find_unused_parameters: True
+  spatial_parallel:
+    # Split the model's HEALPix/location dimension across this many consecutive
+    # distributed ranks.
+    size: 4
 
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
@@ -78,7 +85,6 @@ rope_2D: False
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: True
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -112,7 +118,6 @@ general:
   world_size: ???
 
   # local_rank, 
-  # with_ddp,
   # data_path_*, 
   # model_path, 
   # run_path, 

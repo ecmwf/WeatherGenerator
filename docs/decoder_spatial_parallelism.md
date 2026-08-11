@@ -9,7 +9,7 @@ This document describes the HEALPix cell-parallel decoder introduced by commits:
 
 The decoder feature extends the topology and contiguous cell ownership described in
 [`encoder_spatial_parallelism.md`](encoder_spatial_parallelism.md). It deliberately reuses
-`spatial_parallel_size`; there is no separate decoder-parallel configuration.
+`distributed.spatial_parallel.size`; there is no separate decoder-parallel configuration.
 
 ## Motivation
 
@@ -46,7 +46,9 @@ decoder_local_cell_end             = encoder.local_cell_end
 The relevant configuration remains:
 
 ```yaml
-spatial_parallel_size: 4
+distributed:
+  spatial_parallel:
+    size: 4
 ```
 
 For HEALPix level 5 and four spatial ranks:
@@ -401,7 +403,7 @@ forecasting or global assimilation will not scale with decoder spatial size.
 
 | File | Responsibility |
 | --- | --- |
-| `config/default_config.yml` | Shared `spatial_parallel_size` and decoder type |
+| `config/default_config.yml` | Shared `distributed.spatial_parallel` settings and decoder type |
 | `src/weathergen/model/model.py` | Local neighborhood/target selection, decoder execution, NaN synchronization, and prediction gather |
 | `src/weathergen/model/spatial_parallel.py` | Packed cell selection, neighborhood selection, lens splitting, and prediction reassembly |
 | `src/weathergen/model/encoder.py` | Spatial group and contiguous ownership reused by the decoder |
@@ -410,7 +412,7 @@ forecasting or global assimilation will not scale with decoder spatial size.
 
 ## Review checklist
 
-- [ ] The decoder reuses `spatial_parallel_size` and the shared spatial process group.
+- [ ] The decoder reuses `distributed.spatial_parallel.size` and the shared spatial process group.
 - [ ] Cell ownership is identical in the encoder and decoder.
 - [ ] Every local cell receives exactly nine neighborhood indices.
 - [ ] Target-coordinate selection respects variable per-cell lengths.

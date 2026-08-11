@@ -17,7 +17,7 @@ import torch.multiprocessing
 
 from weathergen.common.config import Config
 from weathergen.train.utils import str_to_tensor, tensor_to_str
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import is_root, normalize_distributed_config
 
 PORT = 1345
 
@@ -65,6 +65,7 @@ class TrainerBase:
     @staticmethod
     def init_ddp(cf):
         """Initializes the distributed environment."""
+        cf = normalize_distributed_config(cf)
         rank = 0
         local_rank = 0
 
@@ -139,6 +140,6 @@ class TrainerBase:
         cf.world_size = world_size
         cf.rank = rank
         cf.local_rank = local_rank
-        cf.with_ddp = world_size > 1
+        cf.distributed.data_parallel.with_ddp = world_size > 1
 
         return cf

@@ -102,7 +102,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         # Ranks in one spatial group must consume the same batch. Data
         # parallelism therefore operates across groups, not across individual ranks.
-        spatial_parallel_size = get_spatial_parallel_size(cf)
+        spatial_parallel_size = get_spatial_parallel_size(cf.distributed.spatial_parallel)
         self.spatial_parallel_size = spatial_parallel_size
         self.spatial_parallel_rank = cf.rank % spatial_parallel_size
         self.ddp_rank = cf.rank // spatial_parallel_size
@@ -115,7 +115,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if self.num_healpix_cells % spatial_parallel_size:
             raise ValueError(
                 f"number of HEALPix cells ({self.num_healpix_cells}) must be divisible by "
-                f"spatial_parallel_size ({spatial_parallel_size})"
+                f"distributed.spatial_parallel.size ({spatial_parallel_size})"
             )
         self.local_num_healpix_cells = self.num_healpix_cells // spatial_parallel_size
         self.local_cell_start = self.spatial_parallel_rank * self.local_num_healpix_cells

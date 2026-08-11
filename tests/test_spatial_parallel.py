@@ -144,11 +144,36 @@ def test_select_packed_cell_shard_rejects_invalid_ranges(num_cells, cell_start, 
 
 def test_spatial_parallel_size_requires_whole_rank_groups(monkeypatch):
     monkeypatch.setattr(distributed, "get_world_size", lambda: 16)
-    assert distributed.get_spatial_parallel_size({"spatial_parallel_size": 4}) == 4
-    assert distributed.get_spatial_parallel_size({"spatial_parallel_size": 8}) == 8
+    assert distributed.get_spatial_parallel_size({"size": 4}) == 4
+    assert distributed.get_spatial_parallel_size({"size": 8}) == 8
 
     with pytest.raises(ValueError, match="must be divisible"):
-        distributed.get_spatial_parallel_size({"spatial_parallel_size": 6})
+        distributed.get_spatial_parallel_size({"size": 6})
+
+
+def test_normalize_distributed_config_moves_legacy_settings():
+    config = {
+        "with_ddp": True,
+        "with_fsdp": True,
+        "data_parallel_world_size": 2,
+        "ddp_find_unused_parameters": False,
+        "spatial_parallel_size": 4,
+        "spatial_parallel_size_original": 8,
+    }
+
+    result = distributed.normalize_distributed_config(config)
+
+    assert result == {
+        "distributed": {
+            "data_parallel": {
+                "with_ddp": True,
+                "with_fsdp": True,
+                "find_unused_parameters": False,
+                "world_size": 2,
+            },
+            "spatial_parallel": {"size": 4, "size_original": 8},
+        }
+    }
 
 
 def test_decoder_selects_nine_neighbours_for_each_rank_local_cell():

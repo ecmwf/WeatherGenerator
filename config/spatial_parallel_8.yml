@@ -5,4 +5,6 @@
 
 # Eight consecutive ranks share one batch and each process one eighth of the
 # HEALPix/location dimension through local assimilation.
-spatial_parallel_size: 8
+distributed:
+  spatial_parallel:
+    size: 8

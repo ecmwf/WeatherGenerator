@@ -151,19 +151,20 @@ class Trainer(TrainerBase):
         # world_size gets overwritten by current setting during init_ddp()
         self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
         cf.world_size_original = self.world_size_original
-        spatial_parallel_size = get_spatial_parallel_size(cf)
-        cf.data_parallel_world_size = cf.world_size // spatial_parallel_size
-        spatial_parallel_size_original = cf.get(
-            "spatial_parallel_size_original", spatial_parallel_size
-        )
+        spatial_cfg = cf.distributed.spatial_parallel
+        data_parallel_cfg = cf.distributed.data_parallel
+        spatial_parallel_size = get_spatial_parallel_size(spatial_cfg)
+        data_parallel_cfg.world_size = cf.world_size // spatial_parallel_size
+        spatial_parallel_size_original = spatial_cfg.get("size_original", spatial_parallel_size)
         if self.world_size_original % spatial_parallel_size_original:
             raise ValueError(
-                "world_size_original must be divisible by spatial_parallel_size_original"
+                "world_size_original must be divisible by "
+                "distributed.spatial_parallel.size_original"
             )
         self.data_parallel_world_size_original = (
             self.world_size_original // spatial_parallel_size_original
         )
-        cf.spatial_parallel_size_original = spatial_parallel_size_original
+        spatial_cfg.size_original = spatial_parallel_size_original
 
         self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 
@@ -242,8 +243,7 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.test_cfg.training_mode,
             devices[0],
-            cf.with_ddp,
-            cf.with_fsdp,
+            cf.distributed.data_parallel,
         )
 
         # get target_aux calculators for different loss terms
@@ -293,8 +293,7 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.training_cfg.training_mode,
             devices[0],
-            cf.with_ddp,
-            cf.with_fsdp,
+            cf.distributed.data_parallel,
         )
 
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
@@ -312,15 +311,17 @@ class Trainer(TrainerBase):
                 mini_epoch_contd,
                 cf.training_config.training_mode,
                 devices[0],
-                cf.with_ddp,
-                cf.with_fsdp,
+                cf.distributed.data_parallel,
             )
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
                 halflife_steps=validate_with_ema_cfg.get("ema_halflife_in_thousands", 1e-3),
                 rampup_ratio=validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
-                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+                is_model_sharded=(
+                    cf.distributed.data_parallel.with_ddp
+                    and cf.distributed.data_parallel.with_fsdp
+                ),
             )
 
         # get target_aux calculators for different loss terms
@@ -330,7 +331,7 @@ class Trainer(TrainerBase):
         # if with_fsdp then parameter count is unreliable
         if is_root():
             # ddp-wrapped model does not expose this function
-            if not cf.with_ddp:
+            if not cf.distributed.data_parallel.with_ddp:
                 self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
@@ -362,7 +363,7 @@ class Trainer(TrainerBase):
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             self.batch_size_per_gpu,
-            cf.data_parallel_world_size,
+            cf.distributed.data_parallel.world_size,
             cf.general.istep,
             lr_steps,
             self.training_cfg.learning_rate_scheduling,
@@ -602,7 +603,8 @@ class Trainer(TrainerBase):
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
+                total=len(self.data_loader_validation),
+                disable=self.cf.distributed.data_parallel.with_ddp,
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     batch.to_device(self.device)
@@ -676,7 +678,10 @@ class Trainer(TrainerBase):
         maybe_sharded_sd = (
             self.model.state_dict() if self.ema_model is None else self.ema_model.state_dict()
         )
-        if self.cf.with_ddp and self.cf.with_fsdp:
+        if (
+            self.cf.distributed.data_parallel.with_ddp
+            and self.cf.distributed.data_parallel.with_fsdp
+        ):
             cpu_state_dict = {}
             for param_name, sharded_param in maybe_sharded_sd.items():
                 full_param = sharded_param.full_tensor()

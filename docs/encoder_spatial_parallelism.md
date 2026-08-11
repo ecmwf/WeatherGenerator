@@ -38,7 +38,7 @@ model or the complete training step.
 | Term | Meaning |
 | --- | --- |
 | `world_size` | Total number of distributed ranks |
-| `spatial_parallel_size` | Number of ranks cooperating on one encoder input |
+| `distributed.spatial_parallel.size` | Number of ranks cooperating on one encoder input |
 | spatial group | Consecutive ranks that consume the same sample and partition its HEALPix domain |
 | data-parallel rank | Index of a spatial group in the global job |
 | spatial rank | Rank index within a spatial group |
@@ -491,14 +491,14 @@ replicas.
 The effective data-parallel world size is:
 
 ```text
-data_parallel_world_size = world_size / spatial_parallel_size
+distributed.data_parallel.world_size = world_size / spatial_parallel_size
 ```
 
 The effective batch size is:
 
 ```text
 effective_batch_size =
-    batch_size_per_spatial_group × data_parallel_world_size
+    batch_size_per_spatial_group × distributed.data_parallel.world_size
 ```
 
 The trainer uses this effective data-parallel size for:
@@ -512,7 +512,7 @@ The sampler similarly maps global ranks in the same spatial group to one data-pa
 they receive the same workset and random seed. Loader-worker IDs and mini-epoch indices still
 differentiate independent workers and epochs.
 
-When present in a saved run, `spatial_parallel_size_original` records the historical
+When present in a saved run, `distributed.spatial_parallel.size_original` records the historical
 spatial size so effective-batch calculations remain consistent. If the key is absent, the
 implementation defaults it to the current spatial size; continuation from a pre-feature run
 therefore requires checking this value explicitly.
@@ -522,10 +522,17 @@ therefore requires checking this value explicitly.
 The relevant option is:
 
 ```yaml
-spatial_parallel_size: 4
+distributed:
+  data_parallel:
+    with_ddp: false
+    with_fsdp: true
+    find_unused_parameters: true
+  spatial_parallel:
+    size: 4
 ```
 
-`spatial_parallel_size` controls the number of ranks per spatial group.
+`distributed.spatial_parallel.size` controls the number of ranks per spatial group. The
+`distributed.data_parallel` subsection can be passed directly to model initialization.
 
 Ready-to-use overrides are provided:
 
@@ -537,14 +544,16 @@ config/spatial_parallel_8.yml
 For a four-rank job in which all ranks cooperate on one encoder sample:
 
 ```yaml
-spatial_parallel_size: 4
+distributed:
+  spatial_parallel:
+    size: 4
 ```
 
 The expected derived values are:
 
 ```text
 world_size: 4
-data_parallel_world_size: 1
+distributed.data_parallel.world_size: 1
 local level-5 cells/rank: 3072
 ```
 
@@ -552,8 +561,8 @@ For an eight-rank job with two four-rank spatial groups:
 
 ```text
 world_size: 8
-spatial_parallel_size: 4
-data_parallel_world_size: 2
+distributed.spatial_parallel.size: 4
+distributed.data_parallel.world_size: 2
 ```
 
 ### Continuing an existing run
@@ -562,7 +571,7 @@ A continued run can inherit a saved configuration that predates this feature. Pa
 configuration explicitly when the intended current run should use spatial parallelism.
 
 Verify the effective, merged configuration rather than relying only on the repository default.
-In a four-rank spatial-only run, `data_parallel_world_size` must be 1, not 4.
+In a four-rank spatial-only run, `distributed.data_parallel.world_size` must be 1, not 4.
 
 ## Runtime verification
 
@@ -683,8 +692,8 @@ batch. The encoder can still select a local shard after embedding, but embedding
 
 Verify:
 
-- `spatial_parallel_size: 4` is present in the effective run configuration;
-- `data_parallel_world_size: 1` for a four-rank spatial-only run;
+- `distributed.spatial_parallel.size: 4` is present in the effective run configuration;
+- `distributed.data_parallel.world_size: 1` for a four-rank spatial-only run;
 - all four ownership messages appear in the startup log;
 - each source stream has a rank-local token count.
 
@@ -759,7 +768,7 @@ Confirm that:
 
 This commit establishes the initial model-side and distributed design:
 
-- adds `spatial_parallel_size`;
+- adds `distributed.spatial_parallel.size`;
 - creates four-rank and eight-rank configuration overrides;
 - creates consecutive-rank spatial process groups;
 - makes spatial-group ranks consume the same data sample;
@@ -800,7 +809,7 @@ domain.
 Before merging or extending this feature, verify:
 
 - [ ] The effective spatial size is explicit in the run configuration.
-- [ ] `world_size % spatial_parallel_size == 0`.
+- [ ] `world_size % distributed.spatial_parallel.size == 0`.
 - [ ] The data-level HEALPix cell count is divisible by the spatial size.
 - [ ] Every spatial group consumes identical samples.
 - [ ] Every source stream constructs only local cells.

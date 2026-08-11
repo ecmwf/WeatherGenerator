@@ -49,14 +49,15 @@ class EncoderModule(torch.nn.Module):
 
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.spatial_parallel_size = get_spatial_parallel_size(cf)
+        spatial_cfg = cf.distributed.spatial_parallel
+        self.spatial_parallel_size = get_spatial_parallel_size(spatial_cfg)
         if self.num_healpix_cells % self.spatial_parallel_size:
             raise ValueError(
                 f"number of HEALPix cells ({self.num_healpix_cells}) must be divisible by "
-                f"spatial_parallel_size ({self.spatial_parallel_size})"
+                f"distributed.spatial_parallel.size ({self.spatial_parallel_size})"
             )
         self.spatial_parallel_group, self.spatial_parallel_rank = (
-            get_spatial_parallel_group(cf)
+            get_spatial_parallel_group(spatial_cfg)
         )
         self.local_num_healpix_cells = self.num_healpix_cells // self.spatial_parallel_size
         self.local_cell_start = self.spatial_parallel_rank * self.local_num_healpix_cells

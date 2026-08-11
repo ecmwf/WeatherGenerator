@@ -15,6 +15,48 @@ SYNC_TIMEOUT_SEC = 60 * 60  # 1 hour
 _SPATIAL_GROUPS: dict[int, tuple[dist.ProcessGroup, int]] = {}
 
 
+def normalize_distributed_config(cf):
+    """Move legacy top-level distributed settings into their shared sections."""
+
+    if cf.get("distributed") is None:
+        cf["distributed"] = {}
+    distributed_cfg = cf["distributed"]
+
+    if distributed_cfg.get("data_parallel") is None:
+        distributed_cfg["data_parallel"] = {}
+    data_parallel_cfg = distributed_cfg["data_parallel"]
+    if "with_ddp" not in data_parallel_cfg:
+        data_parallel_cfg["with_ddp"] = cf.get("with_ddp", False)
+    if "with_fsdp" not in data_parallel_cfg:
+        data_parallel_cfg["with_fsdp"] = cf.get("with_fsdp", False)
+    if "find_unused_parameters" not in data_parallel_cfg:
+        data_parallel_cfg["find_unused_parameters"] = cf.get(
+            "ddp_find_unused_parameters", True
+        )
+    if "world_size" not in data_parallel_cfg and cf.get("data_parallel_world_size") is not None:
+        data_parallel_cfg["world_size"] = cf["data_parallel_world_size"]
+
+    if distributed_cfg.get("spatial_parallel") is None:
+        distributed_cfg["spatial_parallel"] = {}
+    spatial_cfg = distributed_cfg["spatial_parallel"]
+    if "size" not in spatial_cfg:
+        spatial_cfg["size"] = cf.get("spatial_parallel_size", 1)
+    if "size_original" not in spatial_cfg and cf.get("spatial_parallel_size_original") is not None:
+        spatial_cfg["size_original"] = cf["spatial_parallel_size_original"]
+
+    for legacy_key in (
+        "with_ddp",
+        "with_fsdp",
+        "data_parallel_world_size",
+        "ddp_find_unused_parameters",
+        "spatial_parallel_size",
+        "spatial_parallel_size_original",
+    ):
+        cf.pop(legacy_key, None)
+
+    return cf
+
+
 def is_root(pg: dist.ProcessGroup | None = None) -> bool:
     """
     Check if the current rank is the root rank (rank 0).
@@ -60,33 +102,34 @@ def get_rank() -> int:
     return dist.get_rank()
 
 
-def get_spatial_parallel_size(cf) -> int:
+def get_spatial_parallel_size(spatial_cfg) -> int:
     """Return and validate the configured spatial-parallel size."""
 
-    size = int(cf.get("spatial_parallel_size", 1))
+    size = int(spatial_cfg.get("size", 1))
     if size < 1:
-        raise ValueError("spatial_parallel_size must be at least 1")
+        raise ValueError("distributed.spatial_parallel.size must be at least 1")
 
     world_size = get_world_size()
     if size > world_size:
         raise ValueError(
-            f"spatial_parallel_size ({size}) exceeds world_size ({world_size})"
+            f"distributed.spatial_parallel.size ({size}) exceeds world_size ({world_size})"
         )
     if world_size % size:
         raise ValueError(
-            f"world_size ({world_size}) must be divisible by spatial_parallel_size ({size})"
+            "world_size "
+            f"({world_size}) must be divisible by distributed.spatial_parallel.size ({size})"
         )
     return size
 
 
-def get_spatial_parallel_group(cf) -> tuple[dist.ProcessGroup | None, int]:
+def get_spatial_parallel_group(spatial_cfg) -> tuple[dist.ProcessGroup | None, int]:
     """Create the consecutive-rank process groups used to shard HEALPix cells.
 
     All ranks call ``new_group`` in the same order. The returned rank is local to
     the spatial group. A size of one deliberately avoids creating a process group.
     """
 
-    size = get_spatial_parallel_size(cf)
+    size = get_spatial_parallel_size(spatial_cfg)
     if size == 1:
         return None, 0
     if not _is_distributed_initialized():
