@@ -22,7 +22,7 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.batch import BatchSamples, ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
@@ -58,10 +58,29 @@ class ModelOutput:
     latent: list[dict[str, torch.Tensor | LatentState]]
     latent_deep: list[dict[str, list[torch.Tensor]]] | None
 
-    def __init__(self, len_output: int) -> None:
-        self.physical = [{} for _ in range(len_output)]
-        self.latent = [{} for _ in range(len_output)]
-        self.latent_deep = None
+    def __init__(
+        self,
+        forecast_steps: list[int],
+        forecast_offset: int,
+        source_samples: BatchSamples,
+    ) -> None:
+        self.forecast_offset = forecast_offset
+        # the first chunk keeps its leading forecast_offset steps as empty slots, so that
+        # concatenating the chunks of a rollout stays indexed by global forecast step
+        base = 0 if forecast_steps[0] == forecast_offset else forecast_steps[0]
+        self.forecast_steps = list(range(base, forecast_steps[-1] + 1))
+
+        self.physical: list[dict[StreamName, torch.Tensor]] = [{} for _ in self.forecast_steps]
+        self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
+        self.batch_samples = source_samples
+
+    def chunk_idx(self, fstep: int) -> int:
+        """Index of forecast step fstep into chunk-local data, e.g. predictions."""
+        return fstep - self.forecast_steps[0]
+
+    def batch_idx(self, fstep: int) -> int:
+        """Index of forecast step fstep into batch-global data, e.g. target coordinates."""
+        return fstep
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
@@ -771,32 +790,34 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
-    def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
+    def forward(
+        self,
+        model_params: ModelParams,
+        samples_or_output: BatchSamples | ModelOutput,
+        forecast_steps: list[int],
+    ) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
         Args:
             model_params : Query and embedding parameters
-            batch
+            input : the batch's source samples, or the previous chunk's output
+            forecast_steps : global forecast steps of the chunk to roll out
         Returns:
             A list containing all prediction results
         """
+        source_samples, tokens, posteriors, intermediates = self._get_initial_conditions(samples_or_output, model_params)
 
-        output = ModelOutput(batch.get_output_len())
+        # output_idxs start with output_offset
+        global_steps = source_samples.get_output_idxs()
+        forecast_offset = global_steps[0]
+        final_step = global_steps[-1]
 
-        tokens, posteriors, intermediates = self.encoder(model_params, batch)
-        output.add_latent_prediction(0, "posteriors", posteriors)
-
-        # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
-        # Reshape tokens to [B, T, ...]
-        tokens = tokens.reshape(shape)
 
         if (
             self.cf.get("fe_diffusion_model", False)
             and self.cf.get("fe_diffusion_model_conditioning", None) == "forecast"
         ):
-            tokens = tokens.reshape(shape)
             # tokens[:,0] = t (most recent), tokens[:,1] = t-1, ..., tokens[:,-1] = t-(T-1) (oldest)
             if self.cf.stage == "inference":
                 print("Using most recent steps as conditioning tokens for inference.")
@@ -824,16 +845,21 @@ class Model(torch.nn.Module):
         # reshape intermediates the same way as tokens
         for i, inter in enumerate(intermediates):
             intermediates[i] = inter.reshape(shape).sum(axis=1)
+        output = ModelOutput(forecast_steps, forecast_offset, source_samples)
+        # posteriors come from encoding the source window, so they exist only on the first chunk
+        if posteriors is not None:
+            output.add_latent_prediction(0, "posteriors", posteriors)
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
 
         # roll-out in latent space, iterate and generate output over requested output steps
-        for step in batch.get_output_idxs():
-            without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
+        for step in forecast_steps:
+            without_grad = p_fwd and self.training and step != final_step
             if without_grad:
-                # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
-                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                # Pushforward mode: advance tokens without grad; no decoding
+                with torch.no_grad():
+                    tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
             if self.forecast_engine:
@@ -921,12 +947,12 @@ class Model(torch.nn.Module):
 
             if "masking" in self.cf.training_config.training_mode:
                 # decoder predictions
-                output = self.predict_decoders(model_params, step, tokens, batch, output)
+                output = self.predict_decoders(model_params, step, tokens, source_samples, output)
 
             if "student_teacher" in self.cf.training_config.training_mode:
                 # latent predictions (raw and with SSL heads)
                 output = self.predict_latent(
-                    model_params, step, tokens, batch, output, intermediates
+                    model_params, step, tokens, source_samples, output, intermediates
                 )
 
         return output
@@ -943,25 +969,48 @@ class Model(torch.nn.Module):
                 new_output.add_latent_prediction(0, k, v)
         return new_output
 
+    def _get_initial_conditions(self, samples_or_output: BatchSamples | ModelOutput, model_params: ModelParams):
+        """Source samples and latent tokens to start a chunk of the rollout from."""
+        source_samples, latent = samples_or_output.batch_samples, samples_or_output.latent
+
+        if len(latent) == 0:
+            tokens, posteriors, intermediates = self.encoder(model_params, source_samples)
+            # recover batch dimension and separate input_steps
+            shape = (len(source_samples), source_samples.get_num_steps(), *tokens.shape[1:])
+            # collapse along input step dimension
+            tokens = tokens.reshape(shape).sum(axis=1)
+        else:
+            tokens, posteriors, intermediates = latent[-1]["latent_state"].z_pre_norm, None, None
+
+        return source_samples, tokens, posteriors, intermediates
+
     def predict_latent(
         self,
         model_params: ModelParams,
         step: int,
         tokens: torch.Tensor,
-        batch: ModelBatch,
+        batch: BatchSamples,
         output: ModelOutput,
         intermediates: list[torch.Tensor] | None = None,
         out_step: int | None = None,
     ) -> ModelOutput:
         """
         Compute latent predictions
+
+        step is the global forecast step, output converts it to the spaces it needs.
         """
+        chunk_idx = output.chunk_idx(step)
+        batch_idx = output.batch_idx(step)
 
         if out_step is None:
             out_step = step
 
         # safe latent prediction
-        tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
+        # latent predictions for SSL training
+        for name, head in self.latent_heads.items():
+            output.add_latent_prediction(chunk_idx, name, head(latent_state))
+
+        tokens_post_norm = self.latent_pre_norm(tokens) if batch_idx == 0 else None
         noise_pre_predictor_std = self.cf.get("noise_pre_predictor_std", 0)
         if noise_pre_predictor_std > 0 and self.training:
             tokens_post_norm = (
@@ -972,7 +1021,7 @@ class Model(torch.nn.Module):
             )
 
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
-        output.add_latent_prediction(out_step, "latent_state", latent_state)
+        output.add_latent_prediction(chunk_idx, "latent_state", latent_state)
 
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
@@ -1012,7 +1061,7 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         step: int,
         tokens: torch.Tensor,
-        batch: ModelBatch,
+        batch: BatchSamples,
         output: ModelOutput,
         out_step: int | None = None,
     ) -> ModelOutput:
@@ -1024,7 +1073,7 @@ class Model(torch.nn.Module):
 
         Args:
             model_params : Query and embedding parameters
-            fstep : Number of forecast steps
+            step : Global forecast step, output converts it to the spaces it needs
             tokens : Tokens from global assimilation engine
             streams_data : Used to initialize target coordinates tokens and index information
                 List of StreamData len(streams_data) == batch_size_per_gpu
@@ -1032,6 +1081,9 @@ class Model(torch.nn.Module):
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
+        chunk_idx = output.chunk_idx(step)
+        batch_idx = output.batch_idx(step)
+
         # Empty dicts evaluate to False in python
         # breakpoint()
         if not self.pred_heads:
@@ -1078,7 +1130,7 @@ class Model(torch.nn.Module):
             # Use modular indexing so that ensemble calls (batch_size > len(batch)) replicate
             # the single real sample's coordinates across all N members.
             t_coords = [
-                batch.samples[i_b % len(batch)].streams_data[stream_name].target_coords[step]
+                batch.samples[i_b].streams_data[stream_name].target_coords[batch_idx]
                 for i_b in range(batch_size)
             ]
             t_coords_lens = [len(t) for t in t_coords]
@@ -1110,10 +1162,8 @@ class Model(torch.nn.Module):
                 # lens for varlen attention
                 tcls = torch.cat(
                     [
-                        batch.samples[i_b % len(batch)]
-                        .streams_data[stream_name]
-                        .target_coords_lens[step]
-                        for i_b in range(batch_size)
+                        sample.streams_data[stream_name].target_coords_lens[batch_idx]
+                        for sample in batch.samples
                     ]
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
@@ -1138,7 +1188,6 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-
-            output.add_physical_prediction(out_step, stream_name, pred)
+            output.add_physical_prediction(chunk_idx, stream_name, pred)
 
         return output
