@@ -841,7 +841,7 @@ class Model(torch.nn.Module):
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
             tokens = tokens[:, 0]
         else:
-            tokens = tokens # .sum(axis=1)
+            tokens = tokens
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
