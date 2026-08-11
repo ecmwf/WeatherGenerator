@@ -88,7 +88,6 @@ class TrainerBase:
 
         return cf
 
-
     @staticmethod
     def init_ddp(cf):
         """Initializes the distributed environment."""
