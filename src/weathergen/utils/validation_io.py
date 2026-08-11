@@ -95,10 +95,6 @@ def write_output(
 
             n_channels = len(cf.streams[sname].val_target_channels)
 
-            # leading empty steps of the first chunk carry a source but no target/prediction
-            if t_idx < forecast_offset:
-                preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
-
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
 
@@ -108,7 +104,11 @@ def write_output(
             # empty per-stream slots to keep the per-stream array alignment used downstream.
             not_reconstructed = not is_stream_reconstructed(cf.streams[sname])
 
-            if not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+            # leading empty steps of the first chunk carry a source but no target/prediction
+            if t_idx < forecast_offset:
+                preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
+
+            elif not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 preds = model_output.get_physical_prediction(chunk_idx, sname)
                 n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
                 preds_s, targets_s, t_coords_s, t_times_s = _empty_step(
