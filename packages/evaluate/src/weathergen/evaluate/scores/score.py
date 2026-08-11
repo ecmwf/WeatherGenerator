@@ -1957,8 +1957,9 @@ class Scores:
 
         # Detect grid type once for the entire stream (avoid repeated detection per channel)
         grid_type = None
+        lons_per_lat = None
         if psd_method == "sht" and lats is not None and lons is not None:
-            grid_type = detect_grid_type(lats, lons, n_points)
+            grid_type, lons_per_lat = detect_grid_type(lats, lons, n_points)
 
         psd_kwargs = dict(
             lats=lats,
@@ -1970,6 +1971,7 @@ class Scores:
             psd_sht_truncation=psd_sht_truncation,
             lat_range=lat_range,
             grid_type=grid_type,
+            lons_per_lat=lons_per_lat,
         )
 
         # Dims to preserve (e.g. channel) vs batch dims (sample, ens)

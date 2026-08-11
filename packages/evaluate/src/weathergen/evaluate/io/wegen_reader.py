@@ -216,6 +216,12 @@ class WeatherGenReader(Reader):
         missing_metrics = {}
         for region in regions:
             for metric, parameters in metrics.items():
+                # PSD is an intrinsic spatial metric whose cached JSON does not
+                # participate in the sample/channel availability check, so a stale
+                # cache can silently slip through. Always recompute it.
+                if metric == "psd":
+                    missing_metrics.setdefault(region, {}).update({metric: parameters})
+                    continue
                 score = self.load_single_score(stream, region, metric, parameters)
                 if score is None:
                     # all other cases: recompute scores
