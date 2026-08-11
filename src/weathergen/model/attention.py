@@ -35,8 +35,14 @@ coordinates aligned with the token order (lat, lon in radians).
 """
 
 
-def _maybe_to_flash_dtype(tensor, attention_dtype):
-    return tensor.to(attention_dtype) if FLASH_ATTN_AVAILABLE else tensor
+def _require_flash_attention(with_flash):
+    if with_flash and not FLASH_ATTN_AVAILABLE:
+        raise RuntimeError("with_flash=True requires flash-attn, but it is not available")
+    return with_flash
+
+
+def _maybe_to_flash_dtype(tensor, attention_dtype, with_flash):
+    return tensor.to(attention_dtype) if with_flash else tensor
 
 
 def _match_attention_dtypes(qs, ks, vs):
@@ -79,31 +85,14 @@ def _normalise_varlen_lens(lens, total_tokens, name):
     return lens
 
 
-def _pad_packed_sequence(x, lens):
-    lens_list = [int(length) for length in lens.detach().cpu().tolist()]
-    if len(lens_list) == 0:
-        return x.new_empty((0, x.shape[1], 0, x.shape[2])), lens_list
-
-    max_len = max(lens_list)
-    if max_len == 0:
-        return x.new_empty((len(lens_list), x.shape[1], 0, x.shape[2])), lens_list
-
-    chunks = list(torch.split(x, lens_list, dim=0))
-    return torch.nn.utils.rnn.pad_sequence(chunks, batch_first=True).transpose(1, 2), lens_list
-
-
-def _unpad_packed_sequence(x, lens_list):
-    if len(lens_list) == 0:
-        return x.new_empty((0, x.shape[1], x.shape[-1]))
-
-    return torch.cat([x[i, :, :length].transpose(0, 1) for i, length in enumerate(lens_list)])
-
-
 def _dense_attention(qs, ks, vs, dropout_rate=0.0, softcap=0.0):
     qs, ks, vs = _match_attention_dtypes(qs, ks, vs)
-    score_mod = _softcap_score_mod(softcap)
-    if score_mod is not None:
-        return _attention_output(flex_attention(qs, ks, vs, score_mod=score_mod))
+    if softcap > 0.0:
+        scores = torch.matmul(qs, ks.transpose(-2, -1)) * (qs.shape[-1] ** -0.5)
+        scores = softcap * torch.tanh(scores / softcap)
+        weights = torch.softmax(scores, dim=-1)
+        weights = torch.nn.functional.dropout(weights, p=dropout_rate, training=True)
+        return torch.matmul(weights, vs)
 
     return torch.nn.functional.scaled_dot_product_attention(
         qs,
@@ -116,52 +105,30 @@ def _dense_attention(qs, ks, vs, dropout_rate=0.0, softcap=0.0):
 def _varlen_attention(qs, ks, vs, q_lens, kv_lens, dropout_rate=0.0, softcap=0.0):
     q_lens = _normalise_varlen_lens(q_lens, qs.shape[0], "q_lens")
     kv_lens = _normalise_varlen_lens(kv_lens, ks.shape[0], "kv_lens")
-
-    if qs.shape[0] == 0:
-        return qs.new_empty(qs.shape)
+    if q_lens.numel() != kv_lens.numel():
+        raise ValueError("q_lens and kv_lens must describe the same batch")
 
     qs, ks, vs = _match_attention_dtypes(qs, ks, vs)
-    qs, q_lens_list = _pad_packed_sequence(qs, q_lens)
-    ks, kv_lens_list = _pad_packed_sequence(ks, kv_lens)
-    vs, _ = _pad_packed_sequence(vs, kv_lens)
+    q_chunks = torch.split(qs, q_lens.detach().cpu().tolist())
+    k_chunks = torch.split(ks, kv_lens.detach().cpu().tolist())
+    v_chunks = torch.split(vs, kv_lens.detach().cpu().tolist())
 
-    max_q_len = qs.shape[-2]
-    max_kv_len = ks.shape[-2]
-    q_lens = q_lens.to(qs.device)
-    kv_lens = kv_lens.to(qs.device)
+    outputs = []
+    for q, k, v in zip(q_chunks, k_chunks, v_chunks, strict=True):
+        if q.shape[0] == 0:
+            outputs.append(q)
+            continue
 
-    score_mod = _softcap_score_mod(softcap)
-    if score_mod is not None:
-
-        def mask_mod(batch, head, q_idx, kv_idx):
-            return (q_idx < q_lens[batch]) & (kv_idx < kv_lens[batch])
-
-        block_mask = create_block_mask(
-            mask_mod,
-            B=qs.shape[0],
-            H=None,
-            Q_LEN=max_q_len,
-            KV_LEN=max_kv_len,
-            device=str(qs.device),
+        output = _dense_attention(
+            q.transpose(0, 1).unsqueeze(0),
+            k.transpose(0, 1).unsqueeze(0),
+            v.transpose(0, 1).unsqueeze(0),
+            dropout_rate=dropout_rate,
+            softcap=softcap,
         )
-        outs = _attention_output(
-            flex_attention(qs, ks, vs, score_mod=score_mod, block_mask=block_mask)
-        )
-    else:
-        q_idx = torch.arange(max_q_len, device=qs.device)
-        kv_idx = torch.arange(max_kv_len, device=qs.device)
-        attn_mask = (q_idx[None, :, None] < q_lens[:, None, None]) & (
-            kv_idx[None, None, :] < kv_lens[:, None, None]
-        )
-        outs = torch.nn.functional.scaled_dot_product_attention(
-            qs,
-            ks,
-            vs,
-            attn_mask=attn_mask[:, None, :, :],
-            dropout_p=dropout_rate,
-        )
+        outputs.append(output.squeeze(0).transpose(0, 1))
 
-    return _unpad_packed_sequence(outs, q_lens_list)
+    return torch.cat(outputs) if outputs else qs.new_empty(qs.shape)
 
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
@@ -186,7 +153,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         self.num_heads = num_heads
         self.dropout_rate = dropout_rate
-        self.with_flash = with_flash
+        self.with_flash = _require_flash_attention(with_flash)
         self.softcap = softcap
         self.with_residual = with_residual
         self.with_2d_rope = with_2d_rope
@@ -229,8 +196,12 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x.shape[0], self.num_heads, x.shape[-1] // self.num_heads]
-        qs = _maybe_to_flash_dtype(self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype)
-        ks = _maybe_to_flash_dtype(self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype)
+        qs = _maybe_to_flash_dtype(
+            self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype, self.with_flash
+        )
+        ks = _maybe_to_flash_dtype(
+            self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype, self.with_flash
+        )
         vs = self.proj_heads_v(x).reshape(s)
 
         if self.with_2d_rope:
@@ -241,7 +212,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
 
-        if FLASH_ATTN_AVAILABLE:
+        if self.with_flash:
             assert flash_attn_varlen_func is not None
             cum_x_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
             # ordering of tensors (seq, heads, embed) differs from torch's
@@ -295,7 +266,7 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         super(MultiSelfAttentionHeadVarlenFlex, self).__init__()
 
         self.num_heads = num_heads
-        self.with_flash = with_flash
+        self.with_flash = _require_flash_attention(with_flash)
         self.softcap = softcap
         self.with_residual = with_residual
 
@@ -352,10 +323,10 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         # ensure these are 4D tensors as required for flash attention
         s = [x.shape[0], 1, self.num_heads, -1]
         qs = _maybe_to_flash_dtype(
-            self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype
+            self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype, self.with_flash
         ).permute([1, 2, 0, 3])
         ks = _maybe_to_flash_dtype(
-            self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype
+            self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype, self.with_flash
         ).permute([1, 2, 0, 3])
         vs = self.proj_heads_v(x).reshape(s).permute([1, 2, 0, 3])
 
@@ -391,7 +362,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
         self.num_heads = num_heads
-        self.with_flash = with_flash
+        self.with_flash = _require_flash_attention(with_flash)
         self.softcap = softcap
         self.with_residual = with_residual
         self.with_2d_rope = with_2d_rope
@@ -441,10 +412,10 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         # project onto heads
         s = [x.shape[0], x.shape[1], self.num_heads, -1]
         qs = _maybe_to_flash_dtype(
-            self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype
+            self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype, self.with_flash
         ).permute([0, 2, 1, 3])
         ks = _maybe_to_flash_dtype(
-            self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype
+            self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype, self.with_flash
         ).permute([0, 2, 1, 3])
         vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
 
@@ -502,7 +473,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         self.num_heads = num_heads
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
-        self.with_flash = with_flash
+        self.with_flash = _require_flash_attention(with_flash)
         self.softcap = softcap
 
         if norm_type == "LayerNorm":
@@ -550,9 +521,13 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
-        qs = _maybe_to_flash_dtype(self.lnorm_q(self.proj_heads_q(x_q).reshape(s)), self.dtype)
+        qs = _maybe_to_flash_dtype(
+            self.lnorm_q(self.proj_heads_q(x_q).reshape(s)), self.dtype, self.with_flash
+        )
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
-        ks = _maybe_to_flash_dtype(self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype)
+        ks = _maybe_to_flash_dtype(
+            self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype, self.with_flash
+        )
         vs = self.proj_heads_v(x_kv).reshape(s)
 
         # set dropout rate according to training/eval mode as required by flash_attn
@@ -563,7 +538,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
                 "x_q_lens and x_kv_lens must be provided for variable-length attention"
             )
 
-        if FLASH_ATTN_AVAILABLE:
+        if self.with_flash:
             assert flash_attn_varlen_func is not None
             cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
             cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
@@ -621,7 +596,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         self.num_heads = num_heads
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
-        self.with_flash = with_flash
+        self.with_flash = _require_flash_attention(with_flash)
         self.softcap = softcap
 
         if norm_type == "LayerNorm":
@@ -676,11 +651,15 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         # ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
         qs = [
-            _maybe_to_flash_dtype(self.lnorm_q(head_proj(x_q_i).reshape(s)), self.dtype)
+            _maybe_to_flash_dtype(
+                self.lnorm_q(head_proj(x_q_i).reshape(s)), self.dtype, self.with_flash
+            )
             for head_proj, x_q_i in zip(self.proj_heads_q, x_q.transpose(1, 0), strict=False)
         ]
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
-        ks = _maybe_to_flash_dtype(self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype)
+        ks = _maybe_to_flash_dtype(
+            self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype, self.with_flash
+        )
         vs = self.proj_heads_v(x_kv).reshape(s)
 
         # set dropout rate according to training/eval mode as required by flash_attn
@@ -691,7 +670,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
                 "x_q_lens and x_kv_lens must be provided for variable-length attention"
             )
 
-        if FLASH_ATTN_AVAILABLE:
+        if self.with_flash:
             assert flash_attn_varlen_func is not None
             cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
             cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
@@ -752,7 +731,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         super(MultiSelfAttentionHead, self).__init__()
 
         self.num_heads = num_heads
-        self.with_flash = with_flash
+        self.with_flash = _require_flash_attention(with_flash)
         self.softcap = softcap
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
@@ -797,9 +776,13 @@ class MultiSelfAttentionHead(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
-        qs = _maybe_to_flash_dtype(self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype)
-        ks = _maybe_to_flash_dtype(self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype)
-        vs = _maybe_to_flash_dtype(self.proj_heads_v(x).reshape(s), self.dtype)
+        qs = _maybe_to_flash_dtype(
+            self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype, self.with_flash
+        )
+        ks = _maybe_to_flash_dtype(
+            self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype, self.with_flash
+        )
+        vs = _maybe_to_flash_dtype(self.proj_heads_v(x).reshape(s), self.dtype, self.with_flash)
 
         if self.with_2d_rope:
             if coords is None:
@@ -809,7 +792,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
 
-        if FLASH_ATTN_AVAILABLE:
+        if self.with_flash:
             assert flash_attn_func is not None
             # ordering of tensors (seq, heads, embed) differs from torch's
             # flash attention implementation.
@@ -850,7 +833,7 @@ class MultiCrossAttentionHead(torch.nn.Module):
 
         self.num_heads = num_heads
         self.with_residual = with_residual
-        self.with_flash = with_flash
+        self.with_flash = _require_flash_attention(with_flash)
 
         if norm_type == "LayerNorm":
             norm = partial(torch.nn.LayerNorm, elementwise_affine=False, eps=norm_eps)
@@ -898,13 +881,15 @@ class MultiCrossAttentionHead(torch.nn.Module):
         # ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], -1, self.num_heads, self.dim_head_proj]
         qs = _maybe_to_flash_dtype(
-            self.lnorm_q(self.proj_heads_q(x_q).reshape(s)), self.dtype
+            self.lnorm_q(self.proj_heads_q(x_q).reshape(s)), self.dtype, self.with_flash
         ).transpose(-3, -2)
         s = [x_kv.shape[0], -1, self.num_heads, self.dim_head_proj]
         ks = _maybe_to_flash_dtype(
-            self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype
+            self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype, self.with_flash
         ).transpose(-3, -2)
-        vs = _maybe_to_flash_dtype(self.proj_heads_v(x_kv).reshape(s), self.dtype).transpose(-3, -2)
+        vs = _maybe_to_flash_dtype(
+            self.proj_heads_v(x_kv).reshape(s), self.dtype, self.with_flash
+        ).transpose(-3, -2)
 
         # correct ordering of tensors with seq dimension second but last is critical
         outs = _dense_attention(qs, ks, vs).transpose(2, 1)
