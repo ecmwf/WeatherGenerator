@@ -71,6 +71,16 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
 _logger.debug(f"Taking cartopy paths from {work_dir}")
 
+# Score maps use a continuous blue->red colormap (no diverging white midpoint,
+# unlike "coolwarm") so mid-range score values stay visually distinguishable.
+# The endpoints are coolwarm's own muted blue/red, just interpolated directly
+# instead of through coolwarm's near-white middle.
+SCORE_MAP_CMAP = mpl.colors.LinearSegmentedColormap.from_list(
+    "score_maps_blue_red",
+    [(0.2298057, 0.298717966, 0.753683153), (0.705673158, 0.01555616, 0.150232812)],
+)
+
+
 @dataclass
 class DistStats:
     """Summary statistics for a 1-D distribution."""
@@ -694,9 +704,7 @@ class Plotter:
 
         # Score maps always use a continuous blue->red colormap (overrides config)
         if str(tag).startswith("score_maps"):
-            return mpl.colors.LinearSegmentedColormap.from_list(
-                "score_maps_blue_red", ["blue", "red"]
-            )
+            return SCORE_MAP_CMAP
         # Bias maps always use coolwarm for visual consistency (overrides config)
         if str(tag).startswith("bias"):
             return plt.get_cmap("coolwarm")
