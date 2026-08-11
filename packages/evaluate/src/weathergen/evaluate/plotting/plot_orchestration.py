@@ -469,31 +469,6 @@ def _scatter_plot_single(
 # ---------------------------------------------------------------------------
 
 
-def _pad_frames_for_mp4(
-    frames: list[np.typing.NDArray], macro_block_size: int = 16
-) -> list[np.typing.NDArray]:
-    """Pad frames to a common size aligned to ``macro_block_size``.
-
-    Frames come from ``savefig(bbox_inches="tight")``, so their pixel dimensions can
-    vary slightly from one fstep to the next. ffmpeg requires each dimension to be a
-    multiple of 16 and otherwise resizes every frame independently (noisy warnings,
-    and inconsistent target sizes if frames within one animation differ). Padding
-    once to a shared, aligned size up front avoids both.
-    """
-    target_h = -(-max(f.shape[0] for f in frames) // macro_block_size) * macro_block_size
-    target_w = -(-max(f.shape[1] for f in frames) // macro_block_size) * macro_block_size
-    padded = []
-    for f in frames:
-        pad_h = target_h - f.shape[0]
-        pad_w = target_w - f.shape[1]
-        if pad_h or pad_w:
-            top, left = pad_h // 2, pad_w // 2
-            pad_width = [(top, pad_h - top), (left, pad_w - left)]
-            if f.ndim == 3:
-                pad_width.append((0, 0))
-            f = np.pad(f, pad_width, mode="edge")
-        padded.append(f)
-    return padded
 
 
 def _build_single_animation(
@@ -573,7 +548,7 @@ def _build_single_animation(
         for img in images:
             img.close()
     elif animation_format.lower() == "mp4":
-        frames = _pad_frames_for_mp4([imageio.imread(p) for p in image_paths])
+        frames = [imageio.imread(p) for p in image_paths]
         fps = 1000 / duration_ms if duration_ms > 0 else 2
         imageio.mimsave(out_path, 
                         frames, fps=fps, 
