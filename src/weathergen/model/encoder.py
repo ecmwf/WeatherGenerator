@@ -125,6 +125,35 @@ class EncoderModule(torch.nn.Module):
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
+    def _prepare_local_cell_tokens(
+        self,
+        stream_cell_tokens: torch.Tensor,
+        tokens_lens: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return packed tokens and per-cell lengths for this rank's HEALPix domain."""
+
+        cell_lens = torch.sum(tokens_lens, 2).flatten()
+        batch_num_cells = tokens_lens.shape[-1]
+        if batch_num_cells == self.spatial_parallel.local_num_cells:
+            # The data pipeline already constructed rank-local cells.
+            return stream_cell_tokens, cell_lens
+
+        if batch_num_cells == self.num_healpix_cells:
+            # Backward-compatible path for batches containing the global grid.
+            return select_packed_cell_shard(
+                stream_cell_tokens,
+                cell_lens,
+                self.num_healpix_cells,
+                self.spatial_parallel.cell_start,
+                self.spatial_parallel.cell_end,
+            )
+
+        raise ValueError(
+            f"batch has {batch_num_cells} HEALPix cells; expected either "
+            f"{self.spatial_parallel.local_num_cells} local or "
+            f"{self.num_healpix_cells} global cells"
+        )
+
     def forward(self, model_params, batch):
         """
         Encoder forward
@@ -133,28 +162,10 @@ class EncoderModule(torch.nn.Module):
         stream_cell_tokens = checkpoint(
             self.embed_engine, batch, model_params.pe_embed, use_reentrant=False
         )
-        cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
-        batch_num_cells = batch.tokens_lens.shape[-1]
-        if batch_num_cells == self.spatial_parallel.local_num_cells:
-            # The data pipeline already constructed only this rank's HEALPix
-            # cells, so its packed tokens are local without another selection.
-            local_cell_lens = cell_lens
-        elif batch_num_cells == self.num_healpix_cells:
-            # Backward-compatible path for batches constructed with the full
-            # global grid.
-            stream_cell_tokens, local_cell_lens = select_packed_cell_shard(
-                stream_cell_tokens,
-                cell_lens,
-                self.num_healpix_cells,
-                self.spatial_parallel.cell_start,
-                self.spatial_parallel.cell_end,
-            )
-        else:
-            raise ValueError(
-                f"batch has {batch_num_cells} HEALPix cells; expected either "
-                f"{self.spatial_parallel.local_num_cells} local or "
-                f"{self.num_healpix_cells} global cells"
-            )
+        stream_cell_tokens, local_cell_lens = self._prepare_local_cell_tokens(
+            stream_cell_tokens,
+            batch.tokens_lens,
+        )
 
         tokens_global, posteriors = checkpoint(
             self.assimilate_local,
