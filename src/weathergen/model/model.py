@@ -842,7 +842,7 @@ class Model(torch.nn.Module):
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
             tokens = tokens[:, 0]
         else:
-            tokens = tokens
+            tokens = tokens.sum(axis=1)
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
@@ -929,7 +929,9 @@ class Model(torch.nn.Module):
                     # Apply residual correction; broadcasts cond (1, H, D) over all N members.
                     member_final_tokens = cond + tokens if predict_residual else tokens
                     # Decode all members (or the single rollout state) in one forward pass.
-                    tmp_output = ModelOutput(1)
+                    # Use a single-slot ModelOutput for this temporary container.
+                    # forecast_offset != step ensures base=step so chunk_idx(step)==0.
+                    tmp_output = ModelOutput([step], step + 1, source_samples)
                     tmp_output = self.predict_decoders(
                         model_params,
                         step,
@@ -989,7 +991,7 @@ class Model(torch.nn.Module):
             # recover batch dimension and separate input_steps
             shape = (len(source_samples), source_samples.get_num_steps(), *tokens.shape[1:])
             # collapse along input step dimension
-            tokens = tokens.reshape(shape).sum(axis=1)
+            tokens = tokens.reshape(shape)
             # reshape intermediates the same way as tokens
             for i, inter in enumerate(intermediates):
                 intermediates[i] = inter.reshape(shape).sum(axis=1)
@@ -1030,10 +1032,7 @@ class Model(torch.nn.Module):
             )
 
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
-        # safe latent prediction
-        # latent predictions for SSL training
-        for name, head in self.latent_heads.items():
-            output.add_latent_prediction(chunk_idx, name, head(latent_state))
+        output.add_latent_prediction(out_step, "latent_state", latent_state)
 
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
@@ -1097,7 +1096,6 @@ class Model(torch.nn.Module):
         fstep_idx = output.fstep_idx(step)
 
         # Empty dicts evaluate to False in python
-        # breakpoint()
         if not self.pred_heads:
             return output
 
@@ -1148,7 +1146,6 @@ class Model(torch.nn.Module):
             t_coords_lens = [len(t) for t in t_coords]
             t_coords = torch.cat(t_coords)
 
-            # breakpoint()
             if len(t_coords) == 0:
                 continue
 
