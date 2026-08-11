@@ -1002,7 +1002,7 @@ class Plotter:
         # canvas so fine structure is visible; sparse grids use the default.
         figsize = self.fig_size
         if figsize is None and data.size >= 200_000:
-            figsize = (16,8)
+            figsize = (16, 8)
 
         proj = ccrs.PlateCarree()
         if regionname:

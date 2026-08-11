@@ -469,8 +469,6 @@ def _scatter_plot_single(
 # ---------------------------------------------------------------------------
 
 
-
-
 def _build_single_animation(
     output_dir: Path,
     run_id: str,
@@ -550,12 +548,16 @@ def _build_single_animation(
     elif animation_format.lower() == "mp4":
         frames = [imageio.imread(p) for p in image_paths]
         fps = 1000 / duration_ms if duration_ms > 0 else 2
-        imageio.mimsave(out_path, 
-                        frames, fps=fps, 
-                        macro_block_size=8, 
-                        ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],  
-                        ffmpeg_log_level="error",
-                       ), 
+        (
+            imageio.mimsave(
+                out_path,
+                frames,
+                fps=fps,
+                macro_block_size=8,
+                ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],
+                ffmpeg_log_level="error",
+            ),
+        )
     else:
         raise ValueError(
             f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'."
