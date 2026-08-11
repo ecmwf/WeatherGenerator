@@ -37,29 +37,34 @@ def test_varlen_attention_matches_independent_sequence_attention():
     torch.testing.assert_close(actual, torch.cat(expected))
 
 
-def test_softcap_attention_applies_dropout():
+def test_varlen_softcap_attention_applies_dropout():
     torch.manual_seed(1)
-    qs = torch.randn(1, 2, 3, 4)
-    ks = torch.randn(1, 2, 5, 4)
-    vs = torch.randn(1, 2, 5, 4)
+    qs = torch.randn(3, 2, 4)
+    ks = torch.randn(5, 2, 4)
+    vs = torch.randn(5, 2, 4)
     softcap = 2.0
     dropout_rate = 0.25
 
     torch.manual_seed(2)
-    actual = attention._dense_attention(
+    actual = attention._varlen_attention(
         qs,
         ks,
         vs,
+        torch.tensor([0, 3]),
+        torch.tensor([0, 5]),
         dropout_rate=dropout_rate,
         softcap=softcap,
     )
 
-    scores = torch.matmul(qs, ks.transpose(-2, -1)) * (qs.shape[-1] ** -0.5)
+    q = qs.transpose(0, 1).unsqueeze(0)
+    k = ks.transpose(0, 1).unsqueeze(0)
+    v = vs.transpose(0, 1).unsqueeze(0)
+    scores = torch.matmul(q, k.transpose(-2, -1)) * (q.shape[-1] ** -0.5)
     scores = softcap * torch.tanh(scores / softcap)
     weights = torch.softmax(scores, dim=-1)
     torch.manual_seed(2)
     weights = torch.nn.functional.dropout(weights, p=dropout_rate, training=True)
-    expected = torch.matmul(weights, vs)
+    expected = torch.matmul(weights, v).squeeze(0).transpose(0, 1)
 
     torch.testing.assert_close(actual, expected)
 
