@@ -28,10 +28,10 @@ import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
+from weathergen.model.model import ModelOutput
 from weathergen.model.model_interface import (
     init_model_and_shard,
 )
-from weathergen.model.model import ModelOutput
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
@@ -294,7 +294,8 @@ class Trainer(TrainerBase):
             )
             if not targets_and_auxs:
                 raise ValueError(
-                    "Writing validation output requires targets. Configure validation losses or set output.num_samples=0."
+                    "Writing validation output requires targets. "
+                    "Configure validation losses or set output.num_samples=0."
                 )
 
         output_idxs = batch.get_output_idxs()
@@ -770,7 +771,6 @@ class Trainer(TrainerBase):
             # Always include a pass without fixed noise level (random sampling)
             noise_levels = [None] + noise_levels
 
-<<<<<<< HEAD
         # Accumulate losses across noise levels with suffixed keys so they are
         # logged as a single "val" entry (e.g. LossLatentDiff.LossLatentDiff.mse.eta0.03)
         all_losses: dict[str, list] = {}
@@ -789,29 +789,10 @@ class Trainer(TrainerBase):
                 eta_str = f"{'-' if _sign else ''}{''.join(map(str, _digits))}e{_exp}"
                 loss_suffix = f".eta{eta_str}" if len(noise_levels) > 1 else ""
                 stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
-=======
-        with torch.no_grad():
-            # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
-            ) as pbar:
-                for bidx, batch in enumerate(dataset_val_iter):
-                    batch.to_device(self.device)
-
-                    # evaluate model
-                    with torch.autocast(
-                        device_type=f"cuda:{cf.local_rank}",
-                        dtype=self.mixed_precision_dtype,
-                        enabled=cf.with_mixed_precision,
-                    ):
-                        total_steps = batch.get_output_len()
-                        preds = ModelOutput(total_steps, batch=batch.get_source_samples())
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
 
             dataset_val_iter = iter(self.data_loader_validation)
             num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
-<<<<<<< HEAD
             with torch.no_grad():
                 # print progress bar but only in interactive mode, i.e. when without ddp
                 with tqdm.tqdm(
@@ -827,17 +808,6 @@ class Trainer(TrainerBase):
                             dtype=self.mixed_precision_dtype,
                             enabled=cf.with_mixed_precision,
                         ):
-                            if self.ema_model is None:
-                                preds = self.model(
-                                    self.model_params,
-                                    batch.get_source_samples(),
-                                )
-                            else:
-                                preds = self.ema_model.forward_eval(
-                                    self.model_params,
-                                    batch.get_source_samples(),
-                                )
-
                             targets_and_auxs = {}
                             for (
                                 loss_name,
@@ -851,13 +821,38 @@ class Trainer(TrainerBase):
                                     self.model,
                                 )
 
-                            # Diffusion inference inflates the model output's fstep
-                            # dimension to one entry per ODE step (the denoising
-                            # trajectory). The physical target is identical for every
-                            # such step, so replicate target/aux entries to keep the
-                            # downstream loss calculator and validation IO aligned.
                             if is_diffusion:
+                                if self.ema_model is None:
+                                    preds = self.model(
+                                        self.model_params,
+                                        batch.get_source_samples(),
+                                    )
+                                else:
+                                    preds = self.ema_model.forward_eval(
+                                        self.model_params,
+                                        batch.get_source_samples(),
+                                    )
+
+                                # Diffusion inference inflates the model output's fstep
+                                # dimension to one entry per ODE step (the denoising
+                                # trajectory). The physical target is identical for every
+                                # such step, so replicate target/aux entries to keep the
+                                # downstream loss calculator and validation IO aligned.
                                 _expand_targets_to_match_preds(preds, targets_and_auxs)
+
+                            else:
+                                preds = ModelOutput(
+                                    batch.get_output_len(), batch=batch.get_source_samples()
+                                )
+                                self._process_validation_chunks(
+                                    batch,
+                                    mode_cfg,
+                                    batch_size,
+                                    mini_epoch,
+                                    bidx,
+                                    targets_and_auxs,
+                                    preds,
+                                )
 
                         _ = self.loss_calculator_val.compute_loss(
                             preds=preds,
@@ -865,46 +860,26 @@ class Trainer(TrainerBase):
                             metadata=extract_batch_metadata(batch),
                         )
 
-                        # log output
-                        if noise_idx == 0:
-                            if bidx < num_samples_write:
-                                # denormalization function for data
-                                denormalize_data_fct = (
-                                    (lambda x0, x1: x1)
-                                    if mode_cfg.get("output", {}).get("normalized_samples", False)
-                                    else self.dataset_val.denormalize_target_channels
-                                )
-                                # write output (zarr only for first noise level, plots for all)
-                                write_output(
-                                    self.cf,
-                                    mode_cfg,
-                                    batch_size,
-                                    mini_epoch,
-                                    bidx,
-                                    denormalize_data_fct,
-                                    batch,
-                                    preds,
-                                    targets_and_auxs,
-                                )
-=======
-                        self._process_validation_chunks(
-                            batch,
-                            mode_cfg,
-                            batch_size,
-                            mini_epoch,
-                            bidx,
-                            targets_and_auxs,
-                            preds,
-                        )
-
-                    _ = self.loss_calculator_val.compute_loss(
-                        preds=preds,
-                        targets_and_aux=targets_and_auxs,
-                        metadata=extract_batch_metadata(batch),
-                    )
-
-                    pbar.update(batch_size)
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
+                        # The diffusion path retains the existing output behavior: only
+                        # its first noise-level pass writes output. Non-diffusion output
+                        # is written incrementally by _process_validation_chunks().
+                        if is_diffusion and noise_idx == 0 and bidx < num_samples_write:
+                            denormalize_data_fct = (
+                                (lambda x0, x1: x1)
+                                if mode_cfg.get("output", {}).get("normalized_samples", False)
+                                else self.dataset_val.denormalize_target_channels
+                            )
+                            write_output(
+                                self.cf,
+                                mode_cfg,
+                                batch_size,
+                                mini_epoch,
+                                bidx,
+                                denormalize_data_fct,
+                                batch,
+                                preds,
+                                targets_and_auxs,
+                            )
 
                         pbar.update(batch_size * self.cf.world_size)
 
