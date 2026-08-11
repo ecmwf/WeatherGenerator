@@ -154,6 +154,27 @@ class EncoderModule(torch.nn.Module):
             f"{self.num_healpix_cells} global cells"
         )
 
+    def _get_global_tokens_lens(self, tokens_lens: torch.Tensor) -> torch.Tensor:
+        """Return token lengths for the full HEALPix grid."""
+
+        batch_num_cells = tokens_lens.shape[-1]
+        if batch_num_cells == self.spatial_parallel.local_num_cells:
+            if self.spatial_parallel.size > 1:
+                return torch.cat(
+                    all_gather(tokens_lens, group=self.spatial_parallel.group),
+                    dim=-1,
+                )
+            return tokens_lens
+
+        if batch_num_cells == self.num_healpix_cells:
+            return tokens_lens
+
+        raise ValueError(
+            f"batch has {batch_num_cells} HEALPix cells; expected either "
+            f"{self.spatial_parallel.local_num_cells} local or "
+            f"{self.num_healpix_cells} global cells"
+        )
+
     def forward(self, model_params, batch):
         """
         Encoder forward
@@ -362,29 +383,13 @@ class EncoderModule(torch.nn.Module):
         Args:
             model_params : Query and embedding parameters
             tokens : Input tokens to be processed by local assimilation
-            cell_lens : Used to identify range of tokens to use from generated tokens in cell
-                embedding
+            cell_lens_local : Per-cell token lengths for this rank's HEALPix domain
         Returns:
             Tokens for global assimilation
         """
 
-        tokens_lens_global = batch.tokens_lens
-        batch_num_cells = tokens_lens_global.shape[-1]
-        if batch_num_cells == self.spatial_parallel.local_num_cells:
-            if self.spatial_parallel.size > 1:
-                tokens_lens_global = torch.cat(
-                    all_gather(
-                        tokens_lens_global,
-                        group=self.spatial_parallel.group,
-                    ),
-                    dim=-1,
-                )
-        elif batch_num_cells != self.num_healpix_cells:
-            raise ValueError(
-                f"batch has {batch_num_cells} HEALPix cells; expected either "
-                f"{self.spatial_parallel.local_num_cells} local or "
-                f"{self.num_healpix_cells} global cells"
-            )
+        batch_num_cells = batch.tokens_lens.shape[-1]
+        tokens_lens_global = self._get_global_tokens_lens(batch.tokens_lens)
         cell_lens = torch.sum(tokens_lens_global, 2).flatten()
 
         num_steps_input = batch.get_num_source_steps()
