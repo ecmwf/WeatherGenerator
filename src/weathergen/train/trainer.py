@@ -622,7 +622,7 @@ class Trainer(TrainerBase):
                 preds = self.model(
                     model_params=self.model_params,
                     input=batch.get_source_samples(),
-                    forecast_steps=batch.get_output_idxs()
+                    forecast_steps=batch.get_output_idxs(),
                 )
 
                 targets_and_auxs = {}
@@ -807,7 +807,6 @@ class Trainer(TrainerBase):
                             dtype=self.mixed_precision_dtype,
                             enabled=cf.with_mixed_precision,
                         ):
-
                             targets_and_auxs = {}
                             for (
                                 loss_name,

@@ -9,17 +9,15 @@
 
 import logging
 
-import astropy_healpix as hp
 import numpy as np
-import numpy.typing as npt
 import torch
 
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
-from weathergen.utils.utils import is_stream_reconstructed
 from weathergen.model.engines import LatentState
+from weathergen.utils.utils import is_stream_reconstructed
 
 _logger = logging.getLogger(__name__)
 
@@ -237,3 +235,43 @@ def write_output(
     with zarrio_writer(store_path) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
+
+
+def get_latent_output(batch, model_output):
+    """
+    Interface for getting latent states
+    """
+
+    # collect latent outputs per forecast step and per sample
+    fp32 = torch.float32
+
+    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+
+    sample_idxs = [
+        list(sample.streams_data.values())[0].sample_idx
+        for sample in batch.get_source_samples().get_samples()
+    ]
+
+    latents_all: list[list[dict]] = []
+    for t_idx in timestep_idxs:
+        latents_all.append([])
+        latent_pred = model_output.get_latent_prediction(t_idx)
+        n_samples = len(sample_idxs)
+        for i_sample in range(n_samples):
+            per_sample: dict = {}
+            for lname, lval in latent_pred.items():
+                if isinstance(lval, LatentState):
+                    fields = {
+                        "tokens": lval.z_pre_norm,
+                        "register_tokens": lval.register_tokens,
+                        "class_token": lval.class_token,
+                    }
+                    for field_name, tensor in fields.items():
+                        if tensor is not None:
+                            sample_tensor = tensor[i_sample]
+                            per_sample[field_name] = sample_tensor.detach().to(fp32).cpu().numpy()
+                else:
+                    per_sample[lname] = lval[i_sample].detach().to(fp32).cpu().numpy()
+            latents_all[-1].append(per_sample)
+
+    return latents_all

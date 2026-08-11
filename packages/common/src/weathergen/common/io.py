@@ -589,7 +589,6 @@ class OutputBatchData:
     source_channels: list[list[str]]
     geoinfo_channels: list[list[str]]
 
-
     # latent outputs: outer list over forecast steps, inner list over samples.
     # each entry is a dict mapping latent_name -> ndarray
     latents: list[list[dict]]
