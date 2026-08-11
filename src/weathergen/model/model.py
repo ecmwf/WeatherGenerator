@@ -900,18 +900,32 @@ class Model(torch.nn.Module):
                     predict_residual = self.cf.get("fe_diffusion_predict_residual", False)
                     # Apply residual correction; broadcasts cond (1, H, D) over all N members.
                     member_final_tokens = cond + tokens if predict_residual else tokens
-                    # Decode all members (or the single rollout state) in one forward pass.
-                    tmp_output = ModelOutput(1)
-                    tmp_output = self.predict_decoders(
-                        model_params, step, member_final_tokens, batch, tmp_output, out_step=0
-                    )
-                    # pred_tuple has N entries (one per member / "batch" item).
+                    # Decode the members in groups of decode_members_per_pass. The decoder runs
+                    # over (members * n_target_points) query tokens, so decoding all members at
+                    # once makes its peak activation scale with the ensemble size — the dominant
+                    # allocation for large target sets (a full O(1e6)-point stream). Grouping
+                    # keeps that peak bounded while the results are concatenated to the same
+                    # (N, n_points, channels) layout as a single pass.
+                    n_members = member_final_tokens.shape[0]
+                    group = self.cf.get("decode_members_per_pass", 0) or n_members
+                    member_preds: dict[str, list[torch.Tensor]] = {}
+                    for m_start in range(0, n_members, group):
+                        tmp_output = ModelOutput(1)
+                        tmp_output = self.predict_decoders(
+                            model_params,
+                            step,
+                            member_final_tokens[m_start : m_start + group],
+                            batch,
+                            tmp_output,
+                            out_step=0,
+                        )
+                        # pred_tuple has one entry per member in this group.
+                        for sname, pred_tuple in tmp_output.physical[0].items():
+                            member_preds.setdefault(sname, []).extend(pred_tuple)
                     # Concatenate along dim 0: (N, n_points, channels),
                     # wrap in 1-tuple (batch_size=1).
-                    for sname, pred_tuple in tmp_output.physical[0].items():
-                        output.add_physical_prediction(
-                            step, sname, (torch.cat(list(pred_tuple), dim=0),)
-                        )
+                    for sname, preds_list in member_preds.items():
+                        output.add_physical_prediction(step, sname, (torch.cat(preds_list, dim=0),))
                     # Store per-member conditioning for the next rollout step.
                     # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
                     # calls expand(N, ...) which is a no-op when the dim already matches.
