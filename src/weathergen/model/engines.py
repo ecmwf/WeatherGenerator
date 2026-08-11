@@ -94,14 +94,10 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
-<<<<<<< HEAD
         for stream_name in self.streams.keys():
             if type(self.embeds[stream_name]) is torch.nn.Identity:
                 continue
 
-=======
-        for stream_name in self.streams:
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
