@@ -277,8 +277,9 @@ class Trainer(TrainerBase):
         bidx,
         targets_and_auxs,
         is_diffusion: bool = False,
+        output_only: bool = False,
     ) -> ModelOutput:
-        """Run the rollout in chunks and assemble the predictions for the whole batch."""
+        """Run the rollout in chunks and optionally write outputs without retaining predictions."""
         forecast_cfg = mode_cfg.get("forecast", {})
 
         output_idxs = batch.get_output_idxs()
@@ -307,17 +308,51 @@ class Trainer(TrainerBase):
         physical, latent = [], []
         forecast_chunk = batch.get_source_samples()
         for chunk in chunks:
-            if self.ema_model is None:
-                forecast_chunk = self.model(
-                    self.model_params,
-                    forecast_chunk,
-                    chunk,
-                )
-            else:
-                forecast_chunk = self.ema_model.forward_eval(
-                    self.model_params,
-                    forecast_chunk,
-                    chunk,
+            if output_only:
+                batch.to_device_for_output_chunk(self.device, chunk)
+
+                # The normal physical-only forward path does not retain a latent
+                # prediction. Capture the final deterministic forecast state so the
+                # following chunk can resume from it without retaining predictions.
+                base_model = getattr(self.model, "module", self.model)
+                final_tokens = []
+
+                def _capture_final_tokens(_module, _inputs, output, tokens=final_tokens):
+                    if not isinstance(output, torch.Tensor):
+                        raise TypeError(
+                            "output.output_only requires a deterministic forecast engine."
+                        )
+                    if tokens:
+                        tokens[0] = output
+                    else:
+                        tokens.append(output)
+
+                hook = base_model.forecast_engine.register_forward_hook(_capture_final_tokens)
+
+            try:
+                if self.ema_model is None:
+                    forecast_chunk = self.model(
+                        self.model_params,
+                        forecast_chunk,
+                        chunk,
+                    )
+                else:
+                    forecast_chunk = self.ema_model.forward_eval(
+                        self.model_params,
+                        forecast_chunk,
+                        chunk,
+                    )
+            finally:
+                if output_only:
+                    hook.remove()
+
+            if output_only:
+                if not final_tokens:
+                    raise RuntimeError("Forecast engine did not produce a continuation state.")
+                forecast_chunk.add_latent_prediction(
+                    forecast_chunk.chunk_idx(chunk[-1]),
+                    "latent_state",
+                    base_model.tokens_to_latent_state(None, final_tokens[-1]),
                 )
 
             if should_write_output:
@@ -333,11 +368,21 @@ class Trainer(TrainerBase):
                     targets_and_auxs,
                 )
 
-            physical += forecast_chunk.physical
-            latent += forecast_chunk.latent
+            if output_only:
+                batch.clear_output_chunk_coordinates(chunk)
+                # Written physical predictions are no longer needed. Keep only
+                # the final latent state, which Model.forward() uses for the next chunk.
+                forecast_chunk.physical = [{} for _ in forecast_chunk.physical]
+                torch.cuda.empty_cache()
+            else:
+                physical += forecast_chunk.physical
+                latent += forecast_chunk.latent
 
         if is_diffusion:
             # single chunk; its fstep dimension is the trajectory, not forecast steps
+            return forecast_chunk
+
+        if output_only:
             return forecast_chunk
 
         # Data for validation purposes => accumulates in memory!?
@@ -773,6 +818,16 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         is_diffusion = cf.get("fe_diffusion_model", False)
+        output_only = mode_cfg.get("output", {}).get("output_only", False)
+        if output_only:
+            if cf.stage != "inference":
+                raise ValueError("output.output_only is supported only during inference.")
+            if is_diffusion:
+                raise ValueError("output.output_only does not support diffusion inference.")
+            if mode_cfg.get("output", {}).get("num_samples", 0) <= 0:
+                raise ValueError("output.output_only requires output.num_samples > 0.")
+            logger.info("Running output-only inference: validation loss metrics are disabled.")
+
         noise_levels = list(mode_cfg.get("validation_noise_levels", [0.0]))
         if not is_diffusion:
             noise_levels = [0.0]
@@ -809,7 +864,12 @@ class Trainer(TrainerBase):
                     disable=self.cf.rank > 0,
                 ) as pbar:
                     for bidx, batch in enumerate(dataset_val_iter):
-                        batch.to_device(self.device)
+                        if output_only:
+                            # Target values remain on CPU. Each chunk transfers only
+                            # the source-side coordinates required by its decoder.
+                            batch.to_device_for_output_chunk(self.device, [])
+                        else:
+                            batch.to_device(self.device)
 
                         # evaluate model
                         with torch.autocast(
@@ -838,6 +898,7 @@ class Trainer(TrainerBase):
                                 bidx,
                                 targets_and_auxs,
                                 is_diffusion,
+                                output_only,
                             )
                             # Diffusion inference inflates the model output's fstep
                             # dimension to one entry per ODE step (the denoising
@@ -847,11 +908,12 @@ class Trainer(TrainerBase):
                             if is_diffusion:
                                 _expand_targets_to_match_preds(preds, targets_and_auxs)
 
-                        _ = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            targets_and_aux=targets_and_auxs,
-                            metadata=extract_batch_metadata(batch),
-                        )
+                        if not output_only:
+                            _ = self.loss_calculator_val.compute_loss(
+                                preds=preds,
+                                targets_and_aux=targets_and_auxs,
+                                metadata=extract_batch_metadata(batch),
+                            )
 
                         # log output
                         # Non-diffusion output is written per chunk inside

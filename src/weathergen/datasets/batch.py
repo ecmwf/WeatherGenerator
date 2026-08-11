@@ -71,7 +71,12 @@ class Sample:
         for stream_name in stream_names:
             self.streams_data[stream_name] = None
 
-    def to_device(self, device) -> None:
+    def to_device(
+        self,
+        device,
+        target_steps: list[int] | None = None,
+        include_target_tokens: bool = True,
+    ) -> None:
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
                 self.meta_info[key].mask.to(device, non_blocking=True)
@@ -81,7 +86,16 @@ class Sample:
 
         for key, val in self.streams_data.items():
             if val is not None:
-                self.streams_data[key] = val.to_device(device)
+                self.streams_data[key] = val.to_device(
+                    device,
+                    target_steps=target_steps,
+                    include_target_tokens=include_target_tokens,
+                )
+
+    def clear_target_coordinates(self, target_steps: list[int]) -> None:
+        for stream_data in self.streams_data.values():
+            if stream_data is not None:
+                stream_data.clear_target_coordinates(target_steps)
 
     def is_empty(self) -> bool:
         """
@@ -175,9 +189,18 @@ class BatchSamples:
     def __len__(self) -> int:
         return len(self.samples)
 
-    def to_device(self, device):
+    def to_device(
+        self,
+        device,
+        target_steps: list[int] | None = None,
+        include_target_tokens: bool = True,
+    ):
         for sample in self.samples:
-            sample.to_device(device)
+            sample.to_device(
+                device,
+                target_steps=target_steps,
+                include_target_tokens=include_target_tokens,
+            )
 
         self.tokens_lens = (
             self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
@@ -186,6 +209,10 @@ class BatchSamples:
         self.device = device
 
         return self
+
+    def clear_target_coordinates(self, target_steps: list[int]) -> None:
+        for sample in self.samples:
+            sample.clear_target_coordinates(target_steps)
 
     def get_samples(self) -> list[Sample]:
         return self.samples
@@ -339,6 +366,20 @@ class ModelBatch:
         self.device = device
 
         return self
+
+    def to_device_for_output_chunk(self, device, target_steps: list[int]):
+        """Move model inputs and only this chunk's decoder coordinates to the device."""
+        self.source_samples.to_device(
+            device,
+            target_steps=target_steps,
+            include_target_tokens=False,
+        )
+        self.device = device
+        return self
+
+    def clear_output_chunk_coordinates(self, target_steps: list[int]) -> None:
+        """Release decoder coordinates after an output-only chunk has been written."""
+        self.source_samples.clear_target_coordinates(target_steps)
 
     def add_source_stream(
         self,

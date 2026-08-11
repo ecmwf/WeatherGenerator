@@ -130,7 +130,12 @@ class StreamData:
 
         return self
 
-    def to_device(self, device: str) -> None:
+    def to_device(
+        self,
+        device: str,
+        target_steps: list[int] | None = None,
+        include_target_tokens: bool = True,
+    ) -> None:
         """
         Move data to GPU
 
@@ -145,9 +150,12 @@ class StreamData:
         """
 
         dv = device
-        self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
-        self.target_coords_lens = [t.to(dv, non_blocking=True) for t in self.target_coords_lens]
-        self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
+        target_steps = range(self.output_steps) if target_steps is None else target_steps
+        for step in target_steps:
+            self.target_coords[step] = self.target_coords[step].to(dv, non_blocking=True)
+            self.target_coords_lens[step] = self.target_coords_lens[step].to(dv, non_blocking=True)
+            if include_target_tokens:
+                self.target_tokens[step] = self.target_tokens[step].to(dv, non_blocking=True)
 
         # move to device if source data is present
         if not np.array([s is None for s in self.source_tokens_cells]).all():
@@ -159,6 +167,12 @@ class StreamData:
             self.source_idxs_embed = [s.to(dv, non_blocking=True) for s in self.source_idxs_embed]
 
         return self
+
+    def clear_target_coordinates(self, target_steps: list[int]) -> None:
+        """Release processed target-coordinate tensors while retaining future CPU steps."""
+        for step in target_steps:
+            self.target_coords[step] = torch.tensor([])
+            self.target_coords_lens[step] = torch.tensor([], dtype=torch.int32)
 
     def add_source(
         self,
