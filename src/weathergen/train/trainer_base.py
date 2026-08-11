@@ -74,9 +74,12 @@ class TrainerBase:
         identical across ranks even without a parameter broadcast (e.g. FSDP2).
         Data loading randomness is diversified per rank/worker/mini-epoch in
         MultiStreamDataSampler.
+
+        Must be called *after* init_ddp: that is where rank 0's seed is communicated
+        to all ranks, so seeding earlier would leave the ranks on diverging RNGs.
         """
-        # rng seed: use value from config if provided, otherwise derive from time;
-        # in the distributed case, rank 0's seed is communicated to all ranks below
+        # rng seed: use value from config if provided, otherwise derive from time
+        # (single-process runs only; under DDP init_ddp has already resolved it)
         if cf.data_loading.get("rng_seed", None) is None:
             cf.data_loading.rng_seed = int(time.time())
         # seed 0 breaks the multiplicative per-rank/worker seed derivation in
@@ -152,6 +155,12 @@ class TrainerBase:
             if not is_root():
                 cf.general.run_id = tensor_to_str(run_id_int)
             print(f"rank: {rank} has run_id: {cf.general.run_id}")
+
+            # rng seed: use value from config if provided, otherwise derive from time.
+            # Resolved here rather than in init_seeds so that the time fallback, which
+            # differs per rank, is overwritten by rank 0's value in the all_reduce below.
+            if cf.data_loading.get("rng_seed", None) is None:
+                cf.data_loading.rng_seed = int(time.time())
 
             # communicate rank 0's rng seed to all ranks; ranks derive their own seed
             # from a common base seed (cf. MultiStreamDataSampler.worker_workset)
