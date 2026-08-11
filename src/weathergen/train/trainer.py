@@ -276,16 +276,22 @@ class Trainer(TrainerBase):
         mini_epoch,
         bidx,
         targets_and_auxs,
+        is_diffusion: bool = False,
     ) -> ModelOutput:
         """Run the rollout in chunks and assemble the predictions for the whole batch."""
         forecast_cfg = mode_cfg.get("forecast", {})
 
         output_idxs = batch.get_output_idxs()
-        chunk_size = forecast_cfg.get("chunk_size", len(output_idxs))
+        # Diffusion consumes the output's fstep dimension for the ODE denoising trajectory,
+        # which neither the reassembly below nor a per-chunk write can handle. Roll out in a
+        # single chunk and let validate() write the output as it did before chunking.
+        chunk_size = (
+            len(output_idxs) if is_diffusion else forecast_cfg.get("chunk_size", len(output_idxs))
+        )
         chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
-        should_write_output = bidx < num_samples_write
+        should_write_output = not is_diffusion and bidx < num_samples_write
         if should_write_output:
             denormalize_data_fct = (
                 (lambda x0, x1: x1)
@@ -329,6 +335,10 @@ class Trainer(TrainerBase):
 
             physical += forecast_chunk.physical
             latent += forecast_chunk.latent
+
+        if is_diffusion:
+            # single chunk; its fstep dimension is the trajectory, not forecast steps
+            return forecast_chunk
 
         # Data for validation purposes => accumulates in memory!?
         preds_full = ModelOutput(output_idxs, output_idxs[0], batch.get_source_samples())
@@ -827,6 +837,7 @@ class Trainer(TrainerBase):
                                 mini_epoch,
                                 bidx,
                                 targets_and_auxs,
+                                is_diffusion,
                             )
                             # Diffusion inference inflates the model output's fstep
                             # dimension to one entry per ODE step (the denoising
@@ -843,7 +854,10 @@ class Trainer(TrainerBase):
                         )
 
                         # log output
-                        if noise_idx == 0:
+                        # Non-diffusion output is written per chunk inside
+                        # _process_validation_chunks; diffusion writes here, after
+                        # _expand_targets_to_match_preds has aligned the targets.
+                        if is_diffusion and noise_idx == 0:
                             if bidx < num_samples_write:
                                 # denormalization function for data
                                 denormalize_data_fct = (
