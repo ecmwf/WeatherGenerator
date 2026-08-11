@@ -144,11 +144,11 @@ def test_select_packed_cell_shard_rejects_invalid_ranges(num_cells, cell_start, 
 
 def test_spatial_parallel_size_requires_whole_rank_groups(monkeypatch):
     monkeypatch.setattr(distributed, "get_world_size", lambda: 16)
-    assert distributed.get_encoder_spatial_parallel_size({"encoder_spatial_parallel_size": 4}) == 4
-    assert distributed.get_encoder_spatial_parallel_size({"encoder_spatial_parallel_size": 8}) == 8
+    assert distributed.get_spatial_parallel_size({"spatial_parallel_size": 4}) == 4
+    assert distributed.get_spatial_parallel_size({"spatial_parallel_size": 8}) == 8
 
     with pytest.raises(ValueError, match="must be divisible"):
-        distributed.get_encoder_spatial_parallel_size({"encoder_spatial_parallel_size": 6})
+        distributed.get_spatial_parallel_size({"spatial_parallel_size": 6})
 
 
 def test_decoder_selects_nine_neighbours_for_each_rank_local_cell():

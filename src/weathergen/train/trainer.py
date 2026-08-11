@@ -47,7 +47,7 @@ from weathergen.train.utils import (
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
 )
-from weathergen.utils.distributed import get_encoder_spatial_parallel_size, is_root
+from weathergen.utils.distributed import get_spatial_parallel_size, is_root
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
@@ -151,19 +151,19 @@ class Trainer(TrainerBase):
         # world_size gets overwritten by current setting during init_ddp()
         self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
         cf.world_size_original = self.world_size_original
-        spatial_parallel_size = get_encoder_spatial_parallel_size(cf)
+        spatial_parallel_size = get_spatial_parallel_size(cf)
         cf.data_parallel_world_size = cf.world_size // spatial_parallel_size
         spatial_parallel_size_original = cf.get(
-            "encoder_spatial_parallel_size_original", spatial_parallel_size
+            "spatial_parallel_size_original", spatial_parallel_size
         )
         if self.world_size_original % spatial_parallel_size_original:
             raise ValueError(
-                "world_size_original must be divisible by encoder_spatial_parallel_size_original"
+                "world_size_original must be divisible by spatial_parallel_size_original"
             )
         self.data_parallel_world_size_original = (
             self.world_size_original // spatial_parallel_size_original
         )
-        cf.encoder_spatial_parallel_size_original = spatial_parallel_size_original
+        cf.spatial_parallel_size_original = spatial_parallel_size_original
 
         self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 

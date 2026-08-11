@@ -28,8 +28,8 @@ from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 from weathergen.model.spatial_parallel import select_packed_cell_shard
 from weathergen.utils.distributed import (
-    get_encoder_spatial_parallel_group,
-    get_encoder_spatial_parallel_size,
+    get_spatial_parallel_group,
+    get_spatial_parallel_size,
 )
 
 
@@ -49,14 +49,14 @@ class EncoderModule(torch.nn.Module):
 
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.spatial_parallel_size = get_encoder_spatial_parallel_size(cf)
+        self.spatial_parallel_size = get_spatial_parallel_size(cf)
         if self.num_healpix_cells % self.spatial_parallel_size:
             raise ValueError(
                 f"number of HEALPix cells ({self.num_healpix_cells}) must be divisible by "
-                f"encoder_spatial_parallel_size ({self.spatial_parallel_size})"
+                f"spatial_parallel_size ({self.spatial_parallel_size})"
             )
         self.spatial_parallel_group, self.spatial_parallel_rank = (
-            get_encoder_spatial_parallel_group(cf)
+            get_spatial_parallel_group(cf)
         )
         self.local_num_healpix_cells = self.num_healpix_cells // self.spatial_parallel_size
         self.local_cell_start = self.spatial_parallel_rank * self.local_num_healpix_cells

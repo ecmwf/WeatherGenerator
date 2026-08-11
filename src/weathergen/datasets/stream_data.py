@@ -58,7 +58,7 @@ class StreamData:
         input_steps: int,
         output_steps: int,
         healpix_cells: int,
-        source_healpix_cells: int | None = None,
+        source_num_healpix_cells: int | None = None,
     ) -> None:
         """
         StreamData object
@@ -74,7 +74,7 @@ class StreamData:
             Note -- Last input step and first output step always overlap.
         healpix_cells : int
             Number of global healpix cells used for targets
-        source_healpix_cells : int | None
+        source_num_healpix_cells : int | None
             Number of rank-local healpix cells used for encoder sources. Defaults
             to ``healpix_cells`` for non-spatial-parallel callers.
 
@@ -88,8 +88,8 @@ class StreamData:
         self.input_steps = input_steps
         self.output_steps = output_steps
         self.healpix_cells = healpix_cells
-        self.source_healpix_cells = (
-            healpix_cells if source_healpix_cells is None else source_healpix_cells
+        self.source_num_healpix_cells = (
+            healpix_cells if source_num_healpix_cells is None else source_num_healpix_cells
         )
 
         self.source_is_spoof = [False for _ in range(self.input_steps)]
@@ -111,7 +111,7 @@ class StreamData:
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = [
-            torch.zeros(self.source_healpix_cells, dtype=torch.int32)
+            torch.zeros(self.source_num_healpix_cells, dtype=torch.int32)
             for _ in range(self.input_steps)
         ]
         # unprocessed source (for logging)

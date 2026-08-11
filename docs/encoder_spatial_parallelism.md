@@ -125,13 +125,13 @@ original global cell order. No coarser parent-cell constraint is required.
 
 ## Distributed topology and process groups
 
-`get_encoder_spatial_parallel_size()` validates that:
+`get_spatial_parallel_size()` validates that:
 
 - the configured spatial size is at least one;
 - it does not exceed `world_size`;
 - `world_size` is divisible by the spatial size.
 
-`get_encoder_spatial_parallel_group()` creates process groups from consecutive global ranks.
+`get_spatial_parallel_group()` creates process groups from consecutive global ranks.
 All global ranks create the groups in the same order, and each process caches the group that
 contains it.
 
@@ -491,7 +491,7 @@ replicas.
 The effective data-parallel world size is:
 
 ```text
-data_parallel_world_size = world_size / encoder_spatial_parallel_size
+data_parallel_world_size = world_size / spatial_parallel_size
 ```
 
 The effective batch size is:
@@ -512,7 +512,7 @@ The sampler similarly maps global ranks in the same spatial group to one data-pa
 they receive the same workset and random seed. Loader-worker IDs and mini-epoch indices still
 differentiate independent workers and epochs.
 
-When present in a saved run, `encoder_spatial_parallel_size_original` records the historical
+When present in a saved run, `spatial_parallel_size_original` records the historical
 spatial size so effective-batch calculations remain consistent. If the key is absent, the
 implementation defaults it to the current spatial size; continuation from a pre-feature run
 therefore requires checking this value explicitly.
@@ -522,22 +522,22 @@ therefore requires checking this value explicitly.
 The relevant option is:
 
 ```yaml
-encoder_spatial_parallel_size: 4
+spatial_parallel_size: 4
 ```
 
-`encoder_spatial_parallel_size` controls the number of ranks per spatial group.
+`spatial_parallel_size` controls the number of ranks per spatial group.
 
 Ready-to-use overrides are provided:
 
 ```text
-config/encoder_spatial_parallel_4.yml
-config/encoder_spatial_parallel_8.yml
+config/spatial_parallel_4.yml
+config/spatial_parallel_8.yml
 ```
 
 For a four-rank job in which all ranks cooperate on one encoder sample:
 
 ```yaml
-encoder_spatial_parallel_size: 4
+spatial_parallel_size: 4
 ```
 
 The expected derived values are:
@@ -552,7 +552,7 @@ For an eight-rank job with two four-rank spatial groups:
 
 ```text
 world_size: 8
-encoder_spatial_parallel_size: 4
+spatial_parallel_size: 4
 data_parallel_world_size: 2
 ```
 
@@ -621,7 +621,7 @@ Compare:
 
 ## Tests
 
-`tests/test_encoder_spatial_parallel.py` covers:
+`tests/test_spatial_parallel.py` covers:
 
 | Test area | Invariant |
 | --- | --- |
@@ -635,7 +635,7 @@ Compare:
 Recommended validation commands are:
 
 ```bash
-pytest -q tests/test_encoder_spatial_parallel.py
+pytest -q tests/test_spatial_parallel.py
 ./scripts/actions.sh lint
 ./scripts/actions.sh unit-test
 ```
@@ -683,7 +683,7 @@ batch. The encoder can still select a local shard after embedding, but embedding
 
 Verify:
 
-- `encoder_spatial_parallel_size: 4` is present in the effective run configuration;
+- `spatial_parallel_size: 4` is present in the effective run configuration;
 - `data_parallel_world_size: 1` for a four-rank spatial-only run;
 - all four ownership messages appear in the startup log;
 - each source stream has a rank-local token count.
@@ -739,8 +739,8 @@ Confirm that:
 | File | Responsibility |
 | --- | --- |
 | `config/default_config.yml` | Default spatial size |
-| `config/encoder_spatial_parallel_4.yml` | Four-rank override |
-| `config/encoder_spatial_parallel_8.yml` | Eight-rank override |
+| `config/spatial_parallel_4.yml` | Four-rank override |
+| `config/spatial_parallel_8.yml` | Eight-rank override |
 | `src/weathergen/datasets/healpix_domain.py` | Rank-local point grouping |
 | `src/weathergen/datasets/multi_stream_data_sampler.py` | Shared spatial-group samples, local ownership, and runtime logging |
 | `src/weathergen/datasets/stream_data.py` | Separate source-local and target-global cell counts |
@@ -751,7 +751,7 @@ Confirm that:
 | `src/weathergen/model/encoder.py` | Local assimilation, local-to-global projection, and differentiable gather |
 | `src/weathergen/train/trainer.py` | Effective data-parallel batch and scheduler semantics |
 | `src/weathergen/utils/distributed.py` | Spatial group validation and construction |
-| `tests/test_encoder_spatial_parallel.py` | Cell ownership, ordering, coverage, validation, and gradient tests |
+| `tests/test_spatial_parallel.py` | Cell ownership, ordering, coverage, validation, and gradient tests |
 
 ## Commit-by-commit design history
 
@@ -759,7 +759,7 @@ Confirm that:
 
 This commit establishes the initial model-side and distributed design:
 
-- adds `encoder_spatial_parallel_size`;
+- adds `spatial_parallel_size`;
 - creates four-rank and eight-rank configuration overrides;
 - creates consecutive-rank spatial process groups;
 - makes spatial-group ranks consume the same data sample;
@@ -800,7 +800,7 @@ domain.
 Before merging or extending this feature, verify:
 
 - [ ] The effective spatial size is explicit in the run configuration.
-- [ ] `world_size % encoder_spatial_parallel_size == 0`.
+- [ ] `world_size % spatial_parallel_size == 0`.
 - [ ] The data-level HEALPix cell count is divisible by the spatial size.
 - [ ] Every spatial group consumes identical samples.
 - [ ] Every source stream constructs only local cells.

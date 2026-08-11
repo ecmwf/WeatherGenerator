@@ -9,7 +9,7 @@ This document describes the HEALPix cell-parallel decoder introduced by commits:
 
 The decoder feature extends the topology and contiguous cell ownership described in
 [`encoder_spatial_parallelism.md`](encoder_spatial_parallelism.md). It deliberately reuses
-`encoder_spatial_parallel_size`; there is no separate decoder-parallel configuration.
+`spatial_parallel_size`; there is no separate decoder-parallel configuration.
 
 ## Motivation
 
@@ -46,7 +46,7 @@ decoder_local_cell_end             = encoder.local_cell_end
 The relevant configuration remains:
 
 ```yaml
-encoder_spatial_parallel_size: 4
+spatial_parallel_size: 4
 ```
 
 For HEALPix level 5 and four spatial ranks:
@@ -401,16 +401,16 @@ forecasting or global assimilation will not scale with decoder spatial size.
 
 | File | Responsibility |
 | --- | --- |
-| `config/default_config.yml` | Shared `encoder_spatial_parallel_size` and decoder type |
+| `config/default_config.yml` | Shared `spatial_parallel_size` and decoder type |
 | `src/weathergen/model/model.py` | Local neighborhood/target selection, decoder execution, NaN synchronization, and prediction gather |
 | `src/weathergen/model/spatial_parallel.py` | Packed cell selection, neighborhood selection, lens splitting, and prediction reassembly |
 | `src/weathergen/model/encoder.py` | Spatial group and contiguous ownership reused by the decoder |
 | `src/weathergen/utils/distributed.py` | Spatial group validation and construction |
-| `tests/test_encoder_spatial_parallel.py` | Neighborhood selection, lens slicing, and result-order tests |
+| `tests/test_spatial_parallel.py` | Neighborhood selection, lens slicing, and result-order tests |
 
 ## Review checklist
 
-- [ ] The decoder reuses `encoder_spatial_parallel_size` and the encoder process group.
+- [ ] The decoder reuses `spatial_parallel_size` and the shared spatial process group.
 - [ ] Cell ownership is identical in the encoder and decoder.
 - [ ] Every local cell receives exactly nine neighborhood indices.
 - [ ] Target-coordinate selection respects variable per-cell lengths.
@@ -422,4 +422,3 @@ forecasting or global assimilation will not scale with decoder spatial size.
 - [ ] Padding is removed before output reconstruction.
 - [ ] Multi-sample batches are restored to sample-major order.
 - [ ] Every decoded autoregressive step performs matching collectives on all group ranks.
-

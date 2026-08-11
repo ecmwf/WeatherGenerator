@@ -3,6 +3,6 @@
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 
-# Eight consecutive ranks share one batch and each process one eighth of the
+# Four consecutive ranks share one batch and each process one quarter of the
 # HEALPix/location dimension through local assimilation.
-encoder_spatial_parallel_size: 8
+spatial_parallel_size: 4
