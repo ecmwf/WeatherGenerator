@@ -13,6 +13,7 @@ import json
 import logging
 import time
 from collections import deque
+from collections.abc import Callable
 from decimal import Decimal
 from math import sqrt
 
@@ -268,9 +269,42 @@ class Trainer(TrainerBase):
             return []
 
         chunk_size = forecast_cfg.get("chunk_size", num_steps) or num_steps
+        if chunk_size <= 0:
+            raise ValueError(f"forecast.chunk_size must be positive, got {chunk_size}.")
         n_full_chunks = num_steps // chunk_size
         remainder_fsteps = num_steps % chunk_size
         return [chunk_size] * n_full_chunks + ([remainder_fsteps] if remainder_fsteps else [])
+
+    def _use_incremental_validation(self, mode_cfg) -> bool:
+        """Return whether validation should use ModelOutput chunk continuation.
+
+        Chunking is an explicit ``forecast.chunk_size`` opt-in. Its accumulator currently
+        supports only physical forecast outputs, so retain the regular full-forward path for
+        SSL/deep-SSL validation and diffusion validation.
+        """
+        forecast_cfg = mode_cfg.get("forecast", {})
+        if forecast_cfg.get("chunk_size") is None:
+            return False
+
+        if self.cf.get("fe_diffusion_model", False):
+            raise ValueError(
+                "Incremental validation chunking is not supported for diffusion models. "
+                "Remove forecast.chunk_size to use the full diffusion validation path."
+            )
+
+        loss_types = {loss_cfg.type for loss_cfg in mode_cfg.losses.values()}
+        if loss_types != {"LossPhysical"}:
+            raise ValueError(
+                "Incremental validation chunking currently supports only LossPhysical. "
+                f"Configured loss types: {sorted(loss_types)}."
+            )
+
+        if not self._get_forecast_chunks(forecast_cfg):
+            raise ValueError(
+                "Incremental validation chunking requires forecast.num_steps to be positive."
+            )
+
+        return True
 
     def _process_validation_chunks(
         self,
@@ -283,9 +317,12 @@ class Trainer(TrainerBase):
         preds_full,
     ):
         chunks = self._get_forecast_chunks(mode_cfg.get("forecast", {}))
+        if not chunks:
+            raise ValueError("Incremental validation requires at least one forecast chunk.")
         source_samples = batch.get_source_samples()
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
         should_write_output = bidx < num_samples_write
+        denormalize_data_fct: Callable[[str, torch.Tensor], torch.Tensor] = lambda _name, data: data
         if should_write_output:
             denormalize_data_fct = (
                 (lambda x0, x1: x1)
@@ -764,6 +801,7 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         is_diffusion = cf.get("fe_diffusion_model", False)
+        use_incremental_validation = self._use_incremental_validation(mode_cfg)
         noise_levels = list(mode_cfg.get("validation_noise_levels", [0.0]))
         if not is_diffusion:
             noise_levels = [0.0]
@@ -821,7 +859,7 @@ class Trainer(TrainerBase):
                                     self.model,
                                 )
 
-                            if is_diffusion:
+                            if is_diffusion or not use_incremental_validation:
                                 if self.ema_model is None:
                                     preds = self.model(
                                         self.model_params,
@@ -833,12 +871,13 @@ class Trainer(TrainerBase):
                                         batch.get_source_samples(),
                                     )
 
-                                # Diffusion inference inflates the model output's fstep
-                                # dimension to one entry per ODE step (the denoising
-                                # trajectory). The physical target is identical for every
-                                # such step, so replicate target/aux entries to keep the
-                                # downstream loss calculator and validation IO aligned.
-                                _expand_targets_to_match_preds(preds, targets_and_auxs)
+                                if is_diffusion:
+                                    # Diffusion inference inflates the model output's fstep
+                                    # dimension to one entry per ODE step (the denoising
+                                    # trajectory). The physical target is identical for every
+                                    # such step, so replicate target/aux entries to keep the
+                                    # downstream loss calculator and validation IO aligned.
+                                    _expand_targets_to_match_preds(preds, targets_and_auxs)
 
                             else:
                                 preds = ModelOutput(
@@ -860,10 +899,14 @@ class Trainer(TrainerBase):
                             metadata=extract_batch_metadata(batch),
                         )
 
-                        # The diffusion path retains the existing output behavior: only
-                        # its first noise-level pass writes output. Non-diffusion output
-                        # is written incrementally by _process_validation_chunks().
-                        if is_diffusion and noise_idx == 0 and bidx < num_samples_write:
+                        # Diffusion and non-chunked validation retain the existing output
+                        # behavior: only the first noise-level pass writes output. Incremental
+                        # non-diffusion output is written by _process_validation_chunks().
+                        if (
+                            (is_diffusion or not use_incremental_validation)
+                            and noise_idx == 0
+                            and bidx < num_samples_write
+                        ):
                             denormalize_data_fct = (
                                 (lambda x0, x1: x1)
                                 if mode_cfg.get("output", {}).get("normalized_samples", False)

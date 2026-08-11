@@ -63,12 +63,9 @@ class ModelOutput:
     ) -> None:
         self.physical = [{} for _ in range(len_output)]
         self.latent = [{} for _ in range(len_output)]
-<<<<<<< HEAD
         self.latent_deep = None
-=======
         self.batch = batch
         self.step_offset = step_offset
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
@@ -808,194 +805,185 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        rollout_steps = batch.get_output_len() if rollout_steps is None else rollout_steps
-        output = ModelOutput(rollout_steps)
+        is_incremental = rollout_steps is not None
+        if is_incremental and self.cf.get("fe_diffusion_model", False):
+            raise ValueError(
+                "Incremental ModelOutput continuation is not supported for diffusion models."
+            )
 
-<<<<<<< HEAD
-        tokens, posteriors, intermediates = self.encoder(model_params, batch)
-        output.add_latent_prediction(0, "posteriors", posteriors)
+        if isinstance(batch, ModelOutput):
+            if not is_incremental:
+                raise ValueError(
+                    "ModelOutput continuation requires an explicit rollout_steps value."
+                )
+            if batch.batch is None:
+                raise ValueError("Cannot continue a ModelOutput without its BatchSamples context.")
 
-        # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
-        # Reshape tokens to [B, T, ...]
-        tokens = tokens.reshape(shape)
-
-        if (
-            self.cf.get("fe_diffusion_model", False)
-            and self.cf.get("fe_diffusion_model_conditioning", None) == "forecast"
-        ):
-            tokens = tokens.reshape(shape)
-            # tokens[:,0] = t (most recent), tokens[:,1] = t-1, ..., tokens[:,-1] = t-(T-1) (oldest)
-            if self.cf.stage == "inference":
-                print("Using most recent steps as conditioning tokens for inference.")
-                # conditioning_tokens = tokens[:, :-1].sum(axis=1)
-                conditioning_tokens = tokens[:, 1:].sum(axis=1)
-            else:
-                # Conditioning: all older context steps [t-1, ..., t-(T-1)];
-                # denoising target: t (newest)
-                conditioning_tokens = tokens[:, 1:].sum(axis=1)
-                conditioning_tokens = conditioning_tokens + torch.randn_like(
-                    conditioning_tokens
-                ) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
-                if np.random.rand() < self.cf.get(
-                    "fe_diffusion_classifier_free_guidance_prob", 0.0
-                ):  # occasionally dropout conditioning for classifier free guidance
-                    conditioning_tokens = torch.zeros_like(conditioning_tokens)
-            # X_t (tokens[:, 0], most recent) is the diffusion denoising target;
-            # older steps are conditioning.
-            batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = conditioning_tokens
-            # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
-            tokens = tokens[:, 0]
-        else:
-            tokens = tokens.sum(axis=1)
-
-        # reshape intermediates the same way as tokens
-        for i, inter in enumerate(intermediates):
-            intermediates[i] = inter.reshape(shape).sum(axis=1)
-=======
-        if isinstance(batch, BatchSamples):
-            step_offset = 0
-            batch_ctx = batch
-            tokens, posteriors = self.encoder(model_params, batch_ctx)
-            output.add_latent_prediction(0, "posteriors", posteriors)
-
-            # recover batch dimension and separate input_steps
-            shape = (len(batch_ctx), batch_ctx.get_num_source_steps(), *tokens.shape[1:])
-            # collapse along input step dimension
-            tokens = tokens.reshape(shape).sum(axis=1)
-        else:
-            step_offset = batch.step_offset + len(batch.physical)
-            latent_state = batch.get_last_latent_state()
             batch_ctx = batch.batch
+            step_offset = batch.step_offset + len(batch.physical)
+            output = ModelOutput(rollout_steps, batch=batch_ctx, step_offset=step_offset)
+            latent_state = batch.get_last_latent_state()
             tokens = latent_state.z_pre_norm
             output.add_latent_prediction(0, "posteriors", latent_state)
+            intermediates = None
+        elif isinstance(batch, BatchSamples):
+            batch_ctx = batch
+            step_offset = 0
+            if rollout_steps is None:
+                rollout_steps = batch_ctx.get_output_len()
 
-        output.batch = batch_ctx
-        output.step_offset = step_offset
-        batch_step_offset = step_offset
-        if batch_ctx is not None and rollout_steps != batch_ctx.get_output_len():
+            output = ModelOutput(
+                rollout_steps,
+                batch=batch_ctx if is_incremental else None,
+                step_offset=step_offset,
+            )
+            tokens, posteriors, intermediates = self.encoder(model_params, batch_ctx)
+            output.add_latent_prediction(0, "posteriors", posteriors)
+
+            # Recover the batch dimension and separate input steps.
+            shape = (len(batch_ctx), batch_ctx.get_num_steps(), *tokens.shape[1:])
+            tokens = tokens.reshape(shape)
+
+            if (
+                self.cf.get("fe_diffusion_model", False)
+                and self.cf.get("fe_diffusion_model_conditioning", None) == "forecast"
+            ):
+                # tokens[:, 0] is the most recent state; older states condition diffusion.
+                if self.cf.stage == "inference":
+                    print("Using most recent steps as conditioning tokens for inference.")
+                    conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                else:
+                    conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                    conditioning_tokens = conditioning_tokens + torch.randn_like(
+                        conditioning_tokens
+                    ) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
+                    if np.random.rand() < self.cf.get(
+                        "fe_diffusion_classifier_free_guidance_prob", 0.0
+                    ):
+                        conditioning_tokens = torch.zeros_like(conditioning_tokens)
+                batch_ctx.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = conditioning_tokens
+                tokens = tokens[:, 0]
+            else:
+                tokens = tokens.sum(axis=1)
+
+            # Reshape intermediates the same way as tokens for deep SSL.
+            for i, inter in enumerate(intermediates):
+                intermediates[i] = inter.reshape(shape).sum(axis=1)
+        else:
+            raise TypeError(f"Expected BatchSamples or ModelOutput, got {type(batch)!r}.")
+
+        if is_incremental:
+            assert rollout_steps is not None
             output_idxs = batch_ctx.get_output_idxs()
-            batch_step_offset += output_idxs[0] if len(output_idxs) > 0 else 0
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
+            if step_offset + rollout_steps > len(output_idxs):
+                raise ValueError(
+                    "Incremental rollout exceeds the target steps available in BatchSamples."
+                )
 
-        # Allow for pushforward trick
+            forecast_step_offset = output_idxs[0] if output_idxs else 0
+            for output_step in range(rollout_steps):
+                batch_step = forecast_step_offset + step_offset + output_step
+                if self.forecast_engine is None:
+                    raise ValueError("Incremental rollout requires a forecasting engine.")
+
+                tokens = self.forecast_engine(
+                    tokens,
+                    batch_step,
+                    meta_info=batch_ctx.samples[0].meta_info,
+                    coords=model_params.rope_coords,
+                )
+                output = self.predict_decoders(
+                    model_params,
+                    output_step,
+                    tokens,
+                    batch_ctx,
+                    output,
+                    batch_step=batch_step,
+                )
+                # Store a latent state on every chunk so the next chunk can resume.
+                output = self.predict_latent(model_params, output_step, tokens, batch_ctx, output)
+
+            return output
+
+        # The full forward path preserves the existing deterministic and diffusion behavior.
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
-
-        # roll-out in latent space, iterate and generate output over requested output steps
-        for step in range(rollout_steps):
-            without_grad = p_fwd and self.training and step != rollout_steps - 1
+        for step in batch_ctx.get_output_idxs():
+            without_grad = p_fwd and self.training and step != max(batch_ctx.get_output_idxs())
             if without_grad:
                 with torch.no_grad():
                     tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
-<<<<<<< HEAD
-            if self.forecast_engine:
-                # apply forecasting engine
+            if self.forecast_engine is not None:
                 tokens = self.forecast_engine(
                     tokens,
                     step,
-                    meta_info=batch.samples[0].meta_info,
+                    meta_info=batch_ctx.samples[0].meta_info,
                     coords=model_params.rope_coords,
                 )
 
-                # Trajectory inspection mode: decode each ODE step as a separate forecast output
-                # so the full denoising trajectory can be inspected downstream.
-                # Not used when diffusion_rollout=True — that case is handled in the unified
-                # diffusion block below.
+                # Trajectory inspection mode: decode each ODE step as a separate forecast output.
                 if isinstance(tokens, list) and not self.cf.get("diffusion_rollout", False):
-                    # Diffusion inference currently only supports a single physical forecast
-                    # step (forecast.num_steps=1); the per-ODE-step trajectory consumes the
-                    # ModelOutput fstep dimension. Multi-step autoregressive rollouts on top of
-                    # diffusion are not implemented yet.
-                    if len(batch.get_output_idxs()) > 1 and not self._warned_diffusion_multi_step:
+                    if (
+                        len(batch_ctx.get_output_idxs()) > 1
+                        and not self._warned_diffusion_multi_step
+                    ):
                         logger.warning(
                             "Diffusion inference is being run with forecast.num_steps=%d (>1). "
                             "Only a single forecast step is supported in this mode; the "
                             "per-ODE-step denoising trajectory will overwrite later forecast "
                             "steps in the model output.",
-                            len(batch.get_output_idxs()),
+                            len(batch_ctx.get_output_idxs()),
                         )
                         self._warned_diffusion_multi_step = True
-                    # Resize output to fit the diffusion trajectory.
                     output = self._reindex_output_for_trajectory(output, len(tokens))
-                    cond = batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
+                    cond = batch_ctx.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                     predict_residual = self.cf.get("fe_diffusion_model", False) and self.cf.get(
                         "fe_diffusion_predict_residual", False
                     )
                     for i, toks in enumerate(tokens):
                         toks_abs = cond + toks if predict_residual else toks
                         output = self.predict_decoders(
-                            model_params, step, toks_abs, batch, output, out_step=i
+                            model_params, step, toks_abs, batch_ctx, output, out_step=i
                         )
                         output = self.predict_latent(
-                            model_params, step, toks_abs, batch, output, out_step=i
+                            model_params, step, toks_abs, batch_ctx, output, out_step=i
                         )
-                    # Feed the final denoised state back as conditioning for the next step.
-                    # Pass tokens[-1] forward so inference diagnostics have a reference point;
-                    # inference_forward always starts from pure noise regardless.
                     final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
-                    batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = final_abs
-                    # NOTE: This is precautionary, might need to be handled differently.
-                    # It should not be the same as conditioning tokens.
+                    batch_ctx.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = final_abs
                     tokens = None
                     continue
 
-                # Unified diffusion decoding path — handles both:
-                #  • rollout (diffusion_rollout=True): tokens is a list; take the final ODE state
-                #  • ensemble (N > 1): tokens is already a (N, healpix_cells, embed_dim) tensor
+                # Unified diffusion decoding path for rollout and ensemble inference.
                 if self.cf.get("fe_diffusion_model", False) and self.cf.get(
                     "diffusion_rollout", False
                 ):
                     if isinstance(tokens, list):
-                        # diffusion_rollout=True: discard intermediate steps, keep the final state.
-                        tokens = tokens[-1]  # (1, healpix_cells, embed_dim)
-                    cond = batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
+                        tokens = tokens[-1]
+                    cond = batch_ctx.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                     predict_residual = self.cf.get("fe_diffusion_predict_residual", False)
-                    # Apply residual correction; broadcasts cond (1, H, D) over all N members.
                     member_final_tokens = cond + tokens if predict_residual else tokens
-                    # Decode all members (or the single rollout state) in one forward pass.
                     tmp_output = ModelOutput(1)
                     tmp_output = self.predict_decoders(
-                        model_params, step, member_final_tokens, batch, tmp_output, out_step=0
+                        model_params, step, member_final_tokens, batch_ctx, tmp_output, out_step=0
                     )
-                    # pred_tuple has N entries (one per member / "batch" item).
-                    # Concatenate along dim 0: (N, n_points, channels),
-                    # wrap in 1-tuple (batch_size=1).
                     for sname, pred_tuple in tmp_output.physical[0].items():
                         output.add_physical_prediction(
                             step, sname, (torch.cat(list(pred_tuple), dim=0),)
                         )
-                    # Store per-member conditioning for the next rollout step.
-                    # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
-                    # calls expand(N, ...) which is a no-op when the dim already matches.
-                    batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = member_final_tokens
+                    batch_ctx.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = (
+                        member_final_tokens
+                    )
                     tokens = None
                     continue
 
             if "masking" in self.cf.training_config.training_mode:
-                # decoder predictions
-                output = self.predict_decoders(model_params, step, tokens, batch, output)
+                output = self.predict_decoders(model_params, step, tokens, batch_ctx, output)
 
             if "student_teacher" in self.cf.training_config.training_mode:
-                # latent predictions (raw and with SSL heads)
                 output = self.predict_latent(
-                    model_params, step, tokens, batch, output, intermediates
+                    model_params, step, tokens, batch_ctx, output, intermediates
                 )
-=======
-            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
-            # decoder predictions
-            output = self.predict_decoders(
-                model_params,
-                output_step=step,
-                batch_step=step + batch_step_offset,
-                tokens=tokens,
-                batch=batch_ctx,
-                output=output,
-            )
-            # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch_ctx, output)
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
 
         return output
 
@@ -1078,12 +1066,12 @@ class Model(torch.nn.Module):
     def predict_decoders(
         self,
         model_params: ModelParams,
-        output_step: int,
-        batch_step: int,
+        step: int,
         tokens: torch.Tensor,
         batch: BatchSamples | None,
         output: ModelOutput,
         out_step: int | None = None,
+        batch_step: int | None = None,
     ) -> ModelOutput:
         """
         Compute decoder-based predictions
@@ -1106,15 +1094,15 @@ class Model(torch.nn.Module):
         if not self.pred_heads:
             return output
 
-<<<<<<< HEAD
-        if out_step is None:
-            out_step = step
-=======
         if batch is None:
             raise ValueError(
-                "Decoder predictions require BatchSamples metadata. Pass a BatchSamples/ModelBatch or a ModelOutput created from one."
+                "Decoder predictions require BatchSamples metadata. Pass a BatchSamples "
+                "or a ModelOutput created from one."
             )
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
+        if out_step is None:
+            out_step = step
+        if batch_step is None:
+            batch_step = step
 
         # remove register  and class tokens
         tokens = tokens[:, self.num_aux_tokens :]
@@ -1154,11 +1142,7 @@ class Model(torch.nn.Module):
             # Use modular indexing so that ensemble calls (batch_size > len(batch)) replicate
             # the single real sample's coordinates across all N members.
             t_coords = [
-<<<<<<< HEAD
-                batch.samples[i_b % len(batch)].streams_data[stream_name].target_coords[step]
-=======
-                batch.samples[i_b].streams_data[stream_name].target_coords[batch_step]
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
+                batch.samples[i_b % len(batch)].streams_data[stream_name].target_coords[batch_step]
                 for i_b in range(batch_size)
             ]
             t_coords_lens = [len(t) for t in t_coords]
@@ -1190,15 +1174,10 @@ class Model(torch.nn.Module):
                 # lens for varlen attention
                 tcls = torch.cat(
                     [
-<<<<<<< HEAD
                         batch.samples[i_b % len(batch)]
                         .streams_data[stream_name]
-                        .target_coords_lens[step]
+                        .target_coords_lens[batch_step]
                         for i_b in range(batch_size)
-=======
-                        sample.streams_data[stream_name].target_coords_lens[batch_step]
-                        for sample in batch.samples
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
                     ]
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
@@ -1223,11 +1202,6 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-<<<<<<< HEAD
-
             output.add_physical_prediction(out_step, stream_name, pred)
-=======
-            output.add_physical_prediction(output_step, stream_name, pred)
->>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
 
         return output
