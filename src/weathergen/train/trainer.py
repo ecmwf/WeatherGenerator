@@ -621,7 +621,7 @@ class Trainer(TrainerBase):
             ):
                 preds = self.model(
                     model_params=self.model_params,
-                    input=batch.get_source_samples(),
+                    samples_or_output=batch.get_source_samples(),
                     forecast_steps=batch.get_output_idxs(),
                 )
 
