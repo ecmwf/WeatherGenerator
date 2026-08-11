@@ -78,15 +78,27 @@ def test_init_seeds_clamps_nonpositive_seed():
         assert cf.data_loading.rng_seed == 1
 
 
-def test_init_ddp_keeps_resolved_seed():
-    """init_ddp leaves the seed resolved by init_seeds alone (single-process case)."""
+def test_init_ddp_then_init_seeds_keeps_config_seed():
+    """The production order (init_ddp, then init_seeds) preserves the configured seed."""
     if not torch.distributed.is_available():
         return
 
-    cf = TrainerBase.init_seeds(_make_cf(2024))
-    cf = TrainerBase.init_ddp(cf)
-
-    assert cf.data_loading.rng_seed == 2024
+    cf = TrainerBase.init_ddp(_make_cf(2024))
     assert cf.world_size == 1
     assert cf.rank == 0
     assert not cf.with_ddp
+
+    cf = TrainerBase.init_seeds(cf)
+    assert cf.data_loading.rng_seed == 2024
+
+
+def test_init_ddp_leaves_missing_seed_to_init_seeds():
+    """Single-process init_ddp does not resolve the seed; init_seeds owns the fallback."""
+    if not torch.distributed.is_available():
+        return
+
+    cf = TrainerBase.init_ddp(_make_cf())
+    assert cf.data_loading.get("rng_seed", None) is None
+
+    cf = TrainerBase.init_seeds(cf)
+    assert cf.data_loading.rng_seed >= 1
