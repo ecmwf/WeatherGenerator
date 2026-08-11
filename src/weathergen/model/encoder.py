@@ -27,10 +27,7 @@ from weathergen.model.engines import (
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 from weathergen.model.spatial_parallel import select_packed_cell_shard
-from weathergen.utils.distributed import (
-    get_spatial_parallel_group,
-    get_spatial_parallel_size,
-)
+from weathergen.utils.distributed import SpatialParallelContext
 
 
 class EncoderModule(torch.nn.Module):
@@ -49,19 +46,11 @@ class EncoderModule(torch.nn.Module):
 
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        spatial_cfg = cf.distributed.spatial_parallel
-        self.spatial_parallel_size = get_spatial_parallel_size(spatial_cfg)
-        if self.num_healpix_cells % self.spatial_parallel_size:
-            raise ValueError(
-                f"number of HEALPix cells ({self.num_healpix_cells}) must be divisible by "
-                f"distributed.spatial_parallel.size ({self.spatial_parallel_size})"
-            )
-        self.spatial_parallel_group, self.spatial_parallel_rank = (
-            get_spatial_parallel_group(spatial_cfg)
+        self.spatial_parallel = SpatialParallelContext.from_config(
+            cf,
+            self.num_healpix_cells,
+            create_process_group=True,
         )
-        self.local_num_healpix_cells = self.num_healpix_cells // self.spatial_parallel_size
-        self.local_cell_start = self.spatial_parallel_rank * self.local_num_healpix_cells
-        self.local_cell_end = self.local_cell_start + self.local_num_healpix_cells
 
         self.cf = cf
         self.sources_size = sources_size
@@ -146,7 +135,7 @@ class EncoderModule(torch.nn.Module):
         )
         cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
         batch_num_cells = batch.tokens_lens.shape[-1]
-        if batch_num_cells == self.local_num_healpix_cells:
+        if batch_num_cells == self.spatial_parallel.local_num_cells:
             # The data pipeline already constructed only this rank's HEALPix
             # cells, so its packed tokens are local without another selection.
             local_cell_lens = cell_lens
@@ -157,13 +146,14 @@ class EncoderModule(torch.nn.Module):
                 stream_cell_tokens,
                 cell_lens,
                 self.num_healpix_cells,
-                self.local_cell_start,
-                self.local_cell_end,
+                self.spatial_parallel.cell_start,
+                self.spatial_parallel.cell_end,
             )
         else:
             raise ValueError(
                 f"batch has {batch_num_cells} HEALPix cells; expected either "
-                f"{self.local_num_healpix_cells} local or {self.num_healpix_cells} global cells"
+                f"{self.spatial_parallel.local_num_cells} local or "
+                f"{self.num_healpix_cells} global cells"
             )
 
         tokens_global, posteriors = checkpoint(
@@ -219,7 +209,7 @@ class EncoderModule(torch.nn.Module):
         # HEALPix cells. Process that shard in one call so every spatial rank
         # enters the local FSDP modules the same number of times.
         num_cells_per_sample = num_cells_per_sample or self.num_healpix_cells
-        if self.spatial_parallel_size > 1:
+        if self.spatial_parallel.size > 1:
             clen = num_cells_per_sample
         else:
             clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
@@ -369,19 +359,20 @@ class EncoderModule(torch.nn.Module):
 
         tokens_lens_global = batch.tokens_lens
         batch_num_cells = tokens_lens_global.shape[-1]
-        if batch_num_cells == self.local_num_healpix_cells:
-            if self.spatial_parallel_size > 1:
+        if batch_num_cells == self.spatial_parallel.local_num_cells:
+            if self.spatial_parallel.size > 1:
                 tokens_lens_global = torch.cat(
                     all_gather(
                         tokens_lens_global,
-                        group=self.spatial_parallel_group,
+                        group=self.spatial_parallel.group,
                     ),
                     dim=-1,
                 )
         elif batch_num_cells != self.num_healpix_cells:
             raise ValueError(
                 f"batch has {batch_num_cells} HEALPix cells; expected either "
-                f"{self.local_num_healpix_cells} local or {self.num_healpix_cells} global cells"
+                f"{self.spatial_parallel.local_num_cells} local or "
+                f"{self.num_healpix_cells} global cells"
             )
         cell_lens = torch.sum(tokens_lens_global, 2).flatten()
 
@@ -396,26 +387,30 @@ class EncoderModule(torch.nn.Module):
         # Direct calls retain the old API and perform the shard selection here.
         # ``forward`` passes an already-sharded stream_cell_tokens tensor.
         if cell_lens_local is None:
-            if batch_num_cells == self.local_num_healpix_cells:
+            if batch_num_cells == self.spatial_parallel.local_num_cells:
                 cell_lens_local = torch.sum(batch.tokens_lens, 2).flatten()
             else:
                 tokens, cell_lens_local = select_packed_cell_shard(
                     tokens,
                     cell_lens,
                     self.num_healpix_cells,
-                    self.local_cell_start,
-                    self.local_cell_end,
+                    self.spatial_parallel.cell_start,
+                    self.spatial_parallel.cell_end,
                 )
 
-        pe_global_local = model_params.pe_global[self.local_cell_start : self.local_cell_end]
+        pe_global_local = model_params.pe_global[
+            self.spatial_parallel.cell_start : self.spatial_parallel.cell_end
+        ]
 
         # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:
-            q_cells_local = self.q_cells[self.local_cell_start : self.local_cell_end]
+            q_cells_local = self.q_cells[
+                self.spatial_parallel.cell_start : self.spatial_parallel.cell_end
+            ]
             tokens_global = (q_cells_local + pe_global_local).repeat(rs, 1, 1)
         else:
             tokens_global = (
-                self.q_cells.repeat(self.local_num_healpix_cells, 1, 1) + pe_global_local
+                self.q_cells.repeat(self.spatial_parallel.local_num_cells, 1, 1) + pe_global_local
             )
             tokens_global = tokens_global.repeat(rs, 1, 1)
 
@@ -426,7 +421,7 @@ class EncoderModule(torch.nn.Module):
                 tokens_global,
                 cell_lens_local,
                 model_params.q_cells_lens,
-                self.local_num_healpix_cells,
+                self.spatial_parallel.local_num_cells,
             )
         )
         tokens_global = tokens_global + empty_chunk_dependency
@@ -437,13 +432,13 @@ class EncoderModule(torch.nn.Module):
         tokens_global[local_mask] = tokens_global_unmasked.to(tokens_global.dtype)
         tokens_global = tokens_global.reshape(
             rs,
-            self.local_num_healpix_cells,
+            self.spatial_parallel.local_num_cells,
             self.q_cells.shape[-2],
             self.q_cells.shape[-1],
         )
-        if self.spatial_parallel_size > 1:
+        if self.spatial_parallel.size > 1:
             tokens_global = torch.cat(
-                all_gather(tokens_global, group=self.spatial_parallel_group),
+                all_gather(tokens_global, group=self.spatial_parallel.group),
                 dim=1,
             )
 

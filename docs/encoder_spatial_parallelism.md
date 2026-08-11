@@ -135,6 +135,11 @@ original global cell order. No coarser parent-cell constraint is required.
 All global ranks create the groups in the same order, and each process caches the group that
 contains it.
 
+`SpatialParallelContext` centralizes the resulting process group, spatial rank and size,
+effective DDP rank and world size, and the rank-local HEALPix interval. The data sampler,
+encoder, and decoder model consume this shared context instead of independently deriving or
+copying the same topology fields.
+
 With spatial size one, no additional process group is created and the feature reduces to the
 single-rank compatibility behavior.
 
@@ -248,7 +253,7 @@ For each local source cell:
 `StreamData` is initialized with:
 
 ```text
-source HEALPix cells = local_num_healpix_cells
+source HEALPix cells = spatial_parallel.local_num_cells
 target HEALPix cells = num_healpix_cells
 ```
 
@@ -376,7 +381,7 @@ cell. Before gathering, every rank restores a dense local tensor:
 ```text
 [
     input_steps × samples,
-    local_num_healpix_cells,
+    spatial_parallel.local_num_cells,
     local_queries_per_cell,
     global_embedding_dimension,
 ]
@@ -463,7 +468,7 @@ and retain an explicit raw observation identifier for inverse mapping.
 
 The encoder accepts either:
 
-- a rank-local source batch with `local_num_healpix_cells`; or
+- a rank-local source batch with `spatial_parallel.local_num_cells`; or
 - a legacy global source batch with `num_healpix_cells`.
 
 For a local batch, the embedding result is already local.
@@ -759,7 +764,7 @@ Confirm that:
 | `src/weathergen/model/spatial_parallel.py` | Legacy packed-token shard selection |
 | `src/weathergen/model/encoder.py` | Local assimilation, local-to-global projection, and differentiable gather |
 | `src/weathergen/train/trainer.py` | Effective data-parallel batch and scheduler semantics |
-| `src/weathergen/utils/distributed.py` | Spatial group validation and construction |
+| `src/weathergen/utils/distributed.py` | Shared spatial topology context, validation, and process-group construction |
 | `tests/test_spatial_parallel.py` | Cell ownership, ordering, coverage, validation, and gradient tests |
 
 ## Commit-by-commit design history

@@ -32,15 +32,10 @@ or its output tensor.
 
 ## Shared topology and configuration
 
-The decoder copies these values from `EncoderModule` during model creation:
+The decoder reuses the encoder's `SpatialParallelContext` during model creation:
 
 ```text
-decoder_spatial_parallel_group     = encoder.spatial_parallel_group
-decoder_spatial_parallel_rank      = encoder.spatial_parallel_rank
-decoder_spatial_parallel_size      = encoder.spatial_parallel_size
-decoder_local_num_healpix_cells    = encoder.local_num_healpix_cells
-decoder_local_cell_start           = encoder.local_cell_start
-decoder_local_cell_end             = encoder.local_cell_end
+model.spatial_parallel = encoder.spatial_parallel
 ```
 
 The relevant configuration remains:
@@ -62,7 +57,7 @@ For HEALPix level 5 and four spatial ranks:
 
 Ranks in one spatial group consume the same batch. Different spatial groups remain data-parallel
 and must not exchange decoder results with one another. For that reason, decoder collectives
-always use `decoder_spatial_parallel_group`, not the default world process group.
+always use `spatial_parallel.group`, not the default world process group.
 
 With spatial size one, the decoder retains the original single-rank behavior and performs no
 prediction gather.
@@ -145,7 +140,7 @@ cell index would therefore be incorrect. `select_packed_cell_shard()` expands th
 by the per-cell lengths and returns complete coordinate segments for:
 
 ```text
-[decoder_local_cell_start, decoder_local_cell_end)
+[spatial_parallel.cell_start, spatial_parallel.cell_end)
 ```
 
 The local lengths retain `(sample, local_cell)` order and are passed to the variable-length
@@ -172,7 +167,7 @@ The stream-specific ensemble prediction head then maps prediction tokens to phys
 cell length entry, so spatial execution passes only:
 
 ```text
-tokens[:, local_cell_start:local_cell_end]
+tokens[:, spatial_parallel.cell_start:spatial_parallel.cell_end]
 ```
 
 rather than the global latent tensor. The current Linear implementation requires:
@@ -232,7 +227,7 @@ The padded predictions are gathered with the autograd-aware collective:
 ```python
 gathered_pred = all_gather(
     pred,
-    group=decoder_spatial_parallel_group,
+    group=spatial_parallel.group,
 )
 ```
 
@@ -407,7 +402,7 @@ forecasting or global assimilation will not scale with decoder spatial size.
 | `src/weathergen/model/model.py` | Local neighborhood/target selection, decoder execution, NaN synchronization, and prediction gather |
 | `src/weathergen/model/spatial_parallel.py` | Packed cell selection, neighborhood selection, lens splitting, and prediction reassembly |
 | `src/weathergen/model/encoder.py` | Spatial group and contiguous ownership reused by the decoder |
-| `src/weathergen/utils/distributed.py` | Spatial group validation and construction |
+| `src/weathergen/utils/distributed.py` | Shared spatial topology context, validation, and process-group construction |
 | `tests/test_spatial_parallel.py` | Neighborhood selection, lens slicing, and result-order tests |
 
 ## Review checklist

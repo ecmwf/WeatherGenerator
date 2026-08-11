@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+import dataclasses
+
 import torch
 import torch.distributed as dist
 
@@ -152,6 +154,63 @@ def get_spatial_parallel_group(spatial_cfg) -> tuple[dist.ProcessGroup | None, i
     result = (own_group, global_rank % size)
     _SPATIAL_GROUPS[size] = result
     return result
+
+
+@dataclasses.dataclass(frozen=True)
+class SpatialParallelContext:
+    """Distributed topology and HEALPix ownership for one spatial rank."""
+
+    size: int
+    rank: int
+    group: dist.ProcessGroup | None
+    ddp_rank: int
+    ddp_world_size: int
+    num_cells: int
+    local_num_cells: int
+    cell_start: int
+    cell_end: int
+
+    @classmethod
+    def from_config(
+        cls,
+        cf,
+        num_cells: int,
+        *,
+        create_process_group: bool = False,
+    ) -> "SpatialParallelContext":
+        """Build and validate the shared spatial-parallel topology."""
+
+        spatial_cfg = cf.distributed.spatial_parallel
+        size = get_spatial_parallel_size(spatial_cfg)
+        if num_cells % size:
+            raise ValueError(
+                f"number of HEALPix cells ({num_cells}) must be divisible by "
+                f"distributed.spatial_parallel.size ({size})"
+            )
+
+        rank = cf.rank % size
+        group = None
+        if create_process_group:
+            group, group_rank = get_spatial_parallel_group(spatial_cfg)
+            if group_rank != rank:
+                raise RuntimeError(
+                    f"spatial process-group rank ({group_rank}) does not match "
+                    f"topology rank ({rank})"
+                )
+
+        local_num_cells = num_cells // size
+        cell_start = rank * local_num_cells
+        return cls(
+            size=size,
+            rank=rank,
+            group=group,
+            ddp_rank=cf.rank // size,
+            ddp_world_size=cf.world_size // size,
+            num_cells=num_cells,
+            local_num_cells=local_num_cells,
+            cell_start=cell_start,
+            cell_end=cell_start + local_num_cells,
+        )
 
 
 def ddp_average(data: torch.Tensor) -> torch.Tensor:

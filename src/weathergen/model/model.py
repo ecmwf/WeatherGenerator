@@ -47,7 +47,7 @@ from weathergen.model.spatial_parallel import (
     split_cell_lens_by_shard,
 )
 from weathergen.model.utils import get_num_parameters
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import SpatialParallelContext, is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
 
 logger = logging.getLogger(__name__)
@@ -340,12 +340,7 @@ class Model(torch.nn.Module):
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
         self.target_token_engines = None
-        self.decoder_spatial_parallel_group = None
-        self.decoder_spatial_parallel_rank = 0
-        self.decoder_spatial_parallel_size = 1
-        self.decoder_local_num_healpix_cells = self.num_healpix_cells
-        self.decoder_local_cell_start = 0
-        self.decoder_local_cell_end = self.num_healpix_cells
+        self.spatial_parallel: SpatialParallelContext | None = None
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
             "Local attention not adapted for register tokens"
@@ -393,15 +388,8 @@ class Model(torch.nn.Module):
         self.encoder = EncoderModule(
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
-        # Decoder cells follow the encoder's contiguous spatial-rank ownership.
-        # Keeping the same group also means a cell's nine-token HEALPix
-        # neighbourhood is sent to the rank that already owns that cell.
-        self.decoder_spatial_parallel_group = self.encoder.spatial_parallel_group
-        self.decoder_spatial_parallel_rank = self.encoder.spatial_parallel_rank
-        self.decoder_spatial_parallel_size = self.encoder.spatial_parallel_size
-        self.decoder_local_num_healpix_cells = self.encoder.local_num_healpix_cells
-        self.decoder_local_cell_start = self.encoder.local_cell_start
-        self.decoder_local_cell_end = self.encoder.local_cell_end
+        # Encoder and decoder share one homogeneous HEALPix decomposition.
+        self.spatial_parallel = self.encoder.spatial_parallel
 
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
@@ -784,6 +772,8 @@ class Model(torch.nn.Module):
         # Empty dicts evaluate to False in python
         if not self.pred_heads:
             return output
+        assert self.spatial_parallel is not None
+        spatial_parallel = self.spatial_parallel
 
         # remove register  and class tokens
         tokens = tokens[:, self.num_aux_tokens :]
@@ -793,15 +783,15 @@ class Model(torch.nn.Module):
         batch_size = len(batch)
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         local_hp_nbours = model_params.hp_nbours[
-            self.decoder_local_cell_start : self.decoder_local_cell_end
+            spatial_parallel.cell_start : spatial_parallel.cell_end
         ]
         tokens_nbors = select_healpix_neighborhood_shard(
             tokens.reshape(s),
             model_params.hp_nbours,
-            self.decoder_local_cell_start,
-            self.decoder_local_cell_end,
+            spatial_parallel.cell_start,
+            spatial_parallel.cell_end,
         )
-        num_decoder_cells = batch_size * self.decoder_local_num_healpix_cells
+        num_decoder_cells = batch_size * spatial_parallel.local_num_cells
         tokens_nbors_lens = torch.full(
             (num_decoder_cells + 1,),
             fill_value=local_hp_nbours.shape[1],
@@ -831,8 +821,8 @@ class Model(torch.nn.Module):
                 t_coords,
                 tcls_global.flatten(),
                 self.num_healpix_cells,
-                self.decoder_local_cell_start,
-                self.decoder_local_cell_end,
+                spatial_parallel.cell_start,
+                spatial_parallel.cell_end,
             )
 
             local_coords_empty = len(t_coords) == 0
@@ -851,11 +841,11 @@ class Model(torch.nn.Module):
             # A rank-local NaN must stop every peer before any rank enters the
             # FSDP-wrapped prediction engine and head.
             has_nan = torch.isnan(tc_tokens).any().to(dtype=torch.int32)
-            if self.decoder_spatial_parallel_size > 1:
+            if spatial_parallel.size > 1:
                 dist.all_reduce(
                     has_nan,
                     op=dist.ReduceOp.MAX,
-                    group=self.decoder_spatial_parallel_group,
+                    group=spatial_parallel.group,
                 )
             if has_nan.item():
                 raise FloatingPointError(
@@ -875,7 +865,7 @@ class Model(torch.nn.Module):
                     raise NotImplementedError("Linear decoder requires ae_local_num_queries == 1")
                 local_tokens = tokens.reshape(s)[
                     :,
-                    self.decoder_local_cell_start : self.decoder_local_cell_end,
+                    spatial_parallel.cell_start : spatial_parallel.cell_end,
                 ].reshape(-1, s[-1])
                 pred = self.target_token_engines[stream_name](
                     tc_tokens,
@@ -909,12 +899,14 @@ class Model(torch.nn.Module):
     ) -> torch.Tensor:
         """Gather packed cell-level decoder output in sample/cell order."""
 
-        if self.decoder_spatial_parallel_size == 1:
+        assert self.spatial_parallel is not None
+        spatial_parallel = self.spatial_parallel
+        if spatial_parallel.size == 1:
             return pred
 
         gathered_lens = split_cell_lens_by_shard(
             global_cell_lens,
-            self.decoder_spatial_parallel_size,
+            spatial_parallel.size,
         )
         packed_lens = [int(lens.sum().item()) for lens in gathered_lens]
         max_len = max(packed_lens)
@@ -930,10 +922,10 @@ class Model(torch.nn.Module):
                 ],
                 dim=1,
             )
-        gathered_pred = all_gather(pred, group=self.decoder_spatial_parallel_group)
+        gathered_pred = all_gather(pred, group=spatial_parallel.group)
 
         return reassemble_packed_cell_shards(
             list(gathered_pred),
             gathered_lens,
-            self.decoder_local_num_healpix_cells,
+            spatial_parallel.local_num_cells,
         )

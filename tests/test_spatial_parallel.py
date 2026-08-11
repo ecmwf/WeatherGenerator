@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import types
+
 import numpy as np
 import pytest
 import torch
@@ -174,6 +176,25 @@ def test_normalize_distributed_config_moves_legacy_settings():
             "spatial_parallel": {"size": 4, "size_original": 8},
         }
     }
+
+
+def test_spatial_parallel_context_collects_topology_and_cell_ownership(monkeypatch):
+    monkeypatch.setattr(distributed, "get_world_size", lambda: 16)
+    config = types.SimpleNamespace(
+        distributed=types.SimpleNamespace(spatial_parallel={"size": 4}),
+        rank=6,
+        world_size=16,
+    )
+
+    context = distributed.SpatialParallelContext.from_config(config, num_cells=48)
+
+    assert context.size == 4
+    assert context.rank == 2
+    assert context.ddp_rank == 1
+    assert context.ddp_world_size == 4
+    assert context.local_num_cells == 12
+    assert (context.cell_start, context.cell_end) == (24, 36)
+    assert context.group is None
 
 
 def test_decoder_selects_nine_neighbours_for_each_rank_local_cell():
