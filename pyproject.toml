@@ -17,7 +17,6 @@ dependencies = [
  'tqdm',
  'matplotlib',
  'packaging',
- 'wheel',
  'psutil',
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
@@ -27,7 +26,13 @@ dependencies = [
  "anemoi-datasets",
  "weathergen-common",
  "weathergen-evaluate",
- "weathergen-readers-extra"
+ "weathergen-readers-extra",
+ "pytest>=9.0.2",
+ # older version have no precompiled linux-aarch64 cp312 wheel
+ "numcodecs>=0.16",
+ # This seems necessary for build isolation?
+ 'wheel',
+ 'setuptools',
 ]
 
 
@@ -52,6 +57,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/weathergen"]
 
+
 [dependency-groups]
 # The development dependencies
 dev = [
@@ -59,7 +65,8 @@ dev = [
  "jupytext>=1.17.2",
  "pytest>=8.3",
  "pytest-mock>=3.14.1",
- "ruff==0.9.7",
+ # If you change the version, also change it in scripts/actions.sh
+ "ruff==0.12.2",
  "tensorboard>=2.20.0",
  "pdbpp>=0.11.7",
  "pylint==4.0.3",
@@ -71,7 +78,7 @@ dev = [
 # uv and python can only filter dependencies by platform, not by capability.
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
 # We need to support:
-# x86_64: cpu (unit tests) + gpu 
+# x86_64: cpu (unit tests) + gpu
 # aarch64: gpu
 [project.optional-dependencies]
 
@@ -161,18 +168,25 @@ enable = ["W0201", "W0141"]
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
 # Also, trying to resolve some permissions issue, see 44.
+# symlink: faster than copy (ex: torch), but leads to files being deleted
+# when the cache is in SCRATCH with a deletion policy.
 link-mode = "symlink"
-# This guarantees that the build is deterministic and will not be impacted 
-# by future releases of dependencies or sub-dependencies. 
+# This guarantees that the build is deterministic and will not be impacted
+# by future releases of dependencies or sub-dependencies.
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
 exclude-newer = "2026-04-27T00:00:00Z"
 
+# torch 2.9.1 pulls nvidia-nccl-cu12==2.27.5. Override
+# torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
+override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]
+
 # The minimum version of uv required.
-# It is tightly controlled because the format of uv.lock has changed 
+# It is tightly controlled because the format of uv.lock has changed
+# and we rely on newer options (extra-build-dependencies)
 # over revisions, causing reformats to happen without reason.
 # Also, relatively recent versions are required to support workspaces.
-required-version = ">=0.7.0"
+required-version = ">=0.10.0"
 
 # The supported environments
 # TODO: add macos and windows (CPU only, for running tests)
@@ -190,6 +204,12 @@ conflicts = [
   ],
 ]
 
+[tool.uv.extra-build-dependencies]
+anemoi-datasets = ["setuptools<76", "wheel"]
+cfunits = ["setuptools<76", "wheel"]
+antlr4-python3-runtime = ["setuptools<76", "wheel"]
+# Cartopy  requires setuptools >= 77
+cartopy = ["setuptools<78", "wheel"]
 
 [tool.pyrefly]
 project-includes = ["src/"]
@@ -242,8 +262,10 @@ torch = [
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
-# branch = "feature/any-zarr-version-in-pyproject/"
+# TODO: switch back to this branch, but this is a larger update and the tag name is incorrect
+# anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
 anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
+
 
 [tool.pytest.ini_options]
 log_cli = true
@@ -261,4 +283,3 @@ members = [
 # Explicitly not depending on 'packages/dashboard' : this causes issues when deploying
 # the streamlit dashboard.
 ]
-

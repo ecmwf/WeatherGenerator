@@ -57,7 +57,6 @@ class EmbeddingEngine(torch.nn.Module):
 
             if si["embed"]["net"] == "transformer":
                 self.embeds[stream_name] = StreamEmbedTransformer(
-                    mode=self.cf.embed_orientation,
                     num_tokens=si["embed"]["num_tokens"],
                     token_size=si["token_size"],
                     num_channels=self.sources_size[i],
@@ -80,7 +79,7 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, batch, pe_embed):
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
 
         num_tokens = torch.sum(batch.tokens_lens.cpu(), 2).flatten().sum().item()
         tokens_all = torch.empty(

@@ -16,6 +16,7 @@ import numpy as np
 from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
+from omegaconf import OmegaConf
 
 from weathergen.common.config import timedelta_to_str
 from weathergen.datasets.data_reader_base import (
@@ -26,6 +27,7 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 from weathergen.train.utils import Stage
+from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
 
@@ -54,6 +56,19 @@ class DataReaderAnemoi(DataReaderTimestep):
         -------
         None
         """
+
+        # use anemoi_config if it's defined; ignore filename in this case
+        data_paths = stream_info.get("data_paths", [])
+        anemoi_config = stream_info.get("anemoi_config")
+        if anemoi_config:
+            # convert OmegaConf DictConfig to a plain dict for anemoi.open_dataset.
+            filename = OmegaConf.to_container(anemoi_config, resolve=True)
+            # add additional data paths
+            for path in data_paths:
+                anemoi_datasets.add_dataset_path(path)
+            # provide some visibility since we ignore filename
+            if is_root():
+                _logger.info("Ignoring filename and using anemoi_config option.")
 
         # open  dataset to peak that it is compatible with requested parameters
         ds0: Dataset = anemoi_datasets.open_dataset(filename)

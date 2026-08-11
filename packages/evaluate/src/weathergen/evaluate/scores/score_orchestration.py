@@ -74,12 +74,15 @@ def _score_single_fstep(
     -------
     (fstep, combined_metrics, metric_attrs) or None if no valid scores.
     """
+    # The climatology is aligned to the full target, so it is masked with the data.
+    tars, preds, tars_next, preds_next, climatology = [
+        bbox.apply_mask(x) if x is not None else None
+        for x in (tars, preds, tars_next, preds_next, climatology)
+    ]
+
+    # Checked after masking: the region itself may contain no points.
     if preds.sizes.get("ipoint") == 0:
         return None
-
-    tars, preds, tars_next, preds_next = [
-        bbox.apply_mask(x) if x is not None else None for x in (tars, preds, tars_next, preds_next)
-    ]
 
     score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
 
@@ -465,6 +468,7 @@ def metric_list_to_json(
         Region names.
     """
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
+    eval_settings = reader.get_eval_settings(stream)
 
     for metric, metric_stream in metrics_dict.items():
         for region in regions:
@@ -481,6 +485,10 @@ def metric_list_to_json(
                         data_dict = json.load(f)
                     if "scores" not in data_dict:
                         data_dict = {"scores": [data_dict]}
+
+                    # Update eval_settings to current values
+                    data_dict["eval_settings"] = eval_settings
+
                     scores = data_dict.get("scores")
                     for i, existing_score in enumerate(scores):
                         if existing_score["attrs"] == metric_data.attrs:
@@ -492,7 +500,7 @@ def metric_list_to_json(
                         _logger.debug(f"Appending results to {save_path}")
                 else:
                     _logger.debug(f"Saving results to new file {save_path}")
-                    data_dict = {"scores": [metric_data_dict]}
+                    data_dict = {"eval_settings": eval_settings, "scores": [metric_data_dict]}
 
                 with open(save_path, "w") as f:
                     json.dump(data_dict, f, indent=4)
