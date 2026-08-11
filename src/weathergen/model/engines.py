@@ -94,10 +94,14 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
+<<<<<<< HEAD
         for stream_name in self.streams.keys():
             if type(self.embeds[stream_name]) is torch.nn.Identity:
                 continue
 
+=======
+        for stream_name in self.streams:
+>>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -133,8 +137,8 @@ class EmbeddingEngine(torch.nn.Module):
         max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
         assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
             "max number of tokens per cell for positional encoding exceeded."
+            " Increase ae_local_max_tokens_per_cell in config."
         )
-        " Increase ae_local_max_tokens_per_cell in config."
 
         if batch.tokens_lens.shape[2] == 1:
             # trivial with one stream

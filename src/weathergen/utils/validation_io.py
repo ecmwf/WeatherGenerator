@@ -31,6 +31,11 @@ def write_output(
     batch,
     model_output,
     target_aux_out,
+<<<<<<< HEAD
+=======
+    timestep_idxs: list[int] | None = None,
+    fstep_offset: int = 0,
+>>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
 ):
     """
     Interface for writing model output
@@ -49,6 +54,7 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
+<<<<<<< HEAD
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
 
@@ -60,6 +66,12 @@ def write_output(
     if cf.get("fe_diffusion_model", False) and n_pred_steps > len(timestep_idxs):
         timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
 
+=======
+    if timestep_idxs is None:
+        timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+    output_idxs = batch.get_output_idxs()
+    forecast_offset = output_idxs[0] if len(output_idxs) > 0 else 0
+>>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
     targets_lens = []
 
     # TODO Maybe stopping at forecast_steps explained #1657
@@ -70,8 +82,10 @@ def write_output(
         targets_times_all += [[]]
         targets_lens += [[]]
         for sname in cf.streams.keys():
+            t_chunk_idx = t_idx - fstep_offset
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
+<<<<<<< HEAD
 
             # Streams that are not physically reconstructed (forcing, or reconstruct: false
             # JEPA-only targets) have no physical decoder, so there are no predictions to
@@ -86,9 +100,18 @@ def write_output(
                 targets_s = [np.zeros((0, t.shape[1])) for t in targets]
                 t_coords_s = [np.zeros((0, 2)) for t in targets]
                 t_times_s = [np.array([]).astype("datetime64[ns]") for t in targets]
+=======
+            if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+                preds = model_output.get_physical_prediction(t_chunk_idx, sname)
+                preds_shape = preds[0].shape
+                preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in preds]
+                targets_s = [np.zeros((0, preds_shape[2])) for _ in preds]
+                t_coords_s = [np.zeros((0, 2)) for _ in preds]
+                t_times_s = [np.array([]).astype("datetime64[ns]") for _ in preds]
+>>>>>>> 78bbeb65 (PR2076: incremental Model.forward + chunked validation writing)
 
             else:
-                preds = model_output.get_physical_prediction(t_idx, sname)
+                preds = model_output.get_physical_prediction(t_chunk_idx, sname)
                 targets = target_aux_out.physical[t_idx][sname]["target"]
 
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
@@ -193,6 +216,7 @@ def write_output(
         geoinfo_channels,
         sample_start,
         forecast_offset,
+        forecast_steps_override=timestep_idxs,
     )
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():
