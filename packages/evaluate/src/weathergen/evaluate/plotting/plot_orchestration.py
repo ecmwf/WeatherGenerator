@@ -575,16 +575,12 @@ def _build_single_animation(
     elif animation_format.lower() == "mp4":
         frames = _pad_frames_for_mp4([imageio.imread(p) for p in image_paths])
         fps = 1000 / duration_ms if duration_ms > 0 else 2
-        # "error" suppresses ffmpeg's harmless "not enough frames to estimate
-        # rate" notice (a rawvideo-probing artifact of piping in a handful of
-        # frames with an explicit fps already set) without hiding real errors.
-        imageio.mimsave(
-            out_path,
-            frames,
-            fps=fps,
-            ffmpeg_params=["-crf", "18"],
-            ffmpeg_log_level="error",
-        )
+        imageio.mimsave(out_path, 
+                        frames, fps=fps, 
+                        macro_block_size=8, 
+                        ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],  
+                        ffmpeg_log_level="error",
+                       ), 
     else:
         raise ValueError(
             f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'."
