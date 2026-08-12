@@ -304,40 +304,29 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
         self.dtype = attention_dtype
 
-        def att(qs, ks, vs):
-            qs, ks, vs = _match_attention_dtypes(qs, ks, vs)
+        assert with_flash, "Only flash attention supported at the moment"
 
-            def sparsity_mask(batch, head, q_idx, kv_idx):
+        def att(qs, ks, vs, x_mask):
+            def sparsity_mask(score, b, h, q_idx, kv_idx):
                 return (q_idx // 16) == (kv_idx % 16)
 
-            block_mask = create_block_mask(
-                sparsity_mask,
-                B=qs.shape[0],
-                H=None,
-                Q_LEN=qs.shape[-2],
-                KV_LEN=ks.shape[-2],
-                device=str(qs.device),
-            )
-            return _attention_output(flex_attention(qs, ks, vs, block_mask=block_mask))
+            return flex_attention(qs, ks, vs, score_mod=sparsity_mask)
 
-        self.compiled_flex_attention = att
+        self.compiled_flex_attention = torch.compile(att, dynamic=False)
 
     def forward(self, x, x_lens=None):
-        x_in = x
+        if self.with_residual:
+            x_in = x
         x = self.lnorm(x)
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x.shape[0], 1, self.num_heads, -1]
-        qs = _maybe_to_flash_dtype(
-            self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype
-        ).permute([1, 2, 0, 3])
-        ks = _maybe_to_flash_dtype(
-            self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype
-        ).permute([1, 2, 0, 3])
+        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
+        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
         vs = self.proj_heads_v(x).reshape(s).permute([1, 2, 0, 3])
 
-        outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze(0)
+        outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
         out = self.dropout(self.proj_out(outs.flatten(-2, -1)))
         if self.with_residual:
