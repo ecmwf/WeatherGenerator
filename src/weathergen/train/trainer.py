@@ -291,6 +291,8 @@ class Trainer(TrainerBase):
         chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+        # This assumes that you only have a physical loss, else this breaks
+        compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
         should_write_output = not is_diffusion and bidx < num_samples_write
         if should_write_output:
             denormalize_data_fct = (
@@ -333,22 +335,29 @@ class Trainer(TrainerBase):
                     targets_and_auxs,
                 )
 
-            physical += forecast_chunk.physical
-            latent += forecast_chunk.latent
+            if compute_full_loss:
+                physical += forecast_chunk.physical
+                latent += forecast_chunk.latent
+            else:
+                physical = forecast_chunk.physical
+                latent = forecast_chunk.latent
 
         if is_diffusion:
             # single chunk; its fstep dimension is the trajectory, not forecast steps
             return forecast_chunk
 
         # Data for validation purposes => accumulates in memory!?
-        preds_full = ModelOutput(output_idxs, output_idxs[0], batch.get_source_samples())
-        assert len(physical) == len(preds_full.physical), (
-            f"Chunks cover {len(physical)} forecast steps, expected {len(preds_full.physical)}."
+        preds = ModelOutput(chunk, output_idxs[0], batch.get_source_samples())
+        assert len(physical) == len(preds.physical), (
+            f"Chunks cover {len(physical)} forecast steps, expected {len(preds.physical)}."
         )
-        preds_full.physical = physical
-        preds_full.latent = latent
+        preds.physical = physical
+        preds.latent = latent
 
-        return preds_full
+        if not compute_full_loss:
+            targets_and_auxs["physical"].physical = [targets_and_auxs["physical"].physical[c] for c in chunk]
+
+        return preds, targets_and_auxs
 
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
@@ -830,7 +839,7 @@ class Trainer(TrainerBase):
                                     self.model,
                                 )
 
-                            preds = self._process_validation_chunks(
+                            preds, targets_and_auxs = self._process_validation_chunks(
                                 batch,
                                 mode_cfg,
                                 batch_size,
@@ -852,23 +861,6 @@ class Trainer(TrainerBase):
                             targets_and_aux=targets_and_auxs,
                             metadata=extract_batch_metadata(batch),
                         )
-
-                        # log output
-                        # Non-diffusion output is written per chunk inside
-                        # _process_validation_chunks; diffusion writes here, after
-                        # _expand_targets_to_match_preds has aligned the targets.
-                        if is_diffusion and noise_idx == 0:
-                            if bidx < num_samples_write:
-                                # denormalization function for data
-                                denormalize_data_fct = (
-                                    (lambda x0, x1: x1)
-                                    if mode_cfg.get("output", {}).get("normalized_samples", False)
-                                    else self.dataset_val.denormalize_target_channels
-                                )
-                                # Note: zarr writing is handled per-chunk inside
-                                # _process_validation_chunks to avoid holding all predictions
-                                # in memory and to prevent duplicate writes.
-
                         pbar.update(batch_size * self.cf.world_size)
 
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:

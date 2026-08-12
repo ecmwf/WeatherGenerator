@@ -1001,7 +1001,11 @@ class Model(torch.nn.Module):
             for i, inter in enumerate(intermediates):
                 intermediates[i] = inter.reshape(shape).sum(axis=1)
         else:
-            tokens, posteriors, intermediates = latent[-1]["latent_state"].z_pre_norm, None, None
+            tokens, posteriors, intermediates = (
+                latent[-1]["latent_state"].z_pre_norm.unsqueeze(dim=1),
+                None,
+                None,
+            )
 
         return source_samples, tokens, posteriors, intermediates
 
