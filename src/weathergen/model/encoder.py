@@ -160,11 +160,8 @@ class EncoderModule(torch.nn.Module):
         to work around to bug in flash attention, the computations is performed in chunks
         """
 
-        cell_lens = cell_lens.cpu()
-        q_cells_lens = q_cells_lens.cpu()
-
         # combined cell lens for all tokens in batch across all input steps
-        zero_pad = torch.zeros(1, device=cell_lens.device, dtype=torch.int32)
+        zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
 
         # subdivision factor for required splitting
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
@@ -175,8 +172,8 @@ class EncoderModule(torch.nn.Module):
             # make sure we properly catch all elements in last chunk
             i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
             l0, l1 = (
-                0 if i == 0 else int(cell_lens[: i * clen].cumsum(0)[-1].item()),
-                int(cell_lens[:i_end].cumsum(0)[-1].item()),
+                (0 if i == 0 else cell_lens[: i * clen].cumsum(0)[-1]),
+                cell_lens[:i_end].cumsum(0)[-1],
             )
 
             toks = tokens[l0:l1]
@@ -198,7 +195,7 @@ class EncoderModule(torch.nn.Module):
 
             # create mask for global tokens, without first element (used for padding)
             mask = cell_lens_cur[1:].to(torch.bool)
-            toks_global_unmasked = toks_global[mask.to(toks_global.device)]
+            toks_global_unmasked = toks_global[mask]
             q_cells_lens_unmasked = torch.cat([zero_pad, q_cells_lens_cur[1:][mask]])
             cell_lens_unmasked = torch.cat([zero_pad, cell_lens_cur[1:][mask]])
 
@@ -229,7 +226,7 @@ class EncoderModule(torch.nn.Module):
         Aggregation engine on the global latents of unmasked cells
         """
 
-        zero_pad = torch.zeros(1, device=tokens_lens.device, dtype=torch.int32)
+        zero_pad = torch.zeros(1, device=tokens_global_unmasked.device, dtype=torch.int32)
 
         # permute to use ae_local_num_queries as the batchsize and no_of_tokens
         # as seq len for flash attention
@@ -238,15 +235,12 @@ class EncoderModule(torch.nn.Module):
         cell_lens_unflattened = torch.sum(tokens_lens, 2)
         cell_mask = cell_lens_unflattened.to(torch.bool)
         batch_lens = cell_mask.sum(dim=-1).flatten()
-        batch_lens_cpu = batch_lens.cpu()
-        expected_len = batch_lens_cpu.sum().item()
+        expected_len = batch_lens.sum().item()
         actual_len = tokens_global_unmasked.shape[1]
         assert expected_len == actual_len, (
             f"Shape mismatch: expected {expected_len}, got {actual_len}"
         )
-        tokens_global_unmasked = torch.split(
-            tokens_global_unmasked.squeeze(0), list(batch_lens_cpu)
-        )
+        tokens_global_unmasked = torch.split(tokens_global_unmasked.squeeze(0), list(batch_lens))
         tokens_global_unmasked = torch.cat(
             [
                 t
@@ -345,9 +339,7 @@ class EncoderModule(torch.nn.Module):
             .repeat(rs, 1)
         )
         cell_lens_r = cell_lens.unsqueeze(0).reshape(rs, self.num_healpix_cells)
-        mask = torch.cat(
-            [mask_reg_class_tokens, cell_lens_r.to(tokens_global.device).to(torch.bool)], dim=1
-        )
+        mask = torch.cat([mask_reg_class_tokens, cell_lens_r.to(torch.bool)], dim=1)
 
         # fill empty tensor using mask for positions of unmasked tokens
         tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)

@@ -145,11 +145,8 @@ class StreamData:
         """
 
         dv = device
-        move_lengths = torch.device(device).type == "cuda"
         self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
-        self.target_coords_lens = [
-            t.to(dv, non_blocking=True) if move_lengths else t for t in self.target_coords_lens
-        ]
+        self.target_coords_lens = [t.to(dv, non_blocking=True) for t in self.target_coords_lens]
         self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
 
         # move to device if source data is present
@@ -157,9 +154,7 @@ class StreamData:
             self.source_tokens_cells = [
                 s.to(dv, non_blocking=True) for s in self.source_tokens_cells
             ]
-            self.source_tokens_lens = [
-                s.to(dv, non_blocking=True) if move_lengths else s for s in self.source_tokens_lens
-            ]
+            self.source_tokens_lens = [s.to(dv, non_blocking=True) for s in self.source_tokens_lens]
 
             self.source_idxs_embed = [s.to(dv, non_blocking=True) for s in self.source_idxs_embed]
 

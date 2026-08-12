@@ -569,7 +569,6 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
 
     elif "WEATHERGEN_PRIVATE_CONF" in os.environ:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
-        print(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
         _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
 
     elif env_script_path.is_file():
@@ -606,7 +605,6 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
             "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
     private_cf = OmegaConf.load(private_home)
-    print(f"private_cf: {private_cf}")
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
