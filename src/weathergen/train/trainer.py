@@ -865,18 +865,9 @@ class Trainer(TrainerBase):
                                     if mode_cfg.get("output", {}).get("normalized_samples", False)
                                     else self.dataset_val.denormalize_target_channels
                                 )
-                                # write output (zarr only for first noise level, plots for all)
-                                write_output(
-                                    self.cf,
-                                    mode_cfg,
-                                    batch_size,
-                                    mini_epoch,
-                                    bidx,
-                                    denormalize_data_fct,
-                                    batch,
-                                    preds,
-                                    targets_and_auxs,
-                                )
+                                # Note: zarr writing is handled per-chunk inside
+                                # _process_validation_chunks to avoid holding all predictions
+                                # in memory and to prevent duplicate writes.
 
                         pbar.update(batch_size * self.cf.world_size)
 
