@@ -94,4 +94,5 @@ def test_with_flash_false_forces_pytorch_fallback(monkeypatch):
     output = layer(torch.randn(3, 4), torch.tensor([0, 2, 1]))
 
     assert layer.with_flash is False
+    assert output.dtype == torch.float32
     assert output.shape == (3, 4)

@@ -35,14 +35,17 @@ coordinates aligned with the token order (lat, lon in radians).
 """
 
 
-def _require_flash_attention(with_flash):
+def _require_flash_attention(with_flash: bool) -> bool:
     if with_flash and not FLASH_ATTN_AVAILABLE:
         raise RuntimeError("with_flash=True requires flash-attn, but it is not available")
     return with_flash
 
 
-def _maybe_to_flash_dtype(tensor, attention_dtype):
-    return tensor.to(attention_dtype) if FLASH_ATTN_AVAILABLE else tensor
+def _maybe_to_flash_dtype(
+    tensor: torch.Tensor, attention_dtype: torch.dtype, with_flash: bool | None = None
+) -> torch.Tensor:
+    with_flash = FLASH_ATTN_AVAILABLE if with_flash is None else with_flash
+    return tensor.to(attention_dtype) if with_flash else tensor
 
 
 def _match_attention_dtypes(qs, ks, vs):
@@ -193,14 +196,19 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.dtype = attention_dtype
 
     def forward(self, x, x_lens, ada_ln_aux=None, coords=None):
-        x_in = x
+        if self.with_residual:
+            x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x.shape[0], self.num_heads, x.shape[-1] // self.num_heads]
-        qs = _maybe_to_flash_dtype(self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype)
-        ks = _maybe_to_flash_dtype(self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype)
+        qs = _maybe_to_flash_dtype(
+            self.lnorm_q(self.proj_heads_q(x).reshape(s)), self.dtype, self.with_flash
+        )
+        ks = _maybe_to_flash_dtype(
+            self.lnorm_k(self.proj_heads_k(x).reshape(s)), self.dtype, self.with_flash
+        )
         vs = self.proj_heads_v(x).reshape(s)
 
         if self.with_2d_rope:
@@ -520,9 +528,13 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
-        qs = _maybe_to_flash_dtype(self.lnorm_q(self.proj_heads_q(x_q).reshape(s)), self.dtype)
+        qs = _maybe_to_flash_dtype(
+            self.lnorm_q(self.proj_heads_q(x_q).reshape(s)), self.dtype, self.with_flash
+        )
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
-        ks = _maybe_to_flash_dtype(self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype)
+        ks = _maybe_to_flash_dtype(
+            self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype, self.with_flash
+        )
         vs = self.proj_heads_v(x_kv).reshape(s)
 
         # set dropout rate according to training/eval mode as required by flash_attn
@@ -646,11 +658,15 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         # ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
         qs = [
-            _maybe_to_flash_dtype(self.lnorm_q(head_proj(x_q_i).reshape(s)), self.dtype)
+            _maybe_to_flash_dtype(
+                self.lnorm_q(head_proj(x_q_i).reshape(s)), self.dtype, self.with_flash
+            )
             for head_proj, x_q_i in zip(self.proj_heads_q, x_q.transpose(1, 0), strict=False)
         ]
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
-        ks = _maybe_to_flash_dtype(self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype)
+        ks = _maybe_to_flash_dtype(
+            self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)), self.dtype, self.with_flash
+        )
         vs = self.proj_heads_v(x_kv).reshape(s)
 
         # set dropout rate according to training/eval mode as required by flash_attn
