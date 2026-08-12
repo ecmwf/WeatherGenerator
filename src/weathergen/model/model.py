@@ -956,6 +956,11 @@ class Model(torch.nn.Module):
 
             if "masking" in self.cf.training_config.training_mode:
                 # decoder predictions
+                output.add_latent_prediction(
+                    output.chunk_idx(step),
+                    "latent_state",
+                    self.tokens_to_latent_state(None, tokens),
+                )
                 output = self.predict_decoders(model_params, step, tokens, source_samples, output)
 
             if "student_teacher" in self.cf.training_config.training_mode:
