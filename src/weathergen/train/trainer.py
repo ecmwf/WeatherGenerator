@@ -354,8 +354,20 @@ class Trainer(TrainerBase):
         preds.physical = physical
         preds.latent = latent
 
+        # if not compute_full_loss:
+        #     targets_and_auxs["physical"].physical = [targets_and_auxs["physical"].physical[c] for c in chunk]
+
         if not compute_full_loss:
-            targets_and_auxs["physical"].physical = [targets_and_auxs["physical"].physical[c] for c in chunk]
+            physical_loss_names = [
+                name for name, loss_cfg in mode_cfg.losses.items()
+                if loss_cfg.type == "LossPhysical"
+            ]
+            assert len(physical_loss_names) == 1, (
+                "Chunked non-full validation requires one LossPhysical term."
+            )
+            target_aux = targets_and_auxs[physical_loss_names[0]]
+            target_aux.physical = [target_aux.physical[step] for step in chunk]
+            target_aux.output_idxs = chunk
 
         return preds, targets_and_auxs
 
