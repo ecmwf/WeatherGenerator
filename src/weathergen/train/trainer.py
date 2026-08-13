@@ -320,8 +320,11 @@ class Trainer(TrainerBase):
         target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
         
         for chunk_idx, chunk in enumerate(chunks):
-            if not compute_full_loss:
-                batch.to_device_for_output_chunk(self.device, chunk)
+
+            print(f"Starting chunk {chunk_idx} : {chunk}")
+
+            if not compute_full_loss and chunk_idx == 0:
+                batch.to_device_for_output_chunk(self.device, [1])
 
             if self.ema_model is None:
                 forecast_chunk = self.model(
@@ -363,8 +366,8 @@ class Trainer(TrainerBase):
                 forecast_chunk.physical.clear()
                 forecast_chunk.latent = [forecast_chunk.latent[-1]]
 
-            if not compute_full_loss:
-                batch.clear_output_chunk_coordinates(chunk)
+            # if not compute_full_loss:
+            #     batch.clear_output_chunk_coordinates(chunk)
 
         if is_diffusion:
             # single chunk; its fstep dimension is the trajectory, not forecast steps
@@ -914,12 +917,13 @@ class Trainer(TrainerBase):
                                     targets_and_auxs,
                                 )
 
-                        _ = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            targets_and_aux=targets_and_auxs,
-                            metadata=extract_batch_metadata(batch),
-                        )
-                        pbar.update(batch_size * self.cf.world_size)
+                        if self.compute_full_validation_loss or is_diffusion:
+                            _ = self.loss_calculator_val.compute_loss(
+                                preds=preds,
+                                targets_and_aux=targets_and_auxs,
+                                metadata=extract_batch_metadata(batch),
+                            )
+                            pbar.update(batch_size * self.cf.world_size)
 
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                             break
