@@ -1,0 +1,29 @@
+site_name: WeatherGenerator-FastEvaluation
+site_url: https://wgen-fasteval.readthedocs.io/
+repo_url: https://github.com/ecmwf/WeatherGenerator/tree/develop/packages/evaluate
+site_author: WeatherGenerator contributors
+copyright: "2025 - 2026, WeatherGenerator contributors"
+
+theme:
+  name: readthedocs
+  locale: en
+  highlightjs: true  
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: sphinx
+markdown_extensions:
+  - markdown_include.include:
+      base_path: packages/evaluate
+  - admonition
+extra_css:
+  - ./_static/custom.css
+
+nav:
+  - "Introduction": 'index.md'
+  - "Configuration Reference": 'guide/config.md'
+  - "Examples": 'examples/index.md'
