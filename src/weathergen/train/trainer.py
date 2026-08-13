@@ -368,6 +368,7 @@ class Trainer(TrainerBase):
             target_aux = targets_and_auxs[physical_loss_names[0]]
             target_aux.physical = [target_aux.physical[step] for step in chunk]
             target_aux.output_idxs = chunk
+            targets_and_auxs = target_aux
 
         return preds, targets_and_auxs
 
