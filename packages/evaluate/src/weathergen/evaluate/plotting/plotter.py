@@ -72,6 +72,26 @@ logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 _logger.debug(f"Taking cartopy paths from {work_dir}")
 
 
+def apply_font_settings(cfg: dict) -> None:
+    """Apply font settings from plotter config to matplotlib rcParams.
+
+    Parameters
+    ----------
+    cfg : dict
+        Plotter configuration dictionary.  Recognised keys:
+
+        - ``font_size``: base font size (default: matplotlib default)
+        - ``font_type``: font family, e.g. ``'serif'``, ``'sans-serif'``,
+          ``'monospace'`` (default: matplotlib default)
+    """
+    font_size = cfg.get("font_size")
+    font_type = cfg.get("font_type")
+    if font_size is not None:
+        mpl.rcParams["font.size"] = font_size
+    if font_type is not None:
+        mpl.rcParams["font.family"] = font_type
+
+
 @dataclass
 class DistStats:
     """Summary statistics for a 1-D distribution."""
@@ -133,6 +153,7 @@ class Plotter:
 
         _logger.debug(f"Taking cartopy paths from {work_dir}")
 
+        apply_font_settings(plotter_cfg)
         self.image_format = plotter_cfg.get("image_format")
         self.animation_format = plotter_cfg.get("animation_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
@@ -575,7 +596,7 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=self._match_glob_kwargs(map_kwargs, var) | map_kwargs_stream,
-                        title=self.get_map_title(var, valid_time, da_t),
+                        title=self.get_map_title(var, valid_time, da_t, tag=tag),
                     )
                     plot_names.append(name)
 
@@ -1165,7 +1186,7 @@ class Plotter:
         """
         return self.out_plot_basedir / self.stream / "histograms"
 
-    def get_map_title(self, var, valid_time, data):
+    def get_map_title(self, var, valid_time, data, tag=""):
         """Build the title string for a map plot.
 
         Parameters
@@ -1178,6 +1199,9 @@ class Plotter:
         data : xr.DataArray
             DataArray from which to extract ``valid_time`` range when
             *valid_time* is ``None``.
+        tag : str
+            Plot tag. When ``"targets"``, ``" (target)"`` is appended
+            to the title.
 
         Returns
         -------
@@ -1185,6 +1209,8 @@ class Plotter:
             Formatted title string.
         """
         title = f"{self.stream}, {var} : fstep = {self.fstep:03}"
+        if tag == "targets":
+            title += " (target)"
         if valid_time is not None:
             title += f" ({format_datetime(valid_time)})"
         elif "valid_time" in data.coords:

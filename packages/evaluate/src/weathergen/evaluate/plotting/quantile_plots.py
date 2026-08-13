@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from weathergen.evaluate.plotting.plotter import apply_font_settings
+
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
@@ -29,6 +31,7 @@ class QuantilePlots:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
         """
+        apply_font_settings(plotter_cfg)
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")

@@ -393,12 +393,15 @@ def plot_metric_region(
                     continue
 
                 selected_data.append(data.sel(channel=ch))
-                labels.append(runs[run_id].get("label", run_id))
+                label = runs[run_id].get("label", run_id)
+                if label != run_id:
+                    label = f"{run_id} - {label}"
+                labels.append(label)
                 run_ids.append(run_id)
                 colors.append(runs[run_id].get("color", None))
 
             if selected_data:
-                _logger.info(f"Creating line plot for {metric} - {region} - {stream} - {ch}.")
+                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
 
                 name = create_filename(
                     prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
@@ -760,7 +763,10 @@ def quantile_plot_metric_region(
                     qq_full_data.append(qq_dataset)
 
                 selected_data.append(data_for_channel)
-                labels.append(runs[run_id].get("label", run_id))
+                label = runs[run_id].get("label", run_id)
+                if label != run_id:
+                    label = f"{run_id} - {label}"
+                labels.append(label)
                 run_ids.append(run_id)
 
             if selected_data:
