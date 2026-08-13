@@ -139,12 +139,12 @@ def write_output(
                     if idxs_inv is not None and len(idxs_inv) > 0:
                         pred = pred[:, idxs_inv]
                         target = target[idxs_inv] 
-                        t_coords = t_coords[idxs_inv] 
+                        t_coords = t_coords[idxs_inv]
                         t_times = t_times[idxs_inv]
 
                     if len(idxs_inv) == 0 :
                         target = torch.zeros((0, pred.shape[-1]), dtype=target.dtype)
-                        t_coords = torch.zeros((0, 2), dtype=t_coords.dtype)
+                        t_coords = torch.zeros((0, 2), dtype=torch.float32)
 
                     # denormalize data if requested and map to storage format
                     preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
