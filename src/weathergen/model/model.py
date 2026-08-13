@@ -1148,8 +1148,9 @@ class Model(torch.nn.Module):
             # extract target coords for current stream and fstep and convert to one tensor
             # Use modular indexing so that ensemble calls (batch_size > len(batch)) replicate
             # the single real sample's coordinates across all N members.
+            n_real = len(batch.samples)
             t_coords = [
-                batch.samples[i_b].streams_data[stream_name].target_coords[fstep_idx]
+                batch.samples[i_b % n_real].streams_data[stream_name].target_coords[fstep_idx]
                 for i_b in range(batch_size)
             ]
             t_coords_lens = [len(t) for t in t_coords]
@@ -1177,11 +1178,11 @@ class Model(torch.nn.Module):
                 pred = torch.tensor([], device=tc_tokens.device)
 
             else:
-                # lens for varlen attention
+                # lens for varlen attention (replicate coords for ensemble members)
                 tcls = torch.cat(
                     [
-                        sample.streams_data[stream_name].target_coords_lens[fstep_idx]
-                        for sample in batch.samples
+                        batch.samples[i_b % n_real].streams_data[stream_name].target_coords_lens[fstep_idx]
+                        for i_b in range(batch_size)
                     ]
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])

@@ -368,7 +368,7 @@ class Trainer(TrainerBase):
 
         if is_diffusion:
             # single chunk; its fstep dimension is the trajectory, not forecast steps
-            return forecast_chunk
+            return forecast_chunk, targets_and_auxs
 
         # Data for validation purposes => accumulates in memory!?
         preds = ModelOutput(chunk, output_idxs[0], batch.get_source_samples())
@@ -888,6 +888,31 @@ class Trainer(TrainerBase):
                             # downstream loss calculator and validation IO aligned.
                             if is_diffusion:
                                 _expand_targets_to_match_preds(preds, targets_and_auxs)
+
+                            # Write output for diffusion — _process_validation_chunks
+                            # skips writing when is_diffusion=True because chunked IO
+                            # is incompatible with the ODE trajectory fstep layout.
+                            # Do it here instead, mirroring the non-diffusion path.
+                            num_samples_write = (
+                                mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+                            )
+                            if is_diffusion and _noise_idx == 0 and bidx < num_samples_write:
+                                denormalize_data_fct = (
+                                    (lambda x0, x1: x1)
+                                    if mode_cfg.get("output", {}).get("normalized_samples", False)
+                                    else self.dataset_val.denormalize_target_channels
+                                )
+                                write_output(
+                                    self.cf,
+                                    mode_cfg,
+                                    batch_size,
+                                    mini_epoch,
+                                    bidx,
+                                    denormalize_data_fct,
+                                    batch,
+                                    preds,
+                                    targets_and_auxs,
+                                )
 
                         _ = self.loss_calculator_val.compute_loss(
                             preds=preds,
