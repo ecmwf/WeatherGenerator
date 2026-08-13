@@ -236,17 +236,15 @@ def get_grid_type(data_type, stream: str, fname_zarr: str) -> str:
 
 
 # TODO: this will change after restructuring the lead time.
-def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], list[np.datetime64]]:
+def get_source_info(fname_zarr, stream, samples, fstep_hours=None) -> tuple[list[np.datetime64], list[np.datetime64]]:
     """
-    Retrieve source interval boundaries from the source group at forecast step 0.
+    Retrieve init time boundaries for each sample.
 
-    Values are derived from the actual ``times`` array of the **source**
-    group at forecast step 0:
-    - ``source_start = min(source_times)``
-    - ``source_end   = max(source_times)``
-
-    The true forecast initialisation (reference) time is either ``source_start``
-    or ``source_end``, selected via the ``init_time_reference`` option.
+    Strategy:
+    - If ``fstep_hours`` is provided, init time is computed as
+      ``first_valid_time(fstep=0) - fstep_hours`` from the prediction or
+      target data.  No source group is needed.
+    - Otherwise, falls back to reading the ``source`` group at fstep 0.
 
     Parameters
     ----------
@@ -256,6 +254,9 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
         Stream name to retrieve data for (e.g., 'ERA5').
     samples : list
         List of samples to process.
+    fstep_hours : int or None
+        Hours per forecast step. When provided, init time is derived from
+        the first valid time minus this offset (source group is not read).
 
     Returns
     -------
@@ -269,15 +270,38 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
     source_ends = []
     with zarrio_reader(fname_zarr) as zio:
         for sample in tqdm(samples, desc="Getting source info"):
-            group_path = f"{sample}/{stream}/0/source"
-            source_group = zio.data_root.get(group_path)
+            if fstep_hours is not None:
+                # Derive init time from prediction/target valid_time - offset
+                offset = np.timedelta64(fstep_hours, "h")
+                first_valid = None
+                for subgroup_name in ("prediction", "target"):
+                    sub_path = f"{sample}/{stream}/0/{subgroup_name}"
+                    sub_group = zio.data_root.get(sub_path)
+                    if sub_group is not None and "times" in list(sub_group.array_keys()):
+                        times_arr = np.asarray(sub_group["times"]).astype("datetime64[ns]")
+                        first_valid = np.min(times_arr)
+                        break
 
-            if source_group is None:
-                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
+                if first_valid is None:
+                    raise FileNotFoundError(
+                        f"Sample {sample}: No prediction or target with 'times' "
+                        f"found at '{sample}/{stream}/0' in {fname_zarr}"
+                    )
 
-            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
-            source_start = np.min(times_arr)
-            source_end = np.max(times_arr)
+                source_start = first_valid - offset
+                source_end = first_valid - offset
+            else:
+                # Read source group directly
+                group_path = f"{sample}/{stream}/0/source"
+                source_group = zio.data_root.get(group_path)
+                if source_group is None:
+                    raise FileNotFoundError(
+                        f"Zarr group '{group_path}' not found in {fname_zarr}. "
+                        f"Set fstep_hours to use offset-based init time inference."
+                    )
+                times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
+                source_start = np.min(times_arr)
+                source_end = np.max(times_arr)
 
             _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
             source_starts.append(source_start)
@@ -357,7 +381,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             _logger.info(f"RUN {run_id}: Processing rank {rank_label} ({rank_file.name})")
 
             samples = get_samples(samples_cfg, rank_file)
-            source_starts, source_ends = get_source_info(rank_file, stream, samples)
+            fstep_hours = kwargs.get("fstep_hours", None)
+            source_starts, source_ends = get_source_info(rank_file, stream, samples, fstep_hours)
 
             kwargs["rank_label"] = rank_label
             parser = CfParserFactory.get_parser(config=config, **kwargs)
