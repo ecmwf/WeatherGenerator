@@ -106,7 +106,7 @@ class EMATeacher(EncoderTeacher):
         self.reset()
 
     def forward_teacher(self, model_params, batch):
-        return self.ema_model.forward_eval(model_params, batch)
+        return self.ema_model.forward_eval(model_params, batch, batch.get_output_idxs())
 
     def reset(self, batch_size=None):
         self.ema_model.reset()
@@ -176,7 +176,7 @@ class FrozenTeacher(EncoderTeacher):
         params = (
             self.teacher_model_params if self.teacher_model_params is not None else model_params
         )
-        return self.teacher_model(params, batch)
+        return self.teacher_model(params, batch, batch.get_output_idxs())
 
     def reset(self, batch_size=None):
         pass

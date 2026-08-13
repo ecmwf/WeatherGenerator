@@ -35,6 +35,9 @@ type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
+# pseudo-stream name for latent outputs
+LATENT_STREAM = "latent"
+
 _logger = logging.getLogger(__name__)
 
 
@@ -338,10 +341,11 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
-        forecast_offset=int | None,
+        forecast_offset: int | None,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
+        latent: list[OutputDataset] | None = None,
     ):
         """Collection of possible datasets for one output item."""
         self.key = key
@@ -354,9 +358,11 @@ class OutputItem:
         if self.key.with_source:
             self._append_dataset(self.source, "source")
 
-        if self.key.with_target(forecast_offset):
+        if forecast_offset is not None and self.key.with_target(forecast_offset):
             self._append_dataset(self.target, "target")
             self._append_dataset(self.prediction, "prediction")
+        if latent is not None:
+            self._append_dataset(latent, "latent")
 
     def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
@@ -583,8 +589,13 @@ class OutputBatchData:
     source_channels: list[list[str]]
     geoinfo_channels: list[list[str]]
 
+    # latent outputs: outer list over forecast steps, inner list over samples.
+    # each entry is a dict mapping latent_name -> ndarray
+    latents: list[list[dict]]
+
     sample_start: int
     forecast_offset: int
+    forecast_steps: list[int]
 
     @functools.cached_property
     def samples(self):
@@ -593,13 +604,6 @@ class OutputBatchData:
         # TODO associate samples with the sampel idx used for the time window
         return np.arange(len(self.sources)) + self.sample_start
 
-    @functools.cached_property
-    def forecast_steps(self):
-        """Indices of all forecast steps adjusted by the forecast offset"""
-        # forecast offset should be either 1 for forecasting or 0 for MTM
-        assert self.forecast_offset in (0, 1)
-        return np.arange(len(self.targets) + self.forecast_offset)
-
     def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
         # TODO: filter for empty items?
@@ -607,6 +611,15 @@ class OutputBatchData:
             self.samples, self.forecast_steps, self.streams.keys()
         ):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
+
+    def latent_items(self) -> typing.Generator[OutputItem, None, None]:
+        """Additionally yield latent output items if a latent stream name was provided"""
+        if self.latents:
+            for s, fo_s in itertools.product(self.samples, self.forecast_steps):
+                key = ItemKey(int(s), int(fo_s), LATENT_STREAM)
+                latent_item = self._make_latent_item(key)
+                if latent_item is not None:
+                    yield latent_item
 
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
@@ -652,11 +665,12 @@ class OutputBatchData:
         To be useable in extraction these have to be adjusted to bridge the differences
         compared to the semantics of the data.
             - `sample` is adjusted from a global continous index to a per batch index
-            - `forecast_step` is adjusted from including `forecast_offset` to indexing
-               the data (always starts at 0)
+            - `forecast_step` is adjusted from a global step to an index into this chunk's data
         """
         return ItemKey(
-            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
+            key.sample - self.sample_start,
+            key.forecast_step - self.forecast_steps[0],  # as in ModelOutput.chunk_idx()
+            key.stream,
         )
 
     def _extract_targets_predictions(self, stream_idx, offset_key, key, source_interval):
@@ -766,6 +780,53 @@ class OutputBatchData:
         _logger.debug(f"source shape: {source_dataset.data.shape}")
 
         return source_dataset
+
+    def _make_latent_item(self, key: ItemKey) -> OutputItem | None:
+        """Create a lightweight output-like item for latent datasets.
+
+        Returns an object with attributes `key` and `datasets` suitable for
+        `ZarrIO.write_zarr`.
+        """
+        offset_key = self._offset_key(key)
+
+        # ensure latents were provided
+        if len(self.latents) <= offset_key.forecast_step:
+            return None
+        latents_for_fstep = self.latents[offset_key.forecast_step]
+
+        if len(latents_for_fstep) <= offset_key.sample:
+            return None
+        latents_for_sample = latents_for_fstep[offset_key.sample]
+
+        if not latents_for_sample:
+            return None
+
+        source_interval = self.source_intervals[offset_key.sample]
+
+        datasets: list[OutputDataset] = []
+        for lname, arr in latents_for_sample.items():
+            arr = np.asarray(arr)
+            # determine datapoints
+            n = arr.shape[0] if arr.ndim > 0 else 0
+            # times/coords placeholders
+            times = np.array([], dtype="datetime64[ns]")
+            coords = np.zeros((n, 2), dtype=np.float32)
+            geoinfo = np.empty((0, 0))
+
+            if arr.ndim == 1:
+                data = arr.reshape((n, 1))
+                channels = [lname]
+            else:
+                data = arr
+                channels = [f"{lname}_{i}" for i in range(data.shape[1])]
+
+            ds = OutputDataset(
+                lname, key, source_interval, data, times, coords, geoinfo, channels, []
+            )
+            datasets.append(ds)
+
+        # TODO: missing forecast offset
+        return OutputItem(key=key, forecast_offset=None, latent=datasets)
 
 
 def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:

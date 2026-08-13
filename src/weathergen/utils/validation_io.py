@@ -16,9 +16,20 @@ import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.model.engines import LatentState
 from weathergen.utils.utils import is_stream_reconstructed
 
 _logger = logging.getLogger(__name__)
+
+
+def _empty_step(n_samples: int, n_ens: int, n_channels: int):
+    """Zero-sized target/prediction entries for a step that carries no data."""
+    return (
+        [np.zeros((n_ens, 0, n_channels), dtype=np.float32) for _ in range(n_samples)],
+        [np.zeros((0, n_channels), dtype=np.float32) for _ in range(n_samples)],
+        [np.zeros((0, 2), dtype=np.float32) for _ in range(n_samples)],
+        [np.array([]).astype("datetime64[ns]") for _ in range(n_samples)],
+    )
 
 
 def write_output(
@@ -49,8 +60,18 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
-    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
-    forecast_offset = timestep_idxs[0]
+    # _get_output_length clamps to at least one output step, so this always holds
+    assert len(batch.get_output_idxs()) > 0, "Batch carries no output steps."
+    forecast_offset = batch.get_output_idxs()[0]
+
+    # The chunk's ModelOutput includes a leading padding range [0..forecast_offset) so
+    # that slot indices equal global forecast step numbers.  When writing to zarr we must
+    # only emit the steps that this chunk actually computed, i.e. steps >= the chunk's own
+    # forecast_offset (stored on the ModelOutput), not the batch's global offset.
+    chunk_forecast_offset = model_output.forecast_offset
+    timestep_idxs = [s for s in model_output.forecast_steps if s >= chunk_forecast_offset]
+
+    n_samples = len(batch.get_source_samples().get_samples())
 
     # Diffusion inference inflates the model output's fstep dimension to one entry per
     # ODE denoising step (the trajectory). The batch only has the original physical
@@ -62,7 +83,6 @@ def write_output(
 
     targets_lens = []
 
-    # TODO Maybe stopping at forecast_steps explained #1657
     for t_idx in timestep_idxs:
         preds_all += [[]]
         targets_all += [[]]
@@ -70,6 +90,14 @@ def write_output(
         targets_times_all += [[]]
         targets_lens += [[]]
         for sname in cf.streams.keys():
+            chunk_idx = model_output.chunk_idx(t_idx)
+            assert model_output.forecast_steps[chunk_idx] == t_idx, (
+                f"Prediction at index {chunk_idx} is valid for forecast step "
+                f"{model_output.forecast_steps[chunk_idx]}, but the target is valid for {t_idx}."
+            )
+
+            n_channels = len(cf.streams[sname].val_target_channels)
+
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
 
@@ -79,16 +107,19 @@ def write_output(
             # empty per-stream slots to keep the per-stream array alignment used downstream.
             not_reconstructed = not is_stream_reconstructed(cf.streams[sname])
 
-            if not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                targets = target_aux_out.physical[t_idx][sname]["target"]
-                # for-loop to make sure we have a consistent number of samples
-                preds_s = [np.zeros((1, 0, t.shape[1])) for t in targets]
-                targets_s = [np.zeros((0, t.shape[1])) for t in targets]
-                t_coords_s = [np.zeros((0, 2)) for t in targets]
-                t_times_s = [np.array([]).astype("datetime64[ns]") for t in targets]
+            # leading empty steps of the first chunk carry a source but no target/prediction
+            if t_idx < forecast_offset:
+                preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
+
+            elif not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+                preds = model_output.get_physical_prediction(chunk_idx, sname)
+                n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
+                preds_s, targets_s, t_coords_s, t_times_s = _empty_step(
+                    n_samples, n_ens, n_channels
+                )
 
             else:
-                preds = model_output.get_physical_prediction(t_idx, sname)
+                preds = model_output.get_physical_prediction(chunk_idx, sname)
                 targets = target_aux_out.physical[t_idx][sname]["target"]
 
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
@@ -154,7 +185,10 @@ def write_output(
     else:
         output_stream_names = stream_names
 
-    output_streams = {name: stream_names.index(name) for name in output_stream_names}
+    write_latents = io.LATENT_STREAM in output_stream_names
+    output_streams: dict[str, int] = {
+        name: stream_names.index(name) for name in output_stream_names if name != io.LATENT_STREAM
+    }
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
@@ -179,6 +213,8 @@ def write_output(
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
+    latents_all = get_latent_output(batch, model_output) if write_latents else None
+
     data = io.OutputBatchData(
         sources,
         source_intervals,
@@ -191,14 +227,54 @@ def write_output(
         target_channels,
         source_channels,
         geoinfo_channels,
-        sample_start,
-        forecast_offset,
+        latents=latents_all,
+        sample_start=sample_start,
+        forecast_offset=forecast_offset,
+        forecast_steps=timestep_idxs,
     )
-    with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
+
+    store_path = config.get_path_results(cf, mini_epoch)
+
+    with zarrio_writer(store_path) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
 
-    # Free arrays no longer needed after zarr writing
-    del targets_all, targets_lens, sources, data
 
-    del targets_times_all
+def get_latent_output(batch, model_output):
+    """
+    Interface for getting latent states
+    """
+
+    # collect latent outputs per forecast step and per sample
+    fp32 = torch.float32
+
+    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+
+    sample_idxs = [
+        list(sample.streams_data.values())[0].sample_idx
+        for sample in batch.get_source_samples().get_samples()
+    ]
+
+    latents_all: list[list[dict]] = []
+    for t_idx in timestep_idxs:
+        latents_all.append([])
+        latent_pred = model_output.get_latent_prediction(t_idx)
+        n_samples = len(sample_idxs)
+        for i_sample in range(n_samples):
+            per_sample: dict = {}
+            for lname, lval in latent_pred.items():
+                if isinstance(lval, LatentState):
+                    fields = {
+                        "tokens": lval.z_pre_norm,
+                        "register_tokens": lval.register_tokens,
+                        "class_token": lval.class_token,
+                    }
+                    for field_name, tensor in fields.items():
+                        if tensor is not None:
+                            sample_tensor = tensor[i_sample]
+                            per_sample[field_name] = sample_tensor.detach().to(fp32).cpu().numpy()
+                else:
+                    per_sample[lname] = lval[i_sample].detach().to(fp32).cpu().numpy()
+            latents_all[-1].append(per_sample)
+
+    return latents_all

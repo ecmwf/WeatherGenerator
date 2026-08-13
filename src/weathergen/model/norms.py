@@ -34,8 +34,7 @@ class RMSNorm(torch.nn.Module):
         self.weight = torch.nn.Parameter(torch.ones(dim))
 
     def reset_parameters(self):
-        """Re-initialize the learnable scale to ones (matches ``__init__``).
-        """
+        """Re-initialize the learnable scale to ones (matches ``__init__``)."""
         torch.nn.init.ones_(self.weight)
 
     def _norm(self, x):
