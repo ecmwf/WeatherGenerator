@@ -306,8 +306,17 @@ class Trainer(TrainerBase):
                     "Configure validation losses or set output.num_samples=0."
                 )
 
+        physical_loss_names = [
+            name for name, loss_cfg in mode_cfg.losses.items()
+            if loss_cfg.type == "LossPhysical"
+        ]
+        assert len(physical_loss_names) == 1, (
+            "Chunked non-full validation requires one LossPhysical term."
+        )
+
         physical, latent = [], []
         forecast_chunk = batch.get_source_samples()
+        target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
         for chunk in chunks:
             if self.ema_model is None:
                 forecast_chunk = self.model(
@@ -323,6 +332,10 @@ class Trainer(TrainerBase):
                 )
 
             if should_write_output:
+                target_aux = targets_and_auxs[physical_loss_names[0]]
+                target_aux_chunk.physical = [None for _ in range(chunk[0])] + [target_aux.physical[step] for step in chunk]
+                target_aux_chunk.output_idxs = chunk
+                # this modifies targets_and_auxs in place
                 write_output(
                     self.cf,
                     mode_cfg,
@@ -332,7 +345,7 @@ class Trainer(TrainerBase):
                     denormalize_data_fct,
                     batch,
                     forecast_chunk,
-                    targets_and_auxs,
+                    { physical_loss_names[0]: target_aux_chunk },
                 )
 
             if compute_full_loss:
@@ -354,21 +367,11 @@ class Trainer(TrainerBase):
         preds.physical = physical
         preds.latent = latent
 
-        # if not compute_full_loss:
-        #     targets_and_auxs["physical"].physical = [targets_and_auxs["physical"].physical[c] for c in chunk]
 
         if not compute_full_loss:
-            physical_loss_names = [
-                name for name, loss_cfg in mode_cfg.losses.items()
-                if loss_cfg.type == "LossPhysical"
-            ]
-            assert len(physical_loss_names) == 1, (
-                "Chunked non-full validation requires one LossPhysical term."
-            )
-            target_aux = targets_and_auxs[physical_loss_names[0]]
-            target_aux.physical = [target_aux.physical[step] for step in chunk]
-            target_aux.output_idxs = chunk
-            targets_and_auxs = target_aux
+            # this modifies targets_and_auxs in place
+            target_aux_chunk.physical = [target_aux.physical[step] for step in chunk]
+            targets_and_auxs[physical_loss_names[0]] = target_aux_chunk
 
         return preds, targets_and_auxs
 
