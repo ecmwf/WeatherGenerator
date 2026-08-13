@@ -316,8 +316,13 @@ class Trainer(TrainerBase):
 
         physical, latent = [], []
         forecast_chunk = batch.get_source_samples()
+        
         target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
-        for chunk in chunks:
+        
+        for chunk_idx, chunk in enumerate(chunks):
+            if not compute_full_loss:
+                batch.to_device_for_output_chunk(self.device, chunk)
+
             if self.ema_model is None:
                 forecast_chunk = self.model(
                     self.model_params,
@@ -351,9 +356,15 @@ class Trainer(TrainerBase):
             if compute_full_loss:
                 physical += forecast_chunk.physical
                 latent += forecast_chunk.latent
-            else:
+            elif chunk_idx == len(chunks) - 1:
                 physical = forecast_chunk.physical
                 latent = forecast_chunk.latent
+            else:
+                forecast_chunk.physical.clear()
+                forecast_chunk.latent = [forecast_chunk.latent[-1]]
+
+            if not compute_full_loss:
+                batch.clear_output_chunk_coordinates(chunk)
 
         if is_diffusion:
             # single chunk; its fstep dimension is the trajectory, not forecast steps
@@ -810,7 +821,7 @@ class Trainer(TrainerBase):
         all_losses: dict[str, list] = {}
         all_stddev: dict[str, list] = {}
 
-        for noise_idx, noise_level in enumerate(noise_levels):
+        for _noise_idx, noise_level in enumerate(noise_levels):
             if is_diffusion:
                 self._set_validation_noise_level(noise_level)
 
@@ -825,7 +836,6 @@ class Trainer(TrainerBase):
                 stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
 
             dataset_val_iter = iter(self.data_loader_validation)
-            num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
             with torch.no_grad():
                 # print progress bar but only in interactive mode, i.e. when without ddp
@@ -834,7 +844,14 @@ class Trainer(TrainerBase):
                     disable=self.cf.rank > 0,
                 ) as pbar:
                     for bidx, batch in enumerate(dataset_val_iter):
-                        batch.to_device(self.device)
+                        compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
+                        if compute_full_loss or is_diffusion:
+                            batch.to_device(self.device)
+                        else:
+                            output_idxs = batch.get_output_idxs()
+                            chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
+                            chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
+                            batch.to_device_for_chunked_inference(self.device, chunks[-1])
 
                         # evaluate model
                         with torch.autocast(
