@@ -28,7 +28,7 @@ A working template to copy and edit is `config/eval_config.yml`
    - [Regridding](#73-regridding)
    - [Climatology](#74-climatology)
 8. [Metrics reference](#8-metrics-reference)
-   - [Special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram)
+   - [Special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram-and-seeps)
 9. [Regions reference](#9-regions-reference)
 10. [Score caching (JSON files)](#10-score-caching-json-files)
 11. [CSV format for pre-computed scores](#11-csv-format-for-pre-computed-scores)
@@ -98,8 +98,7 @@ Applied to all runs. Stream-level blocks inside this section allow per-stream ov
 
 ### Per-stream appearance options (e.g. `ERA5:`)
 
-Any stream name can appear as a key inside `global_plotting_options` to set stream-specific
-rendering defaults.
+Any stream name can appear as a key inside `global_plotting_options` to set stream-specific rendering defaults. Within a stream block, options can additionally be set per channel. The channel keys may be either an exact channel name (e.g. `2t`) or a glob pattern (e.g. `"q_*"`). 
 
 | Key | Type | Optional | Default | Description |
 |-----|------|----------|---------|-------------|
@@ -109,7 +108,9 @@ rendering defaults.
 | `marker` | str | yes | `"o"` | Matplotlib marker style. Common values: `"o"` (circle), `"s"` (square), `"."` (small dot), `"^"` (triangle up), `","` (pixel). See [matplotlib marker reference](https://matplotlib.org/stable/api/markers_api.html). |
 | `alpha` | float | yes | — | Marker alpha (transparency), `0.0`–`1.0`. |
 | `colormap` | str | yes | `"coolwarm"` | Matplotlib colormap name for 2D maps. Examples: `"viridis"`, `"RdBu_r"`, `"plasma"`. See [matplotlib colormaps](https://matplotlib.org/stable/gallery/color/colormap_reference.html). |
+| `colors` | list[str] | yes | — | Explicit list of colors used to build a discrete `ListedColormap` (e.g. hex codes like "#BEDAE5"; `"none"` is allowed for transparency). Takes precedence over `colormap` and is typically combined with `levels`. Ignored for bias maps, which always use `coolwarm` for visual consistency. |
 | `levels` | list[float] | yes | — | Explicit colorscale boundary values (e.g. `[-10, -5, 0, 5, 10]`). When set, a `BoundaryNorm` is applied and `vmin`/`vmax` are ignored. |
+| `colorbar_scale` | str | yes | `"linear"` | Colorbar scaling: `"linear"`, `"log"`, or `"symlog"`. `"log"` is intended for single-sign skewed distributions (e.g. `tp`) and requires `vmin > 0`, otherwise it warns and falls back to `"linear"`. `"symlog"` handles skewed double-sign variables (e.g. `u`, `v`) and is default for non-linear bias plots since they are signed. Unknown values warn and fall back to `"linear"`. Explicit levels (non-bias plots) override this with a `BoundaryNorm`. |
 | `add_healpix_grid` | bool | yes | `false` | Overlay a HEALPix grid on map plots. |
 | `healpix_nside` | int | yes | `4` | HEALPix `nside` controlling grid resolution. Higher values produce a finer grid. |
 | `healpix_color` | str | yes | `"black"` | Colour of the HEALPix grid lines. |
@@ -142,6 +143,10 @@ global_plotting_options:
       alpha: 0.9
       edgecolors: "black"
       linewidths: 0.05
+
+    # per-channel override with glob pattern
+    "q_*":
+      levels: [0.0001, 0.0005, 0.001, 0.002, 0.005, 0.015, 0.03]
 ```
 
 Pass-through examples here are: `edgecolors`, `linewidths`, `zorder`, `alpha`.
@@ -587,8 +592,8 @@ evaluation:
 | `pss` | Peirce Skill Score. Override threshold with `thresh`. |
 | `fbi` | Frequency Bias Index. Override threshold with `thresh`. |
 | `grad_amplitude` | Ratio of spatial variability (gradient amplitude) between prediction and target. Requires a regular lat/lon grid. |
-| `qq_analysis` | Quantile–quantile analysis. Produces Q-Q plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
-| `psd` | Power Spectral Density. Produces PSD plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
+| `qq_analysis` | Quantile–quantile analysis. Produces Q-Q plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram-and-seeps). |
+| `psd` | Power Spectral Density. Produces PSD plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram-and-seeps). |
 
 ### Metrics requiring alignment between consecutive forecast steps
 
@@ -618,7 +623,7 @@ evaluation:
 |------|-------------|
 | `ssr` | Spread–Skill Ratio |
 | `crps` | Continuous Ranked Probability Score (via the [scores](https://scores.readthedocs.io/) package). Supports standard, fair, and threshold-weighted variants — see parameters below. |
-| `rank_histogram` | Rank Histogram (Talagrand diagram). Produces a bar chart, not a score line plot — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
+| `rank_histogram` | Rank Histogram (Talagrand diagram). Produces a bar chart, not a score line plot — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram-and-seeps). |
 | `spread` | Ensemble Spread |
 
 ### Special output metrics: `psd`, `qq_analysis`, `rank_histogram` and `seeps`
