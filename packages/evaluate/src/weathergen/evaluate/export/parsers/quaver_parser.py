@@ -103,11 +103,32 @@ class QuaverParser(CfParser):
                 result = result.as_xarray().squeeze()
             result = result.sel(channel=self.channels)
 
-            unique_times = np.unique(result.valid_time.values)
+            # Decompose into individual valid times.
+            # Two layouts are possible:
+            #   (a) tokenized spacetime: valid_time is a coord on 'ipoint'
+            #       → multiple times concatenated along ipoint
+            #   (b) hourly sub-steps: valid_time is its own dimension
+            #       → shape is (n_times, n_spatial, ...)
+            if "valid_time" in result.dims:
+                # Case (b): valid_time is an explicit dimension — iterate over it
+                unique_times = result.valid_time.values
+                time_slices = [
+                    result.sel(valid_time=vt).drop_vars("valid_time", errors="ignore")
+                    for vt in unique_times
+                ]
+            elif "valid_time" in result.coords and result.coords["valid_time"].dims == ("ipoint",):
+                # Case (a): tokenized spacetime — filter ipoint by time
+                unique_times = np.unique(result.valid_time.values)
+                time_slices = [
+                    result.isel(ipoint=(result.valid_time.values == vt))
+                    for vt in unique_times
+                ]
+            else:
+                # Scalar valid_time or no decomposition needed
+                unique_times = np.atleast_1d(result.valid_time.values)
+                time_slices = [result]
 
-            for vt in unique_times:
-                mask = result.valid_time.values == vt
-                sub = result.isel(ipoint=mask)
+            for vt, sub in zip(unique_times, time_slices):
                 da_sub = self.assign_coords(sub)
 
                 sf_fields = []
