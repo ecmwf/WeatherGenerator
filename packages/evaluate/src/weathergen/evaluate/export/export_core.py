@@ -275,7 +275,7 @@ def get_source_info(fname_zarr, stream, samples, fstep_hours=None) -> tuple[list
                 offset = np.timedelta64(fstep_hours, "h")
                 first_valid = None
                 for subgroup_name in ("prediction", "target"):
-                    sub_path = f"{sample}/{stream}/0/{subgroup_name}"
+                    sub_path = f"{sample}/{stream}/1/{subgroup_name}"
                     sub_group = zio.data_root.get(sub_path)
                     if sub_group is not None and "times" in list(sub_group.array_keys()):
                         times_arr = np.asarray(sub_group["times"]).astype("datetime64[ns]")
@@ -285,7 +285,7 @@ def get_source_info(fname_zarr, stream, samples, fstep_hours=None) -> tuple[list
                 if first_valid is None:
                     raise FileNotFoundError(
                         f"Sample {sample}: No prediction or target with 'times' "
-                        f"found at '{sample}/{stream}/0' in {fname_zarr}"
+                        f"found at '{sample}/{stream}/1' in {fname_zarr}"
                     )
 
                 source_start = first_valid - offset
