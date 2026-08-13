@@ -305,8 +305,11 @@ def run_score_map_pipeline(
         "fig_size": cfg.get("fig_size", None),
         "animation_format": cfg.get("animation_format", "gif"),
         "fps": cfg.get("fps", 2),
+        "font_size": cfg.get("font_size"),
+        "font_type": cfg.get("font_type"),
     }
     output_basedir = str(reader.runplot_dir)
+    apply_font_settings(plotter_cfg)
     run_id = reader.run_id
 
     _computed, raw_results = _compute_scores(
@@ -888,9 +891,12 @@ def plot_data(
         "log_y": global_plotting_opts.get("log_y", False),
         "n_bins": global_plotting_opts.get("n_bins", 50),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
+        "font_size": global_plotting_opts.get("font_size"),
+        "font_type": global_plotting_opts.get("font_type"),
         | plot_settings.get("plot_subtimesteps", False),
     }
 
+    apply_font_settings(plotter_cfg)
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")
@@ -1251,8 +1257,11 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "add_grid": eval_opt.get("add_grid", False),
         "plot_ensemble": eval_opt.get("plot_ensemble", False),
         "baseline": eval_opt.get("baseline", None),
+        "font_size": plt_opt.get("font_size"),
+        "font_type": plt_opt.get("font_type"),
     }
 
+    apply_font_settings(plot_cfg)
     # Prefix the output directory with a run_ids identifier so that
     # different evaluation configs can coexist in the same base directory.
     run_ids_str = "_".join(sorted(runs.keys()))

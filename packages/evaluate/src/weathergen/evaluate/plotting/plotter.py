@@ -575,7 +575,7 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=self._match_glob_kwargs(map_kwargs, var) | map_kwargs_stream,
-                        title=self.get_map_title(var, valid_time, da_t),
+                        title=self.get_map_title(var, valid_time, da_t, tag=tag),
                     )
                     plot_names.append(name)
 
@@ -1165,7 +1165,7 @@ class Plotter:
         """
         return self.out_plot_basedir / self.stream / "histograms"
 
-    def get_map_title(self, var, valid_time, data):
+    def get_map_title(self, var, valid_time, data, tag=""):
         """Build the title string for a map plot.
 
         Parameters
@@ -1178,6 +1178,9 @@ class Plotter:
         data : xr.DataArray
             DataArray from which to extract ``valid_time`` range when
             *valid_time* is ``None``.
+        tag : str
+            Plot tag. When ``"targets"``, ``" (target)"`` is appended
+            to the title.
 
         Returns
         -------
@@ -1185,6 +1188,8 @@ class Plotter:
             Formatted title string.
         """
         title = f"{self.stream}, {var} : fstep = {self.fstep:03}"
+        if tag == "targets":
+            title += " (target)"
         if valid_time is not None:
             title += f" ({format_datetime(valid_time)})"
         elif "valid_time" in data.coords:

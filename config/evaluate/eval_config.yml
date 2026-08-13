@@ -5,6 +5,8 @@
 #  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 #  animation_format: "gif" #options: "mp4", "gif"
+#  font_size: 12
+#  font_type: "serif" 
 
 #  dpi_val : 300
 #  fps: 2

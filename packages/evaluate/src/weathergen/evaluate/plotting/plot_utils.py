@@ -17,7 +17,29 @@ import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
+import matplotlib as mpl
+
 _logger = logging.getLogger(__name__)
+
+
+def apply_font_settings(cfg: dict) -> None:
+    """Apply font settings from plotter config to matplotlib rcParams.
+
+    Parameters
+    ----------
+    cfg : dict
+        Plotter configuration dictionary.  Recognised keys:
+
+        - ``font_size``: base font size (default: matplotlib default)
+        - ``font_type``: font family, e.g. ``'serif'``, ``'sans-serif'``,
+          ``'monospace'`` (default: matplotlib default)
+    """
+    font_size = cfg.get("font_size")
+    font_type = cfg.get("font_type")
+    if font_size is not None:
+        mpl.rcParams["font.size"] = font_size
+    if font_type is not None:
+        mpl.rcParams["font.family"] = font_type
 
 
 class PlotSubdir(str, Enum):
@@ -393,12 +415,15 @@ def plot_metric_region(
                     continue
 
                 selected_data.append(data.sel(channel=ch))
-                labels.append(runs[run_id].get("label", run_id))
+                label = runs[run_id].get("label", run_id)
+                if label != run_id:
+                    label = f"{run_id} - {label}"
+                labels.append(label)
                 run_ids.append(run_id)
                 colors.append(runs[run_id].get("color", None))
 
             if selected_data:
-                _logger.info(f"Creating line plot for {metric} - {region} - {stream} - {ch}.")
+                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
 
                 name = create_filename(
                     prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
@@ -760,7 +785,10 @@ def quantile_plot_metric_region(
                     qq_full_data.append(qq_dataset)
 
                 selected_data.append(data_for_channel)
-                labels.append(runs[run_id].get("label", run_id))
+                label = runs[run_id].get("label", run_id)
+                if label != run_id:
+                    label = f"{run_id} - {label}"
+                labels.append(label)
                 run_ids.append(run_id)
 
             if selected_data:
