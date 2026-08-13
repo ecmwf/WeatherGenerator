@@ -17,7 +17,29 @@ import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
+import matplotlib as mpl
+
 _logger = logging.getLogger(__name__)
+
+
+def apply_font_settings(cfg: dict) -> None:
+    """Apply font settings from plotter config to matplotlib rcParams.
+
+    Parameters
+    ----------
+    cfg : dict
+        Plotter configuration dictionary.  Recognised keys:
+
+        - ``font_size``: base font size (default: matplotlib default)
+        - ``font_type``: font family, e.g. ``'serif'``, ``'sans-serif'``,
+          ``'monospace'`` (default: matplotlib default)
+    """
+    font_size = cfg.get("font_size")
+    font_type = cfg.get("font_type")
+    if font_size is not None:
+        mpl.rcParams["font.size"] = font_size
+    if font_type is not None:
+        mpl.rcParams["font.family"] = font_type
 
 
 class PlotSubdir(str, Enum):

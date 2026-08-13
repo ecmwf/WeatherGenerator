@@ -12,7 +12,6 @@ from weathergen.evaluate.plotting.plot_utils import (
     calculate_average_over_dim,
     lower_is_better,
 )
-from weathergen.evaluate.plotting.plotter import apply_font_settings
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -34,7 +33,6 @@ class BarPlots:
     """
 
     def __init__(self, plotter_cfg: dict, output_basedir: str | Path) -> None:
-        apply_font_settings(plotter_cfg)
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.cmap = plotter_cfg.get("cmap", "bwr")

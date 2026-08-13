@@ -25,7 +25,6 @@ from weathergen.evaluate.plotting.plot_utils import (
     clean_label,
     lower_is_better,
 )
-from weathergen.evaluate.plotting.plotter import apply_font_settings
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -55,7 +54,6 @@ class LinePlots:
             Expected scheme `<results_base_dir>/<run_id>`.
         """
 
-        apply_font_settings(plotter_cfg)
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
