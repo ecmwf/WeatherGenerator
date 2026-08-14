@@ -323,6 +323,41 @@ class Trainer(TrainerBase):
 
             if not compute_full_loss and chunk_idx == 0:
                 batch.to_device_for_output_chunk(self.device, [1])
+            else:
+                # update sine/cosine of day of the year
+                julian_day = (
+                    batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1][:, 14]
+                )
+                julian_day = (torch.acos((julian_day * 0.707112) + 1.5913e-05) * 365.25) / (
+                    2.0 * np.pi
+                )
+                julian_day = (julian_day + 0.25) % 365
+                batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1][:, 14] = (
+                    torch.cos(2.0 * np.pi * julian_day / 365.25) - 1.5913e-05
+                ) / 0.707112
+                batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1][:, 15] = (
+                    torch.sin(2.0 * np.pi * julian_day / 365.25) - 1.5913e-05
+                ) / 0.707112
+                julian_day = (
+                    batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1][:, 14]
+                )
+                # update sine/cosine local time
+                local_time = (
+                    batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1][:, 12]
+                )
+                local_time = (torch.acos(torch.clamp(local_time * 0.707107, -1.0, 1.0)) * 24) / (
+                    2.0 * np.pi
+                )
+                local_time = (local_time + 6.0) % 24.0
+                batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1][:, 12] = (
+                    torch.cos(2.0 * np.pi * local_time / 24.0) / 0.707107
+                )
+                batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1][:, 13] = (
+                    torch.sin(2.0 * np.pi * local_time / 24.0) / 0.707107
+                )
+                local_time = (
+                    batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1][:, 12]
+                )
 
             if self.ema_model is None:
                 forecast_chunk = self.model(
