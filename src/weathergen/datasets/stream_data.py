@@ -366,8 +366,18 @@ class StreamData:
 
         # cat over forecast steps
         target_coords_empty = torch.cat(self.target_coords_lens).sum() == 0
-        target_tokens_empty = torch.cat(self.target_tokens).sum() == 0
-        return target_coords_empty and target_tokens_empty
+        # count coord rows rather than summing values: values may have zero width
+        # (skip_target_values), which a value-based check misreports as empty;
+        # spoofed windows carry no real points and still count as empty
+        target_points_empty = (
+            sum(
+                len(c)
+                for c, is_spoof in zip(self.target_coords_raw, self.target_is_spoof, strict=True)
+                if not is_spoof
+            )
+            == 0
+        )
+        return target_coords_empty and target_points_empty
 
     def source_empty(self) -> bool:
         """
