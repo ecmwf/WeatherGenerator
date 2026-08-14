@@ -89,6 +89,13 @@ def _read_anemoi_target(
     """
     unique_times = np.unique(times)
 
+    # Handle empty times (some fsteps have no data)
+    if len(unique_times) == 0:
+        n_ch = len(target_idx)
+        if channel_idxs is not None:
+            n_ch = len(channel_idxs)
+        return np.empty((0, n_ch), dtype=np.float32)
+
     # Read one time-slice at a time (typically ≤6 per fstep)
     all_data = []
     for ut in unique_times:
