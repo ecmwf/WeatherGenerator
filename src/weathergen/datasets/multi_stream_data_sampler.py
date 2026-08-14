@@ -35,7 +35,7 @@ from weathergen.datasets.utils import (
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import is_stream_diagnostic
+from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -478,6 +478,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         """
 
+        # output_data is empty for forcing streams (_get_data_windows skips them);
+        # nothing to add in that case.
+        if not output_data:
+            return stream_data
+
         # collect for all forecast steps
         num_output_steps = self._get_output_length(num_forecast_steps)
         for step, timestep_idx in enumerate(range(self.output_offset, num_output_steps)):
@@ -590,46 +595,48 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         # source data: iterate overall input steps
         input_data = []
-        for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
-            # TODO: check that we are not out of bounds when we go back in time
+        if not is_stream_diagnostic(stream_ds[0].stream_info, self._stage):
+            for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
+                # TODO: check that we are not out of bounds when we go back in time
 
-            rdata = collect_datasources(stream_ds, idx, "source", self.rng)
+                rdata = collect_datasources(stream_ds, idx, "source", self.rng)
 
-            if rdata.is_empty():
-                # work around for https://github.com/pytorch/pytorch/issues/158719
-                # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(idx)
-                rdata = spoof(
-                    self.healpix_level,
-                    time_win.start,
-                    stream_ds[0].get_geoinfo_size(),
-                    len(stream_ds[0].mean[stream_ds[0].source_idx]),
-                )
-                rdata.is_spoof = True
+                if rdata.is_empty():
+                    # work around for https://github.com/pytorch/pytorch/issues/158719
+                    # create non-empty mean data instead of empty tensor
+                    time_win = self.time_window_handler.window(idx)
+                    rdata = spoof(
+                        self.healpix_level,
+                        time_win.start,
+                        stream_ds[0].get_geoinfo_size(),
+                        len(stream_ds[0].mean[stream_ds[0].source_idx]),
+                    )
+                    rdata.is_spoof = True
 
-            input_data += [rdata]
+                input_data += [rdata]
 
         # target data: collect for all forecast steps
         output_data = []
-        num_output_steps = self._get_output_length(num_forecast_steps)
-        for timestep_idx in range(self.output_offset, num_output_steps):
-            step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
+        if not is_stream_forcing(stream_ds[0].stream_info, self._stage):
+            num_output_steps = self._get_output_length(num_forecast_steps)
+            for timestep_idx in range(self.output_offset, num_output_steps):
+                step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-            rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+                rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
-            if rdata.is_empty():
-                # work around for https://github.com/pytorch/pytorch/issues/158719
-                # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(step_forecast_dt)
-                rdata = spoof(
-                    self.healpix_level,
-                    time_win.start,
-                    stream_ds[0].get_geoinfo_size(),
-                    len(stream_ds[0].mean[stream_ds[0].target_idx]),
-                )
-                rdata.is_spoof = True
+                if rdata.is_empty():
+                    # work around for https://github.com/pytorch/pytorch/issues/158719
+                    # create non-empty mean data instead of empty tensor
+                    time_win = self.time_window_handler.window(step_forecast_dt)
+                    rdata = spoof(
+                        self.healpix_level,
+                        time_win.start,
+                        stream_ds[0].get_geoinfo_size(),
+                        len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                    )
+                    rdata.is_spoof = True
 
-            output_data += [rdata]
+                output_data += [rdata]
 
         return (input_data, output_data)
 
