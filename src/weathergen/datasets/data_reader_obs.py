@@ -243,7 +243,7 @@ class DataReaderObs(DataReaderBase):
         self.properties["vars"] = self.data.attrs["vars"]
 
     @override
-    def _get(self, idx: int, channels_idx: list[int]) -> ReaderData:
+    def _get(self, idx: int, channels_idx: list[int], time_only: bool = False) -> ReaderData:
         """
         Get data for window
 
@@ -272,14 +272,21 @@ class DataReaderObs(DataReaderBase):
         start_row = self.indices_start[idx]
         end_row = self.indices_end[idx]
 
-        coords = self.data.oindex[start_row:end_row, self.coords_idx]
-        geoinfos = (
-            self.data.oindex[start_row:end_row, self.geoinfo_idx]
-            if len(self.geoinfo_idx) > 0
-            else np.zeros((coords.shape[0], 0), np.float32)
-        )
+        if not time_only:
+            coords = self.data.oindex[start_row:end_row, self.coords_idx]
+            geoinfos = (
+                self.data.oindex[start_row:end_row, self.geoinfo_idx]
+                if len(self.geoinfo_idx) > 0
+                else np.zeros((coords.shape[0], 0), np.float32)
+            )
 
-        data = self.data.oindex[start_row:end_row, channels_idx]
+            data = self.data.oindex[start_row:end_row, channels_idx]
+
+        else:
+            data = np.empty((0, len(channels_idx)), dtype=np.float32)
+            geoinfos = np.empty((0, len(self.geoinfo_idx)), dtype=np.float32)
+            coords = np.empty((0, 2), dtype=np.float32)
+
         datetimes = self.dt[start_row:end_row][:, 0]
 
         # indices_start, indices_end above work with [t_start, t_end] and violate
@@ -296,6 +303,8 @@ class DataReaderObs(DataReaderBase):
         )
 
         dtr = self.time_window_handler.window(idx)
-        check_reader_data(rdata, dtr)
+
+        if not time_only:
+            check_reader_data(rdata, dtr)
 
         return rdata

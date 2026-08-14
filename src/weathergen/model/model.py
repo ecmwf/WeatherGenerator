@@ -1102,7 +1102,7 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
         chunk_idx = output.chunk_idx(step)
-        fstep_idx = output.fstep_idx(step)
+        fstep_idx = 1  # output.fstep_idx(step)
 
         # Empty dicts evaluate to False in python
         if not self.pred_heads:
@@ -1181,7 +1181,9 @@ class Model(torch.nn.Module):
                 # lens for varlen attention (replicate coords for ensemble members)
                 tcls = torch.cat(
                     [
-                        batch.samples[i_b % n_real].streams_data[stream_name].target_coords_lens[fstep_idx]
+                        batch.samples[i_b % n_real]
+                        .streams_data[stream_name]
+                        .target_coords_lens[fstep_idx]
                         for i_b in range(batch_size)
                     ]
                 )

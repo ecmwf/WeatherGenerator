@@ -111,7 +111,7 @@ def write_output(
             if t_idx < forecast_offset:
                 preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
 
-            elif not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+            if not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 preds = model_output.get_physical_prediction(chunk_idx, sname)
                 n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
                 preds_s, targets_s, t_coords_s, t_times_s = _empty_step(
@@ -136,11 +136,15 @@ def write_output(
                     t_times = target_data["target_times"][i_batch]
 
                     idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
-                    if idxs_inv is not None:
+                    if idxs_inv is not None and len(idxs_inv) > 0:
                         pred = pred[:, idxs_inv]
                         target = target[idxs_inv]
                         t_coords = t_coords[idxs_inv]
                         t_times = t_times[idxs_inv]
+
+                    if len(idxs_inv) == 0:
+                        target = torch.zeros((0, pred.shape[-1]), dtype=target.dtype)
+                        t_coords = torch.zeros((0, 2), dtype=torch.float32)
 
                     # denormalize data if requested and map to storage format
                     preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]

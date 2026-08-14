@@ -350,6 +350,40 @@ class StreamData:
 
         self.target_is_spoof[fstep] = is_spoof
 
+    def add_target_times(
+        self,
+        stage: Stage,
+        fstep: int,
+        times_raw: torch.Tensor,
+    ) -> None:
+        """
+        Add data for target for one input.
+
+        Parameters
+        ----------
+        fstep : int
+            forecast step
+        targets : torch.tensor( number of healpix cells )
+            [ torch.tensor( num tokens, channels) ]
+              Target data for loss computation
+        targets_lens : torch.tensor( number of healpix cells)
+            length of targets per cell
+        target_coords : list( number of healpix cells)
+            [ torch.tensor( points per cell, 105) ]
+              target coordinates
+        target_times : list( number of healpix cells)
+            [ torch.tensor( points per cell) ]
+              absolute target times
+        idxs_inv:
+            Indices to reorder targets back to order in input
+
+        Returns
+        -------
+        None
+        """
+
+        self.target_times_raw[fstep] = times_raw
+
     def target_empty(self) -> bool:
         """
         Test if target for stream is empty

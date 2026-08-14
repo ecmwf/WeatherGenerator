@@ -165,7 +165,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         return self.len
 
     @override
-    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+    def _get(self, idx: TIndex, channels_idx: list[int], time_only: bool = False) -> ReaderData:
         """
         Get data for window (for either source or target, through public interface)
 
@@ -193,36 +193,42 @@ class DataReaderAnemoi(DataReaderTimestep):
         # End is inclusive
         didx_end = t_idxs[-1] + 1
 
-        # extract number of time steps and collapse ensemble dimension
-        # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
-        # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
-        # sampling is required here
-        try:
-            data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
-        except MissingDateError as e:
-            _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
-            return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
-            )
+        if not time_only:
+            # extract number of time steps and collapse ensemble dimension
+            # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
+            # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
+            # sampling is required here
+            try:
+                data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
+            except MissingDateError as e:
+                _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
+                return ReaderData.empty(
+                    num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+                )
 
-        # coords-first representation and collapse multiple steps
-        data = data.transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
+            # coords-first representation and collapse multiple steps
+            data = data.transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
 
-        # extract geoinfo channels (can be time-varying, so read from dataset)
-        geoinfos = data[:, list(self.geoinfo_idx)]
-        # extract channels
-        data = data[:, list(channels_idx)]
+            # extract geoinfo channels (can be time-varying, so read from dataset)
+            geoinfos = data[:, list(self.geoinfo_idx)]
+            # extract channels
+            data = data[:, list(channels_idx)]
 
-        # construct lat/lon coords
-        latlon = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-            ],
-            axis=0,
-        ).transpose()
-        # repeat latlon len(t_idxs) times
-        coords = np.vstack((latlon,) * len(t_idxs))
+            # construct lat/lon coords
+            latlon = np.concatenate(
+                [
+                    np.expand_dims(self.latitudes, 0),
+                    np.expand_dims(self.longitudes, 0),
+                ],
+                axis=0,
+            ).transpose()
+            # repeat latlon len(t_idxs) times
+            coords = np.vstack((latlon,) * len(t_idxs))
+
+        else:
+            data = np.empty((0, len(channels_idx)), dtype=np.float32)
+            geoinfos = np.empty((0, len(self.geoinfo_idx)), dtype=np.float32)
+            coords = np.empty((0, 2), dtype=np.float32)
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
@@ -234,7 +240,8 @@ class DataReaderAnemoi(DataReaderTimestep):
             data=data,
             datetimes=datetimes,
         )
-        check_reader_data(rd, dtr)
+        if not time_only:
+            check_reader_data(rd, dtr)
 
         return rd
 
