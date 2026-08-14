@@ -83,6 +83,7 @@ class IOState:
     offset: np.timedelta64 | None = (
         None  # fallback offset in hours for init_time when source_interval is missing
     )
+    anemoi_target_cfg: dict | None = None  # if set, read targets from anemoi dataset
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +255,7 @@ def _build_io_state(
     n_io_workers: int,
     ens_select: EnsembleSelect,
     rank: str = "",
+    inference_cfg: dict | None = None,
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -278,6 +280,19 @@ def _build_io_state(
     if isinstance(regrid_opts, bool) and regrid_opts:
         regrid_opts = {"target_grid": [1.5, 1.5]}
 
+    # ---- Resolve anemoi target config from inference config ----
+    anemoi_target_cfg = None
+    if inference_cfg:
+        stream_info = inference_cfg.get("streams", {}).get(stream, {})
+        if stream_info.get("type") in ("anemoi", "anemoi_operan") and stream_info.get("filenames"):
+            data_path = inference_cfg.get("data_path_anemoi", "")
+            filename = str(Path(data_path) / stream_info["filenames"][0])
+            anemoi_target_cfg = {
+                "filename": filename,
+                "channels": stream_info.get("val_target_channels", []),
+            }
+            _logger.info(f"Anemoi target source: {filename}")
+
     return IOState(
         run_id=run_id,
         zarr_path=zarr_path,
@@ -295,10 +310,11 @@ def _build_io_state(
         coords=coords,
         lat=lat,
         lon=lon,
-        n_workers=n_io_workers,
+        n_workers=min(n_io_workers, 20) if anemoi_target_cfg is not None else n_io_workers,
         rank=rank,
         offset=offset,
         regrid_opts=regrid_opts,
+        anemoi_target_cfg=anemoi_target_cfg,
     )
 
 
@@ -315,6 +331,7 @@ def _parallel_read(
     backend: str,
     label: str,
     regrid_opts: dict,
+    anemoi_target_cfg: dict | None = None,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -333,6 +350,7 @@ def _parallel_read(
         read_coords=need_coords,
         is_gridded=is_gridded,
         regrid_opts=regrid_opts,
+        anemoi_target_cfg=anemoi_target_cfg,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -550,6 +568,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
             regrid_opts=state.regrid_opts,
+            anemoi_target_cfg=state.anemoi_target_cfg,
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
@@ -583,7 +602,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
 
         del results
 
-    if n_workers > 1:
+    if n_workers > 1 and state.backend == "loky":
         get_reusable_executor().shutdown(wait=True)
 
     _logger.info(
@@ -623,6 +642,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
         regrid_opts=state.regrid_opts,
+        anemoi_target_cfg=state.anemoi_target_cfg,
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
@@ -635,6 +655,11 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         backend=state.backend,
         desc=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} (ZipStore)",
         verbose=5,
+    )
+
+    _logger.info(
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
+        f"dispatch_parallel returned {len(flat_results)} results. Assembling..."
     )
 
     # --- Re-group: flat_results[sample_idx * n_fsteps + fstep_idx] --------
@@ -694,7 +719,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
 
     del flat_results
 
-    if state.n_workers > 1:
+    if state.n_workers > 1 and state.backend == "loky":
         get_reusable_executor().shutdown(wait=True)
 
     _logger.info(
