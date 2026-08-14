@@ -84,7 +84,6 @@ class CsvReader(Reader):
         self.samples = [0]
         self.forecast_steps = sorted(self.data["step"].dropna().unique().tolist())
         self.epoch = [0]
-        self.ensemble = [0]
 
     def get_samples(self) -> set[int]:
         """
@@ -124,10 +123,6 @@ class CsvReader(Reader):
         """
         assert stream == self.stream, "streams do not match in CSVReader."
         return list(self.channels)  # Placeholder implementation
-
-    def get_ensemble(self, stream: str | None = None) -> list[str]:
-        """Get ensembles for a given stream."""
-        return self.ensemble  # Placeholder implementation
 
     def get_values(
         self, region: str, metric: str, forecast_steps: list[int], channels: list[str]

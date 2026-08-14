@@ -40,7 +40,6 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from scipy.interpolate import griddata
 
 _logger = logging.getLogger(__name__)
 
@@ -524,7 +523,6 @@ def fft_psd(
     lats: np.typing.NDArray,
     lons: np.typing.NDArray,
     lat_range: tuple[float, float] = (-60.0, 60.0),
-    regrid_resolution: float = 1.0,
 ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
     """Compute PSD using 1-D zonal FFT along the longitude dimension.
 
@@ -545,8 +543,6 @@ def fft_psd(
         Longitude values (per-point), length ``n_points``.
     lat_range : tuple[float, float]
         Latitude bounds to restrict the computation to.
-    regrid_resolution : float
-        Grid spacing in degrees for the regular target grid.
 
     Returns
     -------
@@ -555,6 +551,11 @@ def fft_psd(
     psd : np.typing.NDArray
         Power spectral density averaged over samples and latitude rows,
         shape ``(nfreq,)``.
+
+    Raises
+    ------
+    ValueError
+        If the input grid is not a regular lat-lon grid.
     """
 
     # Ensure 2-D: (n_samples, n_points)
@@ -563,35 +564,24 @@ def fft_psd(
 
     n_samples, n_points = data.shape
 
-    # Determine if the grid is regular or unstructured
+    # Verify the grid is regular
     unique_lats = np.unique(lats)
     unique_lons = np.unique(lons)
-    is_regular = len(unique_lats) * len(unique_lons) == n_points
+    nlat, nlon = len(unique_lats), len(unique_lons)
 
-    if is_regular and len(lats) == len(unique_lats):
-        # lats/lons are axis arrays for a regular grid
-        lat_axis = unique_lats
-        lon_axis = unique_lons
-        nlat, nlon = len(lat_axis), len(lon_axis)
-        data_3d = data.reshape(n_samples, nlat, nlon)
-    else:
-        # Unstructured grid — regrid to regular lat-lon
-        lat_min = max(lat_range[0], lats.min())
-        lat_max = min(lat_range[1], lats.max())
-        lon_min, lon_max = lons.min(), lons.max()
+    if nlat * nlon != n_points:
+        raise ValueError(
+            f"FFT PSD requires a regular lat-lon grid, but got {n_points} points "
+            f"with {nlat} unique latitudes and {nlon} unique longitudes "
+            f"(expected {nlat}×{nlon} = {nlat * nlon}). "
+            f"Use psd_method='sht' for non-regular grids."
+        )
 
-        lat_axis = np.arange(lat_min, lat_max + regrid_resolution / 2, regrid_resolution)
-        lon_axis = np.arange(lon_min, lon_max + regrid_resolution / 2, regrid_resolution)
-        nlat, nlon = len(lat_axis), len(lon_axis)
-
-        grid_lon, grid_lat = np.meshgrid(lon_axis, lat_axis)
-        points = np.column_stack((lats, lons))
-
-        data_3d = np.empty((n_samples, nlat, nlon))
-        for s in range(n_samples):
-            data_3d[s] = griddata(points, data[s], (grid_lat, grid_lon), method="nearest")
+    # Reshape to (n_samples, nlat, nlon) — points are assumed ordered lat-major
+    data_3d = data.reshape(n_samples, nlat, nlon)
 
     # Apply latitude mask
+    lat_axis = unique_lats
     lat_mask = (lat_axis >= lat_range[0]) & (lat_axis <= lat_range[1])
     data_3d = data_3d[:, lat_mask, :]
     nlon_sub = data_3d.shape[2]
@@ -602,7 +592,7 @@ def fft_psd(
         psds.append(_cubepsd(data_3d[s]))
     psd_result = np.mean(psds, axis=0)
 
-    spacing = 360.0 / nlon_sub if nlon_sub > 0 else regrid_resolution
+    spacing = 360.0 / nlon_sub if nlon_sub > 0 else 1.0
     frequencies = _calcposfreq(nlon_sub, spacing_deg=spacing)
     return frequencies, psd_result
 
@@ -619,7 +609,6 @@ def compute_psd_for_field(
     lats: np.typing.NDArray | None = None,
     lons: np.typing.NDArray | None = None,
     lat_range: tuple[float, float] = (-60.0, 60.0),
-    regrid_resolution: float = 1.0,
     sht_truncation: int | None = None,
     grid_type: str = "octahedral",
 ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
@@ -637,8 +626,6 @@ def compute_psd_for_field(
         Latitude / longitude coordinate arrays (required for fft method).
     lat_range : tuple[float, float]
         Latitude bounds for the fft method.
-    regrid_resolution : float
-        Grid spacing in degrees for the fft method.
     sht_truncation : int | None
         Spectral truncation for SHT.
     grid_type : str
@@ -668,7 +655,6 @@ def compute_psd_for_field(
             lats=lats,
             lons=lons,
             lat_range=lat_range,
-            regrid_resolution=regrid_resolution,
         )
     else:
         raise ValueError(f"Unknown PSD method: {method!r}. Use 'sht' or 'fft'.")
@@ -682,7 +668,6 @@ def compute_psd_score(
     nlat: int | None,
     n_points: int,
     psd_method: str = "sht",
-    psd_regrid_resolution: float = 1.0,
     psd_sht_truncation: int | None = None,
     lat_range: tuple[float, float] = (-60.0, 60.0),
     grid_type: str | None = None,
@@ -705,8 +690,6 @@ def compute_psd_score(
         Original number of spatial points (before NaN masking).
     psd_method : str
         ``"sht"`` or ``"fft"``.
-    psd_regrid_resolution : float
-        Grid spacing for fft method.
     psd_sht_truncation : int | None
         Spectral truncation for SHT.
     lat_range : tuple[float, float]
@@ -766,7 +749,6 @@ def compute_psd_score(
             lats=lats_valid,
             lons=lons_valid,
             lat_range=lat_range,
-            regrid_resolution=psd_regrid_resolution,
             sht_truncation=psd_sht_truncation,
             grid_type=grid_type,
         )
@@ -777,7 +759,6 @@ def compute_psd_score(
             lats=lats_valid,
             lons=lons_valid,
             lat_range=lat_range,
-            regrid_resolution=psd_regrid_resolution,
             sht_truncation=psd_sht_truncation,
             grid_type=grid_type,
         )

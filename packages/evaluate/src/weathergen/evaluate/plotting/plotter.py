@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
-import fnmatch
 import logging
 import os
 import warnings
@@ -138,6 +137,7 @@ class Plotter:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
+        self.log_colorbar = plotter_cfg.get("log_colorbar", False)
         self.regions = plotter_cfg.get("regions")
         self.log_x = plotter_cfg.get("log_x", False)
         self.log_y = plotter_cfg.get("log_y", False)
@@ -517,8 +517,8 @@ class Plotter:
         """
         self.update_data_selection(select)
 
-        # copy stream plotting options, not specific to any variable
-        map_kwargs_stream = {
+        # copy global plotting options, not specific to any variable
+        map_kwargs_global = {
             key: value
             for key, value in (map_kwargs or {}).items()
             if not isinstance(value, oc.DictConfig)
@@ -574,7 +574,7 @@ class Plotter:
                         var,
                         region,
                         tag=tag,
-                        map_kwargs=self._match_glob_kwargs(map_kwargs, var) | map_kwargs_stream,
+                        map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
                         title=self.get_map_title(var, valid_time, da_t),
                     )
                     plot_names.append(name)
@@ -582,39 +582,6 @@ class Plotter:
         self.clean_data_selection()
 
         return plot_names
-
-    # glob pattern resolution
-    @staticmethod
-    def _match_glob_kwargs(map_kwargs: dict | None, var: str) -> dict:
-        """Resolve variable-specific plotting options, supporting exact and glob keys.
-
-        Keys under a stream section may be either:
-          - an exact channel name, e.g. "tp_imerg_0"
-          - a glob pattern containing one of ``* ? [ ]``, e.g. "tp_*"
-
-        All matching glob patterns are merged first (in config order), then the
-        exact channel key is merged on top, so an exact key overrides glob
-        values on key conflicts while non-conflicting keys from both are kept.
-        """
-        if map_kwargs is None:
-            return {}
-
-        resolved: dict = {}
-
-        # merge glob/pattern keys
-        for key, value in map_kwargs.items():
-            if not isinstance(value, oc.DictConfig | dict):
-                continue
-            k = str(key)
-            if any(ch in k for ch in "*?[]") and fnmatch.fnmatch(var, k):
-                resolved |= dict(value)
-
-        # override with exact key if present
-        exact = map_kwargs.get(var)
-        if isinstance(exact, oc.DictConfig | dict):
-            resolved |= dict(exact)
-
-        return resolved
 
     # map_kwargs parsing
     @staticmethod
@@ -627,9 +594,9 @@ class Plotter:
         ----------
         map_kwargs : dict or None
             Raw keyword arguments from the caller. Known keys (``marker_size``,
-            ``scale_marker_size``, ``marker``, ``vmin``, ``vmax``, ``colormap``,``colors``,
-            ``use_datashader``, ``levels``, ``colorbar_scale`` and HEALPix-related keys) are
-            extracted; remaining keys are collected under ``"extra"``.
+            ``scale_marker_size``, ``marker``, ``vmin``, ``vmax``, ``colormap``,
+            ``use_datashader``, ``levels``, and HEALPix-related keys) are extracted;
+            remaining keys are collected under ``"extra"``.
         stream : str or None
             Stream name used to look up the default marker size when
             ``marker_size`` is not provided in *map_kwargs*.
@@ -643,7 +610,6 @@ class Plotter:
                 - marker (str)
                 - vmin, vmax (float or None)
                 - cmap (matplotlib.colors.Colormap)
-                - colors (list or None)
                 - use_datashader (bool)
                 - norm (matplotlib.colors.Normalize or BoundaryNorm)
                 - add_healpix_grid (bool) and related healpix_* keys
@@ -659,11 +625,9 @@ class Plotter:
             "marker": kw.pop("marker", "o"),
             "vmin": kw.pop("vmin", None),
             "vmax": kw.pop("vmax", None),
-            "cmap": kw.pop("colormap", "coolwarm"),
-            "colors": kw.pop("colors", None),
+            "cmap": plt.get_cmap(kw.pop("colormap", "coolwarm")),
             "use_datashader": kw.pop("use_datashader", False),
             "levels": kw.pop("levels", None),
-            "colorbar_scale": kw.pop("colorbar_scale", "linear"),
             # HEALPix grid
             "add_healpix_grid": kw.pop("add_healpix_grid", False),
             "healpix_nside": kw.pop("healpix_nside", 4),
@@ -675,82 +639,6 @@ class Plotter:
 
         parsed["extra"] = kw  # remaining kwargs forwarded to scatter
         return parsed
-
-    @staticmethod
-    def _resolve_cmap(opts: dict, tag: str) -> mpl.colors.Colormap:
-        """Resolve the colormap for the plot.
-
-        Parameters
-        ----------
-        opts : dict
-            Parsed map kwargs from ``_parse_map_kwargs``.
-        tag : str
-            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``).
-
-        Returns
-        -------
-        matplotlib.colors.Colormap
-            The resolved colormap.
-        """
-
-        # Bias maps always use coolwarm for visual consistency (overrides config)
-        if str(tag).startswith("bias"):
-            return plt.get_cmap("coolwarm")
-        # Explicit colors take precedence over colormap
-        elif isinstance(opts["colors"], oc.listconfig.ListConfig):
-            return mpl.colors.ListedColormap(list(opts["colors"]))
-        # Otherwise use the specified colormap (default "coolwarm")
-        else:
-            return plt.get_cmap(opts["cmap"])
-
-    @staticmethod
-    def _resolve_norm(opts: dict, tag: str) -> mpl.colors.Normalize:
-        """Resolve the colorbar scale and build color normalisation.
-
-        Parameters
-        ----------
-        opts : dict
-            Parsed map kwargs from ``_parse_map_kwargs``.
-        tag : str
-            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``).
-
-        Returns
-        -------
-        matplotlib.colors.Normalize
-            LogNorm, SymLogNorm, BoundaryNorm or linear Normalize.
-        """
-
-        is_bias = str(tag).startswith("bias")
-        vmin, vmax = opts["vmin"], opts["vmax"]
-
-        scale = opts["colorbar_scale"]
-        if scale not in {"linear", "log", "symlog"}:
-            _logger.warning("Unknown colorbar_scale=%r. Falling back to linear.", scale)
-            scale = "linear"
-
-        # Bias maps are always signed, use symlog instead of plain log
-        if scale != "linear" and is_bias:
-            scale = "symlog"
-
-        # Explicit levels override continuous norm (preds/targets only)
-        if isinstance(opts["levels"], oc.listconfig.ListConfig) and not is_bias:
-            return mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
-
-        if scale == "log" and vmin is not None and vmin > 0:
-            return mpl.colors.LogNorm(vmin=vmin, vmax=vmax)
-        elif scale == "log" and vmin is not None and vmin <= 0:
-            _logger.warning(
-                "colorbar_scale='log' but vmin=%.3g <= 0; falling back to linear norm.",
-                vmin,
-            )
-
-        # Symlog (default for bias maps with non-linear scale)
-        if scale == "symlog" and vmin is not None and vmax is not None:
-            vmax_abs = max(abs(float(vmin)), abs(float(vmax)))
-            linthresh = max(vmax_abs * 1e-3, 1e-8)
-            return mpl.colors.SymLogNorm(linthresh=linthresh, vmin=vmin, vmax=vmax)
-
-        return mpl.colors.Normalize(vmin=vmin, vmax=vmax, clip=False)
 
     # rendering backends
     @staticmethod
@@ -1021,9 +909,17 @@ class Plotter:
                 if opts["vmax"] is None:
                     opts["vmax"] = float(p_hi)
 
-        # resolve cmap and norm based on options and tag
-        opts["cmap"] = self._resolve_cmap(opts, tag)
-        opts["norm"] = self._resolve_norm(opts, tag)
+        if isinstance(opts["levels"], oc.listconfig.ListConfig):
+            opts["norm"] = mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
+        elif self.log_colorbar and opts["vmin"] is not None and opts["vmin"] > 0:
+            opts["norm"] = mpl.colors.LogNorm(vmin=opts["vmin"], vmax=opts["vmax"])
+        else:
+            if self.log_colorbar:
+                _logger.warning(
+                    "log_colorbar=True but vmin=%.3g <= 0; falling back to linear norm.",
+                    opts["vmin"],
+                )
+            opts["norm"] = mpl.colors.Normalize(vmin=opts["vmin"], vmax=opts["vmax"], clip=False)
 
         if regionname == "global":
             ax.set_global()
@@ -1040,7 +936,7 @@ class Plotter:
 
         # render points
         if opts["use_datashader"] and HAS_DATASHADER:
-            self._render_datashader(
+            artist = self._render_datashader(
                 ax, proj, data, opts["norm"], opts["cmap"], opts["marker_size_base"]
             )
         else:
@@ -1058,7 +954,7 @@ class Plotter:
                 lat=data["lat"],
             )
 
-            self._render_scatter(
+            artist = self._render_scatter(
                 ax, data, opts["norm"], opts["cmap"], marker_size, opts["marker"], opts["extra"]
             )
 
@@ -1076,7 +972,7 @@ class Plotter:
             ax.gridlines(draw_labels=False, linestyle="--", color="gray", linewidth=0.6, alpha=0.7)
 
         cbar = plt.colorbar(
-            mpl.cm.ScalarMappable(norm=opts["norm"], cmap=opts["cmap"]),
+            artist,
             ax=ax,
             fraction=0.03,
             pad=0.02,

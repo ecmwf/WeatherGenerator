@@ -267,9 +267,15 @@ class Regridder:
         pos = dims.index("ncells")
         dims[pos : pos + 1] = ["latitude", "longitude"]
         dims = tuple(dims)
-
+        ordered_dims = (
+            ["valid_time", "pressure", "latitude", "longitude"]
+            if len(dims) == 4
+            else ["valid_time", "latitude", "longitude"]
+        )
+        permutation_indices = [dims.index(o_dim) for o_dim in ordered_dims]
+        regridded_values = np.transpose(regridded_values, axes=permutation_indices)
         regrid_data = xr.DataArray(
-            data=regridded_values, dims=dims, coords=new_coords, attrs=attrs, name=data.name
+            data=regridded_values, dims=ordered_dims, coords=new_coords, attrs=attrs, name=data.name
         )
 
         return regrid_data
@@ -543,9 +549,7 @@ class Regridder:
             regrid_vars[var] = self.regrid_da(ds[var])
         regrid_ds = xr.Dataset(regrid_vars)
         regrid_ds = self.add_attrs(regrid_ds)
-        regrid_ds = regrid_ds.transpose(
-            "valid_time", "pressure", "latitude", "longitude", "mem", ..., missing_dims="ignore"
-        )
+
         return regrid_ds
 
     def regrid_da(self, da: xr.DataArray) -> xr.DataArray:

@@ -70,7 +70,7 @@ class NetcdfParser(CfParser):
         da_fs = []
 
         for result in fstep_iterator_results:
-            if result is None or (isinstance(result, xr.DataArray) and result.size == 0):
+            if result is None:
                 continue
 
             # result is already a materialized xarray DataArray (built in the worker).
@@ -139,25 +139,19 @@ class NetcdfParser(CfParser):
         # Original logic
         var_dict = find_pl(data.channel.values)
         data_vars = {}
-        # order of appending upoints should be ipoint, pressure_level, mem (if mem exists)
+
         for new_var, pls in var_dict.items():
-            data_dims = ["ipoint"]
             if pls[0] is not None:
-                data_dims.append("pressure_level")
-                if "mem" in data.dims:
-                    data_dims.append("mem")
                 old_vars = [f"{new_var}_{p}" for p in pls]
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
-                    dims=data_dims,
+                    dims=["ipoint", "pressure_level"],
                     coords={"pressure_level": pls},
                 )
             else:
-                if "mem" in data.dims:
-                    data_dims.append("mem")
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=new_var).values,
-                    dims=data_dims,
+                    dims=["ipoint"],
                 )
 
         reshaped_dataset = xr.Dataset(data_vars)
@@ -343,12 +337,7 @@ class NetcdfParser(CfParser):
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
         for var_name, da in ds.data_vars.items():
-            try:
-                mapped_info = self.mapping[var_name]
-            except KeyError as e:
-                raise KeyError(
-                    f"Variable '{var_name}' not found in mapping. Update relevant config."
-                ) from e
+            mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
@@ -386,12 +375,7 @@ class NetcdfParser(CfParser):
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
         dims_list = ["pressure", "valid_time", "latitude", "longitude"]
         for var_name, da in ds.data_vars.items():
-            try:
-                mapped_info = self.mapping[var_name]
-            except KeyError as e:
-                raise KeyError(
-                    f"Variable '{var_name}' not found in mapping. Update relevant config."
-                ) from e
+            mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
             dims = dims_list.copy()
             if mapped_info.get("level_type") == "sfc":
@@ -487,6 +471,7 @@ class NetcdfParser(CfParser):
                     f"Coordinate '{coord}' will be skipped for "
                     f"variable '{var_cfg.get('var', 'unknown')}'."
                 )
+
         return coords
 
     def _add_grid_attrs(self, ds: xr.Dataset, grid_info: dict | None = None) -> xr.Dataset:
