@@ -63,15 +63,8 @@ class QuaverParser(CfParser):
 
         self.encoder = ekd.create_encoder("grib")
 
-        # Open output files once for the lifetime of this parser.
-        # Using plain open() in "wb" mode so we own the file handle and
-        # field.to_target("file", fh) appends directly without earthkit
-        # ever reopening the path.
-        pl_path = self.get_output_filename("pl")
-        sfc_path = self.get_output_filename("sfc")
-        self.pl_file = open(pl_path, "wb")  # noqa: SIM115
-        self.sf_file = open(sfc_path, "wb")  # noqa: SIM115
-        _logger.info(f"Opened output files: {pl_path}, {sfc_path}")
+        self.pl_file = ekd.create_target("file", self.get_output_filename("pl"))
+        self.sf_file = ekd.create_target("file", self.get_output_filename("sfc"))
 
         self.template_cache = self.cache_templates()
 
@@ -81,7 +74,6 @@ class QuaverParser(CfParser):
         ref_time: np.datetime64,
         source_interval_start: np.datetime64 = None,
         source_interval_end: np.datetime64 = None,
-        **kwargs,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -103,6 +95,10 @@ class QuaverParser(CfParser):
                 result = result.as_xarray().squeeze()
             result = result.sel(channel=self.channels)
 
+            # Each zarr fstep may contain multiple hourly sub-steps
+            # concatenated along ipoint.  Split by unique valid_time so
+            # each GRIB message gets exactly one time step worth of grid
+            # points, with step = valid_time - source_interval_start.
             unique_times = np.unique(result.valid_time.values)
 
             for vt in unique_times:
@@ -140,12 +136,10 @@ class QuaverParser(CfParser):
                     field_list = pl_fields if level_type == "pl" else sf_fields
                     field_list.append(encoded.to_field())
 
-                for field in pl_fields:
-                    field.to_target("file", self.pl_file)
-                for field in sf_fields:
-                    field.to_target("file", self.sf_file)
+                self.save(pl_fields, "pl")
+                self.save(sf_fields, "sfc")
 
-        _logger.info(f"Saved sample to {self.output_format} in {self.output_dir}.")
+        _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
 
     def extract_var_info(self, var: str) -> tuple[str, str, str]:
         """
@@ -201,9 +195,11 @@ class QuaverParser(CfParser):
 
     def get_output_filename(self, level_type: str) -> Path:
         """
-        Generate output filename, including rank label when available.
+        Generate output filename.
         Parameters
         ----------
+            data_type : str
+                Type of data (e.g., 'prediction' or 'target').
             level_type : str
                 Level type (e.g., 'sfc', 'pl', etc.).
         Returns
@@ -211,11 +207,9 @@ class QuaverParser(CfParser):
             Path
                 Output filename as a Path object.
         """
-        rank_label = getattr(self, "rank_label", None)
-        rank_tag = f"_{rank_label}" if rank_label else ""
         return (
-            Path(self.output_dir) / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}"
-            f"{rank_tag}.{self.file_extension}"
+            Path(self.output_dir)
+            / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}.{self.file_extension}"
         )
 
     def assign_coords(self, data: xr.DataArray) -> xr.DataArray:
@@ -249,9 +243,8 @@ class QuaverParser(CfParser):
         Add metadata to the dataset attributes.
 
         The GRIB ``step`` is computed as ``valid_time - source_interval_end``
-        (in hours), i.e. the lead time relative to the forecast init time
-        (``source_interval_end`` is set to ``source_start`` by the caller,
-        the beginning of the conditioning window).
+        (in hours), i.e. the lead time relative to the end of the
+        conditioning window.
         """
         step_hours = int((valid_time - source_interval_end) / np.timedelta64(1, "h"))
 
@@ -265,14 +258,21 @@ class QuaverParser(CfParser):
             metadata["level"] = level
         return metadata
 
-    def close(self):
-        """Flush and close the output file handles."""
-        for fh in (self.pl_file, self.sf_file):
-            try:
-                fh.flush()
-                fh.close()
-            except Exception:
-                pass
+    def save(self, encoded_fields: list, level_type: str):
+        """
+        Save the dataset to a file.
+        Parameters
+        ----------
+            encoded_fields : List
+                List of encoded fields to write.
+            level_type : str
+                Level type ('pl' or 'sfc').
+        Returns
+        -------
+            None
+        """
 
-    def __del__(self):
-        self.close()
+        file = self.pl_file if level_type == "pl" else self.sf_file
+
+        for field in encoded_fields:
+            file.write(field)

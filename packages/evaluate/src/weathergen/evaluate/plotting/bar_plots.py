@@ -36,15 +36,11 @@ class BarPlots:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.cmap = plotter_cfg.get("cmap", "bwr")
-        self._base_dir = Path(output_basedir) / "bar_plots"
-        self.out_plot_dir = self._base_dir
+        self.out_plot_dir = Path(output_basedir) / "bar_plots"
         self.baseline = plotter_cfg.get("baseline")
-        os.makedirs(self.out_plot_dir, exist_ok=True)
-
-    def set_subdir(self, metric: str, region: str) -> None:
-        """Set a metric/region subdirectory for output."""
-        self.out_plot_dir = self._base_dir / metric / region
-        os.makedirs(self.out_plot_dir, exist_ok=True)
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
         self,

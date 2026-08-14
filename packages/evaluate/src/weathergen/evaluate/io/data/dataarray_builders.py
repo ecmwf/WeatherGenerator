@@ -15,33 +15,26 @@ Extracted here so that the reader module stays focused on I/O orchestration.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
-import earthkit.regrid.db as ekr_db
+import earthkit.regrid as ekr
 import numpy as np
 import xarray as xr
-from earthkit.data import from_source
 from earthkit.regrid.gridspec import GridSpec as EkGridSpec
 from numpy.typing import NDArray
-
-_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class EnsembleSelect:
     """Pre-resolved ensemble selection.
 
-    Use :meth:`mean` for the ensemble-mean sentinel,
-    :meth:`std` for the ensemble-standard-deviation sentinel,
-    or :meth:`from_names` to resolve requested member
-    names against the full list stored in zarr.
+    Use :meth:`mean` for the ensemble-mean sentinel, or :meth:`from_names`
+    to resolve requested member names against the full list stored in zarr.
     """
 
     labels: list[str]
     indices: list[int]
     is_mean: bool = False
-    is_std: bool = False
 
     # ------ factories ------
 
@@ -49,11 +42,6 @@ class EnsembleSelect:
     def mean(cls) -> EnsembleSelect:
         """Sentinel: average over the ensemble axis and drop it."""
         return cls(labels=[], indices=[], is_mean=True)
-
-    @classmethod
-    def std(cls) -> EnsembleSelect:
-        """Sentinel: standard deviation over the ensemble axis and drop it."""
-        return cls(labels=[], indices=[], is_std=True)
 
     @classmethod
     def from_names(
@@ -68,7 +56,6 @@ class EnsembleSelect:
         requested : list[str]
             Requested ensemble members (e.g. ``["ens0", "ens2"]``).
             Pass ``["mean"]`` to get the mean sentinel.
-            Pass ``["std"]`` to get the std sentinel.
         all_ens : list[str] | None
             All ensemble member names from the zarr store.
 
@@ -78,8 +65,6 @@ class EnsembleSelect:
         """
         if requested == ["mean"]:
             return cls.mean()
-        if requested == ["std"]:
-            return cls.std()
         if all_ens is not None:
             indices = [all_ens.index(e) for e in requested]
         else:
@@ -98,8 +83,7 @@ def build_gridded_dataarrays(
     init_times: NDArray,
     forecast_step_val: int,
     ens_select: EnsembleSelect,
-    regridder: Regridder | None = None,
-    run_id: str = "",
+    regrid_opts: dict,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Build DataArrays for gridded data by stacking samples along a new axis.
 
@@ -130,19 +114,18 @@ def build_gridded_dataarrays(
     ens_select : EnsembleSelect
         Pre-resolved ensemble selection (from :meth:`EnsembleSelect.from_names`).
         ``EnsembleSelect.mean()`` → mean; otherwise selects members.
-    regridder : Regridder | None
-        If provided, regrid each sample before stacking.  The Regridder
-        holds the grid options (original_grid, target_grid) internally.
+    regrid_opts : dict
+        Regrid each sample from its original grid to a regular
+        lat/lon grid before stacking.  Must contain 'target_grid' (e.g. [1.5, 1.5]).
+        Optionally 'original_grid' to skip auto-detection.
 
     Returns
     -------
     da_tar, da_pred : xr.DataArray
     """
     # Regrid each sample individually (correct n_ipoints per sub-step)
-    if regridder is not None:
-        tars_list, preds_list, lat, lon = regridder.regrid_dataarrays(
-            tars_list, preds_list, run_id=run_id
-        )
+    if regrid_opts:
+        tars_list, preds_list, lat, lon = regrid_dataarrays(tars_list, preds_list, regrid_opts)
 
     n_samples = len(samples)
     n_ipoints = tars_list[0].shape[0]
@@ -288,18 +271,7 @@ def build_scatter_dataarrays(
         )
         per_sample_preds.append(da_p)
 
-    # Promote scalar 'sample' to a per-ipoint coordinate before concatenation
-    # so that groupby("sample") works downstream.
-    for i, (da_t, da_p) in enumerate(zip(per_sample_tars, per_sample_preds, strict=False)):
-        if "sample" in da_t.coords and da_t.coords["sample"].ndim == 0:
-            sample_val = da_t.coords["sample"].item()
-            n_ip = da_t.sizes["ipoint"]
-            sample_arr = ("ipoint", np.full(n_ip, sample_val))
-            per_sample_tars[i] = da_t.drop_vars("sample").assign_coords(sample=sample_arr)
-            per_sample_preds[i] = da_p.drop_vars("sample").assign_coords(sample=sample_arr)
-
     # Concatenate along ipoint (like get_data() does for non-gridded)
-    # Keep behavior stable across xarray default changes.
     da_tar = xr.concat(per_sample_tars, dim="ipoint", coords="different", compat="equals")
     da_pred = xr.concat(per_sample_preds, dim="ipoint", coords="different", compat="equals")
 
@@ -346,9 +318,6 @@ def _build_dataarray(
         if ens_select is None or ens_select.is_mean:
             # Average over ensemble axis, drop ens coordinate
             data = data.mean(axis=-1)
-        elif ens_select.is_std:
-            # Std over ensemble axis, drop ens coordinate
-            data = data.std(axis=-1)
         else:
             idx = tuple([slice(None)] * n_base + [ens_select.indices])
             data = data[idx]
@@ -359,7 +328,7 @@ def _build_dataarray(
 
 
 # ---------------------------------------------------------------------------
-# Numpy-level regridding
+# Numpy-level regridding (called inside each worker)
 # ---------------------------------------------------------------------------
 
 
@@ -399,124 +368,84 @@ def _detect_grid(n_ipoints: int, regrid_opts: dict) -> str:
     return grid
 
 
-class Regridder:
+def _regrid_field(field_1d: NDArray, in_grid: dict, out_grid: dict) -> NDArray:
+    """Regrid a single 1D field and return the flattened result."""
+
+    result_2d = ekr.interpolate(field_1d, in_grid, out_grid)
+    return result_2d.ravel()
+
+
+def _regrid_array(data: NDArray, regrid_opts: dict) -> NDArray:
+    """Regrid a numpy array from a reduced Gaussian grid to a regular lat/lon grid.
+
+    Parameters
+    ----------
+    data : NDArray
+        Input array of shape ``(n_ipoints, n_channels)`` or
+        ``(n_ipoints, n_channels, n_ens)``.
+    regrid_opts : dict
+        Must contain 'target_grid' (e.g. [1.5, 1.5]).  Optionally
+        'original_grid' to skip auto-detection.
+
+    Returns
+    -------
+    NDArray
+        Regridded array of shape ``(n_lat * n_lon, n_channels[, n_ens])``.
     """
-    Caches sparse interpolation matrices and applies them to numpy arrays.
-    Different streams may have different grids — the cache handles them all.
-    """
+    n_ipoints = data.shape[0]
+    original_grid = regrid_opts.get("original_grid")
+    if original_grid is None:
+        original_grid = _detect_grid(n_ipoints, regrid_opts)
+    target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
+    if not isinstance(target_grid, str):
+        target_grid = list(target_grid)  # earthkit.regrid requires a plain list, not numpy array
 
-    def __init__(self, regrid_opts: dict) -> None:
-        self._regrid_opts = regrid_opts
-        self._target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
-        if not isinstance(self._target_grid, str):
-            self._target_grid = list(self._target_grid)
-        self._matrices: dict[tuple[str, str], tuple] = {}
-        self._coords: dict[str, tuple[NDArray, NDArray]] = {}
-        self._logged: set[str] = set()
+    in_grid = {"grid": original_grid}
+    out_grid = {"grid": target_grid}
 
-    def _get_matrix(self, original_grid: str, target_grid: list | str):
-        """Load or retrieve the cached interpolation matrix."""
-
-        cache_key = (str(original_grid), str(target_grid))
-        if cache_key not in self._matrices:
-            in_grid = {"grid": original_grid}
-            out_grid = {"grid": target_grid}
-            matrix, out_shape = ekr_db.find(in_grid, out_grid, "linear")
-            if matrix is None:
-                raise ValueError(
-                    f"No interpolation matrix found for {in_grid} -> {out_grid}. "
-                    f"Check that the grid combination is supported by earthkit-regrid."
-                )
-            self._matrices[cache_key] = (matrix, out_shape)
-        return self._matrices[cache_key]
-
-    def regrid_array(self, data: NDArray) -> NDArray:
-        """Regrid a numpy array using a cached sparse matrix.
-
-        Parameters
-        ----------
-        data : NDArray
-            Input array of shape ``(n_ipoints, n_channels)`` or
-            ``(n_ipoints, n_channels, n_ens)``.
-
-        Returns
-        -------
-        NDArray
-            Regridded array of shape ``(n_lat * n_lon, n_channels[, n_ens])``.
-        """
-        n_ipoints = data.shape[0]
-        original_grid = _detect_grid(n_ipoints, self._regrid_opts)
-
-        matrix, _ = self._get_matrix(original_grid, self._target_grid)
-
-        if data.ndim == 2:
-            return matrix.dot(data)
-        if data.ndim == 3:
-            n_channels, n_ens = data.shape[1], data.shape[2]
-            flat = data.reshape(n_ipoints, n_channels * n_ens)
-            regridded = matrix.dot(flat)
-            return regridded.reshape(-1, n_channels, n_ens)
+    if data.ndim == 2:
+        # (n_ipoints, n_channels)
+        n_channels = data.shape[1]
+        cols = [_regrid_field(data[:, ch], in_grid, out_grid) for ch in range(n_channels)]
+        out = np.column_stack(cols)
+    elif data.ndim == 3:
+        # (n_ipoints, n_channels, n_ens)
+        n_channels, n_ens = data.shape[1], data.shape[2]
+        slices = [
+            [_regrid_field(data[:, ch, e], in_grid, out_grid) for e in range(n_ens)]
+            for ch in range(n_channels)
+        ]
+        out = np.stack([np.column_stack(s) for s in slices], axis=1)
+    else:
         raise ValueError(f"Unexpected data shape for regridding: {data.shape}")
 
-    def _get_output_coords(self, target_grid, out_shape) -> tuple[NDArray, NDArray]:
-        """Compute (or retrieve cached) output lat/lon for the target grid.
+    return out
 
-        Supports regular lat-lon grids (target_grid as list, e.g. [1.5, 1.5])
-        and named grids (target_grid as string, e.g. "O96", "N320").
-        """
-        key = str(target_grid)
-        if key not in self._coords:
-            if isinstance(target_grid, str):
-                # Named grid — use earthkit-data to enumerate grid points
-                ds = from_source("empty", {"grid": target_grid})
-                lat = np.asarray(ds[0].metadata("latitudes"))
-                lon = np.asarray(ds[0].metadata("longitudes"))
-            else:
-                # Regular lat-lon grid [dy, dx]
-                out_spec = {"grid": list(target_grid)}
-                gs = EkGridSpec.from_dict(out_spec)
-                ymax, xmin, ymin, xmax = gs["area"]
-                n_lat, n_lon = out_shape
-                lat_1d = np.linspace(ymin, ymax, n_lat)
-                lon_1d = np.linspace(xmin, xmax, n_lon)
-                lat_grid, lon_grid = np.meshgrid(lat_1d, lon_1d, indexing="ij")
-                lat = lat_grid.ravel()
-                lon = lon_grid.ravel()
-            self._coords[key] = (lat, lon)
-        return self._coords[key]
 
-    def regrid_dataarrays(self, tars_list, preds_list, run_id: str = ""):
-        """Regrid lists of target/prediction arrays and compute output lat/lon.
+def regrid_dataarrays(tars_list, preds_list, regrid_opts):
+    """Regrid each sample in tars_list and preds_list according to regrid_opts."""
 
-        Logs the regridding info once per *run_id*.
+    tars_list = [_regrid_array(t, regrid_opts) for t in tars_list]
+    preds_list = [_regrid_array(p, regrid_opts) for p in preds_list]
 
-        Returns
-        -------
-        tars_list, preds_list, lat, lon
-        """
+    target_grid = (
+        regrid_opts.get("target_grid", [1.5, 1.5]) if isinstance(regrid_opts, dict) else [1.5, 1.5]
+    )
 
-        shape_before = tars_list[0].shape
+    # TODO: improve this. Now it works only for regular lat-lon grids
+    out_spec = {}
+    out_spec["grid"] = list(target_grid)
+    # Only keep keys relevant to the output grid spec
+    gs = EkGridSpec.from_dict(out_spec)
+    ymax, xmin, ymin, xmax = gs["area"]
+    dy, dx = gs["grid"]
+    n_lat_out = round((ymax - ymin) / dy) + 1
+    n_lon_out = round((xmax - xmin) / dx) + 1
 
-        tars_list = [self.regrid_array(t) for t in tars_list]
-        preds_list = [self.regrid_array(p) for p in preds_list]
+    lat_1d = np.linspace(ymin, ymax, n_lat_out)
+    lon_1d = np.linspace(xmin, xmax, n_lon_out)
+    lat_grid, lon_grid = np.meshgrid(lat_1d, lon_1d, indexing="ij")
+    lat = lat_grid.ravel()
+    lon = lon_grid.ravel()
 
-        shape_after = tars_list[0].shape
-
-        if run_id and run_id not in self._logged:
-            target_grid_str = (
-                list(self._target_grid)
-                if not isinstance(self._target_grid, str)
-                else self._target_grid
-            )
-            _logger.info(
-                f"[{run_id}] Regridding: {shape_before} -> {shape_after} "
-                f"(target_grid={target_grid_str})"
-            )
-            self._logged.add(run_id)
-
-        # Resolve output coordinates (cached per target_grid)
-        original_grid = _detect_grid(shape_before[0], self._regrid_opts)
-        _, out_shape = self._get_matrix(original_grid, self._target_grid)
-        lat, lon = self._get_output_coords(self._target_grid, out_shape)
-
-        return tars_list, preds_list, lat, lon
+    return tars_list, preds_list, lat, lon
