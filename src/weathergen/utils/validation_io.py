@@ -111,7 +111,7 @@ def write_output(
             if t_idx < forecast_offset:
                 preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
 
-            if not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+            elif not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 preds = model_output.get_physical_prediction(chunk_idx, sname)
                 n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
                 preds_s, targets_s, t_coords_s, t_times_s = _empty_step(
