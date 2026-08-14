@@ -843,10 +843,12 @@ def psd_plot_metric_region(
 
                 label = runs[run_id].get("label", run_id)
 
+                per_fstep_datasets = {}
                 for fstep in attr_fsteps:
                     psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
                     if psd_datasets is None:
                         continue
+                    per_fstep_datasets[fstep] = psd_datasets[0]
 
                     method_tag = psd_datasets[0].get("psd_method", "sht")
                     name = create_filename(
@@ -860,6 +862,22 @@ def psd_plot_metric_region(
                         tag=name,
                         variable=ch,
                         forecast_step=str(fstep),
+                    )
+
+                if len(per_fstep_datasets) >= 2:
+                    method_tag = next(iter(per_fstep_datasets.values())).get(
+                        "psd_method", "sht"
+                    )
+                    evo_name = create_filename(
+                        prefix=[metric, method_tag, region],
+                        middle=[run_id],
+                        suffix=[stream, ch, "evolution"],
+                    )
+                    plotter.psd_evolution_plot(
+                        per_fstep_datasets,
+                        tag=evo_name,
+                        variable=ch,
+                        label=label,
                     )
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
