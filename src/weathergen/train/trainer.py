@@ -310,7 +310,7 @@ class Trainer(TrainerBase):
             name for name, loss_cfg in mode_cfg.losses.items()
             if loss_cfg.type == "LossPhysical"
         ]
-        assert len(physical_loss_names) == 1, (
+        assert len(physical_loss_names) == 1 or chunk_size == len(output_idxs), (
             "Chunked non-full validation requires one LossPhysical term."
         )
 
