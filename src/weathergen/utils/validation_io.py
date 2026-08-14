@@ -64,12 +64,11 @@ def write_output(
     assert len(batch.get_output_idxs()) > 0, "Batch carries no output steps."
     forecast_offset = batch.get_output_idxs()[0]
 
-    # The chunk's ModelOutput includes a leading padding range [0..forecast_offset) so
-    # that slot indices equal global forecast step numbers.  When writing to zarr we must
-    # only emit the steps that this chunk actually computed, i.e. steps >= the chunk's own
-    # forecast_offset (stored on the ModelOutput), not the batch's global offset.
-    chunk_forecast_offset = model_output.forecast_offset
-    timestep_idxs = [s for s in model_output.forecast_steps if s >= chunk_forecast_offset]
+    # The first output chunk includes leading padding steps [0..forecast_offset). They have
+    # no target or prediction, but step 0 must be emitted: it contains the source data and
+    # lets ZarrIO infer the forecast offset. The loop below writes empty target/prediction
+    # slots for these padding steps.
+    timestep_idxs = list(model_output.forecast_steps)
 
     n_samples = len(batch.get_source_samples().get_samples())
 
