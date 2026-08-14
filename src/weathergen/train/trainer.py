@@ -317,7 +317,7 @@ class Trainer(TrainerBase):
         physical, latent = [], []
         forecast_chunk = batch.get_source_samples()
        
-        if compute_full_loss:
+        if not compute_full_loss:
             target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
         
         for chunk_idx, chunk in enumerate(chunks):
@@ -338,7 +338,7 @@ class Trainer(TrainerBase):
                 )
 
             if should_write_output:
-                if compute_full_loss:
+                if not compute_full_loss:
                     target_aux = targets_and_auxs[physical_loss_names[0]]
                     target_aux_chunk.physical = [None for _ in range(chunk[0])] + [target_aux.physical[step] for step in chunk]
                     target_aux_chunk.output_idxs = chunk
