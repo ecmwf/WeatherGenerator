@@ -17,6 +17,7 @@ from decimal import Decimal
 from math import sqrt
 
 import numpy as np
+import numpy.typing as npt
 import torch
 import tqdm
 from omegaconf import OmegaConf
@@ -106,6 +107,89 @@ def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
         # keep the dataclass internally consistent in case other consumers read it.
         if t_aux.output_idxs is not None and len(t_aux.output_idxs) == n_tgt:
             t_aux.output_idxs = [t_aux.output_idxs[i // repeat] for i in range(n_pred)]
+
+
+def _output_chunk_steps(batch, chunk: list[int]) -> list[int]:
+    """Forecast steps whose target coordinates have to be resident for one chunk.
+
+    A stream that repeats its target coordinates only ever holds the step it was read at
+    and reuses that tensor for the whole rollout, so that step has to stay on device for
+    every chunk. Streams that keep per-step coordinates just need the chunk's own steps.
+    """
+
+    steps = set(chunk)
+    for sample in batch.get_source_samples().get_samples():
+        for stream_data in sample.streams_data.values():
+            if stream_data is None:
+                continue
+            meta = getattr(stream_data, "time_geoinfo", None)
+            if meta is not None:
+                steps.add(meta.reference_step)
+
+    return sorted(steps)
+
+
+def _repeat_step_metadata(batch) -> dict[str, tuple[int, npt.NDArray[np.datetime64]]]:
+    """Reference step and per-step valid times of every stream that repeats coordinates."""
+
+    meta: dict[str, tuple[int, npt.NDArray[np.datetime64]]] = {}
+    for sample in batch.get_source_samples().get_samples():
+        for stream_name, stream_data in sample.streams_data.items():
+            if stream_data is None or stream_name in meta:
+                continue
+            tgi = getattr(stream_data, "time_geoinfo", None)
+            if tgi is not None:
+                meta[stream_name] = (tgi.reference_step, tgi.valid_times)
+
+    return meta
+
+
+def _derive_repeated_target(reference: dict, step: int, ref_step: int, valid_times) -> dict:
+    """Target entry for a forecast step whose ground truth was never read.
+
+    A ``repeat_steps`` stream reads the target window once, so only the reference step has
+    targets, coordinates and times. The decoder still predicts at every step, and those
+    predictions are written at the reference step's coordinates -- that is exactly what
+    repeating the coordinates asserts. This rebuilds the surrounding metadata for a later
+    step so the writer sizes and orders the output the same way it does at the reference
+    step: same coordinates, same inverse permutation, times shifted by the lead time, and
+    NaN in place of the ground truth that was deliberately not read.
+    """
+
+    shift = np.timedelta64(valid_times[step] - valid_times[ref_step])
+
+    derived = dict(reference)
+    derived["target"] = [torch.full_like(t, float("nan")) for t in reference["target"]]
+    derived["target_times"] = [t + shift for t in reference["target_times"]]
+
+    return derived
+
+
+def _fill_repeated_targets(
+    physical: list, step: int, repeat_meta: dict[str, tuple[int, npt.NDArray[np.datetime64]]]
+) -> dict:
+    """Substitute derived targets for repeating streams at non-reference forecast steps.
+
+    Streams that read every step keep their own entry untouched.
+    """
+
+    entry = physical[step]
+    if entry is None or not repeat_meta:
+        return entry
+
+    filled = dict(entry)
+    for stream_name, (ref_step, valid_times) in repeat_meta.items():
+        if stream_name not in entry or step == ref_step:
+            continue
+        reference = physical[ref_step].get(stream_name) if physical[ref_step] else None
+        if reference is None or len(reference["target"]) == 0:
+            continue
+        # a step that carries real targets is left alone; only the empty ones are filled
+        if any(t.shape[0] > 0 for t in entry[stream_name]["target"]):
+            continue
+        filled[stream_name] = _derive_repeated_target(reference, step, ref_step, valid_times)
+
+    return filled
 
 
 class Trainer(TrainerBase):
@@ -291,7 +375,6 @@ class Trainer(TrainerBase):
         chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
-        # This assumes that you only have a physical loss, else this breaks
         compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
         should_write_output = not is_diffusion and bidx < num_samples_write
         if should_write_output:
@@ -306,23 +389,52 @@ class Trainer(TrainerBase):
                     "Configure validation losses or set output.num_samples=0."
                 )
 
+        # Splitting the targets per chunk, and reducing them to the last chunk when the
+        # full loss is skipped, both address a single physical target. A validation that
+        # does neither (one chunk, full loss) never touches them, so configurations with
+        # no LossPhysical at all -- pure SSL/JEPA -- must still be able to validate.
         physical_loss_names = [
             name for name, loss_cfg in mode_cfg.losses.items() if loss_cfg.type == "LossPhysical"
         ]
-        assert len(physical_loss_names) == 1, (
-            "Chunked non-full validation requires one LossPhysical term."
-        )
+        split_targets_per_chunk = should_write_output and len(chunks) > 1
+        needs_single_physical = split_targets_per_chunk or not compute_full_loss
+
+        target_aux = None
+        target_aux_chunk = None
+        if needs_single_physical:
+            if len(physical_loss_names) != 1:
+                reason = (
+                    "writing output for a rollout split into chunks"
+                    if split_targets_per_chunk
+                    else "compute_full_validation_loss: False"
+                )
+                raise ValueError(
+                    f"{reason} requires exactly one LossPhysical term in the validation "
+                    f"losses, found {len(physical_loss_names)}: {physical_loss_names}. "
+                    "Either configure a single LossPhysical, set forecast.chunk_size to "
+                    "cover the whole rollout, or enable compute_full_validation_loss."
+                )
+            target_aux = targets_and_auxs[physical_loss_names[0]]
+            # only copied when the per-chunk views below actually need to diverge from
+            # the batch-wide targets; it is a full copy of the target tensors
+            target_aux_chunk = copy.deepcopy(target_aux)
+
+        # streams that repeat their coordinates only have targets at the reference step;
+        # the writer sizes its output from the targets, so the later steps need a derived
+        # entry or their predictions are silently dropped
+        repeat_meta = _repeat_step_metadata(batch) if split_targets_per_chunk else {}
 
         physical, latent = [], []
         forecast_chunk = batch.get_source_samples()
 
-        target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
-
         for chunk_idx, chunk in enumerate(chunks):
-            print(f"Starting chunk {chunk_idx} : {chunk}")
+            logger.debug("Starting chunk %d: %s", chunk_idx, chunk)
 
-            if not compute_full_loss and chunk_idx == 0:
-                batch.to_device_for_output_chunk(self.device, [1])
+            if not compute_full_loss:
+                # Streams that repeat their target coordinates only ever hold the step
+                # they were read at, so that one has to be resident for every chunk; the
+                # rest need the steps the chunk actually decodes.
+                batch.to_device_for_output_chunk(self.device, _output_chunk_steps(batch, chunk))
 
             if self.ema_model is None:
                 forecast_chunk = self.model(
@@ -338,12 +450,20 @@ class Trainer(TrainerBase):
                 )
 
             if should_write_output:
-                target_aux = targets_and_auxs[physical_loss_names[0]]
-                target_aux_chunk.physical = [None for _ in range(chunk[0])] + [
-                    target_aux.physical[step] for step in chunk
-                ]
-                target_aux_chunk.output_idxs = chunk
-                # this modifies targets_and_auxs in place
+                if split_targets_per_chunk:
+                    # pad up to the chunk's first step so the targets stay indexed by
+                    # global forecast step, matching the chunk's ModelOutput
+                    target_aux_chunk.physical = [None for _ in range(chunk[0])] + [
+                        _fill_repeated_targets(target_aux.physical, step, repeat_meta)
+                        for step in chunk
+                    ]
+                    target_aux_chunk.output_idxs = chunk
+                    write_targets = {physical_loss_names[0]: target_aux_chunk}
+                else:
+                    # one chunk covers the whole rollout, so the batch-wide targets are
+                    # already aligned; pass them through untouched as before chunking
+                    write_targets = targets_and_auxs
+
                 write_output(
                     self.cf,
                     mode_cfg,
@@ -353,7 +473,7 @@ class Trainer(TrainerBase):
                     denormalize_data_fct,
                     batch,
                     forecast_chunk,
-                    {physical_loss_names[0]: target_aux_chunk},
+                    write_targets,
                 )
 
             if compute_full_loss:
@@ -366,15 +486,22 @@ class Trainer(TrainerBase):
                 forecast_chunk.physical.clear()
                 forecast_chunk.latent = [forecast_chunk.latent[-1]]
 
-            # if not compute_full_loss:
-            #     batch.clear_output_chunk_coordinates(chunk)
+            if not compute_full_loss:
+                # releases per-step coordinates; a repeated stream's reference step is
+                # kept, since every later chunk decodes from that same tensor
+                batch.clear_output_chunk_coordinates(chunk)
 
         if is_diffusion:
             # single chunk; its fstep dimension is the trajectory, not forecast steps
             return forecast_chunk, targets_and_auxs
 
-        # Data for validation purposes => accumulates in memory!?
-        preds = ModelOutput(chunk, output_idxs[0], batch.get_source_samples())
+        # Accumulating every chunk keeps the whole rollout in memory; the reference output
+        # therefore spans all forecast steps. Skipping the full loss keeps only the last
+        # chunk, so the reference spans just that one. Chunk 0 carries the leading padding
+        # in both cases, which is why the full-loss reference is built from output_idxs
+        # rather than from the last chunk.
+        reference_steps = output_idxs if compute_full_loss else chunks[-1]
+        preds = ModelOutput(reference_steps, output_idxs[0], batch.get_source_samples())
         assert len(physical) == len(preds.physical), (
             f"Chunks cover {len(physical)} forecast steps, expected {len(preds.physical)}."
         )
@@ -382,8 +509,16 @@ class Trainer(TrainerBase):
         preds.latent = latent
 
         if not compute_full_loss:
-            # this modifies targets_and_auxs in place
-            target_aux_chunk.physical = [target_aux.physical[step] for step in chunk]
+            # The loss is computed over the last chunk only, so reduce the targets to it.
+            # A single chunk keeps the leading padding (its slots are indexed by global
+            # forecast step) while a later chunk does not, so the number of leading empty
+            # slots is taken from preds rather than assumed.
+            last_chunk = chunks[-1]
+            leading = preds.chunk_idx(last_chunk[0])
+            target_aux_chunk.physical = [None for _ in range(leading)] + [
+                target_aux.physical[step] for step in last_chunk
+            ]
+            target_aux_chunk.output_idxs = last_chunk
             targets_and_auxs[physical_loss_names[0]] = target_aux_chunk
 
         return preds, targets_and_auxs

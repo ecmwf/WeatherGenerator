@@ -99,6 +99,16 @@ class StreamData:
         ]
         self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
+        # degrees lat/lon of every row of target_coords, in the same order; only needed
+        # (and only populated) when target coords are repeated across forecast steps
+        self.target_coords_latlon = [torch.tensor([]) for _ in range(output_steps)]
+        # per-row index into the window's distinct valid times, same order again; a 6h
+        # window over hourly data holds six of them
+        self.target_coords_tslot = [
+            torch.tensor([], dtype=torch.int32) for _ in range(output_steps)
+        ]
+        # metadata to rebuild time-varying geoinfo channels; None unless repeat_steps
+        self.time_geoinfo = None
 
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
@@ -122,6 +132,8 @@ class StreamData:
         self.target_tokens = _pin_tensor_list(self.target_tokens)
         self.idxs_inv = _pin_tensor_list(self.idxs_inv)
         self.target_coords_raw = _pin_tensor_list(self.target_coords_raw)
+        self.target_coords_latlon = _pin_tensor_list(self.target_coords_latlon)
+        self.target_coords_tslot = _pin_tensor_list(self.target_coords_tslot)
 
         # Pin source tensors
         self.source_tokens_cells = _pin_tensor_list(self.source_tokens_cells)
@@ -159,6 +171,14 @@ class StreamData:
                 self.target_coords_lens[step] = self.target_coords_lens[step].to(
                     dv, non_blocking=True
                 )
+                # lat/lon and the time slot have to follow the coords they annotate,
+                # otherwise the geoinfo recompute would mix host and device tensors
+                self.target_coords_latlon[step] = self.target_coords_latlon[step].to(
+                    dv, non_blocking=True
+                )
+                self.target_coords_tslot[step] = self.target_coords_tslot[step].to(
+                    dv, non_blocking=True
+                )
             if include_target_tokens:
                 self.target_tokens[step] = self.target_tokens[step].to(dv, non_blocking=True)
 
@@ -174,10 +194,19 @@ class StreamData:
         return self
 
     def clear_target_coordinates(self, target_steps: list[int]) -> None:
-        """Release decoder coordinates for forecast steps that have been processed."""
+        """Release decoder coordinates for forecast steps that have been processed.
+
+        A stream that repeats its coordinates holds a single tensor that every later
+        forecast step still needs, so its reference step is never released.
+        """
+        pinned = self.time_geoinfo.reference_step if self.time_geoinfo is not None else None
         for step in target_steps:
+            if step == pinned:
+                continue
             self.target_coords[step] = torch.empty(0)
             self.target_coords_lens[step] = torch.empty(0, dtype=torch.int32)
+            self.target_coords_latlon[step] = torch.empty(0)
+            self.target_coords_tslot[step] = torch.empty(0, dtype=torch.int32)
 
     def add_source(
         self,
@@ -318,6 +347,8 @@ class StreamData:
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
         is_spoof: bool,
+        coords_latlon: torch.Tensor | None = None,
+        coords_tslot: torch.Tensor | None = None,
     ) -> None:
         """
         Add data for target for one input.
@@ -347,6 +378,10 @@ class StreamData:
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
+        if coords_latlon is not None:
+            self.target_coords_latlon[fstep] = torch.as_tensor(coords_latlon, dtype=torch.float32)
+        if coords_tslot is not None:
+            self.target_coords_tslot[fstep] = torch.as_tensor(coords_tslot, dtype=torch.int32)
 
         self.target_is_spoof[fstep] = is_spoof
 

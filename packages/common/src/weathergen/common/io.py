@@ -526,7 +526,9 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
 
-        all_steps = sorted(list(example_stream.group_keys()))
+        # group keys are strings, so sort them numerically: a plain sort orders a 40 step
+        # rollout as 0, 1, 10, 11, ..., 2, 20, ... and scrambles the lead times
+        all_steps = sorted(example_stream.group_keys(), key=int)
 
         if self.forecast_offset == 1:
             return all_steps[1:]  # exclude fstep with no targets/preds

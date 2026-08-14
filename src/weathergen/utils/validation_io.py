@@ -64,12 +64,13 @@ def write_output(
     assert len(batch.get_output_idxs()) > 0, "Batch carries no output steps."
     forecast_offset = batch.get_output_idxs()[0]
 
-    # The chunk's ModelOutput includes a leading padding range [0..forecast_offset) so
-    # that slot indices equal global forecast step numbers.  When writing to zarr we must
-    # only emit the steps that this chunk actually computed, i.e. steps >= the chunk's own
-    # forecast_offset (stored on the ModelOutput), not the batch's global offset.
-    chunk_forecast_offset = model_output.forecast_offset
-    timestep_idxs = [s for s in model_output.forecast_steps if s >= chunk_forecast_offset]
+    # The chunk's ModelOutput includes a leading padding range [0..forecast_offset), which
+    # only the first chunk of a rollout has. Those steps hold no prediction, but step 0 is
+    # where the source is written (ItemKey.with_source is `forecast_step == 0`) and it is
+    # the step ZarrIO probes to infer the store's forecast offset. Dropping it produces a
+    # store with no source that the reader cannot open, so the padding is emitted here and
+    # the per-step loop below fills it with empty target/prediction slots.
+    timestep_idxs = list(model_output.forecast_steps)
 
     n_samples = len(batch.get_source_samples().get_samples())
 
@@ -107,11 +108,12 @@ def write_output(
             # empty per-stream slots to keep the per-stream array alignment used downstream.
             not_reconstructed = not is_stream_reconstructed(cf.streams[sname])
 
-            # leading empty steps of the first chunk carry a source but no target/prediction
+            # leading empty steps of the first chunk carry a source but no target/prediction,
+            # and no target_aux entry either, so they must not reach the lookups below
             if t_idx < forecast_offset:
                 preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
 
-            if not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+            elif not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 preds = model_output.get_physical_prediction(chunk_idx, sname)
                 n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
                 preds_s, targets_s, t_coords_s, t_times_s = _empty_step(

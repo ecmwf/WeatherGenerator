@@ -179,7 +179,7 @@ class TokenizerMasking(Tokenizer):
         )
 
         # TODO: split up
-        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+        _, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
             stream_info["stream_id"],
             self.hl_target,
             idxs_cells,
@@ -194,7 +194,10 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        return (coords_local, coords_per_cell)
+        # coords and datetimes are the raw lat/lon and valid time of every row of
+        # coords_local, in the same order; both are needed to rebuild the time-varying
+        # geoinfos when target coords are repeated across forecast steps
+        return (coords_local, coords_per_cell, coords, datetimes)
 
     def get_target_values(
         self,

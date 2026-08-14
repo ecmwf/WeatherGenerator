@@ -23,6 +23,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
+from weathergen.datasets.time_geoinfo import recompute_geoinfos
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
@@ -1102,7 +1103,6 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
         chunk_idx = output.chunk_idx(step)
-        fstep_idx = 1  # output.fstep_idx(step)
 
         # Empty dicts evaluate to False in python
         if not self.pred_heads:
@@ -1145,10 +1145,41 @@ class Model(torch.nn.Module):
             # though they may still carry (unused) target coords on the student view.
             if stream_name not in self.embed_target_coords:
                 continue
+            # Streams that repeat their target coordinates read the target window once and
+            # reuse that tensor for every forecast step, so they are indexed at the step
+            # that was actually read rather than at the current one. Every other stream
+            # keeps per-step coordinates and is indexed normally. A sample whose view is
+            # empty carries no metadata, so look for the first one that does.
+            n_real = len(batch.samples)
+            stream_datas = [batch.samples[i_b].streams_data[stream_name] for i_b in range(n_real)]
+            repeat_meta = next(
+                (
+                    sd.time_geoinfo
+                    for sd in stream_datas
+                    if sd is not None and sd.time_geoinfo is not None
+                ),
+                None,
+            )
+            fstep_idx = repeat_meta.reference_step if repeat_meta else output.fstep_idx(step)
+
+            # The repeated tensor is correct for the geometry but not for the geoinfo
+            # channels that depend on the valid time, so rebuild those in place, on
+            # device, before they are consumed. Per sample: each carries its own valid
+            # times, and each mutates only its own coordinate tensor.
+            for stream_data in stream_datas:
+                if stream_data is None or stream_data.time_geoinfo is None:
+                    continue
+                recompute_geoinfos(
+                    stream_data.target_coords[fstep_idx],
+                    stream_data.target_coords_latlon[fstep_idx],
+                    stream_data.target_coords_tslot[fstep_idx],
+                    stream_data.time_geoinfo,
+                    step,
+                )
+
             # extract target coords for current stream and fstep and convert to one tensor
             # Use modular indexing so that ensemble calls (batch_size > len(batch)) replicate
             # the single real sample's coordinates across all N members.
-            n_real = len(batch.samples)
             t_coords = [
                 batch.samples[i_b % n_real].streams_data[stream_name].target_coords[fstep_idx]
                 for i_b in range(batch_size)
