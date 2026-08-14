@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import dataclasses
+import functools
 import logging
 import pathlib
 from collections.abc import Sequence
@@ -35,7 +36,11 @@ from weathergen.datasets.utils import (
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
+from weathergen.utils.utils import (
+    is_stream_diagnostic,
+    is_stream_forcing,
+    is_stream_reconstructed,
+)
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -50,11 +55,15 @@ FORECAST_DEFAULTS = {
 }
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
+def collect_datasources(
+    stream_datasets: list, idx: int, type: str, rng, coords_geoinfos_only: bool = False
+) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
 
     rng and num_subset are used to drop data
+
+    coords_geoinfos_only (targets only): skip reading the data values; data has zero width
     """
 
     rdatas = []
@@ -68,7 +77,9 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
             normalize_channels = ds.normalize_source_channels
             shuffle = ds.stream_info.get("shuffle_source", False)
         elif type == "target":
-            get_reader_data = ds.get_target
+            get_reader_data = functools.partial(
+                ds.get_target, coords_geoinfos_only=coords_geoinfos_only
+            )
             normalize_channels = ds.normalize_target_channels
             num_subset = ds.stream_info.get("max_num_targets", -1)
             shuffle = ds.stream_info.get("shuffle_target", False)
@@ -79,7 +90,9 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
         rdata = (
             get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
         )
-        rdata.data = normalize_channels(rdata.data)
+        if not coords_geoinfos_only:
+            # zero-width data has nothing to normalize (and would fail the channel-count check)
+            rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
 
@@ -136,6 +149,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     "Ignoring teacher_time_offset (setting to 0)."
                 )
             self.teacher_time_offset = 0
+
+        # skip_target_values: inference-only; do not read/store target values for physically
+        # reconstructed streams, only coords/geoinfos/datetimes (data gets zero width)
+        self.skip_target_values = bool(mode_cfg.get("skip_target_values", False))
+        if self.skip_target_values and (
+            "student_teacher" in training_mode or "latent_loss" in training_mode
+        ):
+            raise ValueError(
+                "skip_target_values is incompatible with student_teacher/latent_loss modes: "
+                "target values are needed to build the teacher's network input."
+            )
 
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.num_workers = cf.data_loading.num_workers
@@ -618,11 +642,23 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # target data: collect for all forecast steps
         output_data = []
         if not is_stream_forcing(stream_ds[0].stream_info, self._stage):
+            # skip target values only for physically reconstructed streams; forcing streams
+            # are skipped entirely above and reconstruct:false (teacher-only) streams keep
+            # their values
+            coords_geoinfos_only = self.skip_target_values and is_stream_reconstructed(
+                stream_ds[0].stream_info, self._stage
+            )
             num_output_steps = self._get_output_length(num_forecast_steps)
             for timestep_idx in range(self.output_offset, num_output_steps):
                 step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-                rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+                rdata = collect_datasources(
+                    stream_ds,
+                    step_forecast_dt,
+                    "target",
+                    self.rng,
+                    coords_geoinfos_only=coords_geoinfos_only,
+                )
 
                 if rdata.is_empty():
                     # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -632,7 +668,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         self.healpix_level,
                         time_win.start,
                         stream_ds[0].get_geoinfo_size(),
-                        len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                        # zero width to match the coords_geoinfos_only data downstream
+                        0
+                        if coords_geoinfos_only
+                        else len(stream_ds[0].mean[stream_ds[0].target_idx]),
                     )
                     rdata.is_spoof = True
 

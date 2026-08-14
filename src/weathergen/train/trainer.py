@@ -446,6 +446,12 @@ class Trainer(TrainerBase):
         if is_root():
             config.save(self.cf, mini_epoch=0)
 
+        if self.test_cfg.get("skip_target_values", False):
+            logger.warning(
+                "skip_target_values is active: target values are neither read nor written "
+                "(the output zarr has no target datasets) and no validation losses are computed."
+            )
+
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
         # inference validation set
@@ -456,6 +462,16 @@ class Trainer(TrainerBase):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
+
+        # skip_target_values is inference-only: without target values there is nothing
+        # to train against and validation losses would be meaningless
+        if self.training_cfg.get("skip_target_values", False) or self.validation_cfg.get(
+            "skip_target_values", False
+        ):
+            raise ValueError(
+                "skip_target_values is only allowed in inference (test_config), "
+                "not in training_config or validation_config."
+            )
 
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
@@ -918,11 +934,14 @@ class Trainer(TrainerBase):
                                     targets_and_auxs,
                                 )
 
-                        _ = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            targets_and_aux=targets_and_auxs,
-                            metadata=extract_batch_metadata(batch),
-                        )
+                        # skip_target_values: target values are not read (zero width),
+                        # so no loss can be computed
+                        if not mode_cfg.get("skip_target_values", False):
+                            _ = self.loss_calculator_val.compute_loss(
+                                preds=preds,
+                                targets_and_aux=targets_and_auxs,
+                                metadata=extract_batch_metadata(batch),
+                            )
                         pbar.update(batch_size * self.cf.world_size)
 
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
