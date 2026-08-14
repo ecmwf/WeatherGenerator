@@ -478,6 +478,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         """
 
+        # output_data is empty for forcing streams (_get_data_windows skips them);
+        # nothing to add in that case.
+        if not output_data:
+            return stream_data
+
         # collect for all forecast steps
         num_output_steps = self._get_output_length(num_forecast_steps)
         for step, timestep_idx in enumerate(range(self.output_offset, num_output_steps)):
