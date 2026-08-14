@@ -412,7 +412,9 @@ class StreamData:
         """
 
         is_nan = torch.isnan(torch.cat(self.target_tokens))
-        return is_nan.all() if len(is_nan) > 0 else False
+        # numel, not len: zero-width values (skip_target_values) have rows but no
+        # elements, and .all() on an empty tensor is vacuously True
+        return is_nan.all() if is_nan.numel() > 0 else False
 
     def source_nan(self) -> bool:
         """
