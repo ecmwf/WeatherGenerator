@@ -407,8 +407,28 @@ class DataReaderBase(metaclass=ABCMeta):
 
         return rdata
 
+    def get_time(self, idx: TIndex) -> ReaderData:
+        """
+        Get target data for idx
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        target data (coords, geoinfos, data, datetimes)
+        """
+
+        rdata = self._get(idx, self.target_idx)
+
+        # keep only time
+
+        return rdata
+
     @abstractmethod
-    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+    def _get(self, idx: TIndex, channels_idx: list[int], time_only: bool = False) -> ReaderData:
         """
         Get data for window
 
