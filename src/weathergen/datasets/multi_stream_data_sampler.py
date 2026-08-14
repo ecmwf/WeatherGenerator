@@ -515,6 +515,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         self._stage, timestep_idx, tc, tc_l, rdata.is_spoof
                     )
 
+                # import code; code.interact(local=locals())
+
                 if "target_values" in mode:
                     (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
                         stream_info,
@@ -563,8 +565,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             StreamData with source and targets masked according to view_meta
         """
 
-        print("Starting _build_stream_data for stream: ", stream_info["name"])
-
         num_output_steps = self._get_output_length(num_forecast_steps)
         stream_data = StreamData(
             base_idx,
@@ -584,7 +584,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 input_tokens,
                 input_mask,
             )
-        print("Finished _build_stream_data_input for stream: ", stream_info["name"])
 
         if not is_stream_forcing(stream_info, self._stage):
             stream_data = self._build_stream_data_output(
@@ -597,7 +596,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 output_tokens,
                 output_mask,
             )
-            print("Finished _build_stream_data_output for stream: ", stream_info["name"])
 
         return stream_data
 
@@ -736,8 +734,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             stream_info = self.streams[stream_name]
             (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
 
-            print("Starting processing stream: ", stream_name)
-
             # max number of input steps
             input_steps = np.array([sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()])
             assert input_steps.min() == input_steps.max(), (
@@ -751,8 +747,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             (input_data, output_data) = self._get_data_windows(
                 idx, num_forecast_steps, i_max, stream_ds.readers
             )
-
-            print("Finished _get_data_windows")
 
             # When teacher_time_offset > 0, load a separate set of data windows
             # shifted forward in time for the teacher (target) samples.
@@ -778,8 +772,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             else:
                 input_tokens_target = input_tokens
                 output_tokens_target = output_tokens
-
-            print("Finished building tokens")
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
@@ -808,8 +800,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
 
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
-
-            print("Finished source_masks")
 
             # for t_idx, mask in enumerate(source_masks):
             input_data_target_orig = input_data_target
@@ -890,10 +880,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 ):
                     target_timestamp = target_sample.meta_info[stream_name].params.get("timestamp")
                     source_sample.meta_info[stream_name].add_params({"timestamp": target_timestamp})
-
-        print(
-            "Finished _get_batch for idx: ", idx, " with num_forecast_steps: ", num_forecast_steps
-        )
 
         return batch
 
