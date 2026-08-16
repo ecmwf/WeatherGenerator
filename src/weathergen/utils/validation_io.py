@@ -155,7 +155,7 @@ def write_output(
                     t_times_s += [t_times.astype("datetime64[ns]")]
 
             targets_lens[-1] += [[]]
-            targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
+            targets_lens[-1][-1] += [p.shape[1] for p in preds_s]
 
             preds_all[-1] += [np.concatenate(preds_s, axis=1)]
             targets_all[-1] += [np.concatenate(targets_s)]
