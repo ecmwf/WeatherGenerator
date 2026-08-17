@@ -325,7 +325,10 @@ class Trainer(TrainerBase):
             target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
 
         for chunk_idx, chunk in enumerate(chunks):
-            if not compute_full_loss:
+            # Load target coords for this chunk when: (a) doing compute_full_loss=False
+            # chunked inference, or (b) doing a diffusion rollout (where the full to_device
+            # was skipped to avoid O(N) GPU memory growth with forecast steps).
+            if not compute_full_loss or diffusion_rollout:
                 batch.to_device_for_output_chunk(self.device, chunk)
 
             if self.ema_model is None:
@@ -388,7 +391,7 @@ class Trainer(TrainerBase):
                 forecast_chunk.physical.clear()
                 forecast_chunk.latent = [forecast_chunk.latent[-1]]
 
-            if not compute_full_loss:
+            if not compute_full_loss or diffusion_rollout:
                 batch.clear_output_chunk_coordinates(chunk)
 
         if is_diffusion and not diffusion_rollout:
@@ -873,13 +876,30 @@ class Trainer(TrainerBase):
                 ) as pbar:
                     for bidx, batch in enumerate(dataset_val_iter):
                         compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
-                        if compute_full_loss or is_diffusion:
+                        diffusion_rollout = cf.get("diffusion_rollout", False)
+                        # For diffusion rollout, target data is not needed on GPU: it is read
+                        # from CPU during write_output (via .cpu()) and predictions are cleared
+                        # before loss computation. Loading all N steps' tokens to GPU would
+                        # scale memory O(N) and defeats the purpose of chunk_size=1.
+                        if (compute_full_loss or is_diffusion) and not diffusion_rollout:
                             batch.to_device(self.device)
                         else:
                             output_idxs = batch.get_output_idxs()
                             chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
                             chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
                             batch.to_device_for_chunked_inference(self.device, chunks[-1])
+                            if diffusion_rollout:
+                                # DiffusionLatentTargetEncoder.compute() runs the encoder on
+                                # target samples, so their source (HEALPix-cell) tokens must be
+                                # on GPU. These are compact (cells × tokens × dim), unlike the
+                                # large sparse per-observation-coordinate target_tokens which stay
+                                # on CPU. We offload them back to CPU after compute() below.
+                                batch.target_samples.to_device(
+                                    self.device,
+                                    include_source=True,
+                                    include_target_coords=False,
+                                    include_target_tokens=False,
+                                )
 
                         # evaluate model
                         with torch.autocast(
@@ -899,8 +919,16 @@ class Trainer(TrainerBase):
                                     self.model_params,
                                     self.model,
                                 )
-
-                            diffusion_rollout = cf.get("diffusion_rollout", False)
+                            if diffusion_rollout:
+                                # Encoder-based target computation is done; offload target source
+                                # data back to CPU so it doesn't occupy GPU during the chunk loop.
+                                batch.target_samples.to_device(
+                                    "cpu",
+                                    include_source=True,
+                                    include_target_coords=False,
+                                    include_target_tokens=False,
+                                )
+                                torch.cuda.empty_cache()
                             preds, targets_and_auxs = self._process_validation_chunks(
                                 batch,
                                 mode_cfg,

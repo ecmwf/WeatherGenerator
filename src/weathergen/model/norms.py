@@ -95,7 +95,8 @@ class AdaLNZero(torch.nn.Module):
             aux = block(aux)
         scale, shift, gate = aux.chunk(3, dim=-1)
 
-        x = self.norm(x) * (1 + scale) + shift
+        scale.add_(1)  # in-place: avoids a temporary (N, D) allocation
+        x = self.norm(x).mul_(scale).add_(shift)
 
         return x, gate
 
@@ -123,7 +124,8 @@ class AdaLayerNorm(torch.nn.Module):
             aux = block(aux)
         scale, shift = aux.split(aux.shape[-1] // 2, dim=-1)
 
-        x = self.norm(x) * (1 + scale) + shift
+        scale.add_(1)  # in-place: avoids a temporary (N, D) allocation
+        x = self.norm(x).mul_(scale).add_(shift)
 
         return x
 

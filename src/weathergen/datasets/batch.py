@@ -80,11 +80,17 @@ class Sample:
         include_target_tokens: bool = True,
     ) -> None:
         for key in self.meta_info.keys():
-            self.meta_info[key].mask = (
-                self.meta_info[key].mask.to(device, non_blocking=True)
-                if self.meta_info[key].mask is not None
-                else None
-            )
+            val = self.meta_info[key]
+            if isinstance(val, torch.Tensor):
+                # Raw tensors (e.g. LATENT_CONDITIONING_TOKENS) are moved directly.
+                self.meta_info[key] = val.to(device, non_blocking=True)
+            else:
+                # SampleMetaData objects: move the mask tensor.
+                self.meta_info[key].mask = (
+                    val.mask.to(device, non_blocking=True)
+                    if val.mask is not None
+                    else None
+                )
 
         for key, val in self.streams_data.items():
             if val is not None:

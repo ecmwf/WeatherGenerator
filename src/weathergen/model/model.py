@@ -1238,4 +1238,7 @@ class Model(torch.nn.Module):
             pred = torch.split(pred, t_coords_lens, dim=1)
             output.add_physical_prediction(chunk_idx, stream_name, pred)
 
+        # Explicitly release the gathered neighbourhood tensor (~3-4 GiB) so
+        # the caching allocator can reuse its blocks for subsequent steps.
+        del tokens_nbors, tokens_nbors_lens
         return output
