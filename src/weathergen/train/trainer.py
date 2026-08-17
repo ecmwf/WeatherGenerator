@@ -318,8 +318,11 @@ class Trainer(TrainerBase):
         forecast_chunk = batch.get_source_samples()
        
         if not compute_full_loss:
-            target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
-        
+            # shallow copy is sufficient: .physical and .output_idxs are reassigned before
+            # any use, and the shared per-step target dicts are only read downstream
+            target_aux = targets_and_auxs[physical_loss_names[0]]
+            target_aux_chunk = copy.copy(target_aux)
+
         for chunk_idx, chunk in enumerate(chunks):
             if not compute_full_loss:
                 batch.to_device_for_output_chunk(self.device, chunk)
@@ -339,7 +342,6 @@ class Trainer(TrainerBase):
 
             if should_write_output:
                 if not compute_full_loss:
-                    target_aux = targets_and_auxs[physical_loss_names[0]]
                     target_aux_chunk.physical = [None for _ in range(chunk[0])] + [target_aux.physical[step] for step in chunk]
                     target_aux_chunk.output_idxs = chunk
                     target_output = { physical_loss_names[0]: target_aux_chunk }
@@ -427,6 +429,10 @@ class Trainer(TrainerBase):
             self.dataset, **loader_params, sampler=None
         )
 
+        # Inference runs under torch.no_grad with no gradient synchronization, so the
+        # DDP/FSDP wrappers are not needed; skipping them avoids allocating DDP gradient
+        # buckets (~one model-size buffer per rank). The process group set up by torchrun
+        # is still used for per-rank data sharding.
         self.model, self.model_params = init_model_and_shard(
             cf,
             self.dataset,
@@ -434,8 +440,8 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.test_cfg.training_mode,
             devices[0],
-            cf.with_ddp,
-            cf.with_fsdp,
+            with_ddp=False,
+            with_fsdp=cf.with_fsdp,
         )
 
         # get target_aux calculators for different loss terms
