@@ -1,0 +1,351 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+# Diffusion fine-tune config for oliqngmf, built from config_diffusion_hsq7hsb6.yml
+# (same skkbxfya-derived pattern used to turn a plain forecast/masking checkpoint
+# into a diffusion model), with two changes required for oliqngmf specifically:
+#  - streams_directory points at the FROZEN weathergen-configs snapshot copied
+#    into oliqngmf's own launch dir (oliqngmf's run_history lineage contains only
+#    itself, so its own launch dir is the earliest available snapshot — same role
+#    od08us1u played for hsq7hsb6). Verified against the fully-resolved 'streams'
+#    dict in model_oliqngmf.json: `diff -rq` between this frozen snapshot and
+#    lessig's live weathergen-configs repo shows zero differences (unlike the
+#    hsq7hsb6 case, where the live copy had since dropped 'cos_sza' from
+#    geoinfo_channels and caused a checkpoint-loading size mismatch), so no drift
+#    risk either way — the frozen path is used to stay consistent with the
+#    established pattern.
+#  - rope_2D is set to True to match oliqngmf's actual resolved config
+#    (model_oliqngmf.json: rope_2D=True, vs hsq7hsb6's False), since freeze_modules
+#    below freezes encoder/ae_local_engine/ae_global_engine, which must match the
+#    positional-encoding scheme the checkpoint was trained with. All other
+#    architecture fields (ae_local_*, ae_global_*, ae_aggregation_*, decoder_type,
+#    embed_*, norm_type, pred_*, healpix_level, etc.) were checked field-by-field
+#    against model_oliqngmf.json and match hsq7hsb6's resolved config exactly, so
+#    they are unchanged from the hsq7hsb6 template.
+# fe_* / diffusion-specific fields are left at the template values, since the
+# forecast engine is not in freeze_modules and is newly trained regardless of
+# oliqngmf's original (non-diffusion) fe_num_blocks: 16.
+#
+# fe_diffusion_latent_dim (2560), ae_local_max_tokens_per_cell (128), and
+# training_config.learning_rate_scheduling.lr_max (1e-4) are set here to match
+# values otherwise passed via --options at launch: launch-slurm.py's MLflow
+# upload logs each --config file and the --options-derived config_command_line.yaml
+# as separate param batches against the same run_id, and MLflow params are
+# immutable, so a --config file literal that differs from a same-key --options
+# override crashes the submission (INVALID_PARAMETER_VALUE) before the SLURM job
+# is ever created. Keeping the file's values equal to the launch-time overrides
+# avoids that crash. training_config.learning_rate_scheduling.num_steps_cooldown
+# already matches the launch-time override (32768) so needed no change.
+
+embed_orientation: "channels"
+embed_unembed_mode: "block"
+embed_dropout_rate: 0.1
+
+ae_local_dim_embed: 2048
+ae_local_num_blocks: 2
+ae_local_num_heads: 16
+ae_local_dropout_rate: 0.1
+ae_local_with_qk_lnorm: True
+
+ae_local_num_queries: 1
+ae_local_queries_per_cell: False
+ae_adapter_num_heads: 16
+ae_adapter_embed: 128
+ae_adapter_with_qk_lnorm: True
+ae_adapter_with_residual: True
+ae_adapter_dropout_rate: 0.1
+ae_local_max_tokens_per_cell: 128
+
+ae_global_dim_embed: 2048
+ae_global_num_blocks: 4
+ae_global_num_heads: 32
+ae_global_dropout_rate: 0.1
+ae_global_with_qk_lnorm: True
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: False
+
+ae_aggregation_num_blocks: 0
+ae_aggregation_num_heads: 32
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: True
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
+decoder_type: PerceiverIOCoordConditioning
+pred_adapter_kv: False
+pred_self_attention: True
+pred_dyadic_dims: False
+pred_mlp_adaln: True
+num_class_tokens: 0
+num_register_tokens: 0
+
+# number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
+# one is training an auto-encoder
+diffusion: {noise_stream: ERA5}
+fe_num_blocks: 12
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+fe_diffusion_latent_dim: 2560  # set to an int > ae_global_dim_embed to inflate the diffusion latent space; null = use ae_global_dim_embed
+fe_diffusion_model: True
+fe_diffusion_predict_residual: False
+fe_diffusion_classifier_free_guidance_prob: 0.0
+fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
+fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "concatenate", ..., "ada_ln"
+fe_layer_norm_after_blocks: [11]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
+fe_impute_latent_noise_std: 0.0  # 1e-4
+fe_impute_latent_diffusion_noise_std: 1e-3  # 1e-4
+# currently fixed to 1.0 (due to limitations with flex_attention and triton)
+forecast_att_dense_rate: 1.0
+with_step_conditioning: True # False
+# Diffusion related parameters
+frequency_embedding_dim: 256
+embedding_dim: 512
+noise_distribution: &noise_distribution "log_uniform"  # "log_uniform" or "log_normal"
+sigma_min: &sigma_min 0.4
+sigma_max: &sigma_max 50
+sigma_data: 1.0
+rho: 7
+p_mean: 3.5  # only required if noise_distribution is log_normal
+p_std: 1.2  # only required if noise_distribution is log_normal
+
+healpix_level: 5
+
+# Use 2D RoPE instead of traditional global positional encoding
+# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
+# When False: uses traditional pe_global positional encoding
+# oliqngmf was trained with rope_2D: True (see model_oliqngmf.json) -- must match
+# since ae_local_engine/ae_global_engine/encoder are frozen below.
+rope_2D: True
+mlp_type: mlp
+use_xsa: False
+# mlp_type: swiglu
+# use_xsa: True
+
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: True
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
+
+latent_noise_kl_weight: 0.0 # 1e-5
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True
+
+#below for FE training only
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+#below for DECODER training only
+# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*noise_embedder.*|.*fe.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+#below for FE and DECODER training
+# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+
+load_chkpt: {'run_id': 'oliqngmf', 'mini_epoch': -1}  # oliqngmf forecast/masking backbone checkpoint
+
+norm_type: "LayerNorm"
+# qk_norm_type: "RMSNorm"
+
+#####################################
+
+streams_directory: "/e/scratch/weatherai/slurm/slurm_weathergen_oliqngmf_dir/WeatherGenerator/weathergen-configs/streams_preprint/era5_georing_avhrr_synop_lowres_linear/"
+streams: ???
+
+zarr_store: "zip"
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+  # local_rank,
+  # with_ddp,
+  # data_path_*,
+  # model_path,
+  # run_path,
+  # path_shared_
+
+  multiprocessing_method: "fork"
+
+  desc: ""
+  run_id: ???
+  run_history: []
+
+train_logging:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
+  log_grad_norms: False
+
+data_loading:
+  num_workers: 10
+  num_workers_validation: 4
+  rng_seed: ???
+  repeat_data_in_mini_epoch: False
+
+training_config:
+  training_mode: ["masking", "student_teacher"]
+
+  num_mini_epochs: 128
+  samples_per_mini_epoch: 4096
+  shuffle: True
+
+  start_date: 1979-01-01T00:00
+  end_date: 2022-12-31T00:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
+  learning_rate_scheduling :
+    lr_start: 1e-6 #5e-5
+    lr_max: 1e-4 #1e-5
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 64
+    num_steps_cooldown: 32768
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw :
+      # parameters are scaled by number of DDP workers
+      beta1 : 0.975
+      beta2 : 0.9875
+      eps : 2e-08
+
+  losses : {
+    # "physical": {
+    #    type: LossPhysical,
+    #    weight: 0.0,
+    #    loss_fcts: {
+    #      "mse": {},
+    #    },
+    #    target_and_aux_calc: "Physical",
+    # },
+    "latent_diff": {
+        type: LossLatentDiffusion,
+        weight: 1.0,
+        target_and_aux_calc: DiffusionLatentTargetEncoder,
+        loss_fcts: { "mse": { }, },
+        }
+  }
+
+  model_input: {
+    "forecasting" : {
+      # masking strategy: "random", "healpix", "forecast"
+      masking_strategy: "forecast",
+      masking_strategy_config: {
+        diffusion_rn: True,
+        noise_distribution: *noise_distribution,
+        sigma_min: *sigma_min,
+        sigma_max: *sigma_max,
+        },
+      num_steps_input: 2,
+      num_samples: 1,
+      }
+    }
+
+  target_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      masking_strategy_config: {
+        diffusion_rn: True,
+        noise_distribution: *noise_distribution,
+        sigma_min: *sigma_min,
+        sigma_max: *sigma_max,
+        },
+      num_steps_input: 1,
+      num_samples: 1,
+      }
+    }
+
+  forecast :
+      time_step: 06:00:00
+      num_steps: 1
+      offset: 0
+      policy: "fixed"
+      # chunk_size: 4
+
+
+validation_config:
+
+  # Noise levels (eta values in standard normal space) at which to evaluate the
+  # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
+  # Each value produces a separate validation pass with independently logged metrics.
+  validation_noise_levels: [1.0, 4.0]
+
+  samples_per_mini_epoch: 64
+  shuffle: True
+
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T18:00
+
+  # whether to track the exponential moving average of weights for validation
+  validate_with_ema:
+    enabled : True
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 1e-3
+
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 0,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
+
+  # run validation before training starts (mainly for model development)
+  validate_before_training: False
+
+
+# test config; full test config is merge of validation and test config
+# test config is used by default when running inference
+
+# Tags for experiment tracking
+# These tags will be logged in MLFlow along with completed runs for train, eval, val
+# The tags are free-form, with the following rules:
+# - tags should be primitive types (strings, numbers, booleans). NO lists or dictionaries
+# - tags should not duplicate existing config entries.
+# - try to reuse existing tags where possible. MLFlow does not like having too many unique tags
+# - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
+wgtags:
+  # The name of the organization of the person running the experiment.
+  # This may be autofilled in the future. Expected values are lowercase strings
+  # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
+  org: null
+  # The Github issue corresponding to this run (number such as 1234)
+  # Github issues are the central point when running experiment and contain
+  # links to hedgedocs, code branches, pull requests etc.
+  # It is recommended to associate a run with a Github issue.
+  issue: null
+  # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
+  # This is expected to be the primary tag for comparing experiments in MLFlow, along with the
+  # issue number.
+  # Expected values are lowercase strings with no spaces, just underscores:
+  # Examples: "rollout_ablation_grid"
+  exp: null
+  # *** Experiment-specific tags ***
+  # All extra tags (including lists, dictionaries, etc.) are treated
+  # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
+  grid: null
