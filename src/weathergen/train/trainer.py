@@ -326,30 +326,36 @@ class Trainer(TrainerBase):
                     if self.cf.streams["ERA5"].get("repeat_steps", False):
                         batch.to_device_for_output_chunk(self.device, chunk)
                     else:
-                        # update sine/cosine of day of the year
                         pi2 = 2.0 * np.pi
                         target_coords = (
-                            batch.source_samples.samples[0].streams_data["ERA5"].target_coords
+                            batch.source_samples.samples[0].streams_data["ERA5"].target_coords[1]
                         )
-                        julian_day = target_coords[1][:, 14]
-                        julian_day = (torch.acos((julian_day * 0.707112) + 1.5913e-05) * 365.25) / (
-                            2.0 * np.pi
-                        )
+
+                        # update sine/cosine of day of the year
+                        julian_day_sin = (target_coords[:, 14] * 0.707118) + 3.26027e-05
+                        julian_day_cos = (target_coords[:, 13] * 0.707095) + 4.48532e-06
+                        julian_day = torch.atan2(julian_day_sin, julian_day_cos) * (365.25 / pi2)
                         julian_day = (julian_day + 0.25) % 365.25
-                        target_coords[1][:, 14] = (
-                            torch.cos(pi2 * julian_day / 365.25) - 1.5913e-05
-                        ) / 0.707112
-                        target_coords[1][:, 15] = (
-                            torch.sin(pi2 * julian_day / 365.25) - 1.5913e-05
-                        ) / 0.707112
+                        target_coords[:, 13] = (
+                            torch.cos(pi2 * julian_day / 365.25) - 4.48532e-06
+                        ) / 0.707095
+                        target_coords[:, 14] = (
+                            torch.sin(pi2 * julian_day / 365.25) - 3.26027e-05
+                        ) / 0.707118
+
                         # update sine/cosine local time
-                        local_time = target_coords[1][:, 12]
-                        local_time = (
-                            torch.acos(torch.clamp(local_time * 0.707107, -1.0, 1.0)) * 24
-                        ) / (2.0 * np.pi)
+                        local_time = torch.atan2(
+                            target_coords[:, 12] * 0.707107, target_coords[:, 11] * 0.707107
+                        )
+                        local_time = ((local_time * 24) / pi2) + 12.0
                         local_time = (local_time + 6.0) % 24.0
-                        target_coords[1][:, 12] = torch.cos(pi2 * local_time / 24.0) / 0.707107
-                        target_coords[1][:, 13] = torch.sin(pi2 * local_time / 24.0) / 0.707107
+                        sign = (-1) ** ((chunk_idx) % 2) if chunk_idx > 1 else -1
+                        target_coords[:, 11] = sign * torch.cos(pi2 * local_time / 24.0) / 0.707107
+                        target_coords[:, 12] = sign * torch.sin(pi2 * local_time / 24.0) / 0.707107
+
+                        # ref = batch.source_samples.samples[0].streams_data["ERA5"].target_coords[chunk[0]].to("cuda")
+                        # errs = [(target_coords[:,i] - ref[:,i]).abs().max().item() for i in [11,12,13,14]]
+                        # print( f"chunk {chunk_idx}: errs = {errs}")
 
             if self.ema_model is None:
                 forecast_chunk = self.model(
