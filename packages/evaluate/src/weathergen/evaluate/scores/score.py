@@ -256,11 +256,12 @@ class Scores:
             f = self.det_metrics_dict[score_name]
             _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
-            assert self.ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
-                "not found in prediction data. Skipping score calculation."
-            )
-            return None
+            if self._ens_dim not in data.prediction.dims:
+                _logger.warning(
+                    f"Probablistic score {score_name} chosen, but ensemble dimension "
+                    f"{self._ens_dim} not found in prediction data. Skipping score calculation."
+                )
+                return None
             f = self.prob_metrics_dict[score_name]
         else:
             raise ValueError(

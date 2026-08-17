@@ -220,11 +220,11 @@ def _process_stream(
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
         return run_id, stream, {}, {}
 
-    needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
+    needs_plotting = stream_dict.get("plotting") and type_ in ("zarr", "merge")
     needs_scoring = stream_dict.get("evaluation", False)
 
     output_data = None
-    if (needs_plotting or needs_scoring) and type_ == "zarr":
+    if (needs_plotting or needs_scoring) and type_ in ("zarr", "merge"):
         available_data = reader.check_availability(stream, mode="evaluation")
 
         output_data = None
@@ -247,9 +247,9 @@ def _process_stream(
     if not needs_scoring:
         return run_id, stream, {}, {}
 
-    plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ == "zarr"
+    plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ in ("zarr", "merge")
     plot_score_init_time_series = (
-        plot_score_options.get("plot_score_init_time_series", False) and type_ == "zarr"
+        plot_score_options.get("plot_score_init_time_series", False) and type_ in ("zarr", "merge")
     )
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
