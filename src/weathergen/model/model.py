@@ -821,24 +821,33 @@ class Model(torch.nn.Module):
             and self.cf.get("fe_diffusion_model_conditioning", None) == "forecast"
         ):
             # tokens[:,0] = t (most recent), tokens[:,1] = t-1, ..., tokens[:,-1] = t-(T-1) (oldest)
-            if self.cf.stage == "inference":
-                print("Using most recent steps as conditioning tokens for inference.")
-                # conditioning_tokens = tokens[:, :-1].sum(axis=1)
-                conditioning_tokens = tokens[:, 1:].sum(axis=1)
-            else:
-                # Conditioning: all older context steps [t-1, ..., t-(T-1)];
-                # denoising target: t (newest)
-                conditioning_tokens = tokens[:, 1:].sum(axis=1)
-                conditioning_tokens = conditioning_tokens + torch.randn_like(
-                    conditioning_tokens
-                ) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
-                if np.random.rand() < self.cf.get(
-                    "fe_diffusion_classifier_free_guidance_prob", 0.0
-                ):  # occasionally dropout conditioning for classifier free guidance
-                    conditioning_tokens = torch.zeros_like(conditioning_tokens)
-            # X_t (tokens[:, 0], most recent) is the diffusion denoising target;
-            # older steps are conditioning.
-            source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = conditioning_tokens
+            # Only recompute LATENT_CONDITIONING_TOKENS from the token tensor when it
+            # contains multiple time steps (i.e. the encoder ran on this forward call).
+            # When restoring from a latent_state checkpoint between chunks, tokens has
+            # exactly 1 time step (the denoised output from the previous chunk), and
+            # LATENT_CONDITIONING_TOKENS in meta_info already holds the correct value
+            # set by the last step of that chunk — overwriting it here would zero it out.
+            if tokens.shape[1] > 1:
+                if self.cf.stage == "inference":
+                    print("Using most recent steps as conditioning tokens for inference.")
+                    # conditioning_tokens = tokens[:, :-1].sum(axis=1)
+                    conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                else:
+                    # Conditioning: all older context steps [t-1, ..., t-(T-1)];
+                    # denoising target: t (newest)
+                    conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                    conditioning_tokens = conditioning_tokens + torch.randn_like(
+                        conditioning_tokens
+                    ) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
+                    if np.random.rand() < self.cf.get(
+                        "fe_diffusion_classifier_free_guidance_prob", 0.0
+                    ):  # occasionally dropout conditioning for classifier free guidance
+                        conditioning_tokens = torch.zeros_like(conditioning_tokens)
+                # X_t (tokens[:, 0], most recent) is the diffusion denoising target;
+                # older steps are conditioning.
+                source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = conditioning_tokens
+            # else: restoring from latent_state (chunk-to-chunk handoff) — LATENT_CONDITIONING_TOKENS
+            # is already correct from the last diffusion step of the previous chunk.
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
             tokens = tokens[:, 0]
         else:
@@ -943,15 +952,35 @@ class Model(torch.nn.Module):
                     # pred_tuple has N entries (one per member / "batch" item).
                     # Concatenate along dim 0: (N, n_points, channels),
                     # wrap in 1-tuple (batch_size=1).
+                    # Use chunk_idx to convert the global step to a chunk-local index,
+                    # matching what predict_decoders does internally.
                     for sname, pred_tuple in tmp_output.physical[0].items():
                         output.add_physical_prediction(
-                            step, sname, (torch.cat(list(pred_tuple), dim=0),)
+                            output.chunk_idx(step), sname, (torch.cat(list(pred_tuple), dim=0),)
                         )
+                    # During no-grad inference with a multi-step rollout the decoded
+                    # physical output for this step is never used by subsequent ODE
+                    # evaluations — only tokens / LATENT_CONDITIONING_TOKENS carry
+                    # information forward.  Offload to CPU immediately so that GPU
+                    # memory does not grow O(N) over the number of rollout steps.
+                    if not torch.is_grad_enabled() and step != forecast_steps[-1]:
+                        chunk_i = output.chunk_idx(step)
+                        output.physical[chunk_i] = {
+                            k: tuple(t.cpu() for t in v)
+                            for k, v in output.physical[chunk_i].items()
+                        }
                     # Store per-member conditioning for the next rollout step.
                     # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
                     # calls expand(N, ...) which is a no-op when the dim already matches.
                     source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = (
                         member_final_tokens
+                    )
+                    # Store the denoised latent state so that _get_initial_conditions can
+                    # bootstrap the next chunk without re-running the encoder.
+                    output.add_latent_prediction(
+                        output.chunk_idx(step),
+                        "latent_state",
+                        self.tokens_to_latent_state(None, member_final_tokens),
                     )
                     tokens = None
                     continue

@@ -434,25 +434,30 @@ def _assign_time_coord(selected_data: list[xr.DataArray]) -> tuple[xr.DataArray,
             )
             return selected_data, time_dim
 
-    # Swap forecast_step with lead_time if all available run_ids have lead_time coord
-    time_dim = "lead_time"
-
-    for i, data in enumerate(selected_data):
+    # Swap forecast_step with lead_time only if ALL DataArrays have a compatible 1-d lead_time.
+    # Check compatibility first to avoid partially swapping dims and then resetting time_dim,
+    # which would leave some DataArrays with lead_time as their primary dim while x_dim is
+    # still "forecast_step".
+    def _is_compatible(data: xr.DataArray) -> bool:
         lead_time = data.coords["lead_time"]
         forecast_step = data.coords["forecast_step"]
-
-        if (
+        return (
             lead_time.dims == forecast_step.dims
             and lead_time.shape == forecast_step.shape
             and lead_time.ndim == 1
-        ):
-            selected_data[i] = data.swap_dims({"forecast_step": "lead_time"})
-        else:
-            _logger.warning(
-                "lead_time coordinate is not compatible with forecast_step for all plotted data; "
-                "using forecast_step as x-axis."
-            )
-            time_dim = "forecast_step"
+        )
+
+    if all(_is_compatible(data) for data in selected_data):
+        time_dim = "lead_time"
+        selected_data = [
+            data.swap_dims({"forecast_step": "lead_time"}) for data in selected_data
+        ]
+    else:
+        _logger.warning(
+            "lead_time coordinate is not compatible with forecast_step for all plotted data; "
+            "using forecast_step as x-axis."
+        )
+        time_dim = "forecast_step"
     return selected_data, time_dim
 
 

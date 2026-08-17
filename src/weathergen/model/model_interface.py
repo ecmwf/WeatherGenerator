@@ -315,9 +315,22 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
                 if not any(path.startswith(root + ".") for root in root_new_modules):
                     root_new_modules.add(path)
 
-            # Get all modules for quick lookup and initialize the new ones
+            # Get all modules for quick lookup and initialize the new ones.
+            # named_modules() deduplicates shared modules (remove_duplicate=True by default),
+            # yielding only the first-encountered path. FSDP2's state_dict() uses
+            # remove_duplicate=False, so mkeys may contain alias paths (e.g. both
+            # `layers.0.embed_aux.2` and `lnorm.embed_aux.2` for the same AdaLayerNorm
+            # inside MLP where lnorm is appended to self.layers). Alias paths are absent
+            # from all_modules; skip them – the canonical path is processed separately.
             all_modules = dict(model.named_modules())
             for path in root_new_modules:
+                if path not in all_modules:
+                    if is_root():
+                        logger.debug(
+                            f"Skipping alias module path not in named_modules "
+                            f"(duplicate FSDP2 state-dict entry): {path}"
+                        )
+                    continue
                 if is_root():
                     logger.info(f"Initializing new module not found in checkpoint: {path}")
                 module_to_init = all_modules[path]

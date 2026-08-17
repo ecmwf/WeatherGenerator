@@ -277,23 +277,27 @@ class Trainer(TrainerBase):
         bidx,
         targets_and_auxs,
         is_diffusion: bool = False,
+        diffusion_rollout: bool = False,
     ) -> ModelOutput:
         """Run the rollout in chunks and assemble the predictions for the whole batch."""
         forecast_cfg = mode_cfg.get("forecast", {})
 
         output_idxs = batch.get_output_idxs()
-        # Diffusion consumes the output's fstep dimension for the ODE denoising trajectory,
-        # which neither the reassembly below nor a per-chunk write can handle. Roll out in a
-        # single chunk and let validate() write the output as it did before chunking.
+        # Pure diffusion (is_diffusion and not diffusion_rollout) consumes the fstep dimension
+        # for the ODE denoising trajectory — roll out in a single chunk and return early.
+        # diffusion_rollout has fstep = forecast steps and is treated like a regular forecast:
+        # the chunked loop handles loss accumulation and per-chunk output writing.
+        # For non-diffusion non-rollout, validate() writes the assembled output directly.
         chunk_size = (
-            len(output_idxs) if is_diffusion else forecast_cfg.get("chunk_size", len(output_idxs))
+            len(output_idxs) if (is_diffusion and not diffusion_rollout)
+            else forecast_cfg.get("chunk_size", len(output_idxs))
         )
         chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
         # This assumes that you only have a physical loss, else this breaks
         compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
-        should_write_output = not is_diffusion and bidx < num_samples_write
+        should_write_output = (not is_diffusion or diffusion_rollout) and bidx < num_samples_write
         if should_write_output:
             denormalize_data_fct = (
                 (lambda x0, x1: x1)
@@ -319,7 +323,7 @@ class Trainer(TrainerBase):
        
         if not compute_full_loss:
             target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
-        
+
         for chunk_idx, chunk in enumerate(chunks):
             if not compute_full_loss:
                 batch.to_device_for_output_chunk(self.device, chunk)
@@ -359,7 +363,24 @@ class Trainer(TrainerBase):
 
             if compute_full_loss:
                 physical += forecast_chunk.physical
-                latent += forecast_chunk.latent
+                # For diffusion rollout, latent_state entries are injected into each chunk's
+                # output solely to carry state to the next chunk via forecast_chunk.latent.
+                # Accumulating them into preds.latent would give more pred entries than
+                # target entries, breaking LossLatentDiff. Leave latent empty so that loss
+                # returns zero (correct for multi-step rollout inference).
+                if not is_diffusion:
+                    latent += forecast_chunk.latent
+                # When writing output, the physical tensors have been saved to disk and
+                # are no longer needed in GPU memory. Replace accumulated entries with
+                # empty dicts so the loss calculator skips them (correct when the physical
+                # loss weight is 0, which is standard for inference). This prevents O(N)
+                # GPU memory growth over forecast steps.
+                if should_write_output:
+                    n_new = len(forecast_chunk.physical)
+                    for i in range(len(physical) - n_new, len(physical)):
+                        physical[i] = {}
+                    forecast_chunk.physical = [{} for _ in forecast_chunk.physical]
+                    torch.cuda.empty_cache()
             elif chunk_idx == len(chunks) - 1:
                 physical = forecast_chunk.physical
                 latent = forecast_chunk.latent
@@ -370,18 +391,21 @@ class Trainer(TrainerBase):
             if not compute_full_loss:
                 batch.clear_output_chunk_coordinates(chunk)
 
-        if is_diffusion:
-            # single chunk; its fstep dimension is the trajectory, not forecast steps
+        if is_diffusion and not diffusion_rollout:
+            # fstep dimension is the ODE trajectory, not forecast steps; return as-is
             return forecast_chunk, targets_and_auxs
 
-        # Data for validation purposes => accumulates in memory!?
-        preds = ModelOutput(chunk, output_idxs[0], batch.get_source_samples())
+        # When compute_full_loss=True, physical/latent accumulate over all chunks and preds must
+        # span all output steps. When False, only the last chunk's data is kept, so preds matches
+        # the last chunk. Using chunk for both cases broke chunked rollout (chunk_size < num_steps)
+        # with compute_full_loss=True because chunk is just the final slice.
+        forecast_steps_for_preds = output_idxs if compute_full_loss else chunk
+        preds = ModelOutput(forecast_steps_for_preds, output_idxs[0], batch.get_source_samples())
         assert len(physical) == len(preds.physical), (
             f"Chunks cover {len(physical)} forecast steps, expected {len(preds.physical)}."
         )
         preds.physical = physical
         preds.latent = latent
-
 
         if not compute_full_loss:
             # this modifies targets_and_auxs in place
@@ -876,6 +900,7 @@ class Trainer(TrainerBase):
                                     self.model,
                                 )
 
+                            diffusion_rollout = cf.get("diffusion_rollout", False)
                             preds, targets_and_auxs = self._process_validation_chunks(
                                 batch,
                                 mode_cfg,
@@ -884,45 +909,49 @@ class Trainer(TrainerBase):
                                 bidx,
                                 targets_and_auxs,
                                 is_diffusion,
+                                diffusion_rollout,
                             )
                             # Diffusion inference inflates the model output's fstep
                             # dimension to one entry per ODE step (the denoising
                             # trajectory). The physical target is identical for every
                             # such step, so replicate target/aux entries to keep the
                             # downstream loss calculator and validation IO aligned.
-                            if is_diffusion:
+                            # Skip expansion for diffusion rollout — it was already
+                            # performed inside _process_validation_chunks before writing.
+                            if is_diffusion and not diffusion_rollout:
                                 _expand_targets_to_match_preds(preds, targets_and_auxs)
 
-                            # Write output for diffusion — _process_validation_chunks
-                            # skips writing when is_diffusion=True because chunked IO
-                            # is incompatible with the ODE trajectory fstep layout.
-                            # Do it here instead, mirroring the non-diffusion path.
-                            num_samples_write = (
-                                mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
-                            )
-                            if is_diffusion and _noise_idx == 0 and bidx < num_samples_write:
-                                denormalize_data_fct = (
-                                    (lambda x0, x1: x1)
-                                    if mode_cfg.get("output", {}).get("normalized_samples", False)
-                                    else self.dataset_val.denormalize_target_channels
+                                # For diffusion non-rollout validation, write the assembled
+                                # output directly here. For rollout (diffusion or otherwise),
+                                # _process_validation_chunks already handled the writing.
+                                num_samples_write = (
+                                    mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
                                 )
-                                write_output(
-                                    self.cf,
-                                    mode_cfg,
-                                    batch_size,
-                                    mini_epoch,
-                                    bidx,
-                                    denormalize_data_fct,
-                                    batch,
-                                    preds,
-                                    targets_and_auxs,
-                                )
+                                if _noise_idx == 0 and bidx < num_samples_write:
+                                    denormalize_data_fct = (
+                                        (lambda x0, x1: x1)
+                                        if mode_cfg.get("output", {}).get("normalized_samples", False)
+                                        else self.dataset_val.denormalize_target_channels
+                                    )
+                                    write_output(
+                                        self.cf,
+                                        mode_cfg,
+                                        batch_size,
+                                        mini_epoch,
+                                        bidx,
+                                        denormalize_data_fct,
+                                        batch,
+                                        preds,
+                                        targets_and_auxs,
+                                    )
 
                         _ = self.loss_calculator_val.compute_loss(
                             preds=preds,
                             targets_and_aux=targets_and_auxs,
                             metadata=extract_batch_metadata(batch),
                         )
+                        del preds, targets_and_auxs, batch
+                        torch.cuda.empty_cache()
                         pbar.update(batch_size * self.cf.world_size)
 
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:

@@ -608,6 +608,12 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
+        # Ensure normalised inputs for the diffusion model
+        if cf.get("fe_diffusion_model") and cf.get("trailing_layer_norm", False):
+            self.fe_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
+
         _concat_hd = (
             self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
         )

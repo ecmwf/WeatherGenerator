@@ -157,8 +157,23 @@ class WeatherGenMergeReader(Reader):
         da_tars_merge = self._concat_over_ens(da_tars_merge, fsteps_merge)
         da_preds_merge = self._concat_over_ens(da_preds_merge, fsteps_merge)
 
+        # If the caller requested ensemble mean, reduce the stacked-member dimension so
+        # that the returned data has no "ens" axis — matching the contract of a single
+        # zarr reader called with ensemble="mean".
+        want_mean = ensemble == "mean" or (
+            isinstance(ensemble, list) and "mean" in ensemble
+        )
+        if want_mean:
+            da_preds_merge = {
+                fstep: da.mean(dim="ens") for fstep, da in da_preds_merge.items()
+            }
+            # All members observe the same targets; drop ens by selecting the first.
+            da_tars_merge = {
+                fstep: da.isel(ens=0, drop=True) for fstep, da in da_tars_merge.items()
+            }
+
         return ReaderOutput(
-            target=da_tars_merge, prediction=da_preds_merge, points_per_sample=points_per_sample
+            target=da_tars_merge, prediction=da_preds_merge
         )
 
     def _concat_over_ens(self, da_merge, fsteps_merge):
