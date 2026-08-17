@@ -32,14 +32,11 @@ class QuantilePlots:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
-        self._base_dir = Path(output_basedir) / "quantile_plots"
-        self.out_plot_dir = self._base_dir
-        os.makedirs(self.out_plot_dir, exist_ok=True)
+        self.out_plot_dir = Path(output_basedir) / "quantile_plots"
 
-    def set_subdir(self, metric: str, region: str) -> None:
-        """Set a metric/region subdirectory for output."""
-        self.out_plot_dir = self._base_dir / metric / region
-        os.makedirs(self.out_plot_dir, exist_ok=True)
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """

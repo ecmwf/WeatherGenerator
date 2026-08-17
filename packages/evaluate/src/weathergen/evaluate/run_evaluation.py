@@ -43,7 +43,6 @@ from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
     metric_list_to_json,
 )
-from weathergen.evaluate.utils.config_compat import get_plot_score_options, parse_plot_config
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
@@ -163,7 +162,7 @@ def get_reader(
     region: str | None = None,
     metric: dict[str, object] | None = None,
 ):
-    if reader_type == "zarr":
+    if reader_type == "zarr" or reader_type == "anemoi-target":
         reader = WeatherGenZarrReader(run, run_id, private_paths)
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
@@ -221,29 +220,15 @@ def _process_stream(
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
         return run_id, stream, {}, {}
 
-    needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
+    is_zarr_like = type_ in ("zarr", "anemoi-target")
+    needs_plotting = stream_dict.get("plotting") and is_zarr_like
     needs_scoring = stream_dict.get("evaluation", False)
 
-    # --- Determine scoring state before loading any data ---
-    plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ == "zarr"
-    plot_score_init_time_series = (
-        plot_score_options.get("plot_score_init_time_series", False) and type_ == "zarr"
-    )
-
-    recomputable_metrics = {}
-    stream_loaded_scores: dict = {}
-    needs_score_recomputation = False
-
-    if needs_scoring:
-        stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
-        needs_score_recomputation = (
-            plot_score_maps or plot_score_init_time_series or bool(recomputable_metrics)
-        ) and type_ == "zarr"
-
-    # --- Load data only when necessary ---
     output_data = None
-    if needs_score_recomputation:
+    if (needs_plotting or needs_scoring) and is_zarr_like:
         available_data = reader.check_availability(stream, mode="evaluation")
+
+        output_data = None
         if available_data.score_availability:
             output_data = reader.get_data(
                 stream,
@@ -252,9 +237,10 @@ def _process_stream(
                 channels=available_data.channels,
                 ensemble=available_data.ensemble,
             )
+
             _logger.info(f"RUN {run_id} - {stream}: Data loaded successfully.")
 
-    # Plotting: pass pre-loaded data if available, otherwise plot_data loads its own subset
+    # Plotting (pass pre-loaded data)
     if needs_plotting:
         plot_data(reader, stream, global_plotting_opts, output_data=output_data)
 
@@ -262,6 +248,12 @@ def _process_stream(
     if not needs_scoring:
         return run_id, stream, {}, {}
 
+    plot_score_maps = plot_score_options.get("plot_score_maps", False) and is_zarr_like
+    plot_score_init_time_series = (
+        plot_score_options.get("plot_score_init_time_series", False) and is_zarr_like
+    )
+
+    stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
@@ -326,12 +318,11 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
 
-    # backward-compatibility with old way of specifying plotting options (bools) instead of lists:
-    # TODO: remove this in a few weeks once all users moved to the new style.
-    with open_dict(cfg):
-        parse_plot_config(cfg)
-
-    plot_score_options = get_plot_score_options(cfg.evaluation)
+    plot_score_options = {
+        "plot_score_maps": cfg.evaluation.get("plot_score_maps", False),
+        "plot_score_animations": cfg.evaluation.get("plot_score_animations", False),
+        "plot_score_init_time_series": cfg.evaluation.get("plot_score_init_time_series", False),
+    }
 
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})

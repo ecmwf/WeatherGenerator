@@ -9,7 +9,6 @@ dependencies = [
     "cartopy>=0.24.1",
     "xskillscore",
     "xhistogram",
-    "scores",
     "panel",
     "omegaconf",
     "plotly>=6.2.0",
@@ -23,8 +22,6 @@ dependencies = [
     "earthkit-utils==0.1.2",
     "imageio[ffmpeg]>=2.37.2",
     "scipy>=1.12",
-    "scores",
-    "pypdf>=4.0",
     ]
 
 [dependency-groups]
