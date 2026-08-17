@@ -506,11 +506,11 @@ class ZarrIO:
                     fstep_group = example_stream[fk]
                     child_names = set(fstep_group.group_keys())
                     if "prediction" in child_names or "target" in child_names:
-                        return ItemKey(sample, int(fk), stream)
-            # Fallback: use first stream / first fstep even without prediction/target
+                        # Return fstep 0 of this stream for correct forecast_offset detection
+                        return ItemKey(sample, 0, stream)
+            # Fallback: use first stream / fstep 0
             stream, example_stream = next(example_sample.groups())
-            fstep_keys = sorted(example_stream.group_keys())
-            fstep = int(fstep_keys[0]) if fstep_keys else 0
+            fstep = 0
         except (StopIteration, IndexError) as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
