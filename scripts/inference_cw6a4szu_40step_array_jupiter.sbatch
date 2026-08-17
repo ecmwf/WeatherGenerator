@@ -67,7 +67,7 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 set -euo pipefail
 
 FROM_RUN_ID=xq65fhca
-MINI_EPOCH=16
+MINI_EPOCH=14
 RUN_PREFIX=xq65
 FORECAST_STEPS=40
 FORECAST_CHUNK_SIZE=1
@@ -81,10 +81,10 @@ LOCAL_TEST_RANGE_HOURS=258
 
 task_id=${SLURM_ARRAY_TASK_ID:?This script must run as a Slurm array task.}
 run_id=$(printf '%s%05d' "$RUN_PREFIX" "$task_id")
-source_start=$(date -u --date="$FIRST_SOURCE_START UTC + $((task_id * NUM_SAMPLES_PER_TASK)) hours" '+%Y-%m-%dT%H:%M')
+source_start=$(date -u --date="$FIRST_SOURCE_START UTC + $((task_id * 4 * NUM_SAMPLES_PER_TASK)) hours" '+%Y-%m-%dT%H:%M')
 source_end=$(date -u --date="$source_start UTC + $INPUT_STEP_HOURS hours" '+%Y-%m-%dT%H:%M')
 test_start=$(date -u --date="$source_start UTC - $INPUT_STEP_HOURS hours" '+%Y-%m-%dT%H:%M')
-test_end=$(date -u --date="$test_start UTC + $LOCAL_TEST_RANGE_HOURS hours" '+%Y-%m-%dT%H:%M')
+test_end=$(date -u --date="$test_start UTC + $((LOCAL_TEST_RANGE_HOURS + NUM_SAMPLES_PER_TASK * INPUT_STEP_HOURS)) hours" '+%Y-%m-%dT%H:%M')
 expected_result="$RESULTS_ROOT/$run_id/validation_chkpt00000_rank0000.zip"
 
 if [[ -e "$expected_result" ]]; then
@@ -128,10 +128,10 @@ srun --ntasks=4 --cpus-per-task="$SLURM_CPUS_PER_TASK" \
         data_loading.num_workers_validation=0 \
         data_loading.persistent_workers=false \
         test_config.samples_per_mini_epoch="$NUM_SAMPLES_PER_TASK" \
+        test_config.output.num_samples="$NUM_SAMPLES_PER_TASK" \
         test_config.shuffle=false \
         test_config.start_date="$test_start" \
         test_config.end_date="$test_end" \
-        test_config.output.num_samples="$NUM_SAMPLES_PER_TASK" \
         test_config.forecast.num_steps="$FORECAST_STEPS" \
         test_config.forecast.chunk_size="$FORECAST_CHUNK_SIZE" \
         test_config.compute_full_validation_loss=false \
