@@ -292,6 +292,11 @@ def _read_sample(
         if anemoi_handle is not None:
             # Read target from anemoi dataset
             anemoi_ds, target_idx, ds_dates = anemoi_handle
+            if fi == 0:
+                _logger.info(
+                    f"Sample {sample} fstep {fs}: reading target from anemoi "
+                    f"(times shape={times_data.shape}, unique={len(np.unique(times_data))})"
+                )
             target_data = _read_anemoi_target(
                 anemoi_ds, target_idx, ds_dates, times_data, channel_idxs
             )

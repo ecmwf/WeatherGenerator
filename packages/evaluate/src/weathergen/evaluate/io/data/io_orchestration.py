@@ -644,6 +644,11 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         regrid_opts=state.regrid_opts,
         anemoi_target_cfg=state.anemoi_target_cfg,
     )
+    if state.anemoi_target_cfg is not None:
+        _logger.info(
+            f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
+            f"Target data will be read from anemoi dataset (not zarr)."
+        )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
         for s in state.samples
