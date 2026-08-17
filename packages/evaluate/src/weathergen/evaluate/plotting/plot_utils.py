@@ -800,12 +800,18 @@ def psd_plot_metric_region(
 
     PSD curves (frequencies, target PSD, prediction PSD) are stored in
     ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+
+    For a given forecast step, all runs are overlaid on one plot. Evolution
+    plots (across forecast steps) remain one-per-run.
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
 
     for stream in streams_set:
         for ch in channels_set:
+            # First pass: gather each run's per-fstep PSD data for this stream/channel.
+            run_fstep_datasets: dict[str, dict] = {}
+            run_labels: dict[str, str] = {}
             for run_id, data in scores_dict[metric][region].get(stream, {}).items():
                 if ch not in np.atleast_1d(data.channel.values):
                     continue
@@ -819,8 +825,6 @@ def psd_plot_metric_region(
                     _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
                     continue
 
-                label = runs[run_id].get("label", run_id)
-
                 per_fstep_datasets = {}
                 for fstep in attr_fsteps:
                     psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
@@ -828,20 +832,39 @@ def psd_plot_metric_region(
                         continue
                     per_fstep_datasets[fstep] = psd_datasets[0]
 
-                    method_tag = psd_datasets[0].get("psd_method", "sht")
-                    name = create_filename(
-                        prefix=[metric, method_tag, region],
-                        middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
-                    )
-                    plotter.psd_plot(
-                        psd_datasets,
-                        [label],
-                        tag=name,
-                        variable=ch,
-                        forecast_step=str(fstep),
-                    )
+                if not per_fstep_datasets:
+                    continue
 
+                run_fstep_datasets[run_id] = per_fstep_datasets
+                run_labels[run_id] = runs[run_id].get("label", run_id)
+
+            if not run_fstep_datasets:
+                continue
+
+            # Second pass: one combined plot per forecast step, overlaying every run
+            # that has data for it.
+            all_fsteps = sorted({fstep for d in run_fstep_datasets.values() for fstep in d})
+            for fstep in all_fsteps:
+                run_ids = [rid for rid, d in run_fstep_datasets.items() if fstep in d]
+                psd_datasets = [run_fstep_datasets[rid][fstep] for rid in run_ids]
+                labels = [run_labels[rid] for rid in run_ids]
+
+                method_tag = psd_datasets[0].get("psd_method", "sht")
+                name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=run_ids,
+                    suffix=[stream, ch, f"fstep{fstep}"],
+                )
+                plotter.psd_plot(
+                    psd_datasets,
+                    labels,
+                    tag=name,
+                    variable=ch,
+                    forecast_step=str(fstep),
+                )
+
+            # Third pass: per-run evolution plot (unchanged — one run per plot).
+            for run_id, per_fstep_datasets in run_fstep_datasets.items():
                 if len(per_fstep_datasets) >= 2:
                     method_tag = next(iter(per_fstep_datasets.values())).get(
                         "psd_method", "sht"
@@ -855,7 +878,7 @@ def psd_plot_metric_region(
                         per_fstep_datasets,
                         tag=evo_name,
                         variable=ch,
-                        label=label,
+                        label=run_labels[run_id],
                     )
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 

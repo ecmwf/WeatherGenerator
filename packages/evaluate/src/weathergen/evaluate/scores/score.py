@@ -16,6 +16,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
+from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
 from weathergen.evaluate.scores.score_utils import to_list
 
 # from common.io import MockIO
@@ -198,6 +199,7 @@ class Scores:
             "seeps": self.calc_seeps,
             "qq_analysis": self.calc_quantiles,
             "nse": self.calc_nse,
+            "psd": self.calc_psd,
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
@@ -1807,3 +1809,183 @@ class Scores:
         _logger.info(f"Q-Q analysis completed with {len(overall_qq_score.attrs)} attributes")
 
         return overall_qq_score
+
+    def calc_psd(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        psd_method: str = "sht",
+        psd_sht_truncation: int | None = None,
+        lat_range: tuple[float, float] = (-60.0, 60.0),
+    ) -> xr.DataArray:
+        """Compute power spectral density for prediction and ground truth.
+
+        Returns a scalar summary score (log-spectral MSE) and stores the full
+        PSD curves in ``.attrs`` for plotting downstream.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        psd_method: str
+            Method to compute the PSD. Options: 'sht' (spherical harmonic transform),
+            'fft' (2D Fourier transform)
+        psd_sht_truncation: int | None
+            Maximum spherical harmonic degree for truncation. If None, no truncation is applied.
+        lat_range: tuple[float, float]
+            Latitude range (min, max) to include in PSD calculation. Default is (-60,
+            60) degrees.
+
+        Returns
+        -------
+        xr.DataArray
+            Power spectral density score (log-spectral MSE) averaged over aggregation dimensions.
+
+        """
+        if self._agg_dims is None:
+            raise ValueError("Cannot calculate PSD without aggregation dimensions.")
+        if len(self._agg_dims) != 1:
+            raise ValueError(
+                f"PSD expects exactly one spatial aggregation dimension, "
+                f"got agg_dims={self._agg_dims}."
+            )
+        spatial_dim = self._agg_dims[0]
+        if spatial_dim not in gt.dims:
+            raise ValueError(
+                f"Spatial dimension '{spatial_dim}' not found in dims {list(gt.dims)}."
+            )
+
+        # PSD requires a spatial dimension with lat/lon coords (e.g. "ipoint").
+        # If the aggregation dim is "sample" or "ens" (e.g. from score map pipeline),
+        # PSD is not applicable — return NaN gracefully.
+        if spatial_dim in ("sample", "ens"):
+            _logger.debug(f"PSD: aggregation dim is '{spatial_dim}' (not spatial). Skipping.")
+            return xr.DataArray(np.nan)
+
+        n_points = gt.sizes[spatial_dim]
+        nlat, lats, lons = self._get_psd_grid_info(gt, spatial_dim)
+
+        if psd_method == "fft" and (lats is None or lons is None):
+            raise ValueError(f"PSD method 'fft' requires lat/lon coords on '{spatial_dim}'.")
+
+        # Detect grid type once for the entire stream (avoid repeated detection per channel)
+        grid_type = None
+        if psd_method == "sht" and lats is not None and lons is not None:
+            grid_type = detect_grid_type(lats, lons, n_points)
+
+        psd_kwargs = dict(
+            lats=lats,
+            lons=lons,
+            nlat=nlat,
+            n_points=n_points,
+            psd_method=psd_method,
+            psd_sht_truncation=psd_sht_truncation,
+            lat_range=lat_range,
+            grid_type=grid_type,
+        )
+
+        # Dims to preserve (e.g. channel) vs batch dims (sample, ens)
+        other_dims = [d for d in gt.dims if d != spatial_dim]
+        preserve_dims = [d for d in other_dims if d not in ("sample", "ens")]
+
+        if not preserve_dims:
+            gt_np, p_np = self._stack_for_psd(gt, p, spatial_dim, n_points)
+            slice_score, slice_attrs = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
+            score = xr.DataArray(slice_score)
+            score.attrs.update(slice_attrs)
+            score.attrs["psd_method"] = psd_method
+            return score
+
+        # Iterate over preserved dims (typically per channel)
+        shape = tuple(gt.sizes[d] for d in preserve_dims)
+        score_values = np.empty(shape)
+        all_attrs: dict = {}
+
+        for idx in np.ndindex(*shape):
+            sel = dict(zip(preserve_dims, idx, strict=False))
+            gt_slice = gt.isel(**sel)
+            p_slice = p.isel(**sel)
+            gt_np, p_np = self._stack_for_psd(gt_slice, p_slice, spatial_dim, n_points)
+
+            slice_score, slice_attrs = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
+            score_values[idx] = slice_score
+
+            key = "_".join(
+                str(gt.coords[d].values[i]) if d in gt.coords else str(i) for d, i in sel.items()
+            )
+            for k, v in slice_attrs.items():
+                all_attrs[f"{key}/{k}"] = v
+
+        coords = {d: gt.coords[d] for d in preserve_dims if d in gt.coords}
+        score = xr.DataArray(score_values, dims=preserve_dims, coords=coords)
+        all_attrs["psd_method"] = psd_method
+        all_attrs["preserve_dims"] = preserve_dims
+        score.attrs.update(all_attrs)
+        return score
+
+    @staticmethod
+    def _get_psd_grid_info(
+        gt: xr.DataArray, spatial_dim: str
+    ) -> tuple[int | None, np.typing.NDArray | None, np.typing.NDArray | None]:
+        """
+        Extract nlat, lats, lons from ground-truth coords.
+
+        Parameters
+        ----------
+        gt: xr.DataArray
+            Ground truth data array with lat/lon coordinates.
+        spatial_dim: str
+            Name of the spatial dimension along which to compute the PSD.
+        Returns
+        -------
+        nlat: int | None
+            Number of latitude points, or None if lat/lon coords are not found.
+        lats: np.typing.NDArray | None
+            Latitude values, or None if lat/lon coords are not found.
+        lons: np.typing.NDArray | None
+            Longitude values, or None if lat/lon coords are not found.
+
+        """
+        if "lat" in gt.coords and "lon" in gt.coords:
+            if gt.coords["lat"].dims == (spatial_dim,) and gt.coords["lon"].dims == (spatial_dim,):
+                lats = gt.coords["lat"].values
+                lons = gt.coords["lon"].values
+                return len(np.unique(lats)), lats, lons
+        raise ValueError(f"PSD requires lat/lon coords on spatial dimension '{spatial_dim}'.")
+
+    @staticmethod
+    def _stack_for_psd(
+        gt: xr.DataArray, p: xr.DataArray, spatial_dim: str, n_points: int
+    ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
+        """
+        Reshape data to (n_batch, n_points) for PSD computation.
+
+        Parameters
+        ----------
+        gt: xr.DataArray
+            Ground truth data array.
+        p: xr.DataArray
+            Forecast data array.
+        spatial_dim: str
+            Name of the spatial dimension along which to compute the PSD.
+        n_points: int
+            Number of points along the spatial dimension.
+        Returns
+        -------
+        gt_np: np.typing.NDArray
+            Reshaped ground truth data of shape (n_batch, n_points).
+        p_np: np.typing.NDArray
+            Reshaped forecast data of shape (n_batch, n_points).
+        """
+        non_spatial = [d for d in gt.dims if d != spatial_dim]
+        if non_spatial:
+            gt_np = gt.transpose(*non_spatial, spatial_dim).values.reshape(-1, n_points)
+            p_np = p.transpose(
+                *[d for d in p.dims if d != spatial_dim], spatial_dim
+            ).values.reshape(-1, n_points)
+        else:
+            gt_np = gt.values.reshape(1, -1)
+            p_np = p.values.reshape(1, -1)
+        return gt_np, p_np

@@ -18,7 +18,7 @@
 #      vmax: 40
 
 evaluation:
-  metrics  : ["psd"]
+  metrics  : ["psd","rmse"]
   regions: ["global"]
   summary_plots : true
   ratio_plots : false
@@ -53,12 +53,12 @@ default_streams:
 
       
 run_ids :
-  ri8gqyup:
+  st6x4i29:
     label: "forecast finetuned deterministic (skkbxfya -> dy0jlrmw)"
 
   # kvp6fds7:
   #   label: "forecast finetuned deterministic (skkbxfya -> mapw62ot)"
-  iy3niftw:
+  m3ezilrq:
     label: "decoder finetuned diffusion (skkbxfya -> ni41n7gy -> mapw62ot)"
     # results_base_dir : "../results/"
     #NEW: if "streams" is not specified, the default streams are used
