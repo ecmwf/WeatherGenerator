@@ -35,9 +35,9 @@
 
 set -euo pipefail
 
-FROM_RUN_ID=cw6a4szu
+FROM_RUN_ID=xq65fhca
 MINI_EPOCH=8
-RUN_PREFIX=cw8
+RUN_PREFIX="${FROM_RUN_ID:0:4}"
 FORECAST_STEPS=40
 FORECAST_CHUNK_SIZE=1                 # value proven interactively on ag for this checkpoint
 FIRST_SOURCE_START=2023-06-01T12:00
@@ -48,7 +48,7 @@ NUM_SAMPLES_PER_TASK=8
 LOCAL_TEST_RANGE_HOURS=258
 
 task_id=${SLURM_ARRAY_TASK_ID:?This script must run as a Slurm array task.}
-run_id=$(printf '%s%05d' "$RUN_PREFIX" "$task_id")
+run_id=$(printf '%s%04d' "$RUN_PREFIX" "$task_id")
 # Advance each task by exactly its own NUM_SAMPLES_PER_TASK windows
 # (INPUT_STEP_HOURS each) so consecutive tasks tile without overlap or grid drift.
 source_start=$(date -u --date="$FIRST_SOURCE_START UTC + $((task_id * INPUT_STEP_HOURS * NUM_SAMPLES_PER_TASK)) hours" '+%Y-%m-%dT%H:%M')
