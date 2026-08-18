@@ -187,6 +187,14 @@ def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
         all_channels = dummy_out.prediction.channels
 
         if channels is not None:
+            channels = list(channels)
+            # "10ff" (10m wind speed) is derived from its u/v components, so
+            # make sure both are exported whenever "10ff" is requested.
+            if "10ff" in channels:
+                for component in ("10u", "10v"):
+                    if component not in channels:
+                        channels.append(component)
+
             existing_channels = set(all_channels) & set(channels)
             if existing_channels != set(channels):
                 missing_channels = set(channels) - set(existing_channels)
@@ -274,14 +282,12 @@ def get_source_info(
             else:
                 # Prediction-only store (forecast_offset=1): no source group.
                 # Derive the init time from the earliest available prediction
-                # group, correcting for its lead time.
+                # group.
                 pred_group = None
-                lead_fstep = None
                 for fstep in available_fsteps:
                     candidate = zio.data_root.get(f"{sample}/{stream}/{fstep}/prediction")
                     if candidate is not None:
                         pred_group = candidate
-                        lead_fstep = fstep
                         break
                 if pred_group is None:
                     raise FileNotFoundError(
@@ -289,10 +295,11 @@ def get_source_info(
                         f"sample {sample}, stream '{stream}' in {fname_zarr}"
                     )
                 times_arr = np.asarray(pred_group["times"]).astype("datetime64[ns]")
-                lead = np.timedelta64(lead_fstep * fstep_hours, "h").astype("timedelta64[ns]")
-                # Shift the prediction's valid times back to the init time.
+                # The init (reference) time is one forecast step before the
+                # earliest prediction valid time: init = min(times) - fstep_hours.
+                lead = np.timedelta64(fstep_hours, "h").astype("timedelta64[ns]")
                 source_start = np.min(times_arr) - lead
-                source_end = np.max(times_arr) - lead
+                source_end = np.min(times_arr) - lead
 
             _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
             source_starts.append(source_start)
