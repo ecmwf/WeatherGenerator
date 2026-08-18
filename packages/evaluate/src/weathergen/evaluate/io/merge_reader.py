@@ -54,7 +54,13 @@ class WeatherGenMergeReader(Reader):
         """
         super().__init__(eval_cfg, run_id, private_paths)
         self.run_ids = eval_cfg.get("merge_run_ids", [])
-        self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir"))
+        # Follow the same convention as WeatherGenReader: store metrics under
+        # {results_base_dir}/evaluation/ so that the JSON files are found by
+        # the normal loader and sit next to other evaluation artefacts.
+        self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir")) / "evaluation"
+        # Maps and per-sample plots are written next to the metrics directory,
+        # mirroring the layout produced by WeatherGenZarrReader.
+        self.runplot_dir = self.metrics_dir.parent
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
 
         assert self.run_ids, (
@@ -140,8 +146,11 @@ class WeatherGenMergeReader(Reader):
             for fstep in out.target.keys():
                 _logger.debug(f"MERGE READERS: Processing fstep {fstep}...")
 
-                da_tars.append(out.target[fstep])
-                da_preds.append(out.prediction[fstep])
+                pred = out.prediction[fstep]
+                tar = out.target[fstep]
+
+                da_tars.append(tar)
+                da_preds.append(pred)
                 da_fsteps.append(fstep)
 
                 if return_counts:
@@ -260,6 +269,10 @@ class WeatherGenMergeReader(Reader):
                     " Please check that the path is correct and that the file exists."
                 )
         return None
+
+    def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
+        """Delegate to the first sub-reader's inference config."""
+        return self.readers[0].get_inference_stream_attr(stream_name, key, default)
 
     def get_stream(self, stream: str):
         """
