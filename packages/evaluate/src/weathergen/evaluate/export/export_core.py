@@ -184,7 +184,7 @@ def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
     with zarrio_reader(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
-        all_channels = dummy_out.target.channels
+        all_channels = dummy_out.prediction.channels
 
         if channels is not None:
             existing_channels = set(all_channels) & set(channels)
@@ -221,7 +221,9 @@ def get_grid_type(data_type, stream: str, fname_zarr: str) -> str:
 
 
 # TODO: this will change after restructuring the lead time.
-def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], list[np.datetime64]]:
+def get_source_info(
+    fname_zarr, stream, samples, fstep_hours: int = 6
+) -> tuple[list[np.datetime64], list[np.datetime64]]:
     """
     Retrieve source interval boundaries from the source group at forecast step 0.
 
@@ -232,6 +234,11 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
 
     The ``source_end`` also serves as the reference (initialisation) time.
 
+    If the store has no ``source`` group (e.g. prediction-only stores with
+    ``forecast_offset=1``), the reference time is derived from the earliest
+    available ``prediction`` group instead: its valid time minus the lead
+    time (``fstep * fstep_hours``) gives the initialisation time.
+
     Parameters
     ----------
     fname_zarr : str
@@ -240,6 +247,10 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
         Stream name to retrieve data for (e.g., 'ERA5').
     samples : list
         List of samples to process.
+    fstep_hours : int
+        Number of hours between consecutive forecast steps. Used to convert
+        a prediction's valid time back to the initialisation time when no
+        source group is present.
 
     Returns
     -------
@@ -252,16 +263,36 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
     source_starts = []
     source_ends = []
     with zarrio_reader(fname_zarr) as zio:
+        available_fsteps = sorted(int(step) for step in zio.forecast_steps)
         for sample in tqdm(samples, desc="Getting source info"):
-            group_path = f"{sample}/{stream}/0/source"
-            source_group = zio.data_root.get(group_path)
+            source_group = zio.data_root.get(f"{sample}/{stream}/0/source")
 
-            if source_group is None:
-                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
-
-            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
-            source_start = np.min(times_arr)
-            source_end = np.max(times_arr)
+            if source_group is not None:
+                times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
+                source_start = np.min(times_arr)
+                source_end = np.max(times_arr)
+            else:
+                # Prediction-only store (forecast_offset=1): no source group.
+                # Derive the init time from the earliest available prediction
+                # group, correcting for its lead time.
+                pred_group = None
+                lead_fstep = None
+                for fstep in available_fsteps:
+                    candidate = zio.data_root.get(f"{sample}/{stream}/{fstep}/prediction")
+                    if candidate is not None:
+                        pred_group = candidate
+                        lead_fstep = fstep
+                        break
+                if pred_group is None:
+                    raise FileNotFoundError(
+                        f"No 'source' group and no 'prediction' group found for "
+                        f"sample {sample}, stream '{stream}' in {fname_zarr}"
+                    )
+                times_arr = np.asarray(pred_group["times"]).astype("datetime64[ns]")
+                lead = np.timedelta64(lead_fstep * fstep_hours, "h").astype("timedelta64[ns]")
+                # Shift the prediction's valid times back to the init time.
+                source_start = np.min(times_arr) - lead
+                source_end = np.max(times_arr) - lead
 
             _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
             source_starts.append(source_start)
@@ -315,7 +346,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     for stream in streams:
         grid_type = get_grid_type(data_type, stream, fname_zarr)
         channels = get_channels(channels, stream, fname_zarr)
-        source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
+        source_starts, source_ends = get_source_info(
+            fname_zarr, stream, samples, fstep_hours=kwargs.get("fstep_hours", 6)
+        )
         kwargs["grid_type"] = grid_type
         kwargs["channels"] = channels
         kwargs["data_type"] = data_type
