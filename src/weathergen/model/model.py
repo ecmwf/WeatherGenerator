@@ -821,11 +821,37 @@ class Model(torch.nn.Module):
             and self.cf.get("fe_diffusion_model_conditioning", None) == "forecast"
         ):
             # tokens[:,0] = t (most recent), tokens[:,1] = t-1, ..., tokens[:,-1] = t-(T-1) (oldest)
-            if self.cf.stage == "inference":
+            if self.cf.stage == "inference" and tokens.shape[1] == 1 and forecast_offset == 1:
+                # Single-input-step inference path: test_config.model_input.forecasting.
+                # num_steps_input=1 paired with test_config.forecast.offset=1, so the
+                # diffusion model's single forecast step lines up with a deterministic
+                # offset=1 model's +1-step lead time. There is no older step to sum over —
+                # the sole loaded step IS the conditioning.
+                print(
+                    "Using the sole loaded step as conditioning token for inference "
+                    "(offset=1, num_steps_input=1)."
+                )
+                conditioning_tokens = tokens[:, 0]
+            elif self.cf.stage == "inference":
+                assert tokens.shape[1] > 1, (
+                    "Diffusion inference with fe_diffusion_model_conditioning='forecast' got "
+                    f"only one loaded input step (tokens.shape[1]=1) but forecast.offset="
+                    f"{forecast_offset} != 1. The single-input-step inference path is only "
+                    "defined for offset=1, num_steps_input=1 (used to align the diffusion "
+                    "model's first forecast step with a deterministic offset=1 model's lead "
+                    "time). Check test_config.forecast.offset and "
+                    "test_config.model_input.forecasting.num_steps_input."
+                )
                 print("Using most recent steps as conditioning tokens for inference.")
                 # conditioning_tokens = tokens[:, :-1].sum(axis=1)
                 conditioning_tokens = tokens[:, 1:].sum(axis=1)
             else:
+                assert tokens.shape[1] > 1, (
+                    "Diffusion training with fe_diffusion_model_conditioning='forecast' "
+                    "requires at least 2 loaded input steps (one denoising target + one "
+                    f"conditioning step); got tokens.shape[1]={tokens.shape[1]}. Check "
+                    "training_config.model_input.forecasting.num_steps_input."
+                )
                 # Conditioning: all older context steps [t-1, ..., t-(T-1)];
                 # denoising target: t (newest)
                 conditioning_tokens = tokens[:, 1:].sum(axis=1)

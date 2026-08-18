@@ -78,7 +78,11 @@ def write_output(
     # forecast indices, so synthesize a contiguous run of indices starting at the
     # original first index to cover every entry in model_output / target_aux_out.
     n_pred_steps = len(model_output.physical)
-    if cf.get("fe_diffusion_model", False) and n_pred_steps > len(timestep_idxs):
+    if (
+        cf.get("fe_diffusion_model", False)
+        and chunk_forecast_offset == 0
+        and n_pred_steps > len(timestep_idxs)
+    ):
         timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
 
     targets_lens = []
