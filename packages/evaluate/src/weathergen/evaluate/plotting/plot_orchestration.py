@@ -1114,10 +1114,13 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "image_format": plt_opt.get("image_format", "png"),
         "dpi_val": plt_opt.get("dpi_val", 300),
         "fig_size": plt_opt.get("fig_size", (8, 10)),
+        "fps": plt_opt.get("fps", 2),
         "log_scale": eval_opt.get("log_scale", False),
         "add_grid": eval_opt.get("add_grid", False),
         "plot_ensemble": eval_opt.get("plot_ensemble", False),
         "baseline": eval_opt.get("baseline", None),
+        "psd_show_ratio": eval_opt.get("psd_show_ratio", True),
+        "psd_animation": eval_opt.get("psd_animation", True),
     }
 
     plotter = LinePlots(plot_cfg, summary_dir)
