@@ -469,6 +469,15 @@ def plot_loss_per_stream(
                                 ):
                                     data_cols += [col]
                                     title_col = col if title_col is None else title_col
+                            elif len(col_split) == 6:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] + "." + col_split[4] == channel
+                                    and int(col_split[5]) in forecast_steps
+                                ):
+                                    data_cols += [col]
+                                    title_col = col if title_col is None else title_col
 
                         for col in data_cols:
                             x_vals = np.array(run_data_mode[x_col])
