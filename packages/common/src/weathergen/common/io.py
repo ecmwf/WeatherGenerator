@@ -442,6 +442,14 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
+    def _has_group(self, item: ItemKey) -> bool:
+        """Check if an output item exists in this store."""
+        assert self.data_root is not None, "ZarrIO must be opened before accessing data."
+        try:
+            return self.data_root.get(item.path) is not None
+        except KeyError:
+            return False
+
     def _get_group(self, item: ItemKey, create: bool) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
@@ -492,7 +500,12 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
-        fstep0_datasets = self._get_datasets(self.example_key)
+        key = self.example_key
+        if not self._has_group(key):
+            # No fstep 0 group at all => no targets at fstep 0 => offset 1.
+            _logger.debug(f"No group at {key.path}, inferring forecast_offset=1.")
+            return 1
+        fstep0_datasets = self._get_datasets(key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
     @functools.cached_property
@@ -501,7 +514,7 @@ class ZarrIO:
             sample, example_sample = next(self.data_root.groups())
             # Find the first stream that has prediction/target data (not just source)
             for stream, example_stream in example_sample.groups():
-                fstep_keys = sorted(example_stream.group_keys())
+                fstep_keys = sorted(example_stream.group_keys(), key=int)
                 for fk in fstep_keys:
                     fstep_group = example_stream[fk]
                     child_names = set(fstep_group.group_keys())
@@ -536,10 +549,11 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
 
-        all_steps = sorted(list(example_stream.group_keys()))
+        all_steps = sorted(example_stream.group_keys(), key=int)
 
         if self.forecast_offset == 1:
-            return all_steps[1:]  # exclude fstep with no targets/preds
+            # exclude fstep with no targets/preds (may be absent from the store entirely)
+            return [step for step in all_steps if int(step) != 0]
         else:
             return all_steps
 
