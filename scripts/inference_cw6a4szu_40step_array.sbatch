@@ -23,7 +23,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=01:30:00
 #SBATCH --array=0-15%16
-#SBATCH --job-name=wg-cw6-f40
+#SBATCH --job-name=wg-cw8-f40
 #SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --error=logs/%x-%A_%a.err
 
@@ -31,7 +31,7 @@ set -euo pipefail
 
 FROM_RUN_ID=cw6a4szu
 MINI_EPOCH=8
-RUN_PREFIX=cw6
+RUN_PREFIX=cw8
 FORECAST_STEPS=40
 FORECAST_CHUNK_SIZE=4
 RESULTS_ROOT=/iopsstor/scratch/cscs/thunter/shared_work/results
