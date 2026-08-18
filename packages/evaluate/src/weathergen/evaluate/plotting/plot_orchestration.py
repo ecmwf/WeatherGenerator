@@ -498,6 +498,14 @@ def _build_single_animation(
 
     if animation_format.lower() == "mp4":
         frames = [imageio.imread(p) for p in image_paths]
+        # Matplotlib can produce frames that differ by a pixel depending on text/colorbar
+        # rendering. Normalise all frames to the first frame's size so mimsave doesn't fail.
+        h0, w0 = frames[0].shape[:2]
+        frames = [
+            f if f.shape[:2] == (h0, w0)
+            else np.array(Image.fromarray(f).resize((w0, h0), Image.LANCZOS))
+            for f in frames
+        ]
         fps = 1000 / duration_ms if duration_ms > 0 else 2
         imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
     else:
