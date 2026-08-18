@@ -295,8 +295,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         raise FileNotFoundError(msg)
 
                     # The same dataset can exist on different locations in the filesystem,
-                    # so we need to choose here.
-                    filename = filenames[0]
+                    # so pick the first data_paths root that actually has it (the check
+                    # above guarantees at least one exists).
+                    filename = next(f for f in filenames if f.exists())
 
                 ds_type = stream_info["type"]
                 if is_root():
