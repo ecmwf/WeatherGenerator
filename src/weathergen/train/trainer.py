@@ -870,7 +870,8 @@ class Trainer(TrainerBase):
                             batch.to_device(self.device)
                         else:
                             output_idxs = batch.get_output_idxs()
-                            chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
+                            forecast_cfg = mode_cfg.get("forecast", {})
+                            chunk_size = forecast_cfg.get("chunk_size", len(output_idxs))
                             chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
                             # calculators that encode the target window (diffusion latent
                             # target, SSL teachers) read the target samples' source view
