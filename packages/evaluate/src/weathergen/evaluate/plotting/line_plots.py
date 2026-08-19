@@ -24,6 +24,7 @@ from numpy.typing import NDArray
 from PIL import Image
 
 from weathergen.evaluate.plotting.plot_utils import (
+    RASTER_ANIMATION_FORMATS,
     align_labels,
     channel_sort_key,
     clean_label,
@@ -956,6 +957,14 @@ class LinePlots:
         paths = [Path(p) for p in frame_paths if p is not None and Path(p).exists()]
         if len(paths) < 2:
             _logger.debug(f"PSD animation '{tag}' skipped: fewer than two frames.")
+            return None
+
+        if self.image_format.lower() not in RASTER_ANIMATION_FORMATS:
+            _logger.warning(
+                f"PSD animation '{tag}' skipped: image_format={self.image_format!r} is not a "
+                f"raster format Pillow can read as frames (supported: "
+                f"{sorted(RASTER_ANIMATION_FORMATS)})."
+            )
             return None
 
         out_dir = Path(self.out_plot_dir_psd)

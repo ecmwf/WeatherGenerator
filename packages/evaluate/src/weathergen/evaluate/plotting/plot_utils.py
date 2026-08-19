@@ -18,6 +18,11 @@ from numpy.typing import NDArray
 
 _logger = logging.getLogger(__name__)
 
+# Animations (gif/mp4) are stitched from per-frame static plots with Pillow or imageio, both of
+# which require raster frames. Vector/document formats like "pdf"/"svg"/"eps" are valid choices
+# for the static plots themselves (via image_format) but can't be decoded as animation frames.
+RASTER_ANIMATION_FORMATS = {"png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp"}
+
 
 # Shared helpers
 def calculate_average_over_dim(
