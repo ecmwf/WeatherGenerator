@@ -49,6 +49,7 @@ from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
 
@@ -112,6 +113,9 @@ def run_score_timeseries_pipeline(
         max_workers=reader.eval_cfg.get("max_workers", None),
     )
 
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
+
     # --- Parallel score computation across (region, fstep) pairs ---
     score_tasks: list[dict] = []
     for fstep in fsteps:
@@ -130,6 +134,12 @@ def run_score_timeseries_pipeline(
         )
         preds_with_hour = preds_fs.assign_coords(source_end_hour=source_end_hour)
         tars_with_hour = tars_fs.assign_coords(source_end_hour=source_end_hour)
+        # get_score groups every DataArray argument, so the climatology is grouped too.
+        clim_with_hour = (
+            aligned_clim_data[fstep].assign_coords(source_end_hour=source_end_hour)
+            if aligned_clim_data
+            else None
+        )
 
         for region in regions:
             # PSD is a spatial metric incompatible with sample+ipoint aggregation
@@ -140,14 +150,23 @@ def run_score_timeseries_pipeline(
 
             metric_names = list(region_metrics.keys())
             metric_params = list(region_metrics.values())
+            # Masked here: the worker only labels its results with `region`.
+            bbox = RegionBoundingBox.from_region_name(region)
+            preds_r = bbox.apply_mask(preds_with_hour)
+            tars_r = bbox.apply_mask(tars_with_hour)
+            if preds_r.sizes.get("ipoint") == 0:
+                continue
             score_tasks.append(
                 dict(
                     fstep=fstep,
                     region=region,
                     metric_names=metric_names,
                     metric_params=metric_params,
-                    preds_with_hour=preds_with_hour,
-                    tars_with_hour=tars_with_hour,
+                    preds_with_hour=preds_r,
+                    tars_with_hour=tars_r,
+                    clim_with_hour=(
+                        bbox.apply_mask(clim_with_hour) if clim_with_hour is not None else None
+                    ),
                     unique_hours=unique_hours,
                 )
             )
@@ -183,6 +202,7 @@ def _compute_timeseries_scores_for_fstep(
     metric_params: list,
     preds_with_hour: xr.DataArray,
     tars_with_hour: xr.DataArray,
+    clim_with_hour: xr.DataArray | None,
     unique_hours: list[int],
 ) -> tuple[int, str, dict[str, xr.DataArray]]:
     """Compute grouped scores for one (region, fstep) pair (parallelisable worker).
@@ -195,7 +215,7 @@ def _compute_timeseries_scores_for_fstep(
     metric_scores: dict[str, xr.DataArray] = {}
     for metric_name, parameters in zip(metric_names, metric_params, strict=False):
         score = get_score(
-            VerifiedData(preds_with_hour, tars_with_hour, None, None, None),
+            VerifiedData(preds_with_hour, tars_with_hour, None, None, clim_with_hour),
             metric_name,
             agg_dims=agg_dims,
             group_by_coord=group_by_coord,
@@ -283,7 +303,7 @@ def run_score_map_pipeline(
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
         "fig_size": cfg.get("fig_size", None),
-        "animation_format": cfg.get("animation_format", "gif"),
+        "animation_format": cfg.get("animation_format", "mp4"),
         "fps": cfg.get("fps", 2),
     }
     output_basedir = str(reader.runplot_dir)
@@ -509,21 +529,40 @@ def _build_single_animation(
     anim_parts.append(var)
     out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
 
-    if animation_format.lower() == "mp4":
-        frames = [imageio.imread(p) for p in image_paths]
-        fps = 1000 / duration_ms if duration_ms > 0 else 2
-        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
-    else:
-        images = [Image.open(p) for p in image_paths]
-        images[0].save(
+    if animation_format.lower() == "gif":
+        images = [Image.open(p).convert("RGB") for p in image_paths]
+        # GIF frames are palette-indexed (256 colors max) — this is a hard
+        # format limit, so gradients like colorbars can never be truly
+        # continuous here.
+        palette = images[0].quantize(colors=256, method=Image.Quantize.MAXCOVERAGE)
+        frames = [img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images]
+        frames[0].save(
             out_path,
             save_all=True,
-            append_images=images[1:],
+            append_images=frames[1:],
             duration=duration_ms,
             loop=0,
         )
         for img in images:
             img.close()
+    elif animation_format.lower() == "mp4":
+        frames = [imageio.imread(p) for p in image_paths]
+        fps = 1000 / duration_ms if duration_ms > 0 else 2
+        (
+            imageio.mimsave(
+                out_path,
+                frames,
+                fps=fps,
+                macro_block_size=8,
+                ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],
+                ffmpeg_log_level="error",
+            ),
+        )
+    else:
+        raise ValueError(
+            f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'."
+        )
+
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
 
@@ -859,7 +898,7 @@ def plot_data(
 
     plotter_cfg = {
         "image_format": global_plotting_opts.get("image_format", "png"),
-        "animation_format": global_plotting_opts.get("animation_format", "gif"),
+        "animation_format": global_plotting_opts.get("animation_format", "mp4"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size"),
         "fps": global_plotting_opts.get("fps", 2),
