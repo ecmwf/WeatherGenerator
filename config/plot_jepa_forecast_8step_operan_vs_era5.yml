@@ -1,0 +1,307 @@
+
+train:
+  
+  plot:
+
+    # old safe branch jepa pretrain runs that were precursors to n0t, srd, af90...
+    # gjl6a0kb:
+    #   slurm_id: 0
+    #   description: "good temporal JEPA, old branch"
+    # uahdb9yl:
+    #   slurm_id: 0
+    #   description: "cont., good temporal JEPA, old branch"
+
+
+    ### runs off the new develop-ssl-diffusion-v1-pre-muon branch and with muon changes merged in
+    # nzb4zf3n:
+    #   slurm_id: 1043776
+    #   description: "probably muon"
+    # bpvgcis0:
+    #   slurm_id: 1043761
+    #   description: "repro with muon changes merged"
+    # gxditlu4:
+    #   slurm_id: 1043751
+    #   description: "repro"
+
+
+    ### fixed the streams appending
+
+    # e4yjoofn:
+    #   slurm_id: 0
+    #   description: "reproduce o96 results, fixed streams appending, 18 mini-epochs pre-train, 2 step forecast"
+    
+    # # # with muon changes merged in
+    # s6zwvfp2:
+    #   slurm_id: 0
+    #   description: "reproduce o96 results, fixed streams appending, 18 mini-epochs pre-train, 2 step forecast"
+
+    # # kf5vjdj2:
+    # #   slurm_id: 1043763
+    # #   description: "repro, fixed streams appending, with muon changes merged in, muon"
+
+
+    # # # Sophie's N320 runs
+
+    # # de3z9l3a:
+    # #   slurm_id: 1043764
+    # #   description: "n320 space jepa, no swiglu or xsa"
+
+    # # jc7v6b5d:
+    # #   slurm_id: 1043765
+    # #   description: "n320 space jepa"
+
+    # # ladqrul6:
+    # #   slurm_id: 0
+    # #   description: "atmofs with Oper finetuning"
+
+    # # dq0sq4ea:
+    # #   slurm_id: 0
+    # #   description: "atmofs, nominal time, 6h output, 2 step trained, 6h tws"
+
+    # perrjey5:
+    #   slurm_id: 0
+    #   description: "N320, pure forecast training"
+
+    # c71eo6pu:
+    #   slurm_id: 0
+    #   description: "perrjey5, cont."
+
+    # o6w60xs5:
+    #   slurm_id: 0
+    #   description: "o96, pure forecast training"
+
+    # # funtz8kv:
+    # #   slurm_id: 0
+    # #   description: "Seb JEPA space masking, unfrozen, ERA5 input, 6h output, nominal time, 6h tws, 2 step, 512 target coords dim embed, increase grad clip to 1.0, 6h output"
+
+    # # v9neivsd:
+    # #   slurm_id: 0
+    # #   description: "n320 forecasting, fsdp forecasting, ci8dbx75"
+
+    # qpf0zarq:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, mini-epoch 20, si0krkxk"
+
+    # b4yeti06:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, mini-epoch 20, si0krkxk, more workers"
+
+    # ci2t558k:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, mini-epoch 24 (?), si0krkxk"
+
+    # wejf33qv:
+    #   slurm_id: 0
+    #   description: "continue ci2t558k"
+
+    # vem1md97:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, mini-epoch 24 (?), si0krkxk, more workers"
+
+    # # n320 but with more workers
+    # xsy4n3ug:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, mini-epoch 24 (?), si0krkxk, more workers"
+
+    # riamnssv:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, mini-epoch 24 (?), si0krkxk, max num targets"
+
+    # heztvrd7:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, mini-epoch 24 (?), si0krkxk, different max num targets"
+
+
+   ### lots of different 8 step models I am doing here:
+    # s89y4qj3:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, mini-epoch 24 (?), si0krkxk, different max num targets"
+
+    # lul6p05x:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, mini-epoch 24 (?), si0krkxk, different max num targets, 8 nodes"
+
+    # exvmvfuf:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, mini-epoch 24 (?), si0krkxk, different max num targets, 8 nodes, channel weights"
+
+    # n0gcrkhy:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, mini-epoch 24, wej..., different max num targets, 2 nodes"
+
+    # eqn3ww8b:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, mini-epoch 24, wej..., different max num targets, 8 nodes"
+    
+    fx276yn3:
+      slurm_id: 0
+      description: "n320 8 step forecasting, mini-epoch 24, wej..., different max num targets, 8 nodes, channel weights"
+
+    # sl0n9qmt:
+    #   slurm_id: 0
+    #   description: "continue fx276yn3 with new branch doing incremental writing"
+
+    # hl4w5imm:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, CHANNEL weight working, mini-epoch 24, wej..., different max num targets, 8 nodes"
+
+    igsqdagc:
+      slurm_id: 0
+      description: "n320 8 step forecasting, jepa, proper iasi channels"
+
+    cw6a4szu:
+      slurm_id: 0
+      description: "n320 8 step forecasting, jepa, proper iasi channels, with channel weights"
+
+    # rrvj7vjv:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, correct iasi channels?"
+
+
+
+    # # f9cg4mwz:
+    # #   slurm_id: 0
+    # #   description: "n320 forecasting, mini-epoch 30?, fsdp forecasting, si0krkxk"
+
+    # lecatz9n:
+    #   slurm_id: 0
+    #   description: "temporal jepa, o96 forecasting, mini-epoch 18, with muon"
+
+    # n30m4d0t:
+    #   slurm_id: 0
+    #   description: "temporal jepa, o96 forecasting, mini-epoch 38"
+
+
+    ## christian's models
+    # nlwqm5vw :
+    #   slurm_id: 0
+    #   description: "fine-tuning, 8-step, fixed, 1979, smaller lr"
+    # fn98xwgv :
+    #   slurm_id : 0
+    #   description: "fine-tuning, 8-step, sequential, 1979, smaller lr, decay=cosine, fixed"
+    # rmcjxm0i :
+    #   slurm_id : 0
+    #   description: "dh00ll5c 8-step fine-tuning"
+    # lvicwsxf :
+    #   slurm_id : 0
+    #   description: "p2h3q0xw 8-step fine-tuning"
+    # bnhjhi3v :
+    #   slurm_id : 0
+    #   description: "p2h3q0xw 8-step fine-tuning, with weighting"
+    # mofk265t :
+    #   slurm_id : 0
+    #   description: "rdovuscj 8-step fine-tuning"
+    # a9g3jtxs :
+    #   slurm_id : 0
+    #   description: "dkir9g0k 8-step fine-tuning"
+
+    # new 8 node really good?
+
+    # skkbxfya:
+    #   slurm_id : 0
+    #   description: "n320 2 step forecasting, forecast, 8 nodes"
+
+    # j9vvlp4n:
+    #   slurm_id : 0
+    #   description: "n320 8 step forecasting, forecast, 8 nodes"
+
+
+    # finetune with operational analysis at the end of the ERA5
+    
+    # tj91fz0m:
+    #   slurm_id : 0
+    #   description: "n320 8 step forecasting, forecast, 8 nodes, finetune with operational analysis at the end of the ERA5, lr1"
+
+    l1fg6xkg:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, 8 nodes, finetune with operational analysis at the end of the ERA5, lr2"
+
+    p4t7jhfg:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, 8 nodes, finetune with operational analysis at the end of the ERA5, lr3"
+
+    taiq2u6d:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, 8 nodes, finetune with operational analysis at the end of the ERA5, lr4"
+
+    hizbux4x:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, 8 nodes, finetune with operational analysis at the end of the ERA5, lr5"
+    
+    jiqb86tl:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze embedding, 8 nodes, finetune with operational analysis at the end of the ERA5, lr1"
+
+    jke9q9cx:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze embedding, 8 nodes, finetune with operational analysis at the end of the ERA5, lr2"
+
+    ji5yw6pk:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze embedding, 8 nodes, finetune with operational analysis at the end of the ERA5, lr3"
+
+    mbzbzjyk:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze embedding, 8 nodes, finetune with operational analysis at the end of the ERA5, lr4"
+
+    lzi4xfwi:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze embedding, 8 nodes, finetune with operational analysis at the end of the ERA5, lr5"
+
+    m0fqkfw1:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr1"
+
+    z62ln8gz:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr2"
+
+    is7d73is:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr3"
+
+    krczycov:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze encoder+fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr1"
+
+    dmopk23p:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze encoder+fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr2"
+
+    ivzwfgaw:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze encoder+fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr2"
+
+    kzdx0h4q:
+      slurm_id : 0
+      description: "n320 8 step forecasting, unweighted forecast, unfreeze encoder+fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr2"
+
+    nx76u5ny:
+      slurm_id : 0
+      description: "n320 8 step forecasting from 8 node 2 step, era5 in"
+
+    e2ov56tf:
+      slurm_id : 0
+      description: "n320 8 step forecasting from 8 node 2 step, era5 in, diff lr"
+
+
+    # ../WeatherGenerator-private/hpc/launch-slurm.py --from-run-id skkbxfya --config ./config/config_forecasting_finetuning.yml --options streams.ERA5.max_num_targets=108416 data_loading.num_workers=8 streams.ERA5_in.filenames=['aifs-od-an-oper-0001-mars-n320-2016-2025-6h-v1-for-single-v2.zarr'] --nodes 8 --time 12:00:00 --chain-jobs 8
+    adexgl64 :
+      slurm_id : 0
+      description: "skkbxfya 8-step ERA5"
+    j9vvlp4n :
+      slurm_id : 0
+      description: "skkbxfya 8-step OperAn"
+    oywmz4sz :
+      slurm_id : 0
+      description: "skkbxfya 8-step ERA5, lr=5e-5"
+    hlhgmwvw :
+      slurm_id : 0
+      description: "skkbxfya 8-step OperAn, lr=4e-5"
+    dy0jlrmw :
+      slurm_id : 0
+      description: "skkbxfya 8-step ERA5, lr=4e-5"
+ 
+    
+
+    

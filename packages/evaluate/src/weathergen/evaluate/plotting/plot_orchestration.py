@@ -508,13 +508,15 @@ def _build_single_animation(
         anim_parts.append(region)
     anim_parts.append(var)
     out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
+    frame_size = _get_animation_frame_size(image_paths, animation_format)
 
     if animation_format.lower() == "mp4":
-        frames = [imageio.imread(p) for p in image_paths]
         fps = 1000 / duration_ms if duration_ms > 0 else 2
-        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
+        with imageio.get_writer(out_path, fps=fps, ffmpeg_params=["-crf", "18"]) as writer:
+            for path in image_paths:
+                writer.append_data(_load_animation_frame(path, frame_size))
     else:
-        images = [Image.open(p) for p in image_paths]
+        images = [Image.fromarray(_load_animation_frame(path, frame_size)) for path in image_paths]
         images[0].save(
             out_path,
             save_all=True,
@@ -526,6 +528,33 @@ def _build_single_animation(
             img.close()
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
+
+
+def _get_animation_frame_size(image_paths: list[str], animation_format: str) -> tuple[int, int]:
+    """Return a common frame size, aligned for MP4 encoding when needed."""
+    image_sizes = []
+    for path in image_paths:
+        with Image.open(path) as image:
+            image_sizes.append(image.size)
+
+    width = max(size[0] for size in image_sizes)
+    height = max(size[1] for size in image_sizes)
+    if animation_format.lower() == "mp4":
+        width = (width + 15) // 16 * 16
+        height = (height + 15) // 16 * 16
+    return width, height
+
+
+def _load_animation_frame(path: str, frame_size: tuple[int, int]):
+    """Load a frame as RGB and pad it to the common animation canvas."""
+    with Image.open(path) as image:
+        image = image.convert("RGB")
+        if image.size == frame_size:
+            return np.array(image)
+
+        padded_image = Image.new("RGB", frame_size, "white")
+        padded_image.paste(image)
+        return np.array(padded_image)
 
 
 def _dispatch_animations(

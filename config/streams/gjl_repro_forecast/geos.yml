@@ -1,0 +1,32 @@
+# Geostationary input-only streams for forecast fine-tuning.
+METEOSAT_SEVIRI_IR: &geos
+  type: obs
+  stream_id: 10
+  filenames: ['observations-file-2014-2024-seviri-o256-wegen-v3.zarr']
+  geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
+  loss_weight: 1.0
+  token_size: 1024
+  tokenize_spacetime: false
+  max_num_targets: 262144
+  forcing: true
+  embed: {net: transformer, num_tokens: 1, num_heads: 4, dim_embed: 512, num_blocks: 2}
+  embed_target_coords: {net: linear, dim_embed: 512}
+  target_readout: {num_layers: 2, num_heads: 4}
+  pred_head: {ens_size: 1, num_layers: 1}
+GOES_ABI_IR:
+  <<: *geos
+  stream_id: 11
+  filenames: ['observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr']
+HIMAWARI_AHI_IR:
+  <<: *geos
+  stream_id: 12
+  filenames: ['observations-file-2015-2022-himawari8-IR-o256-v1.zarr', 'observations-file-2022-2024-himawari9-IR-o256-v1.zarr']
+GOES_ABI_VIS:
+  <<: *geos
+  stream_id: 13
+  filenames: ['observations-file-2017-2024-abi-goes16-VIS-o256-v2.zarr']
+HIMAWARI_AHI_VIS:
+  <<: *geos
+  stream_id: 14
+  filenames: ['observations-file-2015-2022-himawari8-VIS-o256-v1.zarr', 'observations-file-2022-2024-himawari9-VIS-o256-v1.zarr']
+  geoinfo_channels: ['zenith']

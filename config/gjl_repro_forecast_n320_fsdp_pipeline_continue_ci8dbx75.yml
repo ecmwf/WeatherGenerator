@@ -1,0 +1,37 @@
+# Continue only the interrupted N320 pretraining run ci8dbx75.
+#
+# The initial four-job pretraining chain did not reach its 96-mini-epoch target:
+# its second job failed and the final two jobs timed out. This pipeline resumes
+# pretraining, then launches the original FSDP forecast fine-tuning stage.
+#
+# Pretraining itself is non-FSDP; the `fsdp` filename identifies the original
+# pipeline whose downstream forecast overlay enables FSDP.  `run_id ==
+# from_run_id` reuses the archived Slurm snapshot and resumes from
+# ci8dbx75_latest.chkpt.  No base config or overlay is supplied:
+# `train_continue` reloads the saved pretraining configuration and preserves
+# its progress.
+#
+# The forecast stage waits for the final continuation job, as in the original
+# pipeline. The launcher uses an afterany dependency, so it will start after
+# that job exits even if the pretraining chain exhausts its walltime.
+#
+# Re-runnable: each submission adds at most four 2-node continuation jobs and
+# then a four-job FSDP forecast fine-tuning chain.
+#
+# Submit from WeatherGenerator:
+#   uv run ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/gjl_repro_forecast_n320_fsdp_pipeline_continue_ci8dbx75.yml
+parallelize: false
+stages:
+  - name: contpretrain
+    stage: train
+    run_id: ci8dbx75
+    from_run_id: ci8dbx75
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.contpretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_fsdp.yml
+    chain_jobs: 4
+    nodes: 2

@@ -1,0 +1,49 @@
+# Continuation of gjl_repro_forecast_muon_pipeline.yml for run kf5vjdj2,
+# the Muon counterpart of the cdgwhdoj / wowepk86 continuations.
+#
+# kf5vjdj2's pretrain chain burned all 4 jobs on 12h walltimes (3x TIMEOUT,
+# 1x COMPLETED early) and only reached mini-epoch 19 of 96. This pipeline
+# resumes that pre-training and then runs the Muon forecast fine-tuning.
+#
+# run_id == from_run_id == kf5vjdj2 makes the launcher reuse the existing
+# /e/scratch/weatherai/slurm/slurm_weathergen_kf5vjdj2_dir (it re-syncs the
+# .venv, which post_train.sh deleted) and continue in place from
+# kf5vjdj2_latest.chkpt (istep 19840). That copy dir is a 2026-07-27 snapshot
+# of this checkout -- the same snapshot wowepk86 used -- so the continuation
+# runs the code the run started with. No base_config / config_files on the
+# continue stage on purpose: the config is reloaded from the run itself, which
+# already carries optimizer.name=muon with muon.lr_max=5e-3, so the Muon
+# overlay must NOT be re-applied here. num_mini_epochs stays 96 and the
+# mini-epoch counter picks up at 19 rather than restarting at 0.
+#
+# Ordering: submit gjl_repro_forecast_muon_finetune_kf5vjdj2.yml FIRST and let
+# it finish submitting (the launcher copies the source tree and syncs the venv
+# synchronously), then submit this one. This pipeline rewrites kf5vjdj2_latest.*
+# and chkpt00019+ in place; the standalone fine-tune is pinned to chkpt00018 so
+# it is unaffected either way.
+#
+# Re-runnable: if 4 more jobs still are not enough, submit this file again and
+# it resumes from the then-latest checkpoint. Drop the forecastft stage if you
+# only want another round of pre-training.
+#
+# Submission (this launcher has no non-submitting dry-run mode), from
+# .../develop-ssl-diffusion-v1/WeatherGenerator:
+#   uv run ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/gjl_repro_forecast_muon_pipeline_continue_kf5vjdj2.yml
+parallelize: false
+stages:
+  - name: contpretrain
+    stage: train
+    run_id: kf5vjdj2
+    from_run_id: kf5vjdj2
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.contpretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast.yml
+      - ./config/config_gjl_repro_finetune_forecast_muon.yml
+    options:
+      - train_logging.checkpoint=100
+    chain_jobs: 4
+    nodes: 2
