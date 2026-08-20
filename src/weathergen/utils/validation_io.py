@@ -79,9 +79,12 @@ def write_output(
     # original first index to cover every entry in model_output / target_aux_out.
     # A diffusion rollout keeps the ordinary fstep layout: there the extra entries are the
     # chunk's leading padding slots, which timestep_idxs has already dropped, so leave it be.
+    # The same holds whenever the chunk starts at a non-zero forecast offset (e.g.
+    # forecast.offset=1): the surplus entries are that chunk's padding, not trajectory steps,
+    # and synthesizing indices would run the emitted steps past the end of the forecast.
     is_trajectory = cf.get("fe_diffusion_model", False) and not cf.get("diffusion_rollout", False)
     n_pred_steps = len(model_output.physical)
-    if is_trajectory and n_pred_steps > len(timestep_idxs):
+    if is_trajectory and chunk_forecast_offset == 0 and n_pred_steps > len(timestep_idxs):
         timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
 
     targets_lens = []
