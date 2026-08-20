@@ -181,10 +181,9 @@ class LossPhysical(LossModuleBase):
         if location_weight_type == "auto":
             n_points = stream_info.get("n_grid_points")
             N = loss_fns._O_GRID_N.get(n_points) if n_points is not None else None
-            if N is not None:
-                weights_locations_fct = lambda coords: loss_fns.o_grid_latitude(coords, N=N)
-            else:
-                weights_locations_fct = loss_fns.cosine_latitude
+            if N is None:
+                return [None for _ in substep_masks]
+            weights_locations_fct = lambda coords: loss_fns.o_grid_latitude(coords, N=N)
         else:
             weights_locations_fct = getattr(loss_fns, location_weight_type)
 
