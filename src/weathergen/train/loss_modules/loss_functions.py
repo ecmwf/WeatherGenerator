@@ -292,10 +292,19 @@ def cosine_latitude(target_coords, min_value=1e-3, max_value=1.0):
     return (max_value - min_value) * torch.cos(latitudes_radian) + min_value
 
 
-def o96_latitude(target_coords, min_value=1e-3, max_value=1.0):
+# Maps total grid point count to N for O<N> reduced Gaussian grids (formula: 4*N*(N+9))
+_O_GRID_N: dict[int, int] = {4 * N * (N + 9): N for N in [96, 160, 256, 320, 640, 1280]}
+
+
+def o_grid_latitude(target_coords, N: int, min_value=1e-3, max_value=1.0):
+    """Latitude weighting for O<N> reduced Gaussian grid.
+
+    Each latitude band has 20+4*(i-1) points for the i-th band from pole (1) to equator (N).
+    """
     latitudes_radian = target_coords[:, 0] * np.pi / 180
     cos_lat = torch.cos(latitudes_radian)
-    n_lat = 400 - torch.abs(target_coords[:, 0]) * (400 - 20) / 90
+    n_lat_max = 20 + 4 * (N - 1)
+    n_lat = n_lat_max - torch.abs(target_coords[:, 0]) * (n_lat_max - 20) / 90
     weights = cos_lat / n_lat
     weights = weights / weights.mean()
     return (max_value - min_value) * weights + min_value
