@@ -163,9 +163,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         _logger.info(f"{ds_name}: target channels: {self.target_channels}")
         _logger.info(f"{ds_name}: geoinfo channels: {self.geoinfo_channels}")
 
-        self.properties = {
-            "stream_id": 0,
-        }
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
 
