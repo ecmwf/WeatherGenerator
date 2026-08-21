@@ -1,0 +1,43 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+SurfaceCombined :
+  type : obs
+  stream_id : 30
+  filenames : ['observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr']
+  # filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
+  # filenames : ['observations-ea-ofb-0001-1979-2022-combined-surface-v3-fixed-land-spatial80-lsm09-min10.zarr', 'observations-ea-ofb-0001-2023-combined-surface-v3-fixed-land-heldout20-lsm09-min10.zarr']
+  source: ['obsvalue_tsts_0', 'obsvalue_t2m_0', 'obsvalue_td2m_0', 'obsvalue_u10m_0', 'obsvalue_v10m_0', 'obsvalue_pmsl_0', 'obsvalue_ps_0']
+  target: ['obsvalue_tsts_0', 'obsvalue_t2m_0', 'obsvalue_td2m_0', 'obsvalue_u10m_0', 'obsvalue_v10m_0', 'obsvalue_pmsl_0', 'obsvalue_ps_0']
+  geoinfo_channels : ['stalt', 'lsm', 'cos_sza', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  loss_weight : 1.0
+  token_size : 64
+  masking_override :
+    model_input :
+      masking_strategy: "random"
+      masking_strategy_config :
+        rate: 0.1
+  tokenize_spacetime : False
+  max_num_targets: -1
+  # diagnostic: True
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 512
+    num_blocks : 2
+  embed_target_coords : 
+    net : linear
+    dim_embed : 512
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head : 
+    ens_size : 1
+    num_layers : 1

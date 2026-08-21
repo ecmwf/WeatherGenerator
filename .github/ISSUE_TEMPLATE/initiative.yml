@@ -50,6 +50,7 @@ body:
         - label: infrastructure and engineering
         - label: evaluation, export and visualization
         - label: documentation
+        - label: performance
     validations:
       required: true
 

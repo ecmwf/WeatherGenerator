@@ -1,0 +1,32 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# logging config
+train_logging:
+
+  # performance metrics:
+  track_performance_metrics: True
+
+# config for training
+training_config:
+
+  metrics: 2
+
+
+  num_mini_epochs: 10
+  samples_per_mini_epoch: 4096
+  shuffle: True
+
+  model_input: {
+    "forecasting" : {
+      # masking strategy: "random", "healpix", "forecast"
+      masking_strategy: "forecast",
+      num_samples: 8
+      },
+    }

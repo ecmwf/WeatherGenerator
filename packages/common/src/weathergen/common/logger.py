@@ -45,14 +45,14 @@ LOGGING_CONFIG = """
             "level": "DEBUG",
             "formatter": "custom",
             "filename": "log.txt",
-            "mode": "w"
+            "mode": "a"
         },
         "errorfile": {
             "class": "logging.FileHandler",
             "level": "ERROR",
             "formatter": "custom",
             "filename": "error.txt",
-            "mode": "w"
+            "mode": "a"
         }
     },
     "root": {
@@ -123,7 +123,7 @@ def init_loggers(run_id=None, logging_config=None):
     # output_dir = f"./output/{timestamp}-{run_id}"
     output_dir = ""
     if run_id is not None:
-        output_dir = f"./output/{run_id}"
+        output_dir = f"./logs/{run_id}"
 
     # load the structure for logging config
     if logging_config is None:
@@ -139,7 +139,7 @@ def init_loggers(run_id=None, logging_config=None):
             if k == "formatter":
                 handler[k] = v
             elif k == "filename":
-                filename = f"{output_dir}/{run_id}-{v}"
+                filename = f"{output_dir}/{v}"
                 ofile = pathlib.Path(filename)
                 # make sure the path is independent of path where job is launched
                 if not ofile.is_absolute():

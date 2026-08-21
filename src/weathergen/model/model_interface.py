@@ -12,7 +12,6 @@
 import itertools
 import logging
 
-import omegaconf
 import torch
 from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
@@ -28,13 +27,11 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
-from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
-from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
-from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
+from weathergen.utils.performance import register_nvtx_hooks
 from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
@@ -58,6 +55,10 @@ def init_model_and_shard(
     model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
+
+    if cf.get("profiling", {}).get("nvtx_annotate", False):
+        logger.info("Registering NVTX hooks for model.")
+        register_nvtx_hooks(model)
 
     # freeze request model part
     apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
@@ -111,7 +112,10 @@ def init_model_and_shard(
 
         for module in model.forecast_engine.fe_blocks.modules():
             if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+                # reshard_after_forward=False keeps FE parameters unsharded
+                # during the multi-step rollout loop.
+                # Needed for pushforward trick.
+                fully_shard(module, reshard_after_forward=False, **fsdp_kwargs)
 
         for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):
@@ -143,8 +147,7 @@ def init_model_and_shard(
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
         for embed in model.encoder.embed_engine.embeds.values():
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward")
 
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is not None:
@@ -194,6 +197,9 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
+            if sharded_meta_param is None:
+                logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
+                continue
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 sharded_meta_param.device_mesh,
@@ -273,60 +279,3 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
     return Model(
         cf_with_overrides, sources_size, targets_num_channels, targets_coords_size
     ).create()
-
-
-def get_target_aux_calculator(
-    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
-):
-    """
-    Create target aux calculator
-    """
-
-    target_and_aux_calc_cfg = loss_cfg.get("target_and_aux_calc", "Physical")
-
-    # parse target_and_aux_calc_cfg specification which can either be a string or config dict
-    if type(target_and_aux_calc_cfg) is str:
-        target_and_aux_calc = target_and_aux_calc_cfg
-        target_and_aux_calc_params = {}
-    elif type(target_and_aux_calc_cfg) is omegaconf.dictconfig.DictConfig:
-        # single key is the target_and_aux_calc type
-        target_and_aux_calc = list(target_and_aux_calc_cfg.keys())[0]
-        # value is dict with the target_and_aux_calc parameters
-        target_and_aux_calc_params = list(target_and_aux_calc_cfg.values())[0]
-    else:
-        assert False, "target_and_aux_calc needs either be name or config dict."
-
-    # create target_and_aux_calc
-    if target_and_aux_calc == "Physical":
-        target_aux = PhysicalTargetAndAux(loss_cfg, model)
-
-    elif target_and_aux_calc == "EMATeacher":
-        # work around for problems with FSDP2
-        assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"
-
-        meta_ema_model, _ = init_model_and_shard(
-            cf,
-            dataset,
-            None,
-            None,
-            "student",
-            device,
-            with_ddp=False,
-            with_fsdp=False,
-            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
-        )
-        ema_model = EMAModel(
-            model,
-            meta_ema_model,
-            halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
-            rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
-            is_model_sharded=(cf.with_ddp and cf.with_fsdp),
-        )
-
-        batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
-        target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
-
-    else:
-        raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
-
-    return target_aux

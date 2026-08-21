@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
-from tqdm import tqdm
+from numpy.typing import NDArray
 
 # Local application / package
 from weathergen.common.config import (
@@ -26,9 +26,15 @@ from weathergen.common.config import (
     load_run_config,
 )
 from weathergen.common.io import zarrio_reader
+from weathergen.evaluate.io.data.dataarray_builders import EnsembleSelect
+from weathergen.evaluate.io.data.io_orchestration import (
+    build_io_state,
+    get_data_dirstore,
+    get_data_zipstore,
+    get_num_workers,
+)
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
-from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -40,7 +46,7 @@ class WeatherGenReader(Reader):
 
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
-        self.rank = eval_cfg.get("rank", 0)
+        self.rank = eval_cfg.get("rank", "all")
 
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
@@ -113,27 +119,56 @@ class WeatherGenReader(Reader):
             Full climatology path if available, otherwise None.
         """
         stream_dict = self.get_stream(stream)
+        explicit_path = stream_dict.get("climatology_path", None)
+        if explicit_path:
+            return str(explicit_path)
 
-        clim_data_path = stream_dict.get("climatology_path", None)
-        if not clim_data_path:
-            clim_base_dir = self.inference_cfg.get("data_path_aux", None)
-            clim_fn = next(
-                (
-                    item.get("climatology_filename")
-                    for item in self.inference_cfg.get("streams", [])
-                    if item.get("name") == stream
-                ),
-                None,
+        clim_base_dir = self.inference_cfg.get("data_path_aux", None)
+        if not clim_base_dir:
+            _logger.warning(
+                "No 'data_path_aux' defined in inference config."
+                " Cannot infer climatology path for stream %s.",
+                stream,
             )
-            if clim_base_dir and clim_fn:
-                clim_data_path = Path(clim_base_dir) / clim_fn
-            else:
-                _logger.warning(
-                    f"No climatology path specified for stream {stream}. Setting climatology to "
-                    "NaN. Add 'climatology_path' to evaluation config to use metrics like ACC."
-                )
+            return None
 
-        return str(clim_data_path) if clim_data_path else None
+        streams = self.inference_cfg.get("streams", {})
+        if isinstance(streams, list | oc.ListConfig):
+            streams = {s["name"]: s for s in streams}
+        streams = oc.OmegaConf.create(streams)
+
+        try:
+            clim_fn = streams[stream].get("filenames")
+        except KeyError:
+            clim_fn = None
+
+        if isinstance(clim_fn, oc.ListConfig) and len(clim_fn) == 1:
+            climatology_partial_filename = clim_fn[0]
+        else:
+            _logger.warning(
+                f"Many source filenames found for stream {stream} in model config."
+                " In that case the climatology filename should be specified"
+                " explicitly via 'climatology_path' in the evaluation config."
+            )
+            return None
+
+        clim_data_path = (
+            Path(clim_base_dir)
+            / "climatology"
+            / climatology_partial_filename.replace(".zarr", "_climatology.zarr")
+        )
+
+        if not clim_data_path.exists():
+            _logger.warning(
+                f"Climatology file {clim_data_path} does not exist or configuration is invalid."
+                " Setting climatology to NaN."
+                " Please check that the path is correct and that the file exists."
+            )
+            return None
+        else:
+            _logger.info(f"Using climatology file: {clim_data_path}")
+
+        return str(clim_data_path)
 
     def get_channels(self, stream: str) -> list[str]:
         """
@@ -196,6 +231,9 @@ class WeatherGenReader(Reader):
                         local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
                             stream, {}
                         )[self.run_id] = score
+                    else:
+                        # JSON exists but doesn't cover the requested data — recompute.
+                        missing_metrics.setdefault(region, {}).update({metric: parameters})
 
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
@@ -206,10 +244,14 @@ class WeatherGenReader(Reader):
         """
         Load a single pre-computed score for a given run, stream and metric.
 
+        Also checks that the stored ``eval_settings`` (regrid, rank, ensemble, etc.)
+        match the current configuration.  Returns None (forcing recomputation) if
+        settings have changed.
+
         Returns
         -------
         score: xr.DataArray or None
-            DataArray of the score if found, else None.
+            DataArray of the score if found and settings match, else None.
         """
         if parameters is None:
             parameters = {}
@@ -221,14 +263,34 @@ class WeatherGenReader(Reader):
 
         score = None
         if score_path.exists():
-            with open(score_path) as f:
-                data_dict = json.load(f)
-                if "scores" not in data_dict:
-                    data_dict = {"scores": [data_dict]}
-                for score_version in data_dict["scores"]:
-                    if score_version["attrs"] == parameters:
-                        score = xr.DataArray.from_dict(score_version)
-                        break
+            try:
+                with open(score_path) as f:
+                    data_dict = json.load(f)
+            except (json.JSONDecodeError, OSError) as exc:
+                _logger.warning(
+                    f"Corrupted or unreadable score file {score_path.name} "
+                    f"({type(exc).__name__}). Forcing recomputation."
+                )
+                return None
+
+            if "scores" not in data_dict:
+                data_dict = {"scores": [data_dict]}
+
+            # Check eval_settings match current config
+            stored_settings = data_dict.get("eval_settings", {})
+            current_settings = self.get_eval_settings(stream)
+            if stored_settings != current_settings:
+                _logger.info(
+                    f"Eval settings changed for {score_path.name}: "
+                    f"stored={stored_settings}, current={current_settings}. "
+                    f"Forcing recomputation."
+                )
+                return None
+
+            for score_version in data_dict["scores"]:
+                if score_version["attrs"] == parameters:
+                    score = xr.DataArray.from_dict(score_version)
+                    break
         return score
 
     def get_recomputable_metrics(self, metrics: dict) -> dict:
@@ -264,9 +326,15 @@ class WeatherGenReader(Reader):
         ------------
             The parameter value if found, otherwise the default.
         """
-        for stream in self.inference_cfg.get("streams", []):
-            if stream.get("name") == stream_name:
-                return stream.get(key, default)
+
+        streams = self.inference_cfg.get("streams", {})
+        if isinstance(streams, list | oc.ListConfig):
+            for stream in streams:
+                if stream.get("name") == stream_name:
+                    return stream.get(key, default)
+        else:
+            return streams.get(stream_name, {}).get(key, default)
+
         return default
 
 
@@ -338,238 +406,358 @@ class WeatherGenJsonReader(WeatherGenReader):
 
 class WeatherGenZarrReader(WeatherGenReader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
-        """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
+        """Data reader class for WeatherGenerator model outputs stored in Zarr format.
+
+        Supports multi-rank inference outputs where each rank file contains a disjoint
+        subset of forecast initializations with overlapping local sample indices.
+        """
         super().__init__(eval_cfg, run_id, private_paths)
 
         zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
-        # For backwards compatibility, assume zarr store is local (.zarr format).
+        self.zarr_ext = zarr_ext
 
-        fname_zarr = self.results_dir.joinpath(
-            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
-        )
+        # Discover rank files: support rank="all", rank=[0,1,2], or rank=0 (int)
+        self.rank_files: list[Path] = self._discover_rank_files()
 
-        assert fname_zarr.exists(), f"Zarr file {fname_zarr} does not exist."
+        # Validate metadata consistency across all ranks (fail-fast)
+        self._validated_metadata: dict = self._validate_rank_metadata()
 
-        assert (zarr_ext == "zarr" and fname_zarr.is_dir()) or (
-            zarr_ext == "zip" and fname_zarr.is_file()
-        ), (
-            f"Zarr file {fname_zarr} has unexpected format. ({zarr_ext}). "
-            f"Expected directory for 'zarr' or file for 'zip'."
-        )
-        self.fname_zarr = fname_zarr
+        # Metadata caches — populated lazily on first access
+        self._cached_samples: set[int] | None = None
+        self._cached_ensemble: dict[str, list[str]] = {}
+        self._cached_is_gridded: dict[str, bool] = {}
+        self._rank_sample_map: dict[Path, tuple[list[int], int]] | None = None
+
+        # Raw I/O worker config (direct zarr access)
+        self._max_workers: int | None = eval_cfg.get("max_workers")
+        self._num_io_workers: int = get_num_workers(max_workers=self._max_workers)
+
+    def _discover_rank_files(self) -> list[Path]:
+        """Discover zarr rank files based on the ``rank`` config parameter.
+
+        Supports:
+        - ``rank: 0`` (int) — single specific rank (backward compatible)
+        - ``rank: "all"`` — glob all matching rank files
+        - ``rank: [0, 1, 2]`` — specific list of ranks
+        """
+        rank_cfg = self.eval_cfg.get("rank", self.rank)
+
+        if isinstance(rank_cfg, int):
+            # Single rank (backward compatible)
+            fname = self.results_dir / (
+                f"validation_chkpt{self.mini_epoch:05d}_rank{rank_cfg:04d}.{self.zarr_ext}"
+            )
+            if not fname.exists():
+                raise FileNotFoundError(f"Zarr file {fname} does not exist.")
+            return self._validate_rank_files([fname])
+
+        elif rank_cfg == "all":
+            pattern = f"validation_chkpt{self.mini_epoch:05d}_rank*.{self.zarr_ext}"
+            files = sorted(self.results_dir.glob(pattern))
+            if not files:
+                raise FileNotFoundError(f"No zarr files matching {pattern} in {self.results_dir}")
+            _logger.info(f"Discovered {len(files)} rank file(s) for run {self.run_id}.")
+            return self._validate_rank_files(files)
+
+        elif isinstance(rank_cfg, list | tuple | oc.listconfig.ListConfig):
+            files = []
+            for r in rank_cfg:
+                fname = self.results_dir / (
+                    f"validation_chkpt{self.mini_epoch:05d}_rank{int(r):04d}.{self.zarr_ext}"
+                )
+                if not fname.exists():
+                    raise FileNotFoundError(f"Zarr file {fname} does not exist.")
+                files.append(fname)
+            return self._validate_rank_files(sorted(files))
+
+        else:
+            raise ValueError(
+                f"Invalid rank config: {rank_cfg!r}. Use an int, 'all', or a list of ints."
+            )
+
+    def _validate_rank_files(self, files: list[Path]) -> list[Path]:
+        """Validate that rank files have the expected format."""
+        for f in files:
+            is_valid = (self.zarr_ext == "zarr" and f.is_dir()) or (
+                self.zarr_ext == "zip" and f.is_file()
+            )
+            if not is_valid:
+                raise FileNotFoundError(
+                    f"Zarr file {f} has unexpected format ({self.zarr_ext}). "
+                    f"Expected directory for 'zarr' or file for 'zip'."
+                )
+        return files
+
+    def _validate_rank_metadata(self) -> dict:
+        """Validate that all rank files share identical metadata (streams, fsteps).
+
+        Returns a dict with the validated common metadata.
+        Raises ValueError if any inconsistency is detected.
+        """
+        reference_streams: set[str] | None = None
+        reference_fsteps: set[int] | None = None
+
+        for rank_file in self.rank_files:
+            with zarrio_reader(rank_file) as zio:
+                streams = set(zio.streams)
+                fsteps = set(int(f) for f in zio.forecast_steps)
+
+            if reference_streams is None:
+                reference_streams = streams
+                reference_fsteps = fsteps
+            else:
+                if streams != reference_streams:
+                    raise ValueError(
+                        f"Stream mismatch: {rank_file.name} has {streams}, "
+                        f"expected {reference_streams}"
+                    )
+                if fsteps != reference_fsteps:
+                    raise ValueError(
+                        f"Forecast step mismatch: {rank_file.name} has {fsteps}, "
+                        f"expected {reference_fsteps}"
+                    )
+
+        return {
+            "streams": reference_streams or set(),
+            "forecast_steps": reference_fsteps or set(),
+        }
+
+    def _open_any_rank_for_metadata(self):
+        """Open a rank file for metadata queries. Tries each rank until one succeeds.
+
+        Returns a context-manager (zarrio_reader) that the caller must use in a
+        ``with`` statement or close manually.
+        """
+        for rank_file in self.rank_files:
+            try:
+                return zarrio_reader(rank_file)
+            except Exception:
+                _logger.warning(f"Failed to open {rank_file.name} for metadata, trying next...")
+        raise RuntimeError("No rank files could be opened for metadata queries.")
+
+    def _get_rank_sample_map(self) -> dict[Path, tuple[list[int], int]]:
+        """Build and cache mapping of rank_file → (local_samples, global_offset).
+
+        Since all ranks use local indices (0, 1, ...), we assign global offsets:
+        rank0: offset=0, rank1: offset=len(rank0_samples), etc.
+        """
+        if self._rank_sample_map is None:
+            self._rank_sample_map = {}
+            offset = 0
+            for zarr_file in self.rank_files:
+                with zarrio_reader(zarr_file) as zio:
+                    local = sorted(int(s) for s in zio.samples)
+                self._rank_sample_map[zarr_file] = (local, offset)
+                offset += len(local)
+        return self._rank_sample_map
+
+    def _merge_fsteps(self, all_das: dict, global_sample_coords) -> dict:
+        """Merge lists of DataArrays for each forecast step across ranks.
+
+        For gridded data (dims include 'sample'), concatenates along 'sample'
+        and re-indexes to global sample coordinates.
+        For scatter data (no 'sample' dim), concatenates along 'ipoint'
+        and promotes the scalar 'sample' coord to a per-ipoint coordinate
+        so that downstream groupby("sample") works correctly.
+        """
+        merged = {}
+        for fstep, das in all_das.items():
+            concat_dim = "sample" if "sample" in das[0].dims else "ipoint"
+
+            if concat_dim == "ipoint":
+                # Scatter: promote scalar 'sample' to per-ipoint so it
+                # survives concatenation and enables groupby("sample").
+                das = [self._promote_scalar_sample(da) for da in das]
+
+            combined = (
+                xr.concat(das, dim=concat_dim, coords="different", compat="equals")
+                if len(das) > 1
+                else das[0]
+            )
+
+            combined = self._reindex_merged_coords(combined, concat_dim, global_sample_coords)
+            merged[fstep] = combined
+        return merged
+
+    @staticmethod
+    def _reindex_merged_coords(
+        da: xr.DataArray, concat_dim: str, global_sample_coords: NDArray
+    ) -> xr.DataArray:
+        """Re-index coordinates after cross-rank concatenation to avoid duplicates.
+
+        Each rank file uses local indices (0, 1, 2, …) for both samples and
+        ipoints.  After concatenation these overlap, so we replace them with
+        unique global coordinates:
+        - For gridded data (concat along 'sample'): assign contiguous global
+          sample indices derived from the rank offsets.
+        - For scatter data (concat along 'ipoint'): assign a fresh 0-based
+          ipoint range covering the combined length.
+        """
+        if "sample" in da.dims:
+            da = da.assign_coords(sample=global_sample_coords[: len(da.sample)])
+        if concat_dim == "ipoint" and "ipoint" in da.dims:
+            da = da.assign_coords(ipoint=np.arange(da.sizes["ipoint"]))
+        return da
+
+    @staticmethod
+    def _promote_scalar_sample(da: xr.DataArray) -> xr.DataArray:
+        """Promote a scalar 'sample' coordinate to a per-ipoint array."""
+        if "sample" in da.coords and da.coords["sample"].ndim == 0:
+            sample_val = da.coords["sample"].item()
+            n_ip = da.sizes["ipoint"]
+            da = da.drop_vars("sample").assign_coords(sample=("ipoint", np.full(n_ip, sample_val)))
+        return da
 
     def get_data(
         self,
         stream: str,
         samples: list[int] | None = None,
-        fsteps: list[str] | None = None,
+        fsteps: list[int] | None = None,
         channels: list[str] | None = None,
         ensemble: list[str] | None = None,
     ) -> ReaderOutput:
-        """
-        Retrieve prediction and target data for a given run from the Zarr store.
+        """Load prediction and target data via direct zarr array access.
+
+        When multiple rank files are present, loads from each rank sequentially
+        and concatenates along the sample dimension with re-indexed global samples.
 
         Parameters
         ----------
-        cfg :
-            Configuration dictionary containing all information for the evaluation.
-        results_dir : Path
-            Directory where the inference results are stored.
-            Expected scheme `<results_base_dir>/<run_id>`.
-        stream :
+        stream : str
             Stream name to retrieve data for.
-        samples :
-            List of sample indices to retrieve. If None, all samples are retrieved.
-        fsteps :
-            List of forecast steps to retrieve. If None, all forecast steps are retrieved.
-        channels :
-            List of channel names to retrieve. If None, all channels are retrieved.
+        samples, fsteps, channels, ensemble
+            Optional filters; ``None`` means "all".
 
         Returns
         -------
-        out: ReaderOutput
-            A dataclass containing:
-            - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
-            - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
+        ReaderOutput
+            target/prediction dicts of xarray DataArrays keyed by forecast step.
         """
-        stream_cfg = self.get_stream(stream)
-        all_channels = self.get_channels(stream)
-        _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
+        resolved_ensemble = to_list(ensemble or self.get_ensemble(stream))
+        ens_select = EnsembleSelect.from_names(resolved_ensemble, self.get_ensemble(stream))
+        resolved_fsteps = sorted(int(f) for f in (fsteps or self.get_forecast_steps()))
+        resolved_channels = to_list(
+            channels or self.get_stream(stream).get("channels", self.get_channels(stream))
+        )
 
-        fsteps = self.get_forecast_steps() if fsteps is None else fsteps
+        rank_sample_map = self._get_rank_sample_map()
 
-        # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
-        fsteps = sorted([int(fstep) for fstep in fsteps])
-        samples = samples or sorted([int(sample) for sample in self.get_samples()])
-        channels = channels or stream_cfg.get("channels", all_channels)
-        channels = to_list(channels)
+        # Determine which ranks to load based on requested global samples
+        requested_globals = set(int(s) for s in (samples or self.get_samples()))
 
-        ensemble = ensemble or self.get_ensemble(stream)
-        ensemble = to_list(ensemble)
+        all_targets: dict[int, list[xr.DataArray]] = {}
+        all_predictions: dict[int, list[xr.DataArray]] = {}
+        ranks_loaded = 0
 
-        da_tars, da_preds = [], []
+        for rank_file in self.rank_files:
+            local_samples, global_offset = rank_sample_map[rank_file]
 
-        fsteps_final = []
+            # Check if any of this rank's global samples are requested
+            rank_globals = set(range(global_offset, global_offset + len(local_samples)))
+            if not rank_globals & requested_globals:
+                continue
 
-        with zarrio_reader(self.fname_zarr) as zio:
-            for fstep in fsteps:
-                _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
-                da_tars_fs, da_preds_fs, valid_times_fs = [], [], []
+            # Map requested global indices back to local indices for this rank
+            rank_local_to_load = [
+                local_samples[g - global_offset] for g in sorted(rank_globals & requested_globals)
+            ]
+            rank_global_labels = sorted(rank_globals & requested_globals)
 
-                for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
-                    out = zio.get_data(sample, stream, fstep)
+            _logger.info(
+                f"RUN {self.run_id} [rank {rank_file.stem.split('rank')[-1]}]: "
+                f"Loading {len(rank_local_to_load)} samples"
+            )
+            _logger.debug(
+                f"RUN {self.run_id} [rank {rank_file.stem.split('rank')[-1]}]: "
+                f"local indices {rank_local_to_load}, "
+                f"global samples {sorted(rank_globals & requested_globals)}"
+            )
 
-                    if out.target is None or out.prediction is None:
-                        _logger.info(
-                            f"Skipping {stream} sample {sample} forecast step: {fstep}. "
-                            "No data found."
-                        )
-                        continue
+            state = build_io_state(
+                self.run_id,
+                rank_file,
+                stream,
+                self.get_stream(stream),
+                self.get_channels(stream),
+                self.is_gridded_data(stream),
+                resolved_fsteps,
+                rank_local_to_load,
+                resolved_channels,
+                resolved_ensemble,
+                self._num_io_workers,
+                ens_select,
+                rank=rank_file.stem.split("rank")[-1],
+                sample_labels=rank_global_labels,
+            )
+            get_data_fn = get_data_zipstore if state.is_zip else get_data_dirstore
+            result = get_data_fn(state)
 
-                    target, pred = out.target.as_xarray(), out.prediction.as_xarray()
+            for fstep, da in result.target.items():
+                all_targets.setdefault(fstep, []).append(da)
+            for fstep, da in result.prediction.items():
+                all_predictions.setdefault(fstep, []).append(da)
+            ranks_loaded += 1
 
-                    npoints = len(target.ipoint)
+        # Concatenate across ranks along sample dimension and re-index
+        global_sample_coords = np.array(sorted(requested_globals))
 
-                    if npoints == 0:
-                        _logger.info(
-                            f"Skipping {stream} sample {sample} forecast step: {fstep}. "
-                            "Dataset is empty."
-                        )
-                        continue
+        merged_targets = self._merge_fsteps(all_targets, global_sample_coords)
+        merged_predictions = self._merge_fsteps(all_predictions, global_sample_coords)
 
-                    if ensemble == ["mean"]:
-                        _logger.debug("Averaging over ensemble members.")
-                        pred = pred.mean("ens", keepdims=True)
-                    else:
-                        _logger.debug(f"Selecting ensemble members {ensemble}.")
-                        pred = pred.sel(ens=ensemble)
-
-                    pred = pred.squeeze()
-                    target = target.squeeze()
-
-                    if self.is_gridded_data(stream):
-                        vt_list = np.unique(target.valid_time.values).tolist()
-                        valid_times_fs.append(vt_list)
-
-                    da_tars_fs.append(target.persist())
-                    da_preds_fs.append(pred.persist())
-
-                if not da_tars_fs:
-                    _logger.info(
-                        f"[{self.run_id} - {stream}] No valid data found for fstep {fstep}."
-                    )
-                    continue
-
-                fsteps_final.append(valid_times_fs if valid_times_fs else fstep)
-
-                _logger.debug(
-                    f"Concatenating targets and predictions for stream {stream}, "
-                    f"forecast_step {fstep}..."
-                )
-
-                # faster processing
-                if self.is_gridded_data(stream):
-                    # Efficient concatenation for regular grid
-                    da_preds_fs = _split_by_valid_time(da_preds_fs)
-                    da_tars_fs = _split_by_valid_time(da_tars_fs)
-
-                    da_tars_fs = _force_consistent_grids(da_tars_fs)
-                    da_preds_fs = _force_consistent_grids(da_preds_fs)
-                else:
-                    # Irregular (scatter) case. concatenate over ipoint
-                    da_tars_fs = xr.concat(
-                        da_tars_fs, dim="ipoint", coords="different", compat="equals"
-                    )
-                    da_preds_fs = xr.concat(
-                        da_preds_fs, dim="ipoint", coords="different", compat="equals"
-                    )
-
-                da_tars.append(da_tars_fs)
-                da_preds.append(da_preds_fs)
-
-            # Safer than a list
-            da_tars_dict, da_preds_dict = {}, {}
-            i = 1
-
-            for _, (fstep, da_t, da_p) in enumerate(
-                zip(fsteps_final, da_tars, da_preds, strict=True)
-            ):
-                if isinstance(fstep, list):  # regular grid with lead times (1 or multiple)
-                    for t, p in zip(da_t, da_p, strict=True):
-                        t, p = _select_channels(t, p, stream, channels, stream_cfg)
-
-                        # But we also want to have a common forecast_step coordinate for all
-                        # substeps to be able to apply the same metrics.
-                        t = t.assign_coords(forecast_step=i)
-                        p = p.assign_coords(forecast_step=i)
-
-                        # TODO: move somewhere else into another loop maybe. but 2 loops is slow?
-                        t = _add_lead_time_coord(t)
-                        p = _add_lead_time_coord(p)
-
-                        p = _scale_z_channels(p, stream)
-                        t = _scale_z_channels(t, stream)
-
-                        da_tars_dict[i] = t
-                        da_preds_dict[i] = p
-                        i += 1
-                else:
-                    da_t, da_p = _select_channels(da_t, da_p, stream, channels, stream_cfg)
-                    da_tars_dict[int(fstep)] = da_t
-                    da_preds_dict[int(fstep)] = da_p
-
-            return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
-
-    ######## reader utils ########
+        ranks_skipped = len(self.rank_files) - ranks_loaded
+        _logger.info(
+            f"RUN {self.run_id}: Multi-rank load complete. "
+            f"{len(global_sample_coords)} samples × {len(merged_targets)} fsteps "
+            f"(including sub-steps) "
+            f"from {ranks_loaded}/{len(self.rank_files)} ranks "
+            f"({ranks_skipped} skipped)."
+        )
+        return ReaderOutput(target=merged_targets, prediction=merged_predictions)
 
     def get_stream(self, stream: str):
+        """Return the config dictionary for a particular stream.
+
+        Returns an empty dictionary if the stream does not exist in the Zarr files.
         """
-        returns the dictionary associated to a particular stream.
-        Returns an empty dictionary if the stream does not exist in the Zarr file.
-
-        Parameters
-        ----------
-        stream:
-            the stream name
-
-        Returns
-        -------
-            The config dictionary associated to that stream
-        """
-        stream_dict = {}
-
-        with zarrio_reader(self.fname_zarr) as zio:
-            if stream in zio.streams:
-                stream_dict = self.eval_cfg.streams.get(stream, {})
-        return stream_dict
+        if stream in self._validated_metadata["streams"]:
+            return self.eval_cfg.streams.get(stream, {})
+        return {}
 
     def get_samples(self) -> set[int]:
-        """Get the set of sample indices from the Zarr file."""
-        with zarrio_reader(self.fname_zarr) as zio:
-            return set(int(s) for s in zio.samples)
+        """Get global sample indices across all rank files.
+
+        Assigns contiguous global indices: rank0 gets 0..N0-1, rank1 gets N0..N0+N1-1, etc.
+        """
+        if self._cached_samples is None:
+            rank_sample_map = self._get_rank_sample_map()
+            all_samples: set[int] = set()
+            for local_samples, offset in rank_sample_map.values():
+                all_samples.update(range(offset, offset + len(local_samples)))
+            self._cached_samples = all_samples
+        return self._cached_samples
 
     def get_forecast_steps(self) -> set[int]:
-        """Get the set of forecast steps from the Zarr file."""
-        with zarrio_reader(self.fname_zarr) as zio:
-            return set(int(f) for f in zio.forecast_steps)
+        """Get the set of forecast steps (validated across all ranks at init)."""
+        return self._validated_metadata["forecast_steps"]
 
     def get_forecast_substep_valid_times(self, stream: str) -> set[str]:
-        """Get the set of forecast times from the Zarr file."""
+        """Get the set of forecast times from a rank file."""
         if not self.is_gridded_data(stream):
             _logger.warning(f"Stream {stream} is not gridded. Forecast times cannot be retrieved.")
             return set()
 
-        with zarrio_reader(self.fname_zarr) as zio:
-            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
+        with self._open_any_rank_for_metadata() as zio:
+            dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
             unique_lead = np.unique(dummy.valid_time.data)
         return set(str(lt) for lt in unique_lead)
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:
-        """Get the list of ensemble member names for a given stream from the config.
+        """Get the list of ensemble member names for a given stream.
+
         Parameters
         ----------
         stream :
-            The name of the stream to get channels for.
+            The name of the stream to get ensemble members for.
 
         Returns
         -------
@@ -577,26 +765,42 @@ class WeatherGenZarrReader(WeatherGenReader):
         """
         _logger.debug(f"Getting ensembles for stream {stream}...")
 
-        # TODO: improve this to get ensemble from io class
-        with zarrio_reader(self.fname_zarr) as zio:
-            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
-        return list(dummy.prediction.as_xarray().coords["ens"].values)
+        if stream not in self._cached_ensemble:
+            with self._open_any_rank_for_metadata() as zio:
+                dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
+            self._cached_ensemble[stream] = list(dummy.prediction.as_xarray().coords["ens"].values)
+        return self._cached_ensemble[stream]
 
     def is_gridded_data(self, stream: str) -> bool:
-        """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
+        """Check if lat/lon coordinates are regularly spaced for a given stream.
+
         Parameters
         ----------
         stream :
-            The name of the stream to get channels for.
+            The name of the stream to check.
 
         Returns
         -------
             True if the stream is regularly spaced. False otherwise.
         """
+        if stream not in self._cached_is_gridded:
+            self._cached_is_gridded[stream] = self._compute_is_gridded(stream)
+        return self._cached_is_gridded[stream]
+
+    def _compute_is_gridded(self, stream: str) -> bool:
+        """is_gridded_data logic, called once per stream and cached."""
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
-        with zarrio_reader(self.fname_zarr) as zio:
-            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
+        max_num_target = self.get_inference_stream_attr(stream, "max_num_targets", -1)
+        if max_num_target != -1:
+            _logger.warning(
+                f"WARNING: Stream '{stream}' has max_num_targets={max_num_target} (!= -1), "
+                "indicating variable-length observations (scatter data)."
+            )
+            return False
+
+        with self._open_any_rank_for_metadata() as zio:
+            dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
 
             sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
             fstep_idx = (
@@ -620,298 +824,3 @@ class WeatherGenZarrReader(WeatherGenReader):
         else:
             _logger.debug("Latitude and longitude coordinates are regularly spaced.")
             return True
-
-
-################### Helper functions ########################
-
-
-def _select_channels(
-    da_tar: xr.DataArray, da_pred: xr.DataArray, stream, channels, stream_cfg
-) -> tuple[xr.DataArray, xr.DataArray]:
-    """
-    Preprocess the data by scaling z channels if needed and adding lead_time coordinate.
-
-    Parameters
-    ----------
-    da_tar :
-        Input DataArray to preprocess.
-    da_pred :
-        Input DataArray to preprocess.
-    stream:
-        Stream name, used to determine if z channels need to be scaled.
-    channels:
-        List of channels to select.
-    stream_cfg:
-        Stream configuration dictionary, used to determine if derived channels need to be computed.
-    Returns
-    -------
-        Data arrays with selected channels and added derived channels if applicable.
-    """
-    # Ensure channel is a dimension, not a scalar coordinate (can happen after squeeze)
-    if "channel" not in da_tar.dims:
-        da_tar = da_tar.expand_dims("channel")
-    if "channel" not in da_pred.dims:
-        da_pred = da_pred.expand_dims("channel")
-
-    assert da_pred.channel.values.tolist() == da_tar.channel.values.tolist(), (
-        "Channels in prediction and target do not match."
-    )
-
-    all_channels = da_tar.channel.values.tolist()
-
-    if set(channels) != set(all_channels):
-        _logger.debug(
-            f"Restricting targets and predictions to channels {channels} for stream {stream}..."
-        )
-
-        dc = DeriveChannels(
-            all_channels,
-            channels,
-            stream_cfg,
-        )
-
-        da_tar, da_pred, channels = dc.get_derived_channels(da_tar, da_pred)
-
-        da_tar = da_tar.sel(channel=channels)
-        da_pred = da_pred.sel(channel=channels)
-
-    return da_tar, da_pred
-
-
-def _scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:
-    """
-    Check scale all channels.
-
-    Parameters
-    ----------
-    data :
-        Input dataset
-    stream :
-        Stream name.
-    Returns
-    -------
-        Returns a Dataset where channels have been scaled if needed
-    """
-    if stream is None or not str(stream).startswith("ERA5"):
-        return data
-
-    channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
-    factor = 9.80665
-
-    if channels_z:
-        channels = data.channel.astype(str)
-        mask = channels.str.startswith("z_")
-        data = data.where(~mask, data / factor)
-    return data
-
-
-def _split_by_valid_time(arrays: list[xr.DataArray]) -> list[xr.DataArray]:
-    """
-    Split arrays by valid_time and stack by sample, creating separate
-    arrays for each unique lead_time.
-
-    Lead_time is calculated as: valid_time - source_interval_start
-
-    Parameters
-    ----------
-    arrays : list[xr.DataArray]
-        List of DataArrays, each containing multiple valid_times per sample
-
-    Returns
-    -------
-    list[xr.DataArray]
-        List of DataArrays, one per unique lead_time, with samples
-        stacked along 'sample' dimension
-    """
-    # Pre-compute all lead times and build index in single pass
-    lead_time_groups = {}  # lead_time -> list of (arr_idx, ipoint_indices)
-
-    unique_valid_times = [np.unique(da.valid_time.values) for da in arrays]
-    if len(unique_valid_times) == len(arrays) and all(len(uvt) == 1 for uvt in unique_valid_times):
-        _logger.debug(
-            "All arrays have a single unique valid_time. Skipping splitting by valid_time."
-        )
-        return arrays
-
-    for arr_idx, da in tqdm(enumerate(arrays), total=len(arrays), desc="Splitting by valid time"):
-        vt = da.valid_time.values
-        sis = da.source_interval_start.values
-
-        # Calculate lead_time once
-        if vt.ndim > 1:
-            lead_times = vt - (sis[:, np.newaxis] if sis.ndim == 1 else sis)
-            # Flatten and get unique lead times with their ipoint indices
-            valid_mask = ~np.isnat(lead_times)
-            for i in range(lead_times.shape[0]):
-                row_leads = lead_times[i][valid_mask[i]]
-                row_ipoints = np.where(valid_mask[i])[0]
-                for lead, ipoint in zip(row_leads, row_ipoints, strict=False):
-                    lead_time_groups.setdefault(lead, []).append((arr_idx, i, ipoint))
-        else:
-            lead_times = vt - sis
-            valid_mask = ~np.isnat(lead_times)
-            valid_leads = lead_times[valid_mask]
-            valid_ipoints = np.where(valid_mask)[0]
-            for lead, ipoint in zip(valid_leads, valid_ipoints, strict=False):
-                lead_time_groups.setdefault(lead, []).append((arr_idx, 0, ipoint))
-
-    # Get reference grid from first array for alignment
-    ref_lat = arrays[0].lat.values
-    ref_lon = arrays[0].lon.values
-    ref_sort_idx = np.lexsort((ref_lon, ref_lat))
-    ref_lat_sorted = ref_lat[ref_sort_idx]
-    ref_lon_sorted = ref_lon[ref_sort_idx]
-
-    # Process each lead time
-    sorted_leads = sorted(lead_time_groups.keys())
-    out = []
-
-    for forecast_step, lead in enumerate(sorted_leads, start=1):
-        # Group by array index to minimize selections
-        array_groups = {}
-        for arr_idx, sample_idx, ipoint in lead_time_groups[lead]:
-            array_groups.setdefault(arr_idx, {}).setdefault(sample_idx, []).append(ipoint)
-
-        per_sample = []
-        for arr_idx, sample_dict in array_groups.items():
-            da = arrays[arr_idx]
-
-            for sample_idx, ipoint_list in sample_dict.items():
-                # Single selection operation
-                ipoint_arr = np.array(ipoint_list)
-                da_subset = da.isel(ipoint=ipoint_arr)
-
-                # Align to reference grid
-                sort_idx = np.lexsort((da_subset.lon.values, da_subset.lat.values))
-                da_subset = da_subset.isel(ipoint=sort_idx).assign_coords(
-                    ipoint=np.arange(len(ipoint_arr)),
-                    lat=("ipoint", ref_lat_sorted[: len(ipoint_arr)]),
-                    lon=("ipoint", ref_lon_sorted[: len(ipoint_arr)]),
-                )
-
-                # Ensure sample dimension
-                if "sample" not in da_subset.dims:
-                    sample_val = da.sample.values.item() if da.sample.ndim == 0 else sample_idx
-                    da_subset = da_subset.expand_dims(sample=[sample_val])
-
-                per_sample.append(da_subset)
-
-        if per_sample:
-            # Single concat operation
-            combined = xr.concat(per_sample, dim="sample", coords="different", compat="equals")
-            combined = combined.assign_coords(
-                ipoint=np.arange(combined.sizes["ipoint"]), forecast_step=forecast_step
-            )
-            out.append(combined)
-
-    return out
-
-
-def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
-    """
-    Add lead_time coordinate computed as:
-    valid_time - source_interval_start
-
-    lead_time has dims (sample, ipoint) and dtype timedelta64[ns].
-
-    Parameters
-    ----------
-    da :
-        Input DataArray
-    sample_dim :
-        The name of the sample dimension (default is "sample") which should be kept.
-        Collapse over the others.
-    Returns
-    -------
-        Returns a DataArray with the lead_time coordinate added.
-
-    NB. Need to be used AFTER splitting by valid_time and stacking by sample,
-    so that all valid_times within a sample are the same and we can assign a
-    single lead_time per sample.
-
-    """
-    vt = da["valid_time"].values
-    sis = da["source_interval_start"].values
-    # Compute lead_time: valid_time - source_interval_start
-    if vt.ndim > 1:
-        sis_expanded = sis[:, np.newaxis] if sis.ndim == 1 else sis
-        lead_time_values = vt - sis_expanded
-        # Get unique lead_time per sample, verify consistency
-        lead_times = [
-            np.unique(lead_time_values[i][~np.isnat(lead_time_values[i])])
-            for i in range(lead_time_values.shape[0])
-        ]
-        if any(len(lt) != 1 for lt in lead_times):
-            raise ValueError(
-                "Inconsistent lead_time values within samples for "
-                f"forecast_step {da.forecast_step.values}"
-            )
-        lead_time_per_sample = np.array([lt[0] for lt in lead_times])
-    else:
-        lead_time_values = vt - sis
-        lead_time_per_sample = np.unique(lead_time_values[~np.isnat(lead_time_values)])
-
-    # Verify all samples have same lead_time for this forecast_step
-    unique_lead = np.unique(lead_time_per_sample)
-    if len(unique_lead) != 1:
-        raise ValueError(
-            "Multiple lead_time values across samples for "
-            f"forecast_step {da.forecast_step.values}: {unique_lead}"
-        )
-
-    da = da.assign_coords(lead_time=unique_lead[0])
-    return da
-
-
-def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
-    """
-    Force all samples to share the same ipoint order.
-
-    This function aligns the spatial ordering (lat/lon/ipoint) of all samples
-    to that of the first sample, ensuring consistent spatial coordinates for
-    subsequent concatenation. It is essential for regular-grid (gridded) data
-    where spatial order matters but may differ across samples.
-
-    Parameters
-    ----------
-    ref: list[xr.DataArray]
-        List of xarray DataArrays, each representing one sample. Must have at least one element.
-
-    Returns
-    -------
-    xr.DataArray
-        A concatenated DataArray across the 'sample' dimension, where each sample's ipoint indices
-        have been reordered to match the sorted lat/lon order of the first sample.
-
-    Notes
-    -----
-    - All input DataArrays must share identical lat/lon values
-        (though possibly in different orders).
-    - Enforces consistent ipoint indexing after alignment (0..N-1).
-    - Preserves and aligns all other coordinates and data variables.
-    """
-    assert len(ref) > 0, "_force_consistent_grids requires at least one input DataArray in 'ref'."
-
-    # Pick first sample as reference
-    ref_lat = ref[0].lat
-    ref_lon = ref[0].lon
-
-    sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
-    npoints = sort_idx.size
-    aligned = []
-    samples = []
-    for i, a in enumerate(ref):
-        a_sorted = a.isel(ipoint=sort_idx)
-        samples.append(a_sorted.sample.values)
-        a_sorted = a_sorted.assign_coords(
-            ipoint=np.arange(npoints),
-            lat=("ipoint", ref_lat.values[sort_idx]),
-            lon=("ipoint", ref_lon.values[sort_idx]),
-        )
-
-        if "sample" not in a_sorted.dims:
-            a_sorted = a_sorted.expand_dims(sample=[i])
-
-        aligned.append(a_sorted)
-
-    return aligned  # xr.concat(aligned, dim="sample")

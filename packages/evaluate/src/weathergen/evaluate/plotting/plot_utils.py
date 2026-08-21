@@ -7,14 +7,287 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import logging
+import re
 from collections.abc import Iterable, Sequence
+from enum import Enum
 
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
 _logger = logging.getLogger(__name__)
+
+
+class PlotSubdir(str, Enum):
+    """Known plot subdirectory names produced by the plotting pipeline.
+
+    Being a ``str`` subclass, members compare and format exactly like plain
+    strings (e.g. ``PlotSubdir.line_plots == "line_plots"``), so they can be
+    used as drop-in replacements wherever the raw directory name is expected
+    (e.g. ``Path(base) / PlotSubdir.line_plots``).
+    """
+
+    line_plots = "line_plots"
+    ratio_plots = "ratio_plots"
+    psd_plots = "psd_plots"
+    score_cards = "score_cards"
+    bar_plots = "bar_plots"
+    qq_plots = "qq_plots"
+
+
+# Shared helpers
+def calculate_average_over_dim(
+    x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """
+    Calculate average over xarray dimensions that are larger than 1. Those might be the
+    forecast-steps or the samples.
+
+    Parameters
+    ----------
+    x_dim: str
+        The dimension for which an average will not be calculated.
+    baseline_var: xr.DataArray
+        xarray DataArray with the scores of the baseline model for a specific channel/variable
+    data_var: xr.DataArray
+        xarray DataArray with the scores of the comparison model for a specific channel/variable
+
+    Returns
+    -------
+    baseline_score: xarray DataArray
+        The baseline average scores over the dimensions not specified by x_dim
+    model_score: xarray DataArray
+        The model average scores over the dimensions not specified by x_dim
+    """
+    non_zero_dims = [
+        dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
+    ]
+
+    if non_zero_dims:
+        _logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
+
+    baseline_score = baseline_var.mean(
+        dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
+    )
+    model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
+
+    return baseline_score, model_score
+
+
+def lower_is_better(metric: str) -> bool:
+    """Determine whether lower or higher is better."""
+    return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
+
+
+def compute_offsets(n, spacing=0.11):
+    """Compute symmetric offsets for *n* items centred around zero.
+
+    Parameters
+    ----------
+    n : int
+        Number of items to offset.
+    spacing : float
+        Distance between consecutive offsets (default ``0.11``).
+
+    Returns
+    -------
+    np.ndarray
+        Array of length *n* with offsets centred at zero.
+    """
+    idx = np.arange(n)
+    return (idx - (n - 1) / 2.0) * spacing
+
+
+def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArray:
+    """
+    Reindex a DataArray to include all labels in the canonical order.
+    Missing variables are filled with NaN.
+    """
+    labels = np.array(labels, dtype=object)
+    return da.reindex({x_dim: labels})
+
+
+def format_datetime(dt):
+    """Format a numpy datetime64 value as a human-readable string.
+
+    Parameters
+    ----------
+    dt : numpy.datetime64
+        Datetime value to format.
+
+    Returns
+    -------
+    str
+        Formatted string in ``'%Y-%m-%d T%H:%M:%S'`` format.
+    """
+    return dt.astype("datetime64[m]").astype(datetime.datetime).strftime("%Y-%m-%d T%H:%M:%S")
+
+
+def channel_sort_key(name: str) -> tuple[int, str, int]:
+    """
+    Sorting key for channel names like 't_850', 'z_500', etc.
+    Splits the name into a prefix and a number suffix for sorting.
+    """
+    m = re.match(r"(.+?)_(\d+)$", name)
+    if m:
+        prefix, number = m.groups()
+        return (0, prefix, int(number))
+    else:
+        return (1, name, float("inf"))
+
+
+def clean_label(s: str) -> str:
+    """Replace underscores and hyphens with spaces, then strip whitespace.
+
+    Parameters
+    ----------
+    s : str
+        Raw label string (e.g. ``'lead_time'``).
+
+    Returns
+    -------
+    str
+        Cleaned label (e.g. ``'lead time'``).
+    """
+    return re.sub(r"[_\-]+", " ", s).strip()
+
+
+def filter_set(items: list, allowed: set | None) -> list:
+    """Return *items* filtered to *allowed*, or all items if *allowed* is ``None``."""
+    if allowed is None:
+        return items
+    return [x for x in items if x in allowed]
+
+
+class DefaultMarkerSize:
+    """
+    Utility class for managing default configuration values, such as marker sizes
+    for various data streams.
+    """
+
+    _marker_size_stream = {
+        "era5": 2.5,
+        "imerg": 0.25,
+        "cerra": 0.1,
+    }
+
+    _default_marker_size = 0.5
+
+    @classmethod
+    def get_marker_size(cls, stream_name: str) -> float:
+        """
+        Get the default marker size for a given stream name.
+
+        Parameters
+        ----------
+        stream_name : str
+            The name of the stream.
+
+        Returns
+        -------
+        float
+            The default marker size for the stream.
+        """
+        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
+
+    @classmethod
+    def list_streams(cls):
+        """
+        List all streams with defined marker sizes.
+
+        Returns
+        -------
+        list[str]
+            List of stream names.
+        """
+        return list(cls._marker_size_stream.keys())
+
+    @staticmethod
+    def compute_marker_size(marker_size_base: float, scale: bool, lat: NDArray) -> float | NDArray:
+        """Return marker sizes, optionally scaled by latitude.
+
+        When *scale* is truthy, markers at higher latitudes are enlarged
+        to compensate for the convergence of meridians (HEALPix point
+        clustering), keeping visual coverage roughly uniform.
+
+        Parameters
+        ----------
+        marker_size_base : float
+            Base marker size in matplotlib scatter units (pt²).
+        scale : bool
+            If ``True``, scale marker size by ``1 / cos²(lat)``.
+        lat : array-like
+            Latitude values (degrees) for every point.
+
+        Returns
+        -------
+        float or np.ndarray
+            Scalar when *scale* is ``False``; array matching *lat* otherwise.
+        """
+        if not scale:
+            return marker_size_base
+        return np.clip(
+            marker_size_base / np.cos(np.radians(lat)) ** 2,
+            a_min=marker_size_base,
+            a_max=marker_size_base * 10.0,
+        )
+
+    @classmethod
+    def auto_marker_size(
+        cls,
+        n_points: int,
+        fig_width_in: float,
+        fig_height_in: float,
+        stream_default: float,
+        scale: bool,
+        lat: NDArray,
+        *,
+        density_threshold: int = 200_000,
+        fill_factor: float = 1.8,
+        max_size: float = 4.0,
+    ) -> float | NDArray:
+        """Compute marker size adapting to point density and figure area.
+
+        For dense grids (≥ *density_threshold* points, e.g. n320, CERRA)
+        the marker size is derived from the figure area so that points
+        fill the globe without white gaps.  Sparser grids (e.g. o96)
+        use the stream default as-is.
+
+        Parameters
+        ----------
+        n_points : int
+            Total number of data points to render.
+        fig_width_in : float
+            Figure width in inches.
+        fig_height_in : float
+            Figure height in inches.
+        stream_default : float
+            Default marker size for the stream (from ``get_marker_size``).
+        scale : bool
+            If ``True``, scale marker size by latitude.
+        lat : array-like
+            Latitude values (degrees) for every point.
+        density_threshold : int
+            Minimum point count for auto-sizing to kick in.
+        fill_factor : float
+            Multiplier for the area-per-point ratio.
+        max_size : float
+            Upper clamp for the auto-computed base size.
+
+        Returns
+        -------
+        float or np.ndarray
+            Marker size(s) ready to pass to ``ax.scatter(s=...)``.
+        """
+        if n_points >= density_threshold:
+            fig_area_pt2 = (fig_width_in * 72) * (fig_height_in * 72)
+            base = float(np.clip(fig_area_pt2 / n_points * fill_factor, 0.05, max_size))
+        else:
+            base = stream_default
+
+        return cls.compute_marker_size(base, scale, lat)
 
 
 def _flatten_or_average(arr: NDArray) -> NDArray:
@@ -112,7 +385,7 @@ def plot_metric_region(
 
     for stream in streams_set:
         for ch in channels_set:
-            selected_data, labels, run_ids = [], [], []
+            selected_data, labels, run_ids, colors = [], [], [], []
 
             for run_id, data in scores_dict[metric][region].get(stream, {}).items():
                 # skip if channel is missing or contains NaN
@@ -122,15 +395,21 @@ def plot_metric_region(
                 selected_data.append(data.sel(channel=ch))
                 labels.append(runs[run_id].get("label", run_id))
                 run_ids.append(run_id)
+                colors.append(runs[run_id].get("color", None))
 
             if selected_data:
-                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
+                _logger.info(f"Creating line plot for {metric} - {region} - {stream} - {ch}.")
 
                 name = create_filename(
                     prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
                 )
 
                 selected_data, time_dim = _assign_time_coord(selected_data)
+
+                title = f"{metric.upper()} | {stream} | {ch}"
+
+                ref_line_dict = {"ssr_adj": 1.0}
+                line = ref_line_dict.get(metric)
 
                 plotter.plot(
                     selected_data,
@@ -139,6 +418,9 @@ def plot_metric_region(
                     x_dim=time_dim,
                     y_dim=metric,
                     print_summary=print_summary,
+                    title=title,
+                    colors=colors,
+                    line=line,
                 )
 
 
@@ -228,9 +510,10 @@ def ratio_plot_metric_region(
         selected_data = []
         labels = []
         run_ids = []
+        colors = []
         for run_id, run_data in runs.items():
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data.isnull().all():
+            if data is None or data.isnull().all():
                 continue
             selected_data.append(data)
             label = run_data.get("label", run_id)
@@ -238,21 +521,22 @@ def ratio_plot_metric_region(
                 label = f"{run_id} - {label}"
             labels.append(label)
             run_ids.append(run_id)
+            colors.append(run_data.get("color", None))
 
         if len(selected_data) > 0:
-            _logger.info(f"Creating Ratio plot for {metric} - {stream}")
+            _logger.info(f"Creating ratio plot for {metric} - {stream}")
 
             name = create_filename(
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
             plotter.ratio_plot(
-                selected_data,
-                run_ids,
-                labels,
-                tag=name,
-                x_dim="channel",
+                data=selected_data,
+                run_ids=run_ids,
+                labels=labels,
                 y_dim=metric,
+                tag=name,
                 print_summary=print_summary,
+                colors=colors,
             )
 
 
@@ -263,7 +547,7 @@ def heat_maps_metric_region(
     scores_dict: dict,
     plotter: object,
 ) -> None:
-    """Plot ratio data for all streams and channels for a given metric and region.
+    """Plot heat map data for all streams and channels for a given metric and region.
 
     Parameters
     ----------
@@ -289,7 +573,7 @@ def heat_maps_metric_region(
         run_ids = []
         for run_id in runs:
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data.isnull().all():
+            if data is None or data.isnull().all():
                 continue
 
             selected_data.append(data)
@@ -300,7 +584,7 @@ def heat_maps_metric_region(
             run_ids.append(run_id)
 
         if len(selected_data) > 0:
-            _logger.info(f"Creating Heat maps for {metric} - {stream}")
+            _logger.info(f"Creating heat maps for {metric} - {stream}")
             name = create_filename(
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
@@ -349,10 +633,15 @@ def score_card_metric_region(
             selected_data.append(data)
             run_ids.append(run_id)
 
-        if selected_data:
+        if len(selected_data) >= 2:
             _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
+        elif len(selected_data) == 1:
+            _logger.info(
+                f"Skipping score card for {metric} - {region} - {stream}: "
+                f"only one run available (need at least 2 to compare)."
+            )
 
 
 def bar_plot_metric_region(
@@ -394,50 +683,6 @@ def bar_plot_metric_region(
             _logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
-
-
-class DefaultMarkerSize:
-    """
-    Utility class for managing default configuration values, such as marker sizes
-    for various data streams.
-    """
-
-    _marker_size_stream = {
-        "era5": 2.5,
-        "imerg": 0.25,
-        "cerra": 0.1,
-    }
-
-    _default_marker_size = 0.5
-
-    @classmethod
-    def get_marker_size(cls, stream_name: str) -> float:
-        """
-        Get the default marker size for a given stream name.
-
-        Parameters
-        ----------
-        stream_name : str
-            The name of the stream.
-
-        Returns
-        -------
-        float
-            The default marker size for the stream.
-        """
-        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
-
-    @classmethod
-    def list_streams(cls):
-        """
-        List all streams with defined marker sizes.
-
-        Returns
-        -------
-        list[str]
-            List of stream names.
-        """
-        return list(cls._marker_size_stream.keys())
 
 
 def quantile_plot_metric_region(
@@ -543,6 +788,80 @@ def quantile_plot_metric_region(
                         f"Q-Q data not available for {metric} - {region} - {stream} - {ch}. "
                         f"Skipping plot generation."
                     )
+
+
+def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict] | None:
+    """Extract PSD curve data from DataArray attrs for a given fstep/channel.
+
+    Returns a single-element list of dicts ready for the plotter, or None if keys are missing.
+    """
+    attrs = data_ch.attrs
+    fp = f"fstep_{fstep}/"
+
+    for prefix in (f"{fp}{ch}/", fp):
+        if f"{prefix}frequencies" in attrs and f"{prefix}psd_target" in attrs:
+            return [
+                {
+                    "frequencies": np.array(attrs[f"{prefix}frequencies"]),
+                    "psd_target": np.array(attrs[f"{prefix}psd_target"]),
+                    "psd_prediction": np.array(attrs[f"{prefix}psd_prediction"]),
+                    "psd_method": attrs.get(f"{fp}psd_method", attrs.get("psd_method", "sht")),
+                }
+            ]
+    return None
+
+
+def psd_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+) -> None:
+    """Create PSD plots for all streams and channels for a given metric and region.
+
+    PSD curves (frequencies, target PSD, prediction PSD) are stored in
+    ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        for ch in channels_set:
+            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+                if ch not in np.atleast_1d(data.channel.values):
+                    continue
+
+                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
+                if data_ch.isnull().all():
+                    continue
+
+                attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
+                if not attr_fsteps:
+                    _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
+                    continue
+
+                label = runs[run_id].get("label", run_id)
+
+                for fstep in attr_fsteps:
+                    psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
+                    if psd_datasets is None:
+                        continue
+
+                    method_tag = psd_datasets[0].get("psd_method", "sht")
+                    name = create_filename(
+                        prefix=[metric, method_tag, region],
+                        middle=[run_id],
+                        suffix=[stream, ch, f"fstep{fstep}"],
+                    )
+                    plotter.psd_plot(
+                        psd_datasets,
+                        [label],
+                        tag=name,
+                        variable=ch,
+                        forecast_step=str(fstep),
+                    )
+    _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 
 def create_filename(

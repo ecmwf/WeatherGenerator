@@ -9,7 +9,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import Regridder, find_pl
+from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_points
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -55,6 +55,7 @@ class NetcdfParser(CfParser):
         self,
         fstep_iterator_results: iter,
         ref_time: np.datetime64,
+        **kwargs,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -69,20 +70,39 @@ class NetcdfParser(CfParser):
         da_fs = []
 
         for result in fstep_iterator_results:
-            if result is None:
+            if result is None or (isinstance(result, xr.DataArray) and result.size == 0):
                 continue
 
-            result = result.as_xarray().squeeze()
-            if "channel" not in result.indexes: 
+            # result is already a materialized xarray DataArray (built in the worker).
+            if not isinstance(result, xr.DataArray):
+                result = result.as_xarray().squeeze()
+            if "channel" not in result.indexes:
                 result = result.expand_dims("channel")
-            result = result.sel(channel=self.channels)
-            result = self.reshape(result)
-            da_fs.append(result)
+
+            # Get unique valid times
+            unique_times = np.sort(np.unique(result.valid_time.values))
+
+            for vt in unique_times:
+                sub = result.sel(channel=self.channels, valid_time=vt)
+
+                if len(unique_times) > 1:
+                    # Reassign ipoint so that the same spatial point indices are used
+                    # for each unique valid_time
+                    new_ipoint = sub.ipoint.copy(data=np.arange(sub.sizes["ipoint"]))
+                    sub = sub.assign_coords(ipoint=new_ipoint)
+
+                sub = self.reshape(sub)
+                da_fs.append(sub)
 
         _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {self.data_type}.")
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
 
         if da_fs:
+            if len(da_fs) > 1:
+                assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
+                    "Grid points between forecast steps are not consistent."
+                    "Check that inference was not performed with masking"
+                )
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
@@ -107,7 +127,8 @@ class NetcdfParser(CfParser):
 
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
         out_fname = (
-            Path(self.output_dir) / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
+            Path(self.output_dir)
+            / f"{self.data_type}_{frt}_{self.run_id}_{self.stream}.{self.file_extension}"
         )
         return out_fname
 
@@ -128,26 +149,37 @@ class NetcdfParser(CfParser):
         grid_type = self.grid_type
 
         # Original logic
-        var_dict, pl = find_pl(data.channel.values)
+        var_dict = find_pl(data.channel.values)
         data_vars = {}
-
-        for new_var, old_vars in var_dict.items():
-            if len(old_vars) > 1:
+        # order of appending upoints should be ipoint, pressure_level, mem (if mem exists)
+        for new_var, pls in var_dict.items():
+            data_dims = ["ipoint"]
+            if pls[0] is not None:
+                data_dims.append("pressure_level")
+                if "mem" in data.dims:
+                    data_dims.append("mem")
+                old_vars = [f"{new_var}_{p}" for p in pls]
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
-                    dims=["ipoint", "pressure_level"],
+                    dims=data_dims,
+                    coords={"pressure_level": pls},
                 )
             else:
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 data_vars[new_var] = xr.DataArray(
-                    data.sel(channel=old_vars[0]).values,
-                    dims=["ipoint"],
+                    data.sel(channel=new_var).values,
+                    dims=data_dims,
                 )
 
         reshaped_dataset = xr.Dataset(data_vars)
         reshaped_dataset = reshaped_dataset.assign_coords(
             ipoint=data.coords["ipoint"],
-            pressure_level=pl,
         )
+
+        # order using pressure_level coord
+        if "pressure_level" in reshaped_dataset.coords:
+            reshaped_dataset = reshaped_dataset.sortby("pressure_level")
 
         if grid_type == "regular":
             # Use original reshape logic for regular grids
@@ -274,7 +306,7 @@ class NetcdfParser(CfParser):
         else:
             variables = self._attrs_regular_grid(ds)
 
-        dataset = xr.merge(variables.values())
+        dataset = xr.merge(variables.values(), compat="no_conflicts")
         dataset.attrs = ds.attrs
         return dataset
 
@@ -302,7 +334,9 @@ class NetcdfParser(CfParser):
             ds["forecast_reference_time"].encoding.update(time_encoding)
 
         if "forecast_period" in ds.coords:
-            ds["forecast_period"].encoding.update({"coordinates": "forecast_reference_time"})
+            ds["forecast_period"].attrs.update(
+                {"coordinates": "forecast_reference_time", "dtype": "timedelta64[ns]"}
+            )
 
         return ds
 
@@ -322,7 +356,12 @@ class NetcdfParser(CfParser):
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
         for var_name, da in ds.data_vars.items():
-            mapped_info = self.mapping.get(var_name, {})
+            try:
+                mapped_info = self.mapping[var_name]
+            except KeyError as e:
+                raise KeyError(
+                    f"Variable '{var_name}' not found in mapping. Update relevant config."
+                ) from e
             mapped_name = mapped_info.get("var", var_name)
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
@@ -358,9 +397,14 @@ class NetcdfParser(CfParser):
         variables = {}
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
-        dims_list = ["pressure", "latitude", "longitude", "valid_time"]
+        dims_list = ["pressure", "valid_time", "latitude", "longitude"]
         for var_name, da in ds.data_vars.items():
-            mapped_info = self.mapping.get(var_name, {})
+            try:
+                mapped_info = self.mapping[var_name]
+            except KeyError as e:
+                raise KeyError(
+                    f"Variable '{var_name}' not found in mapping. Update relevant config."
+                ) from e
             mapped_name = mapped_info.get("var", var_name)
             dims = dims_list.copy()
             if mapped_info.get("level_type") == "sfc":
@@ -445,12 +489,17 @@ class NetcdfParser(CfParser):
         coord_map = self.config.get("coordinates", {}).get(var_cfg.get("level_type"), {})
 
         for coord, new_name in coord_map.items():
-            coords[new_name] = (
-                ds.coords[coord].dims,
-                ds.coords[coord].values,
-                attrs[new_name],
-            )
-
+            try:
+                coords[new_name] = (
+                    ds.coords[coord].dims,
+                    ds.coords[coord].values,
+                    attrs[new_name],
+                )
+            except KeyError:
+                _logger.warning(
+                    f"Coordinate '{coord}' will be skipped for "
+                    f"variable '{var_cfg.get('var', 'unknown')}'."
+                )
         return coords
 
     def _add_grid_attrs(self, ds: xr.Dataset, grid_info: dict | None = None) -> xr.Dataset:
@@ -500,7 +549,7 @@ class NetcdfParser(CfParser):
             xarray Dataset with CF conventions added to attributes.
         """
         # ds = ds.copy()
-        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id} using stream {self.stream}"
+        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id}"
         ds.attrs["institution"] = "WeatherGenerator Project"
         ds.attrs["source"] = "WeatherGenerator v0.0"
         ds.attrs["history"] = (
@@ -508,8 +557,7 @@ class NetcdfParser(CfParser):
             + np.datetime_as_string(np.datetime64("now"), unit="s")
         )
         ds.attrs["Conventions"] = "CF-1.12"
-        # drop stream now it's in title
-        ds = ds.drop_vars("stream")
+
         return ds
 
     def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:

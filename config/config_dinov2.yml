@@ -1,5 +1,3 @@
-
-embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 

@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -185,7 +184,7 @@ training_config:
   forecast :
       time_step: 06:00:00
       offset: 1
-      num_steps: 2
+      num_steps: 3
       policy: "fixed"
 
 
@@ -202,7 +201,7 @@ validation_config:
   validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
-    ema_halflife_in_thousands: 1e-3
+    ema_halflife_in_thousands: 600
 
   # parameters for validation samples that are written to disk
   output : {

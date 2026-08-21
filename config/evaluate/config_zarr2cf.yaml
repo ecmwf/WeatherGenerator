@@ -36,7 +36,7 @@ variables:
     wg_unit: m**2 s**-2
     std_unit: m2 s-2
     level_type: pl
-    scale_factor: 1/9.80665
+    scale_factor: 1.0 #0.10197 #1/9.80665
   10u:
     var: u10
     long: u_wind_at_10m
@@ -89,33 +89,88 @@ variables:
     wg_unit: Pa
     std_unit: Pa
     level_type: sfc
-  tp_imerg:
+  tp:
+    var: tp
+    long: total_precipitation
+    std: precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc
+  cp:
+    var: cp
+    long: convective_precipitation
+    std: convective_precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc 
+  tp_imerg_0:
     var: tp_imerg_0
     long: imerg_total_precipitation
     std: precipitation_amount
     wg_unit: m
     std_unit: m
     level_type: sfc
-  
+  hcc:
+    var: hcc
+    long: high_cloud_cover
+    std: cloud_area_fraction_high
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  mcc:
+    var: mcc
+    long: medium_cloud_cover
+    std: cloud_area_fraction_medium
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  lcc:
+    var: lcc
+    long: low_cloud_cover
+    std: cloud_area_fraction_low
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  tcc:
+    var: tcc
+    long: total_cloud_cover
+    std: cloud_area_fraction
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  strd:
+    var: strd
+    long: surface_thermal_radiation_downwards
+    std: surface_downwelling_longwave_flux_in_air
+    wg_unit: J m**-2
+    std_unit: J m-2
+    level_type: sfc
+  ssrd:
+    var: ssrd
+    long: surface_solar_radiation_downwards
+    std: surface_downwelling_shortwave_flux_in_air
+    wg_unit: J m**-2
+    std_unit: J m-2
+    level_type: sfc
 
 coordinates:
     sfc:
         valid_time: valid_time
         lat: latitude
         lon: longitude
-        stream: stream
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
+        mem: mem
     pl:
         pressure_level: pressure
         valid_time: valid_time
         lat: latitude
         lon: longitude
-        stream: stream
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
+        mem: mem
 
 dimensions:
     valid_time:
@@ -141,9 +196,11 @@ dimensions:
       std: forecast_period
       long: time since forecast_reference_time
       std_unit: hours
-    stream:
-      wg: stream
-      std: stream
     ncells:
       wg: ncells
       std: ncells
+    mem:
+      wg: mem
+      std: realization
+      long: realization
+      std_unit: 1

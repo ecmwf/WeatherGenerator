@@ -77,35 +77,6 @@ def _add_inference_args(parser: argparse.ArgumentParser):
     _add_model_loading_params(parser)
     _add_general_arguments(parser)
 
-    parser.add_argument(
-        "--start-date",
-        "-start",
-        type=_format_date,
-        default="2022-10-01",
-        help="Start date for inference. Format must be parsable with pd.to_datetime.",
-    )
-    parser.add_argument(
-        "--end-date",
-        "-end",
-        type=_format_date,
-        default="2022-12-01",
-        help="End date for inference. Format must be parsable with pd.to_datetime.",
-    )
-    parser.add_argument(
-        "--samples", type=int, default=10000000, help="Number of inference samples."
-    )
-    parser.add_argument(  # behaviour changed => implies default=False
-        "--save-samples",
-        type=bool,
-        default=True,
-        help="Toggle saving of samples from inference. Default True",
-    )
-    parser.add_argument(
-        "--streams-output",
-        nargs="+",
-        help="Output streams during inference.",
-    )
-
 
 def _format_date(date: str) -> str:
     try:

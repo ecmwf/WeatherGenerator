@@ -11,6 +11,7 @@
 
 import logging
 import math
+import typing
 import warnings
 
 import astropy_healpix as hp
@@ -18,6 +19,7 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
@@ -27,6 +29,7 @@ from weathergen.model.engines import (
     BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
+    IdentityEngine,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
@@ -36,7 +39,6 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
-from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
 
@@ -91,12 +93,12 @@ class ModelParams(torch.nn.Module):
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
-        self.batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
 
-        ### POSITIONAL EMBEDDINGS ###
-        len_token_seq = 1024
+        # Positional embeddings
+        self.max_tokens_local_per_cell = cf.get("ae_local_max_tokens_per_cell", 64)
         self.pe_embed = torch.nn.Parameter(
-            torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
+            torch.zeros(self.max_tokens_local_per_cell, cf.ae_local_dim_embed, dtype=self.dtype),
+            requires_grad=False,
         )
 
         pe = torch.zeros(
@@ -107,7 +109,7 @@ class ModelParams(torch.nn.Module):
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
-        ### ROPE COORDS ###
+        # RoPE coordinates
         self.rope_2D = cf.get("rope_2D", False)
         if self.rope_2D:
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
@@ -135,7 +137,7 @@ class ModelParams(torch.nn.Module):
             self.rope_coords = None
             self.rope_cell_coords = None
 
-        ### HEALPIX NEIGHBOURS ###
+        # HEALPix neighbours
         hlc = self.healpix_level
         with warnings.catch_warnings(action="ignore"):
             temp = hp.neighbours(
@@ -181,12 +183,17 @@ class ModelParams(torch.nn.Module):
         # positional encodings
 
         dim_embed = cf.ae_local_dim_embed
-        len_token_seq = 1024
+        token_idx_bias = 16
+        freq_bias = 8
         self.pe_embed.data.fill_(0.0)
-        position = torch.arange(0, len_token_seq, device=self.pe_embed.device).unsqueeze(1)
+        position = torch.arange(
+            token_idx_bias,
+            token_idx_bias + self.max_tokens_local_per_cell,
+            device=self.pe_embed.device,
+        ).unsqueeze(1)
         div = torch.exp(
-            torch.arange(0, dim_embed, 2, device=self.pe_embed.device)
-            * -(math.log(len_token_seq) / dim_embed),
+            torch.arange(freq_bias, freq_bias + dim_embed, 2, device=self.pe_embed.device)
+            * -(math.log(self.max_tokens_local_per_cell) / dim_embed),
         )
         self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
@@ -317,10 +324,10 @@ class Model(torch.nn.Module):
 
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
-        self.forecast_engine: ForecastingEngine | None = None
+        self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
-        self.stream_names: list[str] = None
+        self.streams: dict[str, typing.Any] = cf.streams
         self.target_token_engines = None
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
@@ -371,9 +378,10 @@ class Model(torch.nn.Module):
         )
 
         mode_cfg = cf.training_config
-        self.forecast_engine = None
         if cf.fe_num_blocks > 0:
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+        else:
+            self.forecast_engine = IdentityEngine()
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -382,19 +390,16 @@ class Model(torch.nn.Module):
         self.pred_heads = torch.nn.ModuleDict()
 
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
-
-        for i_stream, _ in enumerate(cf.streams):
-            stream_name = self.stream_names[i_stream]
-
-        loss_terms = [v.type for _, v in cf.training_config.losses.items()]
+        loss_terms = [
+            v.type for _, v in cf.training_config.losses.items() if v.get("enabled", True)
+        ]
         if cf.validation_config.get("losses"):
-            loss_terms += [v.type for _, v in cf.validation_config.losses.items()]
+            loss_terms += [
+                v.type for _, v in cf.validation_config.losses.items() if v.get("enabled", True)
+            ]
 
         if "LossPhysical" in loss_terms:
-            for i_stream, si in enumerate(cf.streams):
-                stream_name = self.stream_names[i_stream]
-
+            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
@@ -437,7 +442,7 @@ class Model(torch.nn.Module):
                             with_residual=False,
                             dropout_rate=dropout_rate,
                             norm_eps=self.cf.mlp_norm_eps,
-                            stream_name=f"embed_target_coords_{stream_name}",
+                            name=f"embed_target_coords_{stream_name}",
                         )
                     else:
                         assert False
@@ -485,16 +490,14 @@ class Model(torch.nn.Module):
                     )
 
             # iterate again to setup shared spatial pred heads if specified in config
-            for i_stream, si in enumerate(cf.streams):
-                stream_name = self.stream_names[i_stream]
-
+            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
 
                 pred_spatial_shared = si.get("pred_spatial_shared")
                 if pred_spatial_shared is not None:
-                    if pred_spatial_shared not in self.stream_names:
+                    if pred_spatial_shared not in self.streams.keys():
                         msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
                         msg += " but no stream with that name found."
                         raise ValueError(msg)
@@ -513,11 +516,8 @@ class Model(torch.nn.Module):
                         pred_spatial_shared
                     ]
 
-                    idx_shared_s = [
-                        i for i, so in enumerate(cf.streams) if so["name"] == pred_spatial_shared
-                    ]
-                    assert (len(idx_shared_s)) == 1
-                    si_other = cf.streams[idx_shared_s[0]]
+                    assert pred_spatial_shared in self.streams.keys()
+                    si_other = self.streams[pred_spatial_shared]
                     dims_embed = [
                         si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
                     ]
@@ -545,7 +545,7 @@ class Model(torch.nn.Module):
         ssl_losses_cfgs = [
             v
             for _, v in cf.training_config.losses.items()
-            if v.type == "LossLatentSSLStudentTeacher"
+            if v.type == "LossLatentSSLStudentTeacher" and v.get("enabled", True)
         ]
 
         # TODO: support multiple LossLatentSSLStudentTeacher terms
@@ -592,9 +592,9 @@ class Model(torch.nn.Module):
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
-        cf = self.cf
         num_params_embed = [
-            get_num_parameters(self.encoder.embed_engine.embeds[name]) for name in self.stream_names
+            get_num_parameters(self.encoder.embed_engine.embeds[name])
+            for name in self.streams.keys()
         ]
         num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)
@@ -603,7 +603,7 @@ class Model(torch.nn.Module):
         num_params_q_cells = (
             np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
         )
-        num_params_ae_adapater = get_num_parameters(self.encoder.ae_local_global_engine.ae_adapter)
+        num_params_ae_adapter = get_num_parameters(self.encoder.ae_local_global_engine)
 
         num_params_ae_aggregation = get_num_parameters(
             self.encoder.ae_aggregation_engine.ae_aggregation_blocks
@@ -612,24 +612,22 @@ class Model(torch.nn.Module):
         num_params_latent_heads = get_num_parameters(self.latent_heads)
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_fe = (
-            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
-        )
+        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
         mdict = self.target_token_engines
         num_params_tte = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
         mdict = self.pred_heads
         num_params_preds = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
 
         print("-----------------")
@@ -638,10 +636,10 @@ class Model(torch.nn.Module):
         print("  Embedding networks:")
         [
             print("    {} : {:,}".format(si["name"], np))
-            for si, np in zip(cf.streams, num_params_embed, strict=False)
+            for si, np in zip(self.streams.values(), num_params_embed, strict=False)
         ]
         print(f" Local assimilation engine: {num_params_ae_local:,}")
-        print(f" Local-global adapter: {num_params_ae_adapater:,}")
+        print(f" Local-global adapter: {num_params_ae_adapter:,}")
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
@@ -649,16 +647,14 @@ class Model(torch.nn.Module):
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
-            cf.streams,
+            self.streams.keys(),
             num_params_embed_tcs,
             num_params_tte,
             num_params_preds,
             strict=False,
         )
-        [
-            print("   {} : {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2))
-            for si, np0, np1, np2 in zps
-        ]
+        for stream_name, np0, np1, np2 in zps:
+            print(f"   {stream_name} : {np0:,} / {np1:,} / {np2:,}")
         print("-----------------")
 
     def tokens_to_latent_state(self, tokens_post_norm, tokens) -> LatentState:
@@ -690,16 +686,21 @@ class Model(torch.nn.Module):
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+        shape = (len(batch), batch.get_num_source_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
+        # Allow for pushforward trick
+        p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
-            # apply forecasting engine (if present)
-            if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+            without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
+            if without_grad:
+                # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                continue
 
+            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
@@ -773,7 +774,7 @@ class Model(torch.nn.Module):
         tokens_nbors_lens[0] = 0
 
         # pair with tokens from assimilation engine to obtain target tokens
-        for stream_name in self.stream_names:
+        for stream_name in self.streams.keys():
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
                 batch.samples[i_b].streams_data[stream_name].target_coords[step]
@@ -787,7 +788,7 @@ class Model(torch.nn.Module):
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = tc_embed(t_coords)
+            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():

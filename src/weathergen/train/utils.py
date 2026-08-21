@@ -143,7 +143,8 @@ def get_batch_size_from_config(config: Config) -> int:
 
     num_samples = 0
     for _, source_cfg in config.model_input.items():
-        num_samples += source_cfg.get("num_samples", 1)
+        if source_cfg.get("enabled", True):
+            num_samples += source_cfg.get("num_samples", 1)
     assert num_samples > 0, "Number of samples in source configs needs to greater than 0."
 
     return num_samples
@@ -190,3 +191,19 @@ def filter_config_by_enabled(cfg: dict | OmegaConf, keys: list[str]):
         cfg_out[key] = filtered
 
     return cfg_out
+
+
+class NoOpGradScaler:
+    """Drop-in replacement for torch.amp.GradScaler when gradient scaling is disabled."""
+
+    def scale(self, loss):
+        return loss
+
+    def unscale_(self, optimizer):
+        return None
+
+    def step(self, optimizer):
+        return optimizer.step()
+
+    def update(self):
+        return None

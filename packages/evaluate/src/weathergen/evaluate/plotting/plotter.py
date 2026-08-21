@@ -1,8 +1,18 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import datetime
-import glob
+import fnmatch
 import logging
 import os
-import re
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import cartopy
@@ -11,17 +21,27 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import omegaconf as oc
-import seaborn as sns
 import xarray as xr
-from matplotlib.lines import Line2D
-from PIL import Image
-from scipy.stats import wilcoxon
+from astropy_healpix import HEALPix as HEALPixGrid
+from cartopy.io import DownloadWarning
+from matplotlib.collections import LineCollection
+from scipy.stats import skew
+from scipy.stats import wasserstein_distance as wd
+
+try:
+    import datashader as ds
+    import pandas as pd
+
+    HAS_DATASHADER = True
+except ImportError:
+    HAS_DATASHADER = False
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plotting.plot_utils import (
-    DefaultMarkerSize,
-)
+from weathergen.evaluate.plotting.plot_utils import DefaultMarkerSize, format_datetime
 from weathergen.evaluate.utils.regions import RegionBoundingBox
+
+_logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -29,14 +49,69 @@ cartopy.config["data_dir"] = str(work_dir)
 cartopy.config["pre_existing_data_dir"] = str(work_dir)
 os.environ["CARTOPY_DATA_DIR"] = str(work_dir)
 
+# Route Cartopy DownloadWarnings through the logging system so they are visible in logs.
+logging.captureWarnings(True)
+warnings.filterwarnings("always", category=DownloadWarning)
+
+
+def _download_cartopy_off(enabled: bool) -> None:
+    """Enable/disable blocking Cartopy downloads by elevating DownloadWarning to error."""
+    if enabled:
+        warnings.filterwarnings("error", category=DownloadWarning)
+        _logger.debug(
+            "Auto-downloads are blocked for cartopy; only local cartopy data will be used."
+        )
+    else:
+        warnings.filterwarnings("default", category=DownloadWarning)
+
+
 np.seterr(divide="ignore", invalid="ignore")
 
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
-
 _logger.debug(f"Taking cartopy paths from {work_dir}")
+
+# Score maps use a continuous blue->red colormap (no diverging white midpoint,
+# unlike "coolwarm") so mid-range score values stay visually distinguishable.
+# The endpoints are coolwarm's own muted blue/red, just interpolated directly
+# instead of through coolwarm's near-white middle.
+SCORE_MAP_CMAP = mpl.colors.LinearSegmentedColormap.from_list(
+    "score_maps_blue_red",
+    [(0.2298057, 0.298717966, 0.753683153), (0.705673158, 0.01555616, 0.150232812)],
+)
+
+
+@dataclass
+class DistStats:
+    """Summary statistics for a 1-D distribution."""
+
+    count: int
+    min: float
+    max: float
+    mean: float
+    median: float
+    std: float
+    skewness: float
+
+    @classmethod
+    def from_array(cls, v: np.typing.NDArray) -> "DistStats":
+        v = np.asarray(v).ravel()
+        return cls(
+            count=len(v),
+            min=float(np.min(v)),
+            max=float(np.max(v)),
+            mean=float(np.mean(v)),
+            median=float(np.median(v)),
+            std=float(np.std(v)),
+            skewness=float(skew(v, nan_policy="omit")),
+        )
+
+    def summary(self, label: str) -> str:
+        return (
+            f"{label:8s} N={self.count}  min={self.min:.3g}  max={self.max:.3g}  "
+            f"mean={self.mean:.3g}  med={self.median:.3g}  "
+            f"std={self.std:.3g}  skew={self.skewness:.3g}"
+        )
 
 
 class Plotter:
@@ -65,13 +140,18 @@ class Plotter:
             It can also be set later via update_data_selection.
         """
 
-        _logger.info(f"Taking cartopy paths from {work_dir}")
+        _logger.debug(f"Taking cartopy paths from {work_dir}")
 
         self.image_format = plotter_cfg.get("image_format")
+        self.animation_format = plotter_cfg.get("animation_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
         self.regions = plotter_cfg.get("regions")
+        self.log_x = plotter_cfg.get("log_x", False)
+        self.log_y = plotter_cfg.get("log_y", False)
+        self.n_bins = plotter_cfg.get("n_bins", 50)
+        _download_cartopy_off(enabled=True)
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -106,6 +186,10 @@ class Plotter:
             _logger.warning("No sample in the selection. Might lead to unexpected results.")
         else:
             self.sample = select["sample"]
+            # "all_samples" is a proxy for across-samples aggregation;
+            # remove it from self.select so it won't be used in .sel()
+            if select["sample"] == "all_samples":
+                self.select.pop("sample")
 
         if "stream" not in select:
             _logger.warning("No stream in the selection. Might lead to unexpected results.")
@@ -147,7 +231,11 @@ class Plotter:
             xarray DataArray with selected data.
         """
         for key, value in selection.items():
-            if key in da.coords and key not in da.dims:
+            if key not in da.coords and key not in da.dims:
+                # Key is not a coordinate or dimension of this DataArray
+                # (e.g. "stream" is used for file-naming only). Skip it.
+                continue
+            elif key in da.coords and key not in da.dims:
                 # Coordinate like 'sample' aligned to another dim
                 da = da.where(da[key] == value, drop=True)
             else:
@@ -155,13 +243,14 @@ class Plotter:
                 da = da.sel({key: value})
         return da
 
-    def create_histograms_per_sample(
+    def create_histograms(
         self,
         target: xr.DataArray,
         preds: xr.DataArray,
         variables: list,
         select: dict,
         tag: str = "",
+        ranges: dict | None = None,
     ) -> list[str]:
         """
         Plot histogram of target vs predictions for each variable and valid time in the DataArray.
@@ -187,44 +276,64 @@ class Plotter:
 
         self.update_data_selection(select)
 
-        # Basic map output directory for this stream
-        hist_output_dir = self.out_plot_basedir / self.stream / "histograms"
+        # Basic histogram output directory for this stream
+        hist_output_dir = self.get_hist_output_dir()
 
         if not os.path.exists(hist_output_dir):
             _logger.info(f"Creating dir {hist_output_dir}")
-            os.makedirs(hist_output_dir)
+            os.makedirs(hist_output_dir, exist_ok=True)
 
-        for var in variables:
-            select_var = self.select | {"channel": var}
+        for region in self.regions:
+            if region != "global":
+                bbox = RegionBoundingBox.from_region_name(region)
+                reg_target = bbox.apply_mask(target)
+                reg_preds = bbox.apply_mask(preds)
+            else:
+                reg_target = target
+                reg_preds = preds
 
-            targ, prd = (
-                self.select_from_da(target, select_var),
-                self.select_from_da(preds, select_var),
-            )
+            for var in variables:
+                select_var = self.select | {"channel": var}
 
-            # Remove NaNs
-            targ = targ.dropna(dim="ipoint")
-            prd = prd.dropna(dim="ipoint")
-            assert targ.size > 0, "Data array must not be empty or contain only NAs"
-            assert prd.size > 0, "Data array must not be empty or contain only NAs"
-
-            if self.plot_subtimesteps:
-                ntimes_unique = len(np.unique(targ.valid_time))
-                _logger.info(
-                    f"Creating histograms for {ntimes_unique} valid times of variable {var}."
+                targ, prd = (
+                    self.select_from_da(reg_target, select_var),
+                    self.select_from_da(reg_preds, select_var),
                 )
 
-                groups = zip(targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False)
-            else:
-                _logger.info(f"Plotting histogram for all valid times of {var}")
+                # Remove NaNs
+                targ = targ.dropna(dim="ipoint")
+                prd = prd.dropna(dim="ipoint")
+                assert targ.size > 0, "Data array must not be empty or contain only NAs"
+                assert prd.size > 0, "Data array must not be empty or contain only NAs"
 
-                groups = [((None, targ), (None, prd))]  # wrap once with dummy valid_time
+                if self.plot_subtimesteps and str(self.sample) != "all_samples":
+                    ntimes_unique = len(np.unique(targ.valid_time))
+                    _logger.debug(
+                        f"Creating histograms for {ntimes_unique} valid times of variable {var}."
+                    )
 
-            for (valid_time, targ_t), (_, prd_t) in groups:
-                if valid_time is not None:
-                    _logger.debug(f"Plotting histogram for {var} at valid_time {valid_time}")
-                name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
-                plot_names.append(name)
+                    groups = zip(
+                        targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False
+                    )
+                else:
+                    _logger.debug(f"Plotting histogram for all valid times of {var}")
+
+                    groups = [((None, targ), (None, prd))]  # wrap once with dummy valid_time
+
+                for (valid_time, targ_t), (_, prd_t) in groups:
+                    if valid_time is not None:
+                        _logger.debug(f"Plotting histogram for {var} at valid_time {valid_time}")
+                    var_range = ranges.get(var, {}) if ranges else {}
+                    name = self.plot_histogram(
+                        targ_t,
+                        prd_t,
+                        hist_output_dir,
+                        var,
+                        tag=tag,
+                        region=region,
+                        xlim=(var_range.get("vmin"), var_range.get("vmax")),
+                    )
+                    plot_names.append(name)
 
         self.clean_data_selection()
 
@@ -237,6 +346,8 @@ class Plotter:
         hist_output_dir: Path,
         varname: str,
         tag: str = "",
+        region: str = "",
+        xlim: tuple | None = None,
     ) -> str:
         """
         Plot a histogram comparing target and prediction data for a specific variable.
@@ -259,47 +370,121 @@ class Plotter:
             Name of the saved plot file.
         """
 
-        # Get common bin edges
-        vals = np.concatenate([target_data, pred_data])
-        bins = np.histogram_bin_edges(vals, bins=50)
+        tar_vals = np.asarray(target_data).ravel()
+        prd_vals = np.asarray(pred_data).ravel()
 
-        # Plot histograms
-        plt.hist(target_data, bins=bins, alpha=0.7, label="Target")
-        plt.hist(pred_data, bins=bins, alpha=0.7, label="Prediction")
+        # Get common bin edges — use fixed xlim range if provided for consistency
+        xmin, xmax = xlim if xlim else (None, None)
+        # Fall back to data-derived bounds if either limit is missing
+        if xmin is None or xmax is None:
+            vals = np.concatenate([tar_vals, prd_vals])
+            if xmin is None:
+                xmin = float(np.nanmin(vals))
+            if xmax is None:
+                xmax = float(np.nanmax(vals))
+        # Add 5% margin on each side so tails are clearly visible
+        margin = (xmax - xmin) * 0.05
+        xmin -= margin
+        xmax += margin
+        bins = np.linspace(xmin, xmax, self.n_bins + 1)
 
-        # set labels and title
-        plt.xlabel(f"Variable: {varname}")
-        plt.ylabel("Frequency")
-        plt.title(
-            f"Histogram of Target and Prediction: {self.stream}, {varname} : "
-            f"fstep = {self.fstep:03}"
+        # Compute histograms
+        target_counts, _ = np.histogram(tar_vals, bins=bins)
+        pred_counts, _ = np.histogram(prd_vals, bins=bins)
+        bin_centers = (bins[:-1] + bins[1:]) / 2
+
+        color_tar = "black"
+        color_pred = "#00897B"  # teal / green-blue
+
+        # Create figure with three rows: histogram, ratio, and stats text
+        fig = plt.figure(figsize=self.fig_size or (8, 8), constrained_layout=True)
+        gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 0.5])
+        ax_hist = fig.add_subplot(gs[0])
+        ax_ratio = fig.add_subplot(gs[1], sharex=ax_hist)
+        ax_text = fig.add_subplot(gs[2])
+        ax_text.set_axis_off()
+
+        # Upper panel: histogram curves
+        ax_hist.plot(
+            bin_centers, target_counts, alpha=0.7, label="Target", linewidth=1.5, color=color_tar
         )
-        plt.legend(frameon=False)
+        ax_hist.plot(
+            bin_centers, pred_counts, alpha=0.7, label="Prediction", linewidth=1.5, color=color_pred
+        )
+        ax_hist.set_ylabel("Frequency")
+        ax_hist.set_title(f"{self.stream}, {varname} : fstep = {self.fstep:03}")
+        ax_hist.legend(frameon=False)
+        if self.log_y:
+            ax_hist.set_yscale("log")
+        ax_hist.grid(True, linestyle="--", alpha=0.5)
 
-        valid_time = (
-            target_data["valid_time"][0]
-            .values.astype("datetime64[m]")
-            .astype(datetime.datetime)
-            .strftime("%Y-%m-%dT%H%M")
+        # Lower panel: ratio (prediction / target)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(target_counts > 0, pred_counts / target_counts, np.nan)
+        ax_ratio.plot(bin_centers, ratio, linewidth=1.2, color=color_pred)
+        ax_ratio.axhline(1.0, linestyle="--", color="gray", linewidth=0.8)
+        ax_ratio.set_ylabel("Pred / Target")
+        ax_ratio.set_xlabel(f"Variable: {varname}")
+        ax_ratio.set_ylim(0, 2)
+        ax_ratio.grid(True, linestyle="--", alpha=0.5)
+
+        if self.log_x:
+            ax_hist.set_xscale("log")
+            ax_ratio.set_xscale("log")
+        ax_ratio.set_xlim(xmin, xmax)
+
+        t_s = DistStats.from_array(tar_vals)
+        p_s = DistStats.from_array(prd_vals)
+
+        # Wasserstein distance
+        w_dist = wd(tar_vals, prd_vals)
+
+        stat_text = (
+            f"Wasserstein distance: {w_dist:.4g}\n{t_s.summary('Target:')}\n{p_s.summary('Pred:')}"
         )
 
-        # TODO: make this nicer
+        ax_text.text(
+            0.5,
+            0.5,
+            stat_text,
+            ha="center",
+            va="center",
+            fontsize=7,
+            family="monospace",
+            transform=ax_text.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
+        )
+
+        # For "all_samples" (across-samples) histograms, omit the valid_time from the name
+        is_global = str(self.sample) == "all_samples"
+
+        if is_global:
+            valid_time = None
+        else:
+            valid_time = (
+                target_data["valid_time"][0]
+                .values.astype("datetime64[m]")
+                .astype(datetime.datetime)
+                .strftime("%Y-%m-%dT%H%M")
+            )
+
         parts = [
             "histogram",
-            self.run_id,
-            tag,
+            str(self.run_id),
+            str(tag) if tag else "",
             str(self.sample),
             valid_time,
-            self.stream,
+            str(self.stream),
+            region if region else "",
             varname,
-            str(self.fstep).zfill(3),
+            f"{self.fstep:03d}",
         ]
         name = "_".join(filter(None, parts))
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving histogram to {fname}")
-        plt.savefig(fname)
-        plt.close()
+        fig.savefig(fname)
+        plt.close(fig)
 
         return name
 
@@ -341,8 +526,8 @@ class Plotter:
         """
         self.update_data_selection(select)
 
-        # copy global plotting options, not specific to any variable
-        map_kwargs_global = {
+        # copy stream plotting options, not specific to any variable
+        map_kwargs_stream = {
             key: value
             for key, value in (map_kwargs or {}).items()
             if not isinstance(value, oc.DictConfig)
@@ -353,7 +538,7 @@ class Plotter:
 
         if not os.path.exists(map_output_dir):
             _logger.info(f"Creating dir {map_output_dir}")
-            os.makedirs(map_output_dir)
+            os.makedirs(map_output_dir, exist_ok=True)
 
         for region in self.regions:
             if region != "global":
@@ -369,9 +554,7 @@ class Plotter:
 
                 if self.plot_subtimesteps:
                     ntimes_unique = len(np.unique(da.valid_time))
-                    _logger.info(
-                        f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
-                    )
+                    _logger.debug(f"Creating maps for variable {var} - {tag}")
                     if ntimes_unique == 0:
                         _logger.warning(
                             f"No valid times found for variable {var} - {tag}. Skipping."
@@ -379,7 +562,7 @@ class Plotter:
                         continue
                     groups = da.groupby("valid_time")
                 else:
-                    _logger.info(f"Creating maps for all valid times of {var} - {tag}")
+                    _logger.debug(f"Creating maps for variable {var} - {tag}")
                     groups = [(None, da)]  # single dummy group
 
                 for valid_time, da_t in groups:
@@ -400,7 +583,7 @@ class Plotter:
                         var,
                         region,
                         tag=tag,
-                        map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                        map_kwargs=self._match_glob_kwargs(map_kwargs, var) | map_kwargs_stream,
                         title=self.get_map_title(var, valid_time, da_t),
                     )
                     plot_names.append(name)
@@ -408,6 +591,369 @@ class Plotter:
         self.clean_data_selection()
 
         return plot_names
+
+    # glob pattern resolution
+    @staticmethod
+    def _match_glob_kwargs(map_kwargs: dict | None, var: str) -> dict:
+        """Resolve variable-specific plotting options, supporting exact and glob keys.
+
+        Keys under a stream section may be either:
+          - an exact channel name, e.g. "tp_imerg_0"
+          - a glob pattern containing one of ``* ? [ ]``, e.g. "tp_*"
+
+        All matching glob patterns are merged first (in config order), then the
+        exact channel key is merged on top, so an exact key overrides glob
+        values on key conflicts while non-conflicting keys from both are kept.
+        """
+        if map_kwargs is None:
+            return {}
+
+        resolved: dict = {}
+
+        # merge glob/pattern keys
+        for key, value in map_kwargs.items():
+            if not isinstance(value, oc.DictConfig | dict):
+                continue
+            k = str(key)
+            if any(ch in k for ch in "*?[]") and fnmatch.fnmatch(var, k):
+                resolved |= dict(value)
+
+        # override with exact key if present
+        exact = map_kwargs.get(var)
+        if isinstance(exact, oc.DictConfig | dict):
+            resolved |= dict(exact)
+
+        return resolved
+
+    # map_kwargs parsing
+    @staticmethod
+    def _parse_map_kwargs(map_kwargs: dict | None, stream: str | None) -> dict:
+        """Extract known plotting keys from *map_kwargs*, returning a structured dict.
+
+        Unknown keys are kept under ``"extra"`` and forwarded to ``ax.scatter``.
+
+        Parameters
+        ----------
+        map_kwargs : dict or None
+            Raw keyword arguments from the caller. Known keys (``marker_size``,
+            ``scale_marker_size``, ``marker``, ``vmin``, ``vmax``, ``colormap``,``colors``,
+            ``use_datashader``, ``levels``, ``colorbar_scale`` and HEALPix-related keys) are
+            extracted; remaining keys are collected under ``"extra"``.
+        stream : str or None
+            Stream name used to look up the default marker size when
+            ``marker_size`` is not provided in *map_kwargs*.
+
+        Returns
+        -------
+        dict
+            Structured dictionary with the following keys:
+                - marker_size_base (float)
+                - scale_marker_size (bool)
+                - marker (str)
+                - vmin, vmax (float or None)
+                - cmap (matplotlib.colors.Colormap)
+                - colors (list or None)
+                - use_datashader (bool)
+                - norm (matplotlib.colors.Normalize or BoundaryNorm)
+                - add_healpix_grid (bool) and related healpix_* keys
+                - extra (dict) – leftover kwargs for ``ax.scatter``
+        """
+        kw = map_kwargs.copy() if map_kwargs is not None else {}
+
+        parsed = {
+            "marker_size_base": kw.pop(
+                "marker_size", DefaultMarkerSize.get_marker_size(stream) if stream else 0.5
+            ),
+            "scale_marker_size": kw.pop("scale_marker_size", False),
+            "marker": kw.pop("marker", "o"),
+            "vmin": kw.pop("vmin", None),
+            "vmax": kw.pop("vmax", None),
+            "cmap": kw.pop("colormap", "coolwarm"),
+            "colors": kw.pop("colors", None),
+            "use_datashader": kw.pop("use_datashader", False),
+            "levels": kw.pop("levels", None),
+            "colorbar_scale": kw.pop("colorbar_scale", "linear"),
+            # HEALPix grid
+            "add_healpix_grid": kw.pop("add_healpix_grid", False),
+            "healpix_nside": kw.pop("healpix_nside", 4),
+            "healpix_color": kw.pop("healpix_color", "black"),
+            "healpix_linewidth": kw.pop("healpix_linewidth", 0.2),
+            "healpix_step": kw.pop("healpix_step", 64),
+            "healpix_linestyle": kw.pop("healpix_linestyle", "-"),
+        }
+
+        parsed["extra"] = kw  # remaining kwargs forwarded to scatter
+        return parsed
+
+    @staticmethod
+    def _resolve_cmap(opts: dict, tag: str) -> mpl.colors.Colormap:
+        """Resolve the colormap for the plot.
+
+        Parameters
+        ----------
+        opts : dict
+            Parsed map kwargs from ``_parse_map_kwargs``.
+        tag : str
+            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``, ``'score_maps_<metric>'``).
+
+        Returns
+        -------
+        matplotlib.colors.Colormap
+            The resolved colormap.
+        """
+
+        # Score maps always use a continuous blue->red colormap (overrides config)
+        if str(tag).startswith("score_maps"):
+            return SCORE_MAP_CMAP
+        # Bias maps always use coolwarm for visual consistency (overrides config)
+        if str(tag).startswith("bias"):
+            return plt.get_cmap("coolwarm")
+        # Explicit colors take precedence over colormap
+        elif isinstance(opts["colors"], oc.listconfig.ListConfig):
+            return mpl.colors.ListedColormap(list(opts["colors"]))
+        # Otherwise use the specified colormap (default "coolwarm")
+        else:
+            return plt.get_cmap(opts["cmap"])
+
+    @staticmethod
+    def _resolve_norm(opts: dict, tag: str) -> mpl.colors.Normalize:
+        """Resolve the colorbar scale and build color normalisation.
+
+        Parameters
+        ----------
+        opts : dict
+            Parsed map kwargs from ``_parse_map_kwargs``.
+        tag : str
+            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``).
+
+        Returns
+        -------
+        matplotlib.colors.Normalize
+            LogNorm, SymLogNorm, BoundaryNorm or linear Normalize.
+        """
+
+        is_bias = str(tag).startswith("bias")
+        vmin, vmax = opts["vmin"], opts["vmax"]
+
+        scale = opts["colorbar_scale"]
+        if scale not in {"linear", "log", "symlog"}:
+            _logger.warning("Unknown colorbar_scale=%r. Falling back to linear.", scale)
+            scale = "linear"
+
+        # Bias maps are always signed, use symlog instead of plain log
+        if scale != "linear" and is_bias:
+            scale = "symlog"
+
+        # Explicit levels override continuous norm (preds/targets only)
+        if isinstance(opts["levels"], oc.listconfig.ListConfig) and not is_bias:
+            return mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
+
+        if scale == "log" and vmin is not None and vmin > 0:
+            return mpl.colors.LogNorm(vmin=vmin, vmax=vmax)
+        elif scale == "log" and vmin is not None and vmin <= 0:
+            _logger.warning(
+                "colorbar_scale='log' but vmin=%.3g <= 0; falling back to linear norm.",
+                vmin,
+            )
+
+        # Symlog (default for bias maps with non-linear scale)
+        if scale == "symlog" and vmin is not None and vmax is not None:
+            vmax_abs = max(abs(float(vmin)), abs(float(vmax)))
+            linthresh = max(vmax_abs * 1e-3, 1e-8)
+            return mpl.colors.SymLogNorm(linthresh=linthresh, vmin=vmin, vmax=vmax)
+
+        return mpl.colors.Normalize(vmin=vmin, vmax=vmax, clip=False)
+
+    # rendering backends
+    @staticmethod
+    def _render_datashader(ax, proj, data, norm, cmap, marker_size_base):
+        """Rasterise points with datashader and display via imshow.
+
+        Bypasses ``dsshow`` because it calls ``get_xlim()``/``get_ylim()``
+        which return infinity on cartopy GeoAxes with non-PlateCarree
+        projections. Instead rasterises manually with ``ds.Canvas``.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            GeoAxes on which to render the rasterised image.
+        proj : cartopy.crs.Projection
+            The map projection used by *ax*.
+        data : xr.DataArray
+            DataArray with ``lon``, ``lat`` coordinates and scalar values.
+        norm : matplotlib.colors.Normalize
+            Colour normalisation instance.
+        cmap : matplotlib.colors.Colormap
+            Colourmap for the rendered image.
+        marker_size_base : float
+            Base marker size (reserved for future tuning).
+
+        Returns
+        -------
+        matplotlib.image.AxesImage
+            The artist returned by ``ax.imshow``, suitable for ``plt.colorbar``.
+        """
+        projected = proj.transform_points(
+            ccrs.PlateCarree(),
+            np.asarray(data["lon"], dtype=np.float64),
+            np.asarray(data["lat"], dtype=np.float64),
+        )
+        df = pd.DataFrame(
+            {
+                "x": projected[:, 0],
+                "y": projected[:, 1],
+                "val": np.asarray(data.values, dtype=np.float64),
+            }
+        )
+        df = df.dropna(subset=["x", "y"])
+
+        x_range = (float(df["x"].min()), float(df["x"].max()))
+        y_range = (float(df["y"].min()), float(df["y"].max()))
+
+        # Determine raster resolution from the figure size + dpi
+        fig = ax.get_figure()
+        bbox = ax.get_position()
+        plot_width = int(fig.get_figwidth() * fig.dpi * bbox.width)
+        plot_height = int(fig.get_figheight() * fig.dpi * bbox.height)
+
+        # Adapt resolution to point density so every pixel is filled.
+        n_pts = len(df)
+        effective_side = max(int(0.8 * np.sqrt(n_pts)), 100)
+
+        # The canvas should not exceed the effective grid resolution —
+        # going higher creates empty pixels that show as white bands.
+        plot_width = min(plot_width, effective_side * 2)
+        plot_height = min(plot_height, effective_side)
+
+        cvs = ds.Canvas(
+            plot_width=plot_width,
+            plot_height=plot_height,
+            x_range=x_range,
+            y_range=y_range,
+        )
+        agg = cvs.points(df, "x", "y", agg=ds.mean("val"))
+
+        # Fill small NaN gaps (isolated empty pixels between data rows)
+        # with nearest-neighbour interpolation so no white bands remain.
+
+        raw = agg.values.astype(np.float64)
+        mask = np.isnan(raw)
+        if mask.any() and not mask.all():
+            from scipy.interpolate import NearestNDInterpolator
+
+            yy, xx = np.where(~mask)
+            interp = NearestNDInterpolator(list(zip(xx, yy, strict=False)), raw[~mask])
+            yy_m, xx_m = np.where(mask)
+            # Only fill pixels whose nearest valid neighbour is within 2 pixels
+            filled = raw.copy()
+            filled[mask] = interp(xx_m, yy_m)
+            # Limit fill distance: re-mask pixels far from any data
+            from scipy.ndimage import binary_dilation
+
+            data_mask = ~mask
+            dilated = binary_dilation(data_mask, iterations=2)
+            filled[~dilated] = np.nan
+            raw = filled
+
+        vals = np.flipud(raw)
+        masked = np.ma.masked_invalid(vals)
+
+        artist = ax.imshow(
+            masked,
+            extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
+            origin="upper",
+            aspect="auto",
+            transform=proj,
+            interpolation="bilinear",
+            norm=norm,
+            cmap=cmap,
+        )
+        return artist
+
+    @staticmethod
+    def _render_scatter(ax, data, norm, cmap, marker_size, marker, extra_kwargs):
+        """Render points with matplotlib scatter and return the artist.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            GeoAxes on which to render the scatter points.
+        data : xr.DataArray
+            DataArray with ``lon``, ``lat`` coordinates and scalar values.
+        norm : matplotlib.colors.Normalize
+            Colour normalisation instance.
+        cmap : matplotlib.colors.Colormap
+            Colourmap for the scatter points.
+        marker_size : float or np.ndarray
+            Marker size(s) in matplotlib scatter units (pt²).
+        marker : str
+            Marker style (e.g. ``'o'``, ``'s'``).
+        extra_kwargs : dict
+            Additional keyword arguments forwarded to ``ax.scatter``.
+
+        Returns
+        -------
+        matplotlib.collections.PathCollection
+            The scatter artist, suitable for ``plt.colorbar``.
+        """
+        return ax.scatter(
+            data["lon"],
+            data["lat"],
+            c=data,
+            norm=norm,
+            cmap=cmap,
+            s=marker_size,
+            marker=marker,
+            transform=ccrs.PlateCarree(),
+            linewidths=0.0,
+            rasterized=True,
+            **extra_kwargs,
+        )
+
+    # filename builder
+    def _build_map_filename(self, varname: str, regionname: str, tag: str, data: xr.DataArray):
+        """Build the canonical filename parts list for a map plot.
+
+        Parameters
+        ----------
+        varname : str
+            Name of the variable being plotted.
+        regionname : str
+            Name of the geographical region.
+        tag : str
+            Additional tag inserted into the filename.
+        data : xr.DataArray
+            DataArray used to extract ``valid_time`` for the filename.
+
+        Returns
+        -------
+        str
+            Joined filename string (without extension).
+        """
+        parts = ["map", self.run_id, tag]
+
+        if self.sample is not None:
+            parts.append(str(self.sample))
+
+        if "valid_time" in data.coords:
+            valid_time = data["valid_time"][0].values
+            if ~np.isnat(valid_time):
+                parts.append(
+                    valid_time.astype("datetime64[m]")
+                    .astype(datetime.datetime)
+                    .strftime("%Y-%m-%dT%H%M")
+                )
+
+        if self.stream:
+            parts.append(self.stream)
+
+        parts.append(regionname)
+        parts.append(varname)
+
+        if self.fstep is not None:
+            parts.append(f"{self.fstep:03d}")
+
+        return "_".join(filter(None, parts))
 
     def scatter_plot(
         self,
@@ -419,213 +965,237 @@ class Plotter:
         map_kwargs: dict | None = None,
         title: str | None = None,
     ):
-        """
-        Plot a 2D map for a data array using scatter plot.
+        """Plot a 2D map for a data array using scatter (or datashader).
 
         Parameters
         ----------
-        data: xr.DataArray
-            DataArray to be plotted
-        map_output_dir: Path
-            Directory where the map will be saved
-        varname: str
-            Name of the variable to be plotted
-        regionname: str
-            Name of the region to be plotted
-        tag: str
-            Any tag you want to add to the plot
-        map_kwargs: dict | None
+        data : xr.DataArray
+            DataArray to be plotted.
+        map_output_dir : Path
+            Directory where the map will be saved.
+        varname : str
+            Name of the variable to be plotted.
+        regionname : str
+            Name of the region to be plotted.
+        tag : str
+            Any tag you want to add to the plot.
+        map_kwargs : dict | None
             Additional keyword arguments for the map.
-        title: str | None
+        title : str | None
             Title for the plot.
 
         Returns
         -------
-            Name of the saved plot file.
+        str
+            Name of the saved plot file (without directory or extension).
         """
-        # check for known keys in map_kwargs
-        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
-        marker_size_base = map_kwargs_save.pop(
-            "marker_size", DefaultMarkerSize.get_marker_size(self.stream)
-        )
-        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
-        marker = map_kwargs_save.pop("marker", "o")
-        vmin = map_kwargs_save.pop("vmin", None)
-        vmax = map_kwargs_save.pop("vmax", None)
-        cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
+        # parse kwargs
+        opts = self._parse_map_kwargs(map_kwargs, self.stream)
 
-        if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
-            norm = mpl.colors.BoundaryNorm(
-                map_kwargs_save.pop("levels", None), cmap.N, extend="both"
-            )
-        else:
-            norm = mpl.colors.Normalize(
-                vmin=vmin,
-                vmax=vmax,
-                clip=False,
-            )
-
-        # scale marker size
-        marker_size = marker_size_base
-        if scale_marker_size:
-            marker_size = np.clip(
-                marker_size / np.cos(np.radians(data["lat"])) ** 2,
-                a_max=marker_size * 10.0,
-                a_min=marker_size,
-            )
-
-        # Create figure and axis objects
-        fig = plt.figure(dpi=self.dpi_val)
-
-        proj = ccrs.PlateCarree()
-        if regionname == "global":
-            proj = ccrs.Robinson()
-
-        ax = fig.add_subplot(1, 1, 1, projection=proj)
-        ax.coastlines()
-
+        data = data.squeeze()
         assert data["lon"].shape == data["lat"].shape == data.shape, (
             f"Scatter plot:: Data shape do not match. Shapes: "
             f"lon {data['lon'].shape}, lat {data['lat'].shape}, data {data.shape}."
         )
 
-        scatter_plt = ax.scatter(
-            data["lon"],
-            data["lat"],
-            c=data,
-            norm=norm,
-            cmap=cmap,
-            s=marker_size,
-            marker=marker,
-            transform=ccrs.PlateCarree(),
-            linewidths=0.0,  # only markers, avoids aliasing for very small markers
-            **map_kwargs_save,
-        )
+        # Pick figure size: for dense grids (>=200 K points) use a larger
+        # canvas so fine structure is visible; sparse grids use the default.
+        figsize = self.fig_size
+        if figsize is None and data.size >= 200_000:
+            figsize = (16, 8)
 
-        plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
-        plt.title(title, fontsize=9.5)
+        proj = ccrs.PlateCarree()
+        if regionname:
+            try:
+                # This uses the method already available in RegionBoundingBox
+                bbox = RegionBoundingBox.from_region_name(regionname)
+                proj = bbox.projection
+            except ValueError:
+                # If regionname isn't in the library, fall back to PlateCarree
+                _logger.warning(f"Region '{regionname}' not found in library, using PlateCarree.")
+                proj = ccrs.PlateCarree()
+        fig = plt.figure(figsize=figsize, dpi=self.dpi_val, constrained_layout=True)
+        ax = fig.add_subplot(1, 1, 1, projection=proj)
+        try:
+            ax.coastlines(linewidth=0.3)
+        except Exception:
+            _logger.warning("Could not add coastlines to plot; continuing without them.")
+
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.3)
+
+        if opts["vmin"] is None or opts["vmax"] is None:
+            valid_vals = data.values[np.isfinite(data.values)]
+            if valid_vals.size > 0:
+                p_lo, p_hi = np.percentile(valid_vals, [5, 95])
+                if opts["vmin"] is None:
+                    opts["vmin"] = float(p_lo)
+                if opts["vmax"] is None:
+                    opts["vmax"] = float(p_hi)
+
+        # resolve cmap and norm based on options and tag
+        opts["cmap"] = self._resolve_cmap(opts, tag)
+        opts["norm"] = self._resolve_norm(opts, tag)
+
         if regionname == "global":
             ax.set_global()
         else:
-            region_extent = [
-                data["lon"].min().item(),
-                data["lon"].max().item(),
-                data["lat"].min().item(),
-                data["lat"].max().item(),
-            ]
-            ax.set_extent(region_extent, crs=ccrs.PlateCarree())
-        ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
+            ax.set_extent(
+                [
+                    data["lon"].min().item(),
+                    data["lon"].max().item(),
+                    data["lat"].min().item(),
+                    data["lat"].max().item(),
+                ],
+                crs=ccrs.PlateCarree(),
+            )
 
-        # TODO: make this nicer
-        parts = ["map", self.run_id, tag]
-
-        if self.sample is not None:
-            parts.append(str(self.sample))
-
-        if "valid_time" in data.coords:
-            valid_time = data["valid_time"][0].values
-            if ~np.isnat(valid_time):
-                valid_time = (
-                    valid_time.astype("datetime64[m]")
-                    .astype(datetime.datetime)
-                    .strftime("%Y-%m-%dT%H%M")
+        # render points
+        if opts["use_datashader"] and HAS_DATASHADER:
+            self._render_datashader(
+                ax, proj, data, opts["norm"], opts["cmap"], opts["marker_size_base"]
+            )
+        else:
+            if opts["use_datashader"] and not HAS_DATASHADER:
+                _logger.warning(
+                    "use_datashader=True but datashader is not installed. "
+                    "Falling back to scatter. Install with: pip install datashader"
                 )
+            marker_size = DefaultMarkerSize.auto_marker_size(
+                n_points=data.size,
+                fig_width_in=fig.get_figwidth(),
+                fig_height_in=fig.get_figheight(),
+                stream_default=opts["marker_size_base"],
+                scale=opts["scale_marker_size"],
+                lat=data["lat"],
+            )
 
-                parts.append(valid_time)
+            self._render_scatter(
+                ax, data, opts["norm"], opts["cmap"], marker_size, opts["marker"], opts["extra"]
+            )
 
-        if self.stream:
-            parts.append(self.stream)
+        # overlays
+        if opts["add_healpix_grid"]:
+            lc = self.healpixlines(
+                opts["healpix_nside"],
+                opts["healpix_color"],
+                opts["healpix_linewidth"],
+                opts["healpix_step"],
+                opts["healpix_linestyle"],
+            )
+            ax.add_collection(lc)
+        else:
+            ax.gridlines(draw_labels=False, linestyle="--", color="gray", linewidth=0.6, alpha=0.7)
 
-        parts.append(regionname)
-        parts.append(varname)
+        cbar = plt.colorbar(
+            mpl.cm.ScalarMappable(norm=opts["norm"], cmap=opts["cmap"]),
+            ax=ax,
+            fraction=0.03,
+            pad=0.02,
+            shrink=0.6,
+            orientation="horizontal",
+        )
+        cbar.set_label(f"Variable: {varname}", fontsize=7)
+        cbar.ax.tick_params(labelsize=6)
+        cbar.outline.set_linewidth(0.3)
+        plt.title(title, fontsize=8)
 
-        if self.fstep is not None:
-            parts.extend(["fstep", f"{self.fstep:03d}"])
-
-        name = "_".join(filter(None, parts))
+        # save
+        name = self._build_map_filename(varname, regionname, tag, data)
         fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
-
         _logger.debug(f"Saving map to {fname}")
-        plt.savefig(fname)
+        plt.savefig(fname, pad_inches=0)
         plt.close()
 
         return name
 
-    def animation(self, samples, fsteps, variables, select, tag) -> list[str]:
-        """
-        Plot 2D animations for a dataset
+    def healpixlines(
+        self, healpix_nside, healpix_color, healpix_linewidth, healpix_step, healpix_linestyle
+    ):
+        """Create a LineCollection of HEALPix pixel boundaries for overlay on a map.
 
         Parameters
         ----------
-        samples: list
-            List of the samples to be plotted
-        fsteps: list
-            List of the forecast steps to be plotted
-        variables: list
-            List of variables to be plotted
-        select: dict
-            Selection to be applied to the DataArray
-        tag: str
-            Any tag you want to add to the plot
+        healpix_nside : int
+            HEALPix ``nside`` parameter controlling grid resolution.
+        healpix_color : str
+            Colour of the grid lines.
+        healpix_linewidth : float
+            Width of the grid lines in points.
+        healpix_step : int
+            Number of interpolation points per boundary edge.
+        healpix_linestyle : str
+            Line style (e.g. ``'-'``, ``'--'``).
 
         Returns
         -------
-            List of plot names for the saved animations.
-
+        matplotlib.collections.LineCollection
+            Collection of HEALPix boundary polygons, ready to be added to a
+            cartopy GeoAxes via ``ax.add_collection``.
         """
-
-        self.update_data_selection(select)
-        map_output_dir = self.get_map_output_dir(tag)
-
-        # Convert FPS to duration in milliseconds
-        duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
-
-        for region in self.regions:
-            for _, sa in enumerate(samples):
-                for _, var in enumerate(variables):
-                    _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
-                    image_paths = []
-                    for _, fstep in enumerate(fsteps):
-                        # TODO: refactor to avoid code duplication with scatter_plot
-                        parts = [
-                            "map",
-                            self.run_id,
-                            tag,
-                            str(sa),
-                            "*",
-                            self.stream,
-                            region,
-                            var,
-                            "fstep",
-                            str(fstep).zfill(3),
-                        ]
-
-                        name = "_".join(filter(None, parts))
-                        fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
-
-                        names = glob.glob(fname)
-                        image_paths += names
-
-                    if image_paths:
-                        image_paths = sorted(image_paths)
-                        images = [Image.open(path) for path in image_paths]
-                        images[0].save(
-                            f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",
-                            save_all=True,
-                            append_images=images[1:],
-                            duration=duration_ms,
-                            loop=0,
-                        )
-
-                    else:
-                        _logger.warning(f"No images found for animation {var} sample {sa}")
-
-        return image_paths
+        hp_grid = HEALPixGrid(nside=healpix_nside, order="ring")
+        lon_all, lat_all = hp_grid.boundaries_lonlat(np.arange(hp_grid.npix), step=healpix_step)
+        # Ensure closure of polygons
+        lon_closed = np.concatenate([lon_all.deg, lon_all.deg[:, 0:1]], axis=1)
+        lat_closed = np.concatenate([lat_all.deg, lat_all.deg[:, 0:1]], axis=1)
+        # Stack as (N_polys, N_points, 2)
+        segments = np.stack([lon_closed, lat_closed], axis=-1)
+        # (cartopy handles transform for LineCollection via set_transform)
+        lc = LineCollection(
+            segments,
+            colors=healpix_color,
+            linewidths=healpix_linewidth,
+            linestyles=healpix_linestyle,
+            alpha=0.5,
+            zorder=10,
+        )
+        lc.set_transform(ccrs.PlateCarree())
+        return lc
 
     def get_map_output_dir(self, tag):
+        """Return the output directory path for map plots.
+
+        Parameters
+        ----------
+        tag : str
+            Sub-directory tag (e.g. ``'target'``, ``'prediction'``).
+
+        Returns
+        -------
+        Path
+            Resolved directory path: ``<out_plot_basedir>/<stream>/maps/<tag>``.
+        """
         return self.out_plot_basedir / self.stream / "maps" / tag
 
+    def get_hist_output_dir(self):
+        """Return the output directory path for histogram plots.
+
+        Returns
+        -------
+        Path
+            Resolved directory path: ``<out_plot_basedir>/<stream>/histograms``.
+        """
+        return self.out_plot_basedir / self.stream / "histograms"
+
     def get_map_title(self, var, valid_time, data):
+        """Build the title string for a map plot.
+
+        Parameters
+        ----------
+        var : str
+            Variable name to include in the title.
+        valid_time : numpy.datetime64 or None
+            Single valid time for the plot. If ``None``, the range is
+            extracted from *data*.
+        data : xr.DataArray
+            DataArray from which to extract ``valid_time`` range when
+            *valid_time* is ``None``.
+
+        Returns
+        -------
+        str
+            Formatted title string.
+        """
         title = f"{self.stream}, {var} : fstep = {self.fstep:03}"
         if valid_time is not None:
             title += f" ({format_datetime(valid_time)})"
@@ -640,1357 +1210,3 @@ class Plotter:
                 title += f" ({format_datetime(valid_time_start)})"
 
         return title
-
-
-class LinePlots:
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
-        """
-        Initialize the LinePlots class.
-
-        Parameters
-        ----------
-        plotter_cfg:
-            Configuration dictionary containing basic information for plotting.
-            Expected keys are:
-                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
-                - dpi_val: DPI value for the saved images
-                - fig_size: Size of the figure (width, height) in inches
-                -  plot_ensemble:
-                    If True, plot ensemble spread if 'ens' dimension is present. Options are:
-                        - False: do not plot ensemble spread
-                        - "std": plot mean +/- standard deviation
-                        - "minmax": plot min-max range
-                        - "members": plot individual ensemble members
-        output_basedir:
-            Base directory under which the plots will be saved.
-            Expected scheme `<results_base_dir>/<run_id>`.
-        """
-
-        self.image_format = plotter_cfg.get("image_format")
-        self.dpi_val = plotter_cfg.get("dpi_val")
-        self.fig_size = plotter_cfg.get("fig_size")
-        self.log_scale = plotter_cfg.get("log_scale")
-        self.add_grid = plotter_cfg.get("add_grid")
-        self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
-        self.baseline = plotter_cfg.get("baseline")
-        self.out_plot_dir = Path(output_basedir) / "line_plots"
-        if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
-            os.makedirs(self.out_plot_dir, exist_ok=True)
-
-        _logger.info(f"Saving summary plots to: {self.out_plot_dir}")
-
-    def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
-        """
-        Check if the lengths of data and labels match.
-
-        Parameters
-        ----------
-        data:
-            DataArray or list of DataArrays to be plotted
-        labels:
-            Label or list of labels for each dataset
-
-        Returns
-        -------
-            data_list, label_list - lists of data and labels
-        """
-        assert isinstance(data, xr.DataArray | list), (
-            "Compare::plot - Data should be of type xr.DataArray or list"
-        )
-        assert isinstance(labels, str | list), (
-            "Compare::plot - Labels should be of type str or list"
-        )
-
-        # convert to lists
-
-        data_list = [data] if isinstance(data, xr.DataArray) else data
-        label_list = [labels] if isinstance(labels, str) else labels
-
-        assert len(data_list) == len(label_list), "Compare::plot - Data and Labels do not match"
-
-        return data_list, label_list
-
-    def print_all_points_from_graph(self, fig: plt.Figure) -> None:
-        for ax in fig.get_axes():
-            for line in ax.get_lines():
-                ydata = line.get_ydata()
-                xdata = line.get_xdata()
-                label = line.get_label()
-                _logger.info(f"Summary for {label} plot:")
-                for xi, yi in zip(xdata, ydata, strict=False):
-                    xi = xi if isinstance(xi, str) else f"{float(xi):.3f}"
-                    yi = yi if isinstance(yi, str) else f"{float(yi):.3f}"
-                    _logger.info(f"  x: {xi}, y: {yi}")
-                _logger.info("--------------------------")
-        return
-
-    def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
-        """
-        Plot ensemble spread for a data array.
-
-        Parameters
-        ----------
-        data: xr.xArray
-            DataArray to be plotted
-        x_dim: str
-            Dimension to be used for the x-axis.
-        label: str
-            Label for the dataset
-        Returns
-        -------
-            None
-        """
-        averaged = data.mean(dim=[dim for dim in data.dims if dim != x_dim], skipna=True).sortby(
-            x_dim
-        )
-
-        lines = plt.plot(
-            averaged[x_dim],
-            averaged.values,
-            label=label,
-            marker="o",
-            linestyle="-",
-        )
-        line = lines[0]
-        color = line.get_color()
-
-        ens = data.mean(
-            dim=[dim for dim in data.dims if dim not in [x_dim, "ens"]], skipna=True
-        ).sortby(x_dim)
-
-        if self.plot_ensemble == "std":
-            std_dev = ens.std(dim="ens", skipna=True).sortby(x_dim)
-            plt.fill_between(
-                averaged[x_dim],
-                (averaged - std_dev).values,
-                (averaged + std_dev).values,
-                label=f"{label} - std dev",
-                color=color,
-                alpha=0.2,
-            )
-
-        elif self.plot_ensemble == "minmax":
-            ens_min = ens.min(dim="ens", skipna=True).sortby(x_dim)
-            ens_max = ens.max(dim="ens", skipna=True).sortby(x_dim)
-
-            plt.fill_between(
-                averaged[x_dim],
-                ens_min.values,
-                ens_max.values,
-                label=f"{label} - min max",
-                color=color,
-                alpha=0.2,
-            )
-
-        elif self.plot_ensemble == "members":
-            for j in range(ens.ens.size):
-                plt.plot(
-                    ens[x_dim],
-                    ens.isel(ens=j).values,
-                    color=color,
-                    alpha=0.2,
-                )
-        else:
-            _logger.warning(
-                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
-                "Skipping ensemble plotting."
-            )
-
-    def _preprocess_data(
-        self, data: xr.DataArray, x_dim: str | list[str], verbose: bool = True
-    ) -> xr.DataArray:
-        """
-        Average all dimensions except x_dim (which may be a string or list)
-        and then sort the result.
-
-        Parameters
-        ----------
-        data : xr.DataArray
-            DataArray to be preprocessed.
-        x_dim : str or list of str
-            Dimension(s) to be preserved for the x-axis.
-        verbose : bool
-            Log information about averaging.
-
-        Returns
-        -------
-        xr.DataArray
-            Preprocessed DataArray.
-        """
-
-        x_dims = [x_dim] if isinstance(x_dim, str) else list(x_dim)
-
-        non_x_dims = [dim for dim in data.dims if dim not in x_dims]
-
-        if any(data.sizes.get(dim, 1) > 1 for dim in non_x_dims) and verbose:
-            logging.info(f"Averaging over dimensions: {non_x_dims}")
-
-        out = data.mean(dim=non_x_dims, skipna=True)
-
-        for xd in x_dims:
-            out = out.sortby(xd)
-
-        return out
-
-    def plot(
-        self,
-        data: xr.DataArray | list,
-        labels: str | list,
-        tag: str = "",
-        x_dim: str = "lead_time",
-        y_dim: str = "value",
-        print_summary: bool = False,
-    ) -> None:
-        """
-        Plot a line graph comparing multiple datasets.
-
-        Parameters
-        ----------
-        data:
-            DataArray or list of DataArrays to be plotted
-        labels:
-            Label or list of labels for each dataset
-        tag:
-            Tag to be added to the plot title and filename
-        x_dim:
-            Dimension to be used for the x-axis. The code will average over all other dimensions.
-        y_dim:
-            Name of the dimension to be used for the y-axis.
-        print_summary:
-            If True, print a summary of the values from the graph.
-        Returns
-        -------
-            None
-        """
-
-        data_list, label_list = self._check_lengths(data, labels)
-
-        assert x_dim in data_list[0].dims or x_dim in data_list[0].coords, (
-            f"x dimension '{x_dim}' not found in data dimensions "
-            f"{data_list[0].dims} or coords {data_list[0].coords}."
-        )
-
-        fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
-
-        for i, data in enumerate(data_list):
-            non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
-
-            if self.plot_ensemble and "ens" in non_zero_dims:
-                _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
-                self._plot_ensemble(data, x_dim, label_list[i])
-            else:
-                averaged = self._preprocess_data(data, x_dim)
-
-                plt.plot(
-                    averaged[x_dim],
-                    averaged.values,
-                    label=label_list[i],
-                    marker="o",
-                    linestyle="-",
-                )
-
-        parts = ["compare", tag]
-        name = "_".join(filter(None, parts))
-
-        # TODO: generalise this for other x_dims by instroducing a "units"
-        # entry in the function if needed
-        xunits = "hr" if x_dim == "lead_time" else None
-        self._plot_base(fig, name, x_dim, y_dim, print_summary, xunits=xunits)
-
-    def _plot_base(
-        self,
-        fig: plt.Figure,
-        name: str,
-        x_dim: str,
-        y_dim: str,
-        print_summary: bool = False,
-        line: float | None = None,
-        vlines: bool = False,
-        title: str | None = None,
-        xunits: str | None = None,
-        yunits: str | None = None,
-    ) -> None:
-        """
-        Apply labels, title, legend, save and optionally print summary.
-        Parameters
-        ----------
-        fig:
-            Matplotlib figure to be finalized
-        name:
-            Name of the plot file
-        x_dim:
-            Label for the x-axis
-        y_dim:
-            Label for the y-axis
-        print_summary:
-            If True, print a summary of the values from the graph.
-        line:
-            If provided, draw a horizontal line at the given y-value.
-        vlines:
-            If True, draw vertical lines to separate each group of variables.
-        title:
-            Title for the plot.
-        xunits:
-            Units for the x-axis.
-        yunits:
-            Units for the y-axis.
-        Returns
-        -------
-            None
-        """
-
-        plt.xlabel(
-            "".join(c if c.isalnum() else " " for c in x_dim) + (f" [{xunits}]" if xunits else "")
-        )
-        plt.ylabel(
-            "".join(c if c.isalnum() else " " for c in y_dim) + (f" [{yunits}]" if yunits else "")
-        )
-
-        plt.title(title if title is not None else " ".join(c if c.isalnum() else " " for c in name))
-        plt.legend(frameon=False)
-
-        if self.add_grid:
-            plt.grid(True, linestyle="--", color="gray", alpha=0.5)
-
-        if self.log_scale:
-            plt.yscale("log")
-
-        if print_summary:
-            _logger.info(f"Summary values for {name}")
-            self.print_all_points_from_graph(fig)
-
-        if line:
-            plt.axhline(y=line, color="black", linestyle="--", linewidth=1, zorder=1)
-
-        if vlines:
-            vlines = []
-            last_prefix = None
-
-            channels = [t.get_text() for t in fig.gca().get_xticklabels() if t.get_text()]
-
-            for idx, ch in enumerate(channels):
-                m = re.match(r"([a-zA-Z]+)_\d+", ch)
-                prefix = m.group(1) if m else ch
-                if last_prefix is not None and prefix != last_prefix:
-                    vlines.append(idx - 0.5)
-                last_prefix = prefix
-            for vl in vlines:
-                plt.axvline(x=vl, color="#001f3f", linestyle="-", linewidth=0.5, zorder=1)
-
-        plt.tight_layout()
-        plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
-        plt.close()
-
-    def ratio_plot(
-        self,
-        data: xr.DataArray | list,
-        run_ids: list[str],
-        labels: str | list,
-        tag: str = "",
-        x_dim: str = "forecast_step",
-        y_dim: str = "value",
-        print_summary: bool = False,
-    ) -> None:
-        """
-        Plot a ratio plot comparing multiple datasets to the first dataset.
-        Parameters
-        ----------
-        data:
-            DataArray or list of DataArrays to be plotted
-        run_ids:
-            List of run IDs corresponding to each dataset
-        labels:
-            Label or list of labels for each dataset
-        tag:
-            Tag to be added to the plot title and filename
-        x_dim:
-            Dimension to be used for the x-axis. The code will average over all other dimensions.
-        y_dim:
-            Name of the dimension to be used for the y-axis.
-        print_summary:
-            If True, print a summary of the values from the graph.
-        Returns
-        -------
-            None
-        """
-
-        data_list, label_list = self._check_lengths(data, labels)
-
-        if len(data_list) < 2:
-            baseline = xr.full_like(data_list[0], 1.0)
-            baseline_name = "ones"
-            descr = "scores"
-        else:
-            descr = "ratio_plot"
-            baseline_name = self.baseline
-            baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
-            if baseline_idx is not None:
-                _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
-                baseline = data_list[baseline_idx]
-
-            else:
-                baseline_name = run_ids[0]
-                baseline = data_list[0]
-
-        ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
-
-        channel_names = set(ref_raw.channel.values)
-        # Merge channels from remaining datasets
-        for data in data_list[1:]:
-            channel_names.update(data.channel.values)  # add new channels
-
-        # Sort the merged list
-        ref_channel_names = sorted(channel_names, key=channel_sort_key)
-
-        ref = align_labels(ref_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
-
-        fig = plt.figure(figsize=(max(12, len(ref_channel_names) * 0.25), 6))
-
-        for data, run_id, lbl in zip(data_list, run_ids, label_list, strict=False):
-            if run_id == baseline_name:
-                continue  # skip baseline
-
-            num_raw = self._preprocess_data(data, x_dim, verbose=False)
-            num = align_labels(num_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
-
-            ratio = num.sel(channel=ref_channel_names) / ref.sel(channel=ref_channel_names)
-
-            plt.plot(
-                ref_channel_names,
-                ratio.values,
-                label=lbl,
-                marker="o",
-                linestyle="-",
-            )
-
-        parts = [descr, tag]
-        name = "_".join(filter(None, parts))
-        plt.xticks(rotation=90, ha="right")
-        plt.grid(True, linestyle="--", color="gray", alpha=0.2)
-        title = (
-            f"{descr.replace('_', ' ')} {tag.split('_')[0]} -"
-            f" {tag.split('_')[-1]} (baseline: {baseline_name})"
-        )
-        self._plot_base(fig, name, x_dim, y_dim, print_summary, line=1.0, vlines=True, title=title)
-
-    def heat_map(
-        self,
-        data: xr.DataArray | list,
-        labels: str | list,
-        metric: str,
-        x_dim,
-        tag: str = "",
-    ) -> None:
-        """
-        Plot a heat map comparing multiple datasets.
-        Parameters
-        ----------
-        data:
-            DataArray or list of DataArrays to be plotted
-        labels:
-            Label or list of labels for each dataset
-        metric:
-            Metric for which we are plotting
-        x_dim:
-            Dimension to be used for the x-axis. The code will average over all other dimensions.
-        tag:
-            Tag to be added to the plot title and filename
-        Returns
-        -------
-            None
-        """
-
-        data_list, label_list = self._check_lengths(data, labels)
-
-        n_runs = len(data_list)
-
-        x_ticks_names = set()
-
-        for data in data_list:
-            da = data.isel({x_dim: 0})
-            x_ticks_names.update(map(str, da.channel.values))
-
-        ref_ticks_names = sorted(x_ticks_names, key=channel_sort_key)
-
-        fig, axes = plt.subplots(
-            1, n_runs, figsize=(8 * n_runs, max(12, len(ref_ticks_names) * 0.25)), squeeze=False
-        )
-
-        global_min = float("inf")
-        global_max = float("-inf")
-
-        for ax, data, label in zip(axes[0], data_list, labels, strict=False):
-            time_steps = sorted(data[x_dim].values)
-
-            # Use the first time step as reference
-            ref = data.reindex(channel=ref_ticks_names).sel({x_dim: time_steps[0]})
-            ref = self._preprocess_data(ref, "channel", verbose=False)
-
-            if ref.isnull().all():
-                _logger.warning(
-                    f"Heatmap:: Reference data for metric {metric} and label {label} contains "
-                    "only NaNs. Skipping heatmap."
-                )
-                continue
-
-            # Compute ratio for all time steps
-            num = self._preprocess_data(data, [x_dim, "channel"], verbose=False)
-            num = num.reindex(channel=ref_ticks_names).sel({x_dim: time_steps})
-
-            heatmap_data = num / ref
-
-            cmap = plt.get_cmap("magma_r") if lower_is_better(metric) else plt.get_cmap("magma")
-            global_min = min(global_min, float(heatmap_data.min()))
-            global_max = max(global_max, float(heatmap_data.max()))
-
-            last_hm = sns.heatmap(
-                heatmap_data.values.T,
-                ax=ax,
-                cmap=cmap,
-                vmin=global_min,
-                vmax=global_max,
-                xticklabels=time_steps,
-                yticklabels=ref_ticks_names,
-                annot=False,
-                fmt=".2f",
-                cbar=False,
-            )
-            ax.set_title(f"Heatmap {metric} – {label}")
-            ax.set_xlabel(f"{x_dim.replace('_', ' ').title()} (h)")
-            ax.set_ylabel("Variable")
-            plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-        cbar = fig.colorbar(
-            last_hm.collections[0], ax=axes.ravel().tolist(), shrink=0.6, location="right", pad=0.02
-        )
-        cbar.set_label(rf"{metric} - $t_{{\mathrm{{step}}}}[0] / t_{{\mathrm{{step}}}}[x]$")
-        parts = ["heat_map", metric, tag]
-        name = "_".join(filter(None, parts))
-        plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
-
-
-class QuantilePlots:
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
-        """
-        Initialize the QuantilePlots class.
-
-        Parameters
-        ----------
-        plotter_cfg:
-            Configuration dictionary containing basic information for plotting.
-            Expected keys are:
-                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
-                - dpi_val: DPI value for the saved images
-                - fig_size: Size of the figure (width, height) in inches
-        output_basedir:
-            Base directory under which the plots will be saved.
-            Expected scheme `<results_base_dir>/<run_id>`.
-        """
-        self.image_format = plotter_cfg.get("image_format")
-        self.dpi_val = plotter_cfg.get("dpi_val")
-        self.fig_size = plotter_cfg.get("fig_size")
-        self.out_plot_dir = Path(output_basedir) / "quantile_plots"
-
-        if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
-            os.makedirs(self.out_plot_dir, exist_ok=True)
-
-    def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
-        """
-        Check if the lengths of data and labels match.
-
-        Parameters
-        ----------
-        data:
-            DataArray or list of DataArrays to be plotted
-        labels:
-            Label or list of labels for each dataset
-
-        Returns
-        -------
-            data_list, label_list - lists of data and labels
-        """
-        assert isinstance(data, xr.DataArray | list), (
-            "QuantilePlots::_check_lengths - Data should be of type xr.DataArray or list"
-        )
-        assert isinstance(labels, str | list), (
-            "QuantilePlots::_check_lengths - Labels should be of type str or list"
-        )
-
-        data_list = [data] if isinstance(data, xr.DataArray) else data
-        label_list = [labels] if isinstance(labels, str) else labels
-
-        assert len(data_list) == len(label_list), (
-            "QuantilePlots::_check_lengths - Data and Labels do not match"
-        )
-
-        return data_list, label_list
-
-    def qq_plot(
-        self,
-        qq_data: list[xr.Dataset],
-        labels: str | list,
-        tag: str = "",
-        metric: str = "qq_analysis",
-        extreme_percentiles: tuple[float, float] | None = None,
-    ) -> None:
-        """
-        Create quantile-quantile (Q-Q) plots for extreme value analysis.
-
-        This method generates comprehensive Q-Q plots comparing forecast quantiles
-        against ground truth quantiles, with emphasis on extreme values.
-
-        Parameters
-        ----------
-        qq_data:
-            Dataset or list of Datasets containing Q-Q analysis results.
-            Each dataset should contain:
-            - 'quantile_levels': Theoretical quantile levels (0 to 1)
-            - 'p_quantiles': Quantile values from prediction data
-            - 'gt_quantiles': Quantile values from ground truth data
-            - 'qq_deviation': Absolute difference between quantiles
-            - 'extreme_low_mse': MSE for lower extreme quantiles
-            - 'extreme_high_mse': MSE for upper extreme quantiles
-        labels:
-            Label or list of labels for each dataset
-        tag:
-            Tag to be added to the plot title and filename
-        metric:
-            Name of the metric (default: 'qq_analysis')
-        extreme_percentiles:
-            Lower and upper percentile thresholds for extreme regions.
-
-        Returns
-        -------
-            None
-        """
-        data_list, label_list = self._check_lengths(qq_data, labels)
-
-        # Use extreme_percentiles from data if not explicitly provided
-        if extreme_percentiles is None:
-            extreme_percentiles = tuple(data_list[0].attrs.get("extreme_percentiles", (5.0, 95.0)))
-
-        # Create figure with subplots
-        fig = plt.figure(figsize=(16, 6), dpi=self.dpi_val)
-        gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], wspace=0.3)
-
-        ax_qq = fig.add_subplot(gs[0])  # Main Q-Q plot
-        ax_dev = fig.add_subplot(gs[1])  # Deviation plot
-
-        colors = plt.cm.tab10(np.linspace(0, 1, len(data_list)))
-
-        for _i, (ds, label, color) in enumerate(zip(data_list, label_list, colors, strict=False)):
-            # Extract quantile data
-            quantile_levels = ds["quantile_levels"].values
-            p_quantiles = ds["p_quantiles"].values
-            gt_quantiles = ds["gt_quantiles"].values
-            qq_deviation = ds["qq_deviation"].values
-
-            # Main Q-Q plot
-            ax_qq.scatter(
-                gt_quantiles,
-                p_quantiles,
-                alpha=0.6,
-                s=20,
-                c=[color],
-                label=label,
-                edgecolors="none",
-            )
-
-            # Deviation plot
-            ax_dev.plot(
-                quantile_levels,
-                qq_deviation,
-                label=label,
-                color=color,
-                linewidth=2,
-                alpha=0.8,
-            )
-
-        # Format main Q-Q plot
-        ax_qq.set_xlabel("Ground Truth Quantiles", fontsize=12)
-        ax_qq.set_ylabel("Prediction Quantiles", fontsize=12)
-        ax_qq.set_title("Quantile-Quantile Plot for Extreme Value Analysis", fontsize=14)
-
-        # Add perfect agreement line (y=x)
-        min_val = min([ds["gt_quantiles"].min().values for ds in data_list])
-        max_val = max([ds["gt_quantiles"].max().values for ds in data_list])
-        ax_qq.plot(
-            [min_val, max_val],
-            [min_val, max_val],
-            "k--",
-            linewidth=2,
-            label="Perfect Agreement",
-            alpha=0.7,
-        )
-
-        # Add shaded regions for extremes
-        if len(data_list) > 0:
-            ds_ref = data_list[0]
-            quantile_levels = ds_ref["quantile_levels"].values
-
-            # Find extreme regions using configurable thresholds
-            lower_extreme_idx = quantile_levels < (extreme_percentiles[0] / 100)
-            upper_extreme_idx = quantile_levels > (extreme_percentiles[1] / 100)
-
-            if np.any(lower_extreme_idx):
-                lower_q = ds_ref["gt_quantiles"].values[lower_extreme_idx]
-                ax_qq.axvspan(
-                    min_val,
-                    lower_q.max() if len(lower_q) > 0 else min_val,
-                    alpha=0.1,
-                    color="blue",
-                    label="Lower Extreme Zone",
-                )
-
-            if np.any(upper_extreme_idx):
-                upper_q = ds_ref["gt_quantiles"].values[upper_extreme_idx]
-                ax_qq.axvspan(
-                    upper_q.min() if len(upper_q) > 0 else max_val,
-                    max_val,
-                    alpha=0.1,
-                    color="red",
-                    label="Upper Extreme Zone",
-                )
-
-        ax_qq.legend(frameon=False, loc="upper left", fontsize=10)
-        ax_qq.grid(True, linestyle="--", alpha=0.3)
-
-        # Format deviation plot
-        ax_dev.set_xlabel("Quantile Level", fontsize=12)
-        ax_dev.set_ylabel("Absolute Deviation", fontsize=12)
-        ax_dev.set_title("Quantile Deviation", fontsize=14)
-        ax_dev.legend(frameon=False, fontsize=10)
-        ax_dev.grid(True, linestyle="--", alpha=0.3)
-
-        # Highlight extreme regions in deviation plot
-        lower_threshold = extreme_percentiles[0] / 100
-        upper_threshold = extreme_percentiles[1] / 100
-        ax_dev.axvspan(0.0, lower_threshold, alpha=0.1, color="blue")
-        ax_dev.axvspan(upper_threshold, 1.0, alpha=0.1, color="red")
-
-        plt.tight_layout()
-
-        # Save the plot
-        parts = ["qq_analysis", tag]
-        name = "_".join(filter(None, parts))
-        save_path = self.out_plot_dir.joinpath(f"{name}.{self.image_format}")
-        plt.savefig(save_path, bbox_inches="tight")
-        plt.close()
-
-        _logger.info(f"Q-Q plot saved to {save_path}")
-
-
-class ScoreCards:
-    """
-    Initialize the ScoreCards class.
-
-    Parameters
-    ----------
-    plotter_cfg:
-        Configuration dictionary containing basic information for plotting.
-        Expected keys are:
-            - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
-            - improvement: Size of the figure (width, height) in inches
-    output_basedir:
-        Base directory under which the score cards will be saved.
-    """
-
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path) -> None:
-        self.image_format = plotter_cfg.get("image_format")
-        self.dpi_val = plotter_cfg.get("dpi_val")
-        self.improvement = plotter_cfg.get("improvement_scale", 0.2)
-        self.out_plot_dir = Path(output_basedir) / "score_cards"
-        self.baseline = plotter_cfg.get("baseline")
-        if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
-            os.makedirs(self.out_plot_dir, exist_ok=True)
-
-    def plot(
-        self,
-        data: list[xr.DataArray],
-        runs: list[str],
-        metric: str,
-        channels: list[str],
-        tag: str,
-    ) -> None:
-        """
-        Plot score cards comparing performance between run_ids against a baseline over channels
-        of interest.
-
-        Parameters
-        ----------
-        data:
-            List of (xarray) DataArrays with the scores (stream, region and metric specific)
-        runs:
-            List containing runs (in str format) to be compared (provided in the config)
-        metric:
-            Metric for which we are plotting
-        channels:
-            List containing channels (in str format) of interest (provided in the config)
-        tag:
-            Tag to be added to the plot title and filename
-        """
-        n_runs = len(runs)
-
-        if self.baseline and self.baseline in runs:
-            baseline_idx = runs.index(self.baseline)
-            runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
-            data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
-
-        common_channels, n_common_channels = self.extract_common_channels(data, channels, n_runs)
-
-        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_common_channels))
-
-        baseline = data[0]
-        skill_models = []
-        for run_index in range(1, n_runs):
-            skill_model = 0.0
-            for var_index, var in enumerate(common_channels):
-                if var not in data[0].channel.values or var not in data[run_index].channel.values:
-                    continue
-                diff, avg_diff, avg_skill = self.compare_models(
-                    data, baseline, run_index, var, metric
-                )
-                skill_model += avg_skill.values
-
-                # Get symbols based on difference and performance as well as coordinates
-                # for the position of the triangles.
-
-                x, y, alt, color, triangle, size = self.get_plot_symbols(
-                    run_index, var_index, avg_skill, avg_diff, metric
-                )
-
-                ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
-
-                # Perform Wilcoxon test
-                if len(diff["forecast_step"].values) > 1:
-                    stat, p = wilcoxon(diff, alternative=alt)
-
-                    # Draw rectangle border for significance
-                    if p < 0.05:
-                        lw = 2 if p < 0.01 else 1
-                        rect_color = color
-                        rect = plt.Rectangle(
-                            (x - 0.25, y - 0.25),
-                            0.5,
-                            0.5,
-                            fill=False,
-                            edgecolor=rect_color,
-                            linewidth=lw,
-                            zorder=2,
-                        )
-                        ax.add_patch(rect)
-
-            skill_models.append(skill_model / n_common_channels)
-
-        # Set axis labels
-        ylabels = [
-            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel=var).mean().values.squeeze():.3f})"
-            for var in common_channels
-        ]
-        xlabels = [
-            f"{model_name}\nSkill: {skill_models[i]:.3f}" for i, model_name in enumerate(runs[1::])
-        ]
-        ax.set_xticks(np.arange(1, n_runs))
-        ax.set_xticklabels(xlabels, fontsize=10)
-        ax.set_yticks(np.arange(n_common_channels) + 0.5)
-        ax.set_yticklabels(ylabels, fontsize=10)
-        for label in ax.get_yticklabels():
-            label.set_horizontalalignment("center")
-            label.set_x(-0.17)
-        ax.set_ylabel("Variable", fontsize=14)
-        ax.set_title(
-            f"Model Scorecard vs. Baseline '{runs[0]}'",
-            fontsize=16,
-            pad=20,
-        )
-        for x in np.arange(0.5, n_runs - 1, 1):
-            ax.axvline(x, color="gray", linestyle="--", linewidth=0.5, zorder=0, alpha=0.5)
-        ax.set_xlim(0.5, n_runs - 0.5)
-        ax.set_ylim(0, n_common_channels)
-
-        legend = [
-            Line2D(
-                [0],
-                [0],
-                marker="^",
-                color="white",
-                label=f"{self.improvement * 100:.0f}% improvement",
-                markerfacecolor="blue",
-                markersize=np.sqrt(200),
-            )
-        ]
-        plt.legend(handles=legend, loc="upper left", bbox_to_anchor=(1.02, 1.0))
-
-        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
-
-        parts = ["score_card", tag] + runs
-        name = "_".join(filter(None, parts))
-        plt.savefig(
-            f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
-            bbox_inches="tight",
-            dpi=self.dpi_val,
-        )
-        plt.close(fig)
-
-    def extract_common_channels(self, data, channels, n_runs):
-        common_channels = []
-        for run_index in range(1, n_runs):
-            for var in channels:
-                if var not in data[0].channel.values or var not in data[run_index].channel.values:
-                    continue
-                common_channels.append(var)
-        common_channels = list(set(common_channels))
-        n_vars = len(common_channels)
-        return common_channels, n_vars
-
-    def compare_models(
-        self,
-        data: list[xr.DataArray],
-        baseline: xr.DataArray,
-        run_index: int,
-        var: str,
-        metric: str,
-        x_dim="forecast_step",
-    ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
-        """
-        Compare a model with a baseline model and calculate skill scores.
-
-        Parameters
-        ----------
-        data: list[xr.DataArray]
-            List of all scores in xarray format for each model.
-
-        baseline: xarray DataArray
-            The baseline scores in xarrays format.
-
-        run_index: int
-            The order index over the run_ids.
-
-        var: str
-            The specified channel over which we compare.
-
-        xdim: str
-            The dimension for which an average will not be calculated.
-
-        Returns
-        ----------
-        diff: xr.DataArray
-            Difference in scores between baseline and model.
-
-        diff.mean(dim="forecast_step"): xr.DataArray
-            Average difference in scores over all forecast steps between baseline and model .
-
-        skill.mean(dim="forecast_step"): xr.DataArray
-            Average skill scores over all forecast steps between baseline and model .
-
-        """
-        baseline_var = baseline.sel({"channel": var})
-        data_var = data[run_index].sel({"channel": var})
-
-        baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
-        diff = baseline_score - model_score
-
-        skill = self.get_skill_score(model_score, baseline_score, metric)
-        return diff, diff.mean(dim=x_dim), skill.mean(dim=x_dim)
-
-    def get_skill_score(
-        self, score_model: xr.DataArray, score_ref: xr.DataArray, metric: str
-    ) -> xr.DataArray:
-        """
-        Calculate skill score comparing a model against a baseline.
-
-        Skill score is defined as: (model_score - baseline_score) / (perfect_score - baseline_score)
-
-        Parameters
-        ----------
-        score_model : xr.DataArray
-            The scores of the model being evaluated
-        score_ref : xr.DataArray
-            The scores of the reference/baseline model
-        metric : str
-            The metric name for which to calculate skill score
-
-        Returns
-        -------
-        xr.DataArray
-            Skill scores comparing model to baseline
-        """
-        perf_score = self.get_perf_score(metric)
-        skill_score = (score_model - score_ref) / (perf_score - score_ref)
-        return skill_score
-
-    def get_perf_score(self, metric: str) -> float:
-        """
-        Get the perfect score for a given metric.
-
-        Perfect scores represent ideal performance:
-        - Error metrics: 0 (lower is better)
-        - Skill/score metrics: 1 (higher is better)
-        - PSNR: 100 (higher is better)
-
-        Parameters
-        ----------
-        metric : str
-            Metric name
-
-        Returns
-        -------
-        float
-            Perfect score for the specified metric
-        """
-        # Metrics where lower values indicate better performance (error metrics)
-        if lower_is_better(metric):
-            return 0.0
-
-        # Metrics where higher values indicate better performance (with specific perfect score)
-        elif metric in ["psnr"]:
-            return 100.0
-
-        # Metrics where higher values indicate better performance (default perfect score)
-        else:
-            return 1.0
-
-    def get_plot_symbols(
-        self,
-        run_index: int,
-        var_index: int,
-        avg_skill: xr.DataArray,
-        avg_diff: xr.DataArray,
-        metric: str,
-    ) -> tuple[int, float, str, str, str, xr.DataArray]:
-        """
-        Determine plot symbol properties based on performance difference.
-
-        Parameters
-        ----------
-        run_index : int
-            Index of the model.
-        var_index : int
-            Index of the variable/channel.
-        avg_skill : xr.DataArray
-            Average skill score of the model.
-        avg_diff : xr.DataArray
-            Average difference between baseline and model.
-        metric : str
-            Metric used for interpretation.
-
-        Returns
-        -------
-        Tuple[int, float, str, str, str, xr.DataArray]
-            x, y coordinates, alternative hypothesis, color, triangle symbol, size.
-        """
-        # Conservative choice
-        alt = "two-sided"
-        modus = "different"
-        color = "gray"
-
-        # Determine if diff_mean indicates improvement
-        is_improvement = (avg_diff > 0 and lower_is_better(metric)) or (
-            avg_diff < 0 and not lower_is_better(metric)
-        )
-
-        if is_improvement:
-            alt = "greater"
-            modus = "better"
-            color = "blue"
-        elif not is_improvement and avg_diff != 0:
-            alt = "less"
-            modus = "worse"
-            color = "red"
-        else:
-            alt = "two-sided"
-            modus = "different"
-
-        triangle = "^" if modus == "better" else "v"
-
-        # Triangle coordinates
-        x = run_index
-        # First row is model 1 vs model 0
-        y = var_index + 0.5
-
-        size = 200 * (1 - (1 / (1 + abs(avg_skill) / self.improvement)))  # Add base size to all
-
-        return x, y, alt, color, triangle, size
-
-
-class BarPlots:
-    """
-    Initialize the BarPlots class.
-
-    Parameters
-    ----------
-    plotter_cfg:
-        Configuration dictionary containing basic information for plotting.
-        Expected keys are:
-            - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
-            - improvement: Size of the figure (width, height) in inches
-    output_basedir:
-        Base directory under which the score cards will be saved.
-    """
-
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path) -> None:
-        self.image_format = plotter_cfg.get("image_format")
-        self.dpi_val = plotter_cfg.get("dpi_val")
-        self.cmap = plotter_cfg.get("cmap", "bwr")
-        self.out_plot_dir = Path(output_basedir) / "bar_plots"
-        self.baseline = plotter_cfg.get("baseline")
-        if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
-            os.makedirs(self.out_plot_dir, exist_ok=True)
-
-    def plot(
-        self,
-        data: list[xr.DataArray],
-        runs: list[str],
-        metric: str,
-        channels: list[str],
-        tag: str,
-    ) -> None:
-        """
-        Plot (ratio) bar plots comparing performance between different run_ids over channels of
-        interest.
-
-        Parameters
-        ----------
-        data:
-            List of (xarray) DataArrays with the scores (stream, region and metric specific)
-        runs:
-            List containing runs (in str format) to be compared (provided in the config)
-        metric:
-            Metric name
-        channels:
-            List containing channels (in str format) of interest (provided in the config)
-        tag:
-            Tag to be added to the plot title and filename
-        """
-
-        fig, ax = plt.subplots(
-            1,
-            len(runs) - 1 if len(runs) > 1 else 1,
-            figsize=(5 * len(runs), 2 * len(channels)),
-            dpi=self.dpi_val,
-            squeeze=False,
-        )
-        ax = ax.flatten()
-        if self.baseline and self.baseline in runs:
-            baseline_idx = runs.index(self.baseline)
-            runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
-            data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
-        elif len(runs) < 2:
-            _logger.warning(
-                "BarPlots:: Less than two runs provided. Generating bar plot against ones."
-            )
-            ones_array = xr.full_like(data[0], 1.0)
-            runs = [""] + runs
-            data = [ones_array] + data
-
-        for run_index in range(1, len(runs)):
-            score, channels_per_comparison = self.calc_ratio_per_run_id(data, channels, run_index)
-            if len(score) > 0:
-                ax[run_index - 1].barh(
-                    np.arange(len(score)),
-                    score,
-                    color=self.colors(score, metric),
-                    align="center",
-                    edgecolor="black",
-                    linewidth=0.5,
-                )
-                ax[run_index - 1].set_yticks(np.arange(len(score)), labels=channels_per_comparison)
-                ax[run_index - 1].invert_yaxis()
-
-                xlabel = (
-                    f"Relative {data[0].coords['metric'].item().upper()}: "
-                    f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
-                )
-
-                if len(runs) == 2 and runs[0] == "":
-                    xlabel = xlabel.replace("Relative ", "")
-                    xlabel = xlabel.replace(
-                        f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})",
-                        f"Model ({runs[run_index]})",
-                    )
-
-                ax[run_index - 1].set_xlabel(xlabel)
-            else:
-                ax[run_index - 1].set_visible(False)  # or annotate as missing
-                # Or show a message:
-                ax[run_index - 1].text(
-                    0.5,
-                    0.5,
-                    "No Data",
-                    ha="center",
-                    va="center",
-                    transform=ax[run_index - 1].transAxes,
-                )
-
-        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
-        parts = ["bar_plot", tag] + runs
-        name = "_".join(filter(None, parts))
-        plt.savefig(
-            f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
-            bbox_inches="tight",
-            dpi=self.dpi_val,
-        )
-        plt.close(fig)
-
-    def calc_ratio_per_run_id(
-        self,
-        data: list[xr.DataArray],
-        channels: list[str],
-        run_index: int,
-        x_dim="channel",
-    ) -> tuple[np.array, str]:
-        """
-        This function calculates the ratio per comparison model for each channel.
-
-        Parameters
-        ----------
-        data: list[xr.DataArray]
-            List of all scores for each model in xarrays format.
-        channels: list[str]
-            All the available channels.
-        run_index: int
-            The order index over the run_ids.
-        xdim: str
-            The dimension for which an average will not be calculated.
-
-        Returns
-        ----------
-        ratio_score: np.array
-            The (ratio) skill over each channel for a specific model
-        channels_per_comparison: str
-            The common channels over which the baseline and the other model will be compared.
-
-        """
-        ratio_score = []
-        channels_per_comparison = []
-
-        for _, var in enumerate(channels):
-            if var not in data[0].channel.values or var not in data[run_index].channel.values:
-                continue
-            baseline_var = data[0].sel({"channel": var})
-            data_var = data[run_index].sel({"channel": var})
-            channels_per_comparison.append(var)
-
-            baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
-
-            ratio_score.append(model_score / baseline_score)
-
-        if np.allclose(baseline_score, 1.0, atol=1e-6):
-            ratio_score = np.array(ratio_score)
-        else:
-            ratio_score = np.array(ratio_score) - 1
-
-        return ratio_score, channels_per_comparison
-
-    def colors(self, ratio_score: np.array, metric: str) -> list[tuple]:
-        """
-        This function calculates colormaps based on the skill scores. From negative value blue
-        color variations should be given otherwise red color variations should be given.
-
-        Parameters
-        ----------
-        ratio_score: np.array
-            The (ratio) skill for a specific model
-        metric: str
-            The metric of interest
-        Returns
-        ----------
-        colors: list[tuple]
-            The color magnitude (blue to red) of the bars in the plots
-        """
-        max_val = np.abs(ratio_score).max()
-        if lower_is_better(metric):
-            cmap = plt.get_cmap("bwr")
-        else:
-            cmap = plt.get_cmap("bwr_r")
-        colors = [cmap(0.5 + v / (2 * max_val)) for v in ratio_score]
-        return colors
-
-
-def calculate_average_over_dim(
-    x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
-) -> tuple[xr.DataArray, xr.DataArray]:
-    """
-    Calculate average over xarray dimensions that are larger than 1. Those might be the
-    forecast-steps or the samples.
-
-    Parameters
-    ----------
-    xdim: str
-        The dimension for which an average will not be calculated.
-    baseline_var: xr.DataArray
-        xarray DataArray with the scores of the baseline model for a specific channel/variable
-    data_var: xr.DataArray
-        xarray DataArray with the scores of the comparison model for a specific channel/variable
-
-    Returns
-    -------
-    baseline_score: xarray DataArray
-        The baseline average scores over the dimensions not specified by xdim
-    model_score: xarray DataArray
-        The model average scores over the dimensions not specified by xdim
-    """
-    non_zero_dims = [
-        dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
-    ]
-
-    if non_zero_dims:
-        _logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
-
-    baseline_score = baseline_var.mean(
-        dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
-    )
-    model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
-
-    return baseline_score, model_score
-
-
-def lower_is_better(metric: str) -> bool:
-    # Determine whether lower or higher is better
-    return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
-
-
-def compute_offsets(n, spacing=0.11):
-    idx = np.arange(n)
-    return (idx - (n - 1) / 2.0) * spacing
-
-
-def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArray:
-    """
-    Reindex a DataArray to include all labels in the canonical order.
-    Missing variables are filled with NaN.
-    """
-    # Convert labels → index format expected by xarray
-    labels = np.array(labels, dtype=object)
-
-    # Reindex, inserting NaN for missing labels
-    return da.reindex({x_dim: labels})
-
-
-def format_datetime(dt):
-    return dt.astype("datetime64[m]").astype(datetime.datetime).strftime("%Y-%m-%d T%H:%M:%S")
-
-
-def channel_sort_key(name: str) -> tuple[int, str, int]:
-    """
-    Sorting key for channel names like 't_850', 'z_500', etc.
-    Splits the name into a prefix and a number suffix for sorting.
-    Parameters
-    ----------
-    name : str
-        Channel name to be sorted.
-    Returns
-    -------
-    tuple[int, str, int]
-        Sorting key: (0, prefix, number) if pattern matches, else (1,
-    """
-    m = re.match(r"(.+?)_(\d+)$", name)
-    if m:
-        prefix, number = m.groups()
-        return (0, prefix, int(number))
-    else:
-        return (1, name, float("inf"))

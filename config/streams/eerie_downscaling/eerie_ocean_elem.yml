@@ -1,0 +1,37 @@
+EERIE_OCEAN_ELEM:
+  type: mesh
+  stream_id: 2137
+  loss_weight: 1.0
+  filenames: # Gridded data is used as source and native high-res data is used as target.
+  - /work/ab0995/a270225/data_transformation/eerie_ocean_gr025_3d_gridded_daily.parq 
+  target_file: /work/ab0995/a270225/data_transformation/eerie_ocean_3d_elements_daily.parq
+  source: # Not every vertical level is present in gridded data.
+  - avg_uoe_2.5m # ocean u velocity at 2.5m depth
+  - avg_voe_2.5m # ocean v velocity at 2.5m depth
+  target:
+  - avg_uoe_2.5m
+  - avg_voe_2.5m
+  sampling_mode: patch
+  patch_size_deg: 20
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 32
+  tokenize_spacetime : True
+  max_num_targets: -1 
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+    # sampling_rate : 0.2
+  pred_head :
+    ens_size : 1
+    num_layers : 1

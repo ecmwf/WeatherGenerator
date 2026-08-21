@@ -8,6 +8,7 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
+      # Creates a virtual environment without checking the integrity of the cache.
       # If we are running on a mac, use the cpu extra
       if [[ "$(uname)" == "Darwin" ]]; then
         uv sync --all-packages --extra cpu
@@ -15,6 +16,28 @@ case "$1" in
       fi
       # Otherwise, use the gpu extra
       uv sync --all-packages --extra gpu
+    )
+    ;;
+  sync-safe)
+    (
+      # Creates a virtual environment, checking the integrity of the cache
+      # and copying the files.
+      # This is slower (+ 60 seconds to the sync) but it is prevents issues with
+      # corrupted cache. These issues happen when a shared filesystem such as LUSTRE
+      # is used along with symlinks and a SCRATCH deletion policy: some files from
+      # cached packages may get deleted because they seem to not be touched enough.
+      cd "$SCRIPT_DIR" || exit 1
+      # --refresh --reinstall : LUSTRE may clean up some pieces of the cache.
+      # This ensures basic integrity but it is too slow (adds 60 seconds to the sync) to do it on every sync. So we only do it on mac, where the cache is more likely to get corrupted.
+      # --link-mode=copy overrides the pyproject.toml setting (symlink) to fully
+      # detach installed files from the cache, so SCRATCH cleanups can't corrupt the venv.
+      # If we are running on a mac, use the cpu extra
+      if [[ "$(uname)" == "Darwin" ]]; then
+        uv sync --all-packages --extra cpu --refresh --reinstall --link-mode=copy
+        exit 0
+      fi
+      # Otherwise, use the gpu extra
+      uv sync --all-packages --extra gpu --refresh --reinstall --link-mode=copy
     )
     ;;
   lint)
@@ -29,9 +52,11 @@ case "$1" in
     ;;
   lint-check)
     (
+      # Warning: make sure that the ruff versions are aligned
+      # with pyproject.toml
       cd "$SCRIPT_DIR" || exit 1
       uv run --no-project --with "ruff==0.12.2" \
-        ruff format --target-version py312 -n src/ scripts/ packages/ \
+      ruff format --target-version py312 --check src/ scripts/ packages/ \
       && \
       uv run --no-project --with "ruff==0.12.2" \
         ruff check  --target-version py312 src/ scripts/ packages/ \
@@ -106,6 +131,12 @@ case "$1" in
       uv sync --offline --all-packages --extra gpu
       uv run --offline pytest ./integration_tests/small_multi_stream_test.py --verbose -s
     );;
+    integration-test-export)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv sync --offline --all-packages --extra gpu
+      uv run --offline pytest ./integration_tests/export_test.py --verbose -s
+    );;
     integration-test-all)
     (
       cd "$SCRIPT_DIR" || exit 1
@@ -113,6 +144,7 @@ case "$1" in
       uv run --offline pytest ./integration_tests/small1_test.py --verbose -s
       uv run --offline pytest ./integration_tests/small_multi_stream_test.py --verbose -s
       uv run --offline pytest ./integration_tests/jepa1_test.py --verbose -s
+      uv run --offline pytest ./integration_tests/export_test.py --verbose -s
     );;
   create-links)
     (
@@ -121,7 +153,11 @@ case "$1" in
       # 1. Get the path of the private config of the cluster
       # 2. Read the yaml and extract the path of the shared conf
       # This uses the yq command. It is a python package so uvx (bundled with uv) will donwload and create the right venv
-      export working_dir=$(cat $("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config) | uvx yq .path_shared_working_dir)
+      # The 'yq' command is used in a separate virtual environment, because the cache
+      # around that tool can get corrupted.
+      # See https://github.com/ecmwf/WeatherGenerator/issues/2298
+      export working_dir=$(cat "$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config)" |
+        UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV=""  uvx yq .path_shared_working_dir)
       # Remove quotes
       export working_dir=$(echo "$working_dir" | sed 's/[\"\x27]//g')
       # If the working directory does not exist, exit with an error
@@ -170,7 +206,7 @@ case "$1" in
   *)
     (
       # Automatically extract all options from the case statement
-      options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
+      options=$(sed -nE 's/^[[:space:]]*([a-zA-Z][a-zA-Z0-9_-]*)\).*/\1/p' "$0" | tr '\n' '|' | sed 's/|$//')
       echo "Usage: $0 {$options}"
       exit 1
     )

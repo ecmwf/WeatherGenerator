@@ -17,6 +17,7 @@ from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
+    Local2GlobalSumEngine,
     LocalAssimilationEngine,
     QueryAggregationEngine,
 )
@@ -57,7 +58,7 @@ class EncoderModule(torch.nn.Module):
 
         # embedding engine
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        self.stream_names = list(cf.streams.keys())
         # separate embedding networks for differnt observation types
         self.embed_engine = EmbeddingEngine(cf, self.sources_size)
 
@@ -77,7 +78,11 @@ class EncoderModule(torch.nn.Module):
             )
 
         # local -> global assimilation engine adapter
-        self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
+        ae_adapter_type = cf.get("ae_adapter_type", "cross_attention")
+        if ae_adapter_type == "sum":
+            self.ae_local_global_engine = Local2GlobalSumEngine(cf)
+        else:
+            self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
 
         # learnable queries
         if cf.ae_local_queries_per_cell:
@@ -284,7 +289,7 @@ class EncoderModule(torch.nn.Module):
 
         cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
 
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
         rs = num_steps_input * len(batch)
 
         # create register and latent tokens and prepend to latent spatial tokens

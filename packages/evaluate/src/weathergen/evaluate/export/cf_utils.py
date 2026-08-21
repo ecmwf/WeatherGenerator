@@ -25,10 +25,8 @@ class CfParser:
         grid_type : str
             Type of grid ('regular' or 'gaussian').
         """
-
         for k, v in kwargs.items():
             setattr(self, k, v)
-
         self.config = config
         self.file_extension = _get_file_extension(self.output_format)
         self.fstep_hours = np.timedelta64(self.fstep_hours, "h")
@@ -96,10 +94,12 @@ def _get_file_extension(output_format: str) -> str:
     """
     if output_format == "netcdf":
         return "nc"
+    if output_format == "verif":
+        return "nc"
     elif output_format == "quaver":
         return "grib"
     else:
         raise ValueError(
             f"Unsupported output format: {output_format},"
-            "supported formats are ['netcdf', 'DWD', 'quaver']"
+            "supported formats are ['netcdf', 'verif', 'quaver']"
         )
