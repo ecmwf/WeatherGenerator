@@ -16,14 +16,14 @@
 # four-GPU GH200 node. The shared partition can avoid this, but is limited to 1h.
 
 #SBATCH --account=e-ext-2025e01-128
-#SBATCH --time=01:00:00
+#SBATCH --time=01:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=4
 #SBATCH --cpus-per-task=72
 #SBATCH --gres=gpu:4
 #SBATCH --chdir=.
 #SBATCH --partition=booster
-#SBATCH --array=0-15%16
+#SBATCH --array=0-92%92
 #SBATCH --output=logs/weathergen-%x.%j.out
 #SBATCH --error=logs/weathergen-%x.%j.err
 
@@ -66,13 +66,13 @@ fi
 echo "MASTER_ADDR: $MASTER_ADDR"
 set -euo pipefail
 
-FROM_RUN_ID=xq65fhca
-MINI_EPOCH=14
-RUN_PREFIX=xq65
+FROM_RUN_ID=cw6a4szu
+MINI_EPOCH=8
+RUN_PREFIX="${FROM_RUN_ID:0:4}"
 FORECAST_STEPS=40
 FORECAST_CHUNK_SIZE=1
 RESULTS_ROOT=/e/scratch/weatherai/shared_work/results
-FIRST_SOURCE_START=2023-06-01T12:00
+FIRST_SOURCE_START=2023-06-01T00:00
 INPUT_STEP_HOURS=6
 NUM_SAMPLES_PER_TASK=8
 # SOURCE_CADENCE_HOURS=12
@@ -80,8 +80,8 @@ NUM_SAMPLES_PER_TASK=8
 LOCAL_TEST_RANGE_HOURS=258
 
 task_id=${SLURM_ARRAY_TASK_ID:?This script must run as a Slurm array task.}
-run_id=$(printf '%s%05d' "$RUN_PREFIX" "$task_id")
-source_start=$(date -u --date="$FIRST_SOURCE_START UTC + $((task_id * 4 * NUM_SAMPLES_PER_TASK)) hours" '+%Y-%m-%dT%H:%M')
+run_id=$(printf '%s%04d' "$RUN_PREFIX" "$task_id")
+source_start=$(date -u --date="$FIRST_SOURCE_START UTC + $((task_id * INPUT_STEP_HOURS * NUM_SAMPLES_PER_TASK)) hours" '+%Y-%m-%dT%H:%M')
 source_end=$(date -u --date="$source_start UTC + $INPUT_STEP_HOURS hours" '+%Y-%m-%dT%H:%M')
 test_start=$(date -u --date="$source_start UTC - $INPUT_STEP_HOURS hours" '+%Y-%m-%dT%H:%M')
 test_end=$(date -u --date="$test_start UTC + $((LOCAL_TEST_RANGE_HOURS + NUM_SAMPLES_PER_TASK * INPUT_STEP_HOURS)) hours" '+%Y-%m-%dT%H:%M')
