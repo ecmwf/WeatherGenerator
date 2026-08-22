@@ -90,12 +90,15 @@ def write_output(
                     preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
                     targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
 
+                    # TODO, TODO, TODO: remove
+                    print(f"{sname} : pred : {pred.shape} : {t_times.shape}")
+
                     # extract original target coords and times from target data
                     t_coords_s += [t_coords.cpu().numpy()]
                     t_times_s += [t_times.astype("datetime64[ns]")]
 
             targets_lens[-1] += [[]]
-            targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
+            targets_lens[-1][-1] += [t.shape[0] for t in preds_s]
 
             preds_all[-1] += [np.concatenate(preds_s, axis=1)]
             targets_all[-1] += [np.concatenate(targets_s)]
