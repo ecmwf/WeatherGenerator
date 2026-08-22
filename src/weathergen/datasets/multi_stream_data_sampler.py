@@ -33,7 +33,7 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import Stage, get_batch_size_from_config
+from weathergen.train.utils import TRAIN, Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import is_stream_diagnostic
 
@@ -433,9 +433,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     mask,
                 )
 
-                stream_data.add_source(
-                    self._stage, step, rdata, source_cells_lens, source_cells, rdata.is_spoof
-                )
+                stream_data.add_source(step, rdata, source_cells_lens, source_cells, rdata.is_spoof)
 
         return stream_data
 
@@ -476,7 +474,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
+
+                stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
@@ -488,7 +487,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
 
                 stream_data.add_target_values(
-                    self._stage, timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
+                    timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
                 )
 
         return stream_data
@@ -529,6 +528,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         num_output_steps = self._get_output_length(num_forecast_steps)
         stream_data = StreamData(
+            self._stage,
             base_idx,
             num_steps_input,
             num_output_steps,
@@ -724,7 +724,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     output_mask=target_masks.masks[tidx],
                     input_mask=source_mask,
                 )
-
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
@@ -794,7 +793,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
                 not_valid = batch.sources_empty() or batch.is_nan()
-                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
+                if self._stage == TRAIN:
+                    not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
 
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not_valid:

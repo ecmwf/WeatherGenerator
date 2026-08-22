@@ -54,6 +54,7 @@ class StreamData:
 
     def __init__(
         self,
+        stage: Stage,
         idx: int,
         input_steps: int,
         output_steps: int,
@@ -78,6 +79,8 @@ class StreamData:
         -------
         None
         """
+
+        self.stage = stage
 
         self.mask_value = 0.0
 
@@ -162,7 +165,6 @@ class StreamData:
 
     def add_source(
         self,
-        stage: Stage,
         step: int,
         ss_raw: IOReaderData,
         ss_lens: torch.Tensor,
@@ -186,7 +188,7 @@ class StreamData:
 
         assert step < self.input_steps
 
-        if stage == TRAIN:
+        if self.stage == TRAIN:
             del ss_raw
             ss_raw = None
 
@@ -201,7 +203,6 @@ class StreamData:
 
     def add_target(
         self,
-        stage: Stage,
         fstep: int,
         targets: list,
         target_coords: torch.Tensor,
@@ -247,7 +248,6 @@ class StreamData:
 
     def add_target_values(
         self,
-        stage: Stage,
         fstep: int,
         targets: list,
         target_coords_raw: torch.Tensor,
@@ -281,7 +281,7 @@ class StreamData:
         None
         """
 
-        if stage == TRAIN:
+        if self.stage == TRAIN:
             del idxs_inv
             idxs_inv = None
 
@@ -294,7 +294,6 @@ class StreamData:
 
     def add_target_coords(
         self,
-        stage: Stage,
         fstep: int,
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
@@ -346,9 +345,10 @@ class StreamData:
         """
 
         # cat over forecast steps
-        target_coords_empty = torch.cat(self.target_coords_lens).sum() == 0
-        target_tokens_empty = torch.cat(self.target_tokens).sum() == 0
-        return target_coords_empty and target_tokens_empty
+        is_empty = torch.cat(self.target_coords_lens).sum() == 0
+        if self.stage == TRAIN:
+            is_empty = is_empty and torch.cat(self.target_tokens).sum() == 0
+        return is_empty
 
     def source_empty(self) -> bool:
         """
