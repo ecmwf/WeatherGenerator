@@ -127,6 +127,8 @@ class LossPhysical(LossModuleBase):
             self.device,
         )
 
+        self._resolve_auto_location_weights()
+
     def _get_weights(self, stream_name, stream_info):
         """
         Get weights for current stream
@@ -171,6 +173,24 @@ class LossPhysical(LossModuleBase):
         decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
         return weights_timestep_fct(len_forecast_steps, decay_factor)
 
+    def _resolve_auto_location_weights(self):
+        """Replace location_weight=auto with the detected concrete value once at init."""
+        for stream_name, stream_info in self.cf.streams.items():
+            if stream_info.get("location_weight") != "auto":
+                continue
+            n = loss_fns._O_GRID_N.get(stream_info.get("n_latitudes"))
+            if n is not None:
+                stream_info["location_weight"] = "o_grid_latitude"
+                stream_info["location_weight_N"] = n
+            else:
+                _logger.warning(
+                    "Stream '%s': location_weight=auto could not detect O<N> grid "
+                    "(n_latitudes=%s). Falling back to uniform weighting.",
+                    stream_name,
+                    stream_info.get("n_latitudes"),
+                )
+                stream_info["location_weight"] = None
+
     def _get_location_weights(self, stream_info, target_coords, substep_masks):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
@@ -178,15 +198,8 @@ class LossPhysical(LossModuleBase):
 
         target_coords = target_coords.to(self.device, non_blocking=True)
 
-        if location_weight_type == "auto":
-            n = loss_fns._O_GRID_N.get(stream_info.get("n_latitudes"))
-            if n is None:
-                _logger.warning(
-                    "location_weight=auto: could not detect O<N> grid (n_latitudes=%s). "
-                    "Falling back to uniform weighting.",
-                    stream_info.get("n_latitudes"),
-                )
-                return [None for _ in substep_masks]
+        if location_weight_type == "o_grid_latitude":
+            n = stream_info["location_weight_N"]
             weights_locations_fct = lambda coords: loss_fns.o_grid_latitude(coords, n=n)
         else:
             weights_locations_fct = getattr(loss_fns, location_weight_type)
