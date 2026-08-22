@@ -196,8 +196,8 @@ class DataReaderAnemoiRT(DataReaderTimestep):
         datetimes = []
         t_cur = dtr.start
         while t_cur < dtr.end:
-            t_cur += self.frequency
             datetimes += [t_cur]
+            t_cur += self.frequency
 
         # extract geoinfo channels (can be time-varying, so read from dataset)
         geoinfos_static = np.repeat(
@@ -217,12 +217,8 @@ class DataReaderAnemoiRT(DataReaderTimestep):
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
-        datetimes = np.repeat(np.array(datetimes, dtype=np.datetime64), (1, len(self.latitudes)))
-        datetimes = datetimes.flatten()
-
-        import code
-
-        code.interact(local=locals())
+        temp = np.repeat(np.array([datetimes], dtype=np.datetime64), len(self.latitudes), axis=0)
+        datetimes = temp.transpose().flatten()
 
         rd = ReaderData(
             coords=coords,
