@@ -179,9 +179,13 @@ class LossPhysical(LossModuleBase):
         target_coords = target_coords.to(self.device, non_blocking=True)
 
         if location_weight_type == "auto":
-            n_points = stream_info.get("n_grid_points")
-            n = loss_fns._O_GRID_N.get(n_points) if n_points is not None else None
+            n = loss_fns._O_GRID_N.get(stream_info.get("n_latitudes"))
             if n is None:
+                _logger.warning(
+                    "location_weight=auto: could not detect O<N> grid (n_latitudes=%s). "
+                    "Falling back to uniform weighting.",
+                    stream_info.get("n_latitudes"),
+                )
                 return [None for _ in substep_masks]
             weights_locations_fct = lambda coords: loss_fns.o_grid_latitude(coords, n=n)
         else:
