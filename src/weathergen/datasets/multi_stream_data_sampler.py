@@ -123,9 +123,23 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.len_timedelta = mode_cfg.time_window_len
         self.step_timedelta = mode_cfg.time_window_step
+
+        # date_ranges: non-contiguous training periods; indices that fall in gaps are excluded
+        raw_ranges = mode_cfg.get("date_ranges", None)
+        if raw_ranges is not None:
+            self._valid_ranges: list[tuple] | None = [
+                (r.start_date, r.end_date) for r in raw_ranges
+            ]
+            t_start = min(r[0] for r in self._valid_ranges)
+            t_end = max(r[1] for r in self._valid_ranges)
+        else:
+            self._valid_ranges = None
+            t_start = self.mode_cfg.start_date
+            t_end = self.mode_cfg.end_date
+
         tw = TimeWindowHandler(
-            self.mode_cfg.start_date,
-            self.mode_cfg.end_date,
+            t_start,
+            t_end,
             self.len_timedelta,
             self.step_timedelta,
         )
@@ -157,15 +171,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        max_index = self.index_range.end - (
-            (  # max time units needed to make a forecast
-                self.time_step * (fsm + self.output_offset)  # translation due to forecasting
-                + self.len_timedelta  # length of forecasting window
-            )
-            // self.step_timedelta  # as number of indexs
-        )
-
-        available_samples = max_index * self.batch_size  # as number of samples
+        available_samples = len(self._calc_baseperms(fsm)) * self.batch_size
 
         assert available_samples > 0, (
             "There is an insufficient date range to \
@@ -213,9 +219,21 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
+        # global end guard: prevent forward index access beyond t_end
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
-        return np.arange(self.max_input_steps, perms_len)
+        if self._valid_ranges is None:
+            return np.arange(self.max_input_steps, perms_len)
+
+        # include only indices whose mapped time falls within one of the valid periods
+        all_indices = np.arange(self.max_input_steps, perms_len)
+        t_start = self.time_window_handler.t_start
+        step = self.time_window_handler.t_window_step
+        times = t_start + all_indices * step
+        mask = np.zeros(len(all_indices), dtype=bool)
+        for p_start, p_end in self._valid_ranges:
+            mask |= (times >= p_start) & (times < p_end)
+        return all_indices[mask]
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""

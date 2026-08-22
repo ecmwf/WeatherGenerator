@@ -96,6 +96,13 @@ def _sanitize_start_end_time_keys(sub_conf):
         if key in sub_conf:
             sub_conf = _patch_time(key, sub_conf, _DATETIME_TYPE_NAME)
 
+    # Support for non-contiguous training: list of {start_date, end_date} dicts
+    if "date_ranges" in sub_conf:
+        for entry in sub_conf.date_ranges:
+            for key in time_keys:
+                if key in entry:
+                    _patch_time(key, entry, _DATETIME_TYPE_NAME)
+
 
 def _sanitize_delta_time_keys(sub_conf):
     """Convert time delta keys to timedelta resolvers."""
