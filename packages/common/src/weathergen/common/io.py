@@ -138,7 +138,7 @@ class IOReaderData:
         """
         Test if data object is empty
         """
-        return len(self.data) == 0
+        return len(self.datetimes) == 0
 
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
@@ -147,16 +147,13 @@ class IOReaderData:
 
         other should be such an instance.
         """
-        coords = np.asarray(other.coords)
-        geoinfos = np.asarray(other.geoinfos)
-        data = np.asarray(other.data)
-        datetimes = np.asarray(other.datetimes)
 
-        n_datapoints = len(data)
-
-        assert coords.shape == (n_datapoints, 2), "number of datapoints do not match data"
-        assert geoinfos.shape[0] == n_datapoints, "number of datapoints do not match data"
-        assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
+        assert other.coords.shape[0] == other.datetimes.shape[0], (
+            "number of datapoints do not match data"
+        )
+        assert other.geoinfos.shape[0] == other.datetimes.shape[0], (
+            "number of datapoints do not match data"
+        )
 
         return cls(**dataclasses.asdict(other))
 
@@ -177,10 +174,9 @@ class IOReaderData:
         is_spoof = True
 
         for other in others:
-            n_datapoints = len(other.data)
+            n_datapoints = len(other.datetimes)
             assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
             assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
-            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
 
             coords = np.concatenate([coords, other.coords])
             geoinfos = np.concatenate([geoinfos, other.geoinfos])
