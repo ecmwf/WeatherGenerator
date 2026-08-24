@@ -21,7 +21,7 @@ import yaml
 
 import weathergen.common.config as config
 from weathergen.train.utils import TRAIN
-from weathergen.utils.train_logger import Metrics, TrainLogger
+from weathergen.utils.train_logger import Metrics, TrainLogger, sanitize_channel_for_matching
 
 _logger = logging.getLogger(__name__)
 
@@ -420,8 +420,17 @@ def plot_loss_per_stream(
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "m", "y"]
 
+    if channels is not None:
+        channels_sanitized = [sanitize_channel_for_matching(c) for c in channels]
+    else:
+        channels_sanitized = channels
+
     for err in errs:
-        for channel in channels:
+        channels_to_use = channels if channels else [None]
+        channels_sanitized_to_use = channels_sanitized if channels_sanitized else [None]
+        for channel, channel_sanitized in zip(
+            channels_to_use, channels_sanitized_to_use, strict=True
+        ):
             for stream_name in stream_names:
                 _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
@@ -456,7 +465,7 @@ def plot_loss_per_stream(
                                 if (
                                     col_split[1].lower() == stream_name.lower()
                                     and col_split[2].lower() == err.lower()
-                                    and col_split[3] == channel
+                                    and col_split[3] == channel_sanitized
                                 ):
                                     data_cols += [col]
                                     title_col = col if title_col is None else title_col
@@ -464,17 +473,8 @@ def plot_loss_per_stream(
                                 if (
                                     col_split[1].lower() == stream_name.lower()
                                     and col_split[2].lower() == err.lower()
-                                    and col_split[3] == channel
+                                    and col_split[3] == channel_sanitized
                                     and int(col_split[4]) in forecast_steps
-                                ):
-                                    data_cols += [col]
-                                    title_col = col if title_col is None else title_col
-                            elif len(col_split) == 6:
-                                if (
-                                    col_split[1].lower() == stream_name.lower()
-                                    and col_split[2].lower() == err.lower()
-                                    and col_split[3] + "." + col_split[4] == channel
-                                    and int(col_split[5]) in forecast_steps
                                 ):
                                     data_cols += [col]
                                     title_col = col if title_col is None else title_col
@@ -612,6 +612,11 @@ def plot_loss_per_run(
     if errs is None:
         errs = ["mse"]
 
+    if channels is not None:
+        channels_sanitized = [sanitize_channel_for_matching(c) for c in channels]
+    else:
+        channels_sanitized = channels
+
     plot_dir = Path(plot_dir)
 
     modes = [modes] if type(modes) is not list else modes
@@ -640,7 +645,7 @@ def plot_loss_per_run(
                 if (
                     len(col_split) >= 4
                     and col_split[2].lower() == err.lower()
-                    and col_split[3] in channels
+                    and col_split[3] in channels_sanitized
                 ):
                     data_cols += [col]
 

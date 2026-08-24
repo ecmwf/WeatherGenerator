@@ -19,7 +19,6 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import torch
-
 import weathergen.common.config as config
 
 # from weathergen.train.trainer import cfg_keys_to_filter
@@ -62,7 +61,9 @@ class TrainLogger:
         self.cf = cf
         self.path_run = path_run
 
-    def log_metrics(self, stage: Stage, metrics: dict[str, float], step: int | None = None) -> None:
+    def log_metrics(
+        self, stage: Stage, metrics: dict[str, float], step: int | None = None
+    ) -> None:
         """
         Log metrics to a file.
         For now, just scalar values are expected. There is no check.
@@ -145,7 +146,9 @@ class TrainLogger:
 
         # Load config from given model_path if provided, otherwise use path from private config
         if model_path:
-            cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
+            cf = config.load_run_config(
+                run_id=run_id, mini_epoch=mini_epoch, model_path=model_path
+            )
         else:
             cf = config.load_merge_configs(
                 private_home=None, from_run_id=run_id, mini_epoch=mini_epoch
@@ -158,13 +161,17 @@ class TrainLogger:
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
         cols1_patterns = ["loss_avg"] + cols_patterns
 
-        metrics_train = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
+        metrics_train = read_metrics(
+            cf, run_id, "train", cols1, cols1_patterns, result_dir_base
+        )
 
         # define cols for validation
         cols2 = [_weathergen_timestamp, "num_samples"]
         cols2_patterns = ["loss_avg"] + cols_patterns
 
-        metrics_val = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
+        metrics_val = read_metrics(
+            cf, run_id, "val", cols2, cols2_patterns, result_dir_base
+        )
 
         return Metrics(run_id, "train", metrics_train, metrics_val, None)
 
@@ -194,6 +201,10 @@ def read_metrics(
     # TODO: this should be a config option
     df = read_metrics_file(metrics_path)
 
+    # Sanitize LossPhysical column names to replace dots in channel names with underscores
+    new_columns = {col: sanitize_loss_physical_column(col) for col in df.columns}
+    df = df.rename(new_columns)
+
     if cols_patterns is not None:
         for col_pattern in cols_patterns:
             cols += [col for col in df.columns if col_pattern in col]
@@ -216,10 +227,14 @@ def clean_df(df, columns: list[str] | None):
 
     # Convert timestamp column to date
     df = df.with_columns(
-        pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(_weathergen_timestamp)
+        pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(
+            _weathergen_timestamp
+        )
     )
     df = df.with_columns(
-        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
+        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(
+            _weathergen_reltime
+        )
     )
 
     if columns:
@@ -269,6 +284,38 @@ def _key_stddev(st_name: str) -> str:
     return f"stream.{st_name}.stddev_avg"
 
 
+def sanitize_loss_physical_column(col: str) -> str:
+    """Replace dots in channel names with underscores for LossPhysical columns.
+
+    Adapts column names like:
+        LossPhysical.EERIE_OCEAN.mse.avg_thetao_2.5.0
+    to:
+        LossPhysical.EERIE_OCEAN.mse.avg_thetao_2_5.0
+
+    The format is: LossPhysical.{stream}.{error}.{channel}[.{forecast_step}]
+    """
+    if not col.startswith("LossPhysical."):
+        return col
+    parts = col.split(".")
+    if len(parts) < 4:
+        return col
+
+    if len(parts) > 4 and parts[-1].isdigit():
+        channel_parts = parts[3:-1]
+        forecast_step = parts[-1]
+        sanitized_channel = "_".join(channel_parts)
+        return f"LossPhysical.{parts[1]}.{parts[2]}.{sanitized_channel}.{forecast_step}"
+    else:
+        channel_parts = parts[3:]
+        sanitized_channel = "_".join(channel_parts)
+        return f"LossPhysical.{parts[1]}.{parts[2]}.{sanitized_channel}"
+
+
+def sanitize_channel_for_matching(channel: str) -> str:
+    """Replace dots with underscores for matching against sanitized column names."""
+    return channel.replace(".", "_")
+
+
 def prepare_losses_for_logging(
     loss_hist: list,
     losses_unweighted_hist: list[dict],
@@ -292,7 +339,9 @@ def prepare_losses_for_logging(
 
     for d in losses_unweighted_hist:
         for key, value in flatten_dict(d).items():
-            value = torch.tensor(value, device="cuda") if type(value) is float else value
+            value = (
+                torch.tensor(value, device="cuda") if type(value) is float else value
+            )
             losses_all[key].append(ddp_average(value).item())
 
     for d in stddev_unweighted_hist:
