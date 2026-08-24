@@ -26,6 +26,8 @@ def calc_val(x: xr.DataArray, bound: str) -> list[float]:
     bound : str
         ``"max"`` or ``"min"``.
     """
+    if "ipoint" not in x.dims or x.sizes["ipoint"] == 0:
+        return np.array([np.nan])
     if bound == "max":
         return x.max(dim="ipoint").values
     elif bound == "min":
@@ -104,13 +106,17 @@ def common_ranges(
         # if vmax still missing, compute bound from data
         if not isinstance(maps_config[var].get("vmax"), (int | float)):
             list_max = calc_bounds(data_tars, data_preds, var, "max")
-            list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-            maps_config[var].update({"vmax": float(max(list_max))})
+            list_max = np.concatenate([arr.flatten() for arr in list_max])
+            list_max = list_max[np.isfinite(list_max)]
+            if list_max.size > 0:
+                maps_config[var].update({"vmax": float(list_max.max())})
         # if vmin still missing, compute bound from data
         if not isinstance(maps_config[var].get("vmin"), (int | float)):
             list_min = calc_bounds(data_tars, data_preds, var, "min")
-            list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
-            maps_config[var].update({"vmin": float(min(list_min))})
+            list_min = np.concatenate([arr.flatten() for arr in list_min])
+            list_min = list_min[np.isfinite(list_min)]
+            if list_min.size > 0:
+                maps_config[var].update({"vmin": float(list_min.min())})
     return maps_config
 
 
@@ -138,16 +144,23 @@ def bias_ranges(
     oc.DictConfig
         Per-variable symmetric ranges (``vmin = -abs_max``, ``vmax = abs_max``).
     """
+    import logging
+
+    _logger = logging.getLogger(__name__)
+
     bias_config = global_plotting_opts_stream.copy()
     for var in plot_chs:
         bias_vals = [
             (p - t).sel(channel=var).values
             for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
         ]
-        abs_max = float(
-            max(abs(np.concatenate(bias_vals).max()), abs(np.concatenate(bias_vals).min()))
-        )
-        bias_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
+        all_bias = np.concatenate([v.flatten() for v in bias_vals])
+        all_bias = all_bias[np.isfinite(all_bias)]
+        if all_bias.size == 0:
+            continue
+        abs_p = float(np.percentile(np.abs(all_bias), 98))
+        bias_config.update({var: {"vmax": abs_p, "vmin": -abs_p}})
+        _logger.info(f"bias_ranges: {var} → vmin={-abs_p:.4f}, vmax={abs_p:.4f}")
     return bias_config
 
 

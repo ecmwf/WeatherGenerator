@@ -660,10 +660,13 @@ class Plotter:
         """
         kw = map_kwargs.copy() if map_kwargs is not None else {}
 
+        _sentinel = object()
+        _user_marker = kw.pop("marker_size", _sentinel)
         parsed = {
-            "marker_size_base": kw.pop(
-                "marker_size", DefaultMarkerSize.get_marker_size(stream) if stream else 0.5
-            ),
+            "marker_size_base": _user_marker
+            if _user_marker is not _sentinel
+            else (DefaultMarkerSize.get_marker_size(stream) if stream else 0.5),
+            "marker_size_explicit": _user_marker is not _sentinel,
             "scale_marker_size": kw.pop("scale_marker_size", False),
             "marker": kw.pop("marker", "o"),
             "vmin": kw.pop("vmin", None),
@@ -1027,7 +1030,13 @@ class Plotter:
         if opts["vmin"] is None or opts["vmax"] is None:
             valid_vals = data.values[np.isfinite(data.values)]
             if valid_vals.size > 0:
-                p_lo, p_hi = np.percentile(valid_vals, [5, 95])
+                is_bias = str(tag).startswith("bias")
+                if is_bias:
+                    # Bias maps: symmetric percentile range
+                    abs_p = float(np.percentile(np.abs(valid_vals), 98))
+                    p_lo, p_hi = -abs_p, abs_p
+                else:
+                    p_lo, p_hi = np.percentile(valid_vals, [2, 98])
                 if opts["vmin"] is None:
                     opts["vmin"] = float(p_lo)
                 if opts["vmax"] is None:
@@ -1061,14 +1070,21 @@ class Plotter:
                     "use_datashader=True but datashader is not installed. "
                     "Falling back to scatter. Install with: pip install datashader"
                 )
-            marker_size = DefaultMarkerSize.auto_marker_size(
-                n_points=data.size,
-                fig_width_in=fig.get_figwidth(),
-                fig_height_in=fig.get_figheight(),
-                stream_default=opts["marker_size_base"],
-                scale=opts["scale_marker_size"],
-                lat=data["lat"],
-            )
+            if opts["marker_size_explicit"]:
+                # User provided an explicit marker_size — use it directly,
+                # only apply latitude scaling if requested.
+                marker_size = DefaultMarkerSize.compute_marker_size(
+                    opts["marker_size_base"], opts["scale_marker_size"], data["lat"]
+                )
+            else:
+                marker_size = DefaultMarkerSize.auto_marker_size(
+                    n_points=data.size,
+                    fig_width_in=fig.get_figwidth(),
+                    fig_height_in=fig.get_figheight(),
+                    stream_default=opts["marker_size_base"],
+                    scale=opts["scale_marker_size"],
+                    lat=data["lat"],
+                )
 
             self._render_scatter(
                 ax, data, opts["norm"], opts["cmap"], marker_size, opts["marker"], opts["extra"]

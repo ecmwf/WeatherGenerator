@@ -489,7 +489,18 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
-        fstep0_datasets = self._get_datasets(self.example_key)
+        # If fstep 0 exists, check whether it contains targets
+        example_sample, sample_group = next(self.data_root.groups())
+        example_stream, stream_group = next(sample_group.groups())
+        fstep_keys = sorted(stream_group.group_keys())
+        if not fstep_keys:
+            return 1
+        first_fstep = fstep_keys[0]
+        # If the first fstep is not 0, offset must be 1 (fstep 0 was never written)
+        if str(first_fstep) != "0":
+            return 1
+        key = ItemKey(example_sample, 0, example_stream)
+        fstep0_datasets = self._get_datasets(key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
     @functools.cached_property
@@ -497,7 +508,7 @@ class ZarrIO:
         try:
             sample, example_sample = next(self.data_root.groups())
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
+            fstep, _ = next(example_stream.groups())
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
@@ -525,8 +536,8 @@ class ZarrIO:
 
         all_steps = sorted(list(example_stream.group_keys()))
 
-        if self.forecast_offset == 1:
-            return all_steps[1:]  # exclude fstep with no targets/preds
+        if self.forecast_offset == 1 and all_steps and str(all_steps[0]) == "0":
+            return all_steps[1:]  # exclude fstep 0 which has no targets/preds
         else:
             return all_steps
 

@@ -821,6 +821,17 @@ class WeatherGenZarrReader(WeatherGenReader):
         ):
             _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
             return False
-        else:
-            _logger.debug("Latitude and longitude coordinates are regularly spaced.")
-            return True
+
+        # Check if the coordinates actually form a grid (latitudes repeat for
+        # multiple longitudes) vs. scattered stations (each point has a unique lat).
+        lats = da["lat"].values
+        n_unique_lats = len(np.unique(np.round(lats, decimals=5)))
+        if n_unique_lats == len(lats):
+            _logger.debug(
+                f"Stream has {len(lats)} points with {n_unique_lats} unique latitudes "
+                f"(no repeated lats) — treating as scatter/station data."
+            )
+            return False
+
+        _logger.debug("Latitude and longitude coordinates are regularly spaced.")
+        return True

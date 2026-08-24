@@ -976,6 +976,16 @@ def plot_data(
     maps_config_dict = oc.OmegaConf.to_container(common_ranges(*_range_args), resolve=True)
     bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*_range_args), resolve=True)
 
+    # Propagate top-level scatter-plot options (marker_size, scale_marker_size, etc.)
+    # from global_plotting_opts into the per-stream maps/bias config so they reach
+    # the Plotter.scatter_plot call.
+    for _key in ("marker_size", "scale_marker_size", "marker", "colormap", "use_datashader"):
+        if _key in global_plotting_opts:
+            val = global_plotting_opts[_key]
+            # Only set if not already overridden at stream level
+            maps_config_dict.setdefault(_key, val)
+            bias_config_dict.setdefault(_key, val)
+
     has_ens = any("ens" in da.dims for da in da_preds.values())
 
     if has_ens:
@@ -994,6 +1004,10 @@ def plot_data(
         for cfg in std_config_dict.values():
             if isinstance(cfg, dict):
                 cfg["colormap"] = "YlOrRd"
+
+        for _key in ("marker_size", "scale_marker_size", "marker", "use_datashader"):
+            if _key in global_plotting_opts:
+                std_config_dict.setdefault(_key, global_plotting_opts[_key])
     else:
         std_config_dict = maps_config_dict
 
