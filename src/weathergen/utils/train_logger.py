@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import torch
+
 import weathergen.common.config as config
 
 # from weathergen.train.trainer import cfg_keys_to_filter
@@ -61,9 +62,7 @@ class TrainLogger:
         self.cf = cf
         self.path_run = path_run
 
-    def log_metrics(
-        self, stage: Stage, metrics: dict[str, float], step: int | None = None
-    ) -> None:
+    def log_metrics(self, stage: Stage, metrics: dict[str, float], step: int | None = None) -> None:
         """
         Log metrics to a file.
         For now, just scalar values are expected. There is no check.
@@ -146,9 +145,7 @@ class TrainLogger:
 
         # Load config from given model_path if provided, otherwise use path from private config
         if model_path:
-            cf = config.load_run_config(
-                run_id=run_id, mini_epoch=mini_epoch, model_path=model_path
-            )
+            cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
         else:
             cf = config.load_merge_configs(
                 private_home=None, from_run_id=run_id, mini_epoch=mini_epoch
@@ -161,17 +158,13 @@ class TrainLogger:
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
         cols1_patterns = ["loss_avg"] + cols_patterns
 
-        metrics_train = read_metrics(
-            cf, run_id, "train", cols1, cols1_patterns, result_dir_base
-        )
+        metrics_train = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
 
         # define cols for validation
         cols2 = [_weathergen_timestamp, "num_samples"]
         cols2_patterns = ["loss_avg"] + cols_patterns
 
-        metrics_val = read_metrics(
-            cf, run_id, "val", cols2, cols2_patterns, result_dir_base
-        )
+        metrics_val = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
 
         return Metrics(run_id, "train", metrics_train, metrics_val, None)
 
@@ -227,14 +220,10 @@ def clean_df(df, columns: list[str] | None):
 
     # Convert timestamp column to date
     df = df.with_columns(
-        pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(
-            _weathergen_timestamp
-        )
+        pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(_weathergen_timestamp)
     )
     df = df.with_columns(
-        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(
-            _weathergen_reltime
-        )
+        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
     )
 
     if columns:
@@ -339,9 +328,7 @@ def prepare_losses_for_logging(
 
     for d in losses_unweighted_hist:
         for key, value in flatten_dict(d).items():
-            value = (
-                torch.tensor(value, device="cuda") if type(value) is float else value
-            )
+            value = torch.tensor(value, device="cuda") if type(value) is float else value
             losses_all[key].append(ddp_average(value).item())
 
     for d in stddev_unweighted_hist:
