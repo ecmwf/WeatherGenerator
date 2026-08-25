@@ -276,24 +276,28 @@ class Trainer(TrainerBase):
         mini_epoch,
         bidx,
         targets_and_auxs,
-        is_diffusion: bool = False,
+        is_diffusion_trajectory: bool = False,
     ) -> ModelOutput:
         """Run the rollout in chunks and assemble the predictions for the whole batch."""
         forecast_cfg = mode_cfg.get("forecast", {})
 
         output_idxs = batch.get_output_idxs()
-        # Diffusion consumes the output's fstep dimension for the ODE denoising trajectory,
-        # which neither the reassembly below nor a per-chunk write can handle. Roll out in a
-        # single chunk and let validate() write the output as it did before chunking.
+        # Trajectory-mode diffusion (diffusion_rollout=False) consumes the output's fstep
+        # dimension for the ODE denoising trajectory, which neither the reassembly below nor a
+        # per-chunk write can handle. Roll out in a single chunk and let validate() write the
+        # output as it did before chunking. A diffusion *rollout* keeps the ordinary fstep
+        # layout and carries its state across chunks, so it chunks like any other forecast.
         chunk_size = (
-            len(output_idxs) if is_diffusion else forecast_cfg.get("chunk_size", len(output_idxs))
+            len(output_idxs)
+            if is_diffusion_trajectory
+            else forecast_cfg.get("chunk_size", len(output_idxs))
         )
         chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
         # This assumes that you only have a physical loss, else this breaks
         compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
-        should_write_output = not is_diffusion and bidx < num_samples_write
+        should_write_output = not is_diffusion_trajectory and bidx < num_samples_write
         if should_write_output:
             denormalize_data_fct = (
                 (lambda x0, x1: x1)
@@ -318,8 +322,11 @@ class Trainer(TrainerBase):
         forecast_chunk = batch.get_source_samples()
        
         if not compute_full_loss:
-            target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
-        
+            # bound here, not inside the write branch: the trailing trim below needs it on
+            # every batch, including the ones past output.num_samples that write nothing
+            target_aux = targets_and_auxs[physical_loss_names[0]]
+            target_aux_chunk = copy.deepcopy(target_aux)
+
         for chunk_idx, chunk in enumerate(chunks):
             if not compute_full_loss:
                 batch.to_device_for_output_chunk(self.device, chunk)
@@ -339,8 +346,9 @@ class Trainer(TrainerBase):
 
             if should_write_output:
                 if not compute_full_loss:
-                    target_aux = targets_and_auxs[physical_loss_names[0]]
-                    target_aux_chunk.physical = [None for _ in range(chunk[0])] + [target_aux.physical[step] for step in chunk]
+                    target_aux_chunk.physical = [None for _ in range(chunk[0])] + [
+                        target_aux.physical[step] for step in chunk
+                    ]
                     target_aux_chunk.output_idxs = chunk
                     target_output = { physical_loss_names[0]: target_aux_chunk }
                 else:
@@ -370,12 +378,16 @@ class Trainer(TrainerBase):
             if not compute_full_loss:
                 batch.clear_output_chunk_coordinates(chunk)
 
-        if is_diffusion:
+        if is_diffusion_trajectory:
             # single chunk; its fstep dimension is the trajectory, not forecast steps
             return forecast_chunk, targets_and_auxs
 
         # Data for validation purposes => accumulates in memory!?
-        preds = ModelOutput(chunk, output_idxs[0], batch.get_source_samples())
+        # compute_full_loss keeps every chunk's predictions, so preds spans all output steps;
+        # otherwise only the last chunk survives the loop and preds spans just that chunk.
+        # (These coincide when there is a single chunk, which is why chunk alone used to do.)
+        covered_steps = output_idxs if compute_full_loss else chunk
+        preds = ModelOutput(covered_steps, output_idxs[0], batch.get_source_samples())
         assert len(physical) == len(preds.physical), (
             f"Chunks cover {len(physical)} forecast steps, expected {len(preds.physical)}."
         )
@@ -813,6 +825,11 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         is_diffusion = cf.get("fe_diffusion_model", False)
+        # Only trajectory-mode diffusion (diffusion_rollout=False) hands back a ModelOutput
+        # whose fstep dimension is the ODE trajectory rather than the forecast steps. That
+        # layout is what forces a single chunk and a deferred, whole-batch write below; a
+        # diffusion rollout is an ordinary forecast as far as chunking and IO are concerned.
+        is_diffusion_trajectory = is_diffusion and not cf.get("diffusion_rollout", False)
         noise_levels = list(mode_cfg.get("validation_noise_levels", [0.0]))
         if not is_diffusion:
             noise_levels = [0.0]
@@ -849,13 +866,23 @@ class Trainer(TrainerBase):
                 ) as pbar:
                     for bidx, batch in enumerate(dataset_val_iter):
                         compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
-                        if compute_full_loss or is_diffusion:
+                        if compute_full_loss or is_diffusion_trajectory:
                             batch.to_device(self.device)
                         else:
                             output_idxs = batch.get_output_idxs()
-                            chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
+                            forecast_cfg = mode_cfg.get("forecast", {})
+                            chunk_size = forecast_cfg.get("chunk_size", len(output_idxs))
                             chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
-                            batch.to_device_for_chunked_inference(self.device, chunks[-1])
+                            # calculators that encode the target window (diffusion latent
+                            # target, SSL teachers) read the target samples' source view
+                            needs_target_source = any(
+                                getattr(c, "encodes_target_samples", False)
+                                for c in self.target_and_aux_calculators_val.values()
+                            )
+                            batch.to_device_for_chunked_inference(
+                                self.device, chunks[-1], include_target_source=needs_target_source
+                            )
+                            print(">>>>>>> chunk_size: " + str(chunk_size))
 
                         # evaluate model
                         with torch.autocast(
@@ -883,24 +910,30 @@ class Trainer(TrainerBase):
                                 mini_epoch,
                                 bidx,
                                 targets_and_auxs,
-                                is_diffusion,
+                                is_diffusion_trajectory,
                             )
-                            # Diffusion inference inflates the model output's fstep
-                            # dimension to one entry per ODE step (the denoising
-                            # trajectory). The physical target is identical for every
-                            # such step, so replicate target/aux entries to keep the
+                            # Both diffusion modes produce more preds fsteps than target
+                            # entries: trajectory mode inflates the fstep dimension to one
+                            # entry per ODE step, and a rollout gets a single encoder latent
+                            # target for all T forecast steps. The target is identical for
+                            # every such step, so replicate target/aux entries to keep the
                             # downstream loss calculator and validation IO aligned.
                             if is_diffusion:
                                 _expand_targets_to_match_preds(preds, targets_and_auxs)
 
-                            # Write output for diffusion — _process_validation_chunks
-                            # skips writing when is_diffusion=True because chunked IO
-                            # is incompatible with the ODE trajectory fstep layout.
-                            # Do it here instead, mirroring the non-diffusion path.
+                            # Write output for trajectory-mode diffusion —
+                            # _process_validation_chunks skips writing there because chunked
+                            # IO is incompatible with the ODE trajectory fstep layout. Do it
+                            # here instead, mirroring the non-diffusion path. A diffusion
+                            # rollout has already been written chunk by chunk.
                             num_samples_write = (
                                 mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
                             )
-                            if is_diffusion and _noise_idx == 0 and bidx < num_samples_write:
+                            if (
+                                is_diffusion_trajectory
+                                and _noise_idx == 0
+                                and bidx < num_samples_write
+                            ):
                                 denormalize_data_fct = (
                                     (lambda x0, x1: x1)
                                     if mode_cfg.get("output", {}).get("normalized_samples", False)

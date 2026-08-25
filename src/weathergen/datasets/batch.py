@@ -79,12 +79,14 @@ class Sample:
         include_target_coords: bool = True,
         include_target_tokens: bool = True,
     ) -> None:
-        for key in self.meta_info.keys():
-            self.meta_info[key].mask = (
-                self.meta_info[key].mask.to(device, non_blocking=True)
-                if self.meta_info[key].mask is not None
-                else None
-            )
+        for info in self.meta_info.values():
+            # meta_info is keyed by stream name, but the diffusion rollout also stashes
+            # model-side state here (LATENT_CONDITIONING_TOKENS, a bare tensor already on
+            # device). Chunked inference re-enters to_device after the model has run, so
+            # only touch entries that actually carry stream metadata.
+            mask = getattr(info, "mask", None)
+            if mask is not None:
+                info.mask = mask.to(device, non_blocking=True)
 
         for key, val in self.streams_data.items():
             if val is not None:
@@ -378,8 +380,15 @@ class ModelBatch:
 
         return self
 
-    def to_device_for_chunked_inference(self, device, loss_steps: list[int]):
-        """Move source inputs and the targets required for the final chunk loss."""
+    def to_device_for_chunked_inference(
+        self, device, loss_steps: list[int], include_target_source: bool = False
+    ):
+        """Move source inputs and the targets required for the final chunk loss.
+
+        include_target_source additionally moves the target samples' source view, which
+        target/aux calculators that encode the target window (SSL teachers, the diffusion
+        latent target) need. It is left on the host otherwise.
+        """
         self.source_samples.to_device(
             device,
             target_steps=[],
@@ -389,7 +398,7 @@ class ModelBatch:
         self.target_samples.to_device(
             device,
             target_steps=loss_steps,
-            include_source=False,
+            include_source=include_target_source,
             include_target_coords=False,
         )
         self.device = device

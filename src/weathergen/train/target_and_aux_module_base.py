@@ -65,6 +65,11 @@ class TargetAuxOutput:
 
 
 class TargetAndAuxModuleBase:
+    # True for calculators that run an encoder over the target samples in compute(), which
+    # needs the target samples' *source* view on the device. Chunked inference otherwise
+    # leaves that view on the host to save memory, so it consults this flag before deciding.
+    encodes_target_samples: bool = False
+
     def __init__(self, cf, model, **kwargs):
         pass
 
