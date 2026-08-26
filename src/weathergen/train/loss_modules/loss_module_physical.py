@@ -265,6 +265,12 @@ class LossPhysical(LossModuleBase):
                     assert len(target_idx) == 1
                     target_idx = target_idx[0]
 
+                    # Predictions may be offloaded to CPU (e.g. diffusion rollout inference,
+                    # offload_predictions_to_cpu) to bound peak GPU memory. Move this single
+                    # prediction back to the compute device for the loss; a no-op when it is
+                    # already there.
+                    pred = pred.to(self.device, non_blocking=True)
+
                     # current target data
                     target = targets_batch[target_idx]
                     target_times = targets_times_batch[target_idx]

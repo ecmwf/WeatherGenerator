@@ -992,9 +992,19 @@ class Model(torch.nn.Module):
                             member_preds.setdefault(sname, []).extend(pred_tuple)
                     # Concatenate along dim 0: (N, n_points, channels),
                     # wrap in 1-tuple (batch_size=1).
+                    # Optionally offload the decoded physical predictions to CPU. During a
+                    # rollout the per-step, per-member full-map predictions would otherwise
+                    # accumulate on the GPU across all forecast steps (they are only consumed
+                    # later by write_output/loss, both of which tolerate CPU tensors), so
+                    # offloading keeps peak GPU memory independent of num_steps / ensemble
+                    # size. The rolled-forward latent conditioning stays on the GPU below.
+                    offload_preds = self.cf.get("offload_predictions_to_cpu", True)
                     for sname, preds_list in member_preds.items():
+                        member_pred = torch.cat(preds_list, dim=0)
+                        if offload_preds:
+                            member_pred = member_pred.to("cpu", non_blocking=True)
                         output.add_physical_prediction(
-                            output.chunk_idx(step), sname, (torch.cat(preds_list, dim=0),)
+                            output.chunk_idx(step), sname, (member_pred,)
                         )
                     # Carry the rolled-forward state so a following forecast chunk resumes from
                     # here instead of re-encoding the source window and restarting the forecast.
