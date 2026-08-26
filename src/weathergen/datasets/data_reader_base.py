@@ -556,9 +556,44 @@ class DataReaderBase(metaclass=ABCMeta):
             raise ValueError(
                 f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}"
             )
+        # Equivalent to (data[..., i] - mean[ch]) / stdev[ch] per channel.
+        # Dict stats are Python floats (weak scalars → same dtype as data). Array stats keep
+        # their dtype so float32 data minus float64 mean still promotes, matching the loop.
+        if isinstance(mean, dict):
+            mean_vec = np.array([mean[ch] for ch in idx], dtype=data.dtype)
+            std_vec = np.array([stdev[ch] for ch in idx], dtype=data.dtype)
+        else:
+            idx_arr = np.asarray(idx, dtype=np.intp)
+            mean_vec = np.asarray(mean)[idx_arr]
+            std_vec = np.asarray(stdev)[idx_arr]
+
+        if mean_vec.dtype == data.dtype and std_vec.dtype == data.dtype:
+            data -= mean_vec
+            data /= std_vec
+            return data
+
+        # Mixed dtypes (typically float32 data, float64 anemoi/obs stats): promote the same
+        # way the original channel loop did. Row-chunked ufuncs avoid a full-size float64
+        # temporary; few-channel or non-contiguous last axes stay on the scalar loop.
+        n_ch = data.shape[-1]
+        last_contiguous = data.strides[-1] == data.dtype.itemsize
+        if n_ch >= 8 and last_contiguous:
+            n_rows = int(np.prod(data.shape[:-1], dtype=np.intp))
+            flat = data.reshape(n_rows, n_ch)
+            if np.shares_memory(flat, data):
+                chunk = 8192
+                tmp_dtype = np.result_type(data.dtype, mean_vec.dtype, std_vec.dtype)
+                tmp = np.empty((min(chunk, n_rows), n_ch), dtype=tmp_dtype)
+                for start in range(0, n_rows, chunk):
+                    end = min(start + chunk, n_rows)
+                    sl = flat[start:end]
+                    view = tmp[: end - start]
+                    np.subtract(sl, mean_vec, out=view)
+                    np.divide(view, std_vec, out=view)
+                    np.copyto(sl, view)
+                return data
         for i, ch in enumerate(idx):
             data[..., i] = (data[..., i] - mean[ch]) / stdev[ch]
-
         return data
 
     @staticmethod
