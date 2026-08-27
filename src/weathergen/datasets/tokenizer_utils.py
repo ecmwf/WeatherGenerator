@@ -359,7 +359,7 @@ def tokenize_apply_mask_target(
     datetimes_enc = enc_time(datetimes, time_win)
     geoinfos = rdata.geoinfos[idxs_data]
     coords = rdata.coords[idxs_data]
-    data = rdata.data[idxs_data]
+    data = rdata.data[idxs_data] if len(rdata.data) > 0 else rdata.data
 
     if mask_channels is not None:
         assert False, "to be implemented"
@@ -516,7 +516,6 @@ def get_target_coords_local(
     tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
     zi = 75
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
-
 
     a[..., 98] = np.sin(coords[:, 0])
     a[..., 97] = np.cos(coords[:, 0])

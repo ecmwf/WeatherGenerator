@@ -26,6 +26,7 @@ import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
+from weathergen.model.model import ModelOutput
 from weathergen.model.model_interface import (
     init_model_and_shard,
 )
@@ -190,6 +191,134 @@ class Trainer(TrainerBase):
 
         return target_and_aux_calculators
 
+    def _get_forecast_step_chunks(self, output_idxs: list[int], chunk_size: int) -> list[list[int]]:
+        """Split the forecast steps into contiguous chunks of at most chunk_size steps."""
+        assert chunk_size >= 1, f"forecast.chunk_size must be >= 1, got {chunk_size}."
+        return [
+            output_idxs[start : start + chunk_size]
+            for start in range(0, len(output_idxs), chunk_size)
+        ]
+
+    def _process_validation_chunks(
+        self,
+        batch,
+        mode_cfg,
+        batch_size,
+        mini_epoch,
+        bidx,
+        targets_and_auxs,
+    ) -> ModelOutput:
+        """
+        Run the rollout in chunks and assemble the predictions for the whole batch.
+        """
+        forecast_cfg = mode_cfg.get("forecast", {})
+
+        output_idxs = batch.get_output_idxs()
+        # Diffusion consumes the output's fstep dimension for the ODE denoising trajectory,
+        # which neither the reassembly below nor a per-chunk write can handle. Roll out in a
+        # single chunk and let validate() write the output as it did before chunking.
+        chunk_size = forecast_cfg.get("chunk_size", len(output_idxs))
+        chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
+
+        num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+        # This assumes that you only have a physical loss, else this breaks
+        compute_full_loss = mode_cfg.get("compute_loss", True)
+        should_write_output = bidx < num_samples_write
+        if should_write_output:
+            denormalize_data_fct = (
+                (lambda x0, x1: x1)
+                if mode_cfg.get("output", {}).get("normalized_samples", False)
+                else self.dataset_val.denormalize_target_channels
+            )
+            if not targets_and_auxs:
+                raise ValueError(
+                    "Writing validation output requires targets. "
+                    "Configure validation losses or set output.num_samples=0."
+                )
+
+        physical_loss_names = [
+            name for name, loss_cfg in mode_cfg.losses.items() if loss_cfg.type == "LossPhysical"
+        ]
+        assert len(physical_loss_names) == 1 or chunk_size == len(output_idxs), (
+            "Chunked non-full validation requires one LossPhysical term."
+        )
+
+        physical, latent = [], []
+        forecast_chunk = batch.get_source_samples()
+
+        if not compute_full_loss:
+            target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
+
+        for chunk_idx, chunk in enumerate(chunks):
+            if not compute_full_loss:
+                batch.to_device_for_output_chunk(self.device, chunk)
+
+            logger.info(f"Chunked inference: processing chunk: {chunk}")
+            if self.ema_model is None:
+                forecast_chunk = self.model(
+                    self.model_params,
+                    forecast_chunk,
+                    chunk,
+                )
+            else:
+                forecast_chunk = self.ema_model.forward_eval(
+                    self.model_params,
+                    forecast_chunk,
+                    chunk,
+                )
+
+            if should_write_output:
+                if not compute_full_loss:
+                    target_aux = targets_and_auxs[physical_loss_names[0]]
+                    target_aux_chunk.physical = [None for _ in range(chunk[0])] + [
+                        target_aux.physical[step] for step in chunk
+                    ]
+                    target_aux_chunk.output_idxs = chunk
+                    target_output = {physical_loss_names[0]: target_aux_chunk}
+                else:
+                    target_output = targets_and_auxs
+
+                # write output incrementally
+                write_output(
+                    self.cf,
+                    mode_cfg,
+                    batch_size,
+                    mini_epoch,
+                    bidx,
+                    denormalize_data_fct,
+                    batch,
+                    forecast_chunk,
+                    target_output,
+                )
+
+            if compute_full_loss:
+                physical += forecast_chunk.physical
+                latent += forecast_chunk.latent
+            elif chunk_idx == len(chunks) - 1:
+                physical = forecast_chunk.physical
+                latent = forecast_chunk.latent
+            else:
+                forecast_chunk.physical.clear()
+                forecast_chunk.latent = [forecast_chunk.latent[-1]]
+
+            if not compute_full_loss:
+                batch.clear_output_chunk_coordinates(chunk)
+
+        # Data for validation purposes => accumulates in memory!?
+        preds = ModelOutput(chunk, output_idxs[0], batch.get_source_samples())
+        assert len(physical) == len(preds.physical), (
+            f"Chunks cover {len(physical)} forecast steps, expected {len(preds.physical)}."
+        )
+        preds.physical = physical
+        preds.latent = latent
+
+        if not compute_full_loss:
+            # this modifies targets_and_auxs in place
+            target_aux_chunk.physical = [target_aux.physical[step] for step in chunk]
+            targets_and_auxs[physical_loss_names[0]] = target_aux_chunk
+
+        return preds, targets_and_auxs
+
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
         self.init(cf, devices)
@@ -209,7 +338,9 @@ class Trainer(TrainerBase):
         self.dataset_val = self.dataset
 
         # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers)
+        loader_num_workers = min(
+            self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers_validation
+        )
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
@@ -323,7 +454,9 @@ class Trainer(TrainerBase):
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
         # https://arxiv.org/pdf/2111.06377
-        kappa = self.get_batch_size_total(self.batch_size_per_gpu)
+        # TODO
+        # kappa = self.get_batch_size_total(self.batch_size_per_gpu)
+        kappa = min(4, self.get_batch_size_total(self.batch_size_per_gpu))
         # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
         # aiming for beta2 = 0.95 at one node, ie B=4
@@ -463,6 +596,7 @@ class Trainer(TrainerBase):
                     preds = self.model(
                         model_params=self.model_params,
                         batch=batch.get_source_samples(),
+                        forecast_steps=batch.get_output_idxs(),
                     )
 
                     targets_and_auxs = {}
@@ -580,15 +714,19 @@ class Trainer(TrainerBase):
 
         dataset_val_iter = iter(self.data_loader_validation)
 
-        num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
-
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    batch.to_device(self.device)
+                    if mode_cfg.get("compute_loss", True):
+                        batch.to_device(self.device)
+                    else:
+                        output_idxs = batch.get_output_idxs()
+                        chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
+                        chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
+                        batch.to_device_for_chunked_inference(self.device, chunks[-1])
 
                     # evaluate model
                     with torch.autocast(
@@ -596,17 +734,6 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        if self.ema_model is None:
-                            preds = self.model(
-                                self.model_params,
-                                batch.get_source_samples(),
-                            )
-                        else:
-                            preds = self.ema_model.forward_eval(
-                                self.model_params,
-                                batch.get_source_samples(),
-                            )
-
                         targets_and_auxs = {}
                         for loss_name, target_aux in self.target_and_aux_calculators_val.items():
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
@@ -617,31 +744,20 @@ class Trainer(TrainerBase):
                                 self.model,
                             )
 
-                    _ = self.loss_calculator_val.compute_loss(
-                        preds=preds,
-                        targets_and_aux=targets_and_auxs,
-                        metadata=extract_batch_metadata(batch),
-                    )
+                            preds, targets_and_auxs = self._process_validation_chunks(
+                                batch,
+                                mode_cfg,
+                                batch_size,
+                                mini_epoch,
+                                bidx,
+                                targets_and_auxs,
+                            )
 
-                    # log output
-                    if bidx < num_samples_write:
-                        # denormalization function for data
-                        denormalize_data_fct = (
-                            (lambda x0, x1: x1)
-                            if mode_cfg.get("output", {}).get("normalized_samples", False)
-                            else self.dataset_val.denormalize_target_channels
-                        )
-                        # write output
-                        write_output(
-                            self.cf,
-                            mode_cfg,
-                            batch_size,
-                            mini_epoch,
-                            bidx,
-                            denormalize_data_fct,
-                            batch,
-                            preds,
-                            targets_and_auxs,
+                    if mode_cfg.get("compute_loss", True):
+                        _ = self.loss_calculator_val.compute_loss(
+                            preds=preds,
+                            targets_and_aux=targets_and_auxs,
+                            metadata=extract_batch_metadata(batch),
                         )
 
                     pbar.update(batch_size)
