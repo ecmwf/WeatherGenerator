@@ -51,6 +51,20 @@ variables:
     wg_unit: m s**-1
     std_unit: m s-1
     level_type: sfc
+  10si:
+    var: 10si # derived channel
+    long: wind_speed_at_10m
+    std: wind_speed
+    wg_unit: m s**-1
+    std_unit: m s**-1
+    level_type: sfc
+  10wdir:
+    var: 10wdir
+    long: wind_direction_at_10m
+    std: wind_from_direction
+    wg_unit: degrees
+    std_unit: degrees
+    level_type: sfc
   2d:
     var: d2m
     long: dew_point_temperature_at_screen_level
@@ -66,6 +80,20 @@ variables:
     wg_unit: K
     std_unit: K
     level_type: sfc
+  2r:
+    var: 2r
+    long: relative_humidity_at_screen_level
+    std: relative_humidity
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  r:
+    var: r
+    long: relative_humidity_at_pressure_levels
+    std: relative_humidity
+    wg_unit: 1
+    std_unit: 1
+    level_type: pl
   msl:
     var: msl
     long: mean_sea_level_pressure

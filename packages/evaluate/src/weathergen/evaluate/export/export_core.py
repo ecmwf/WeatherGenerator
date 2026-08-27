@@ -319,6 +319,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     n_processes = kwargs.n_processes
     epoch = kwargs.epoch
     rank = kwargs.rank
+    region = kwargs.region
     init_time_reference = kwargs.get("init_time_reference", "source_start")
     if init_time_reference not in ("source_start", "source_end"):
         raise ValueError(
@@ -434,6 +435,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                                 ref_time=init_time,
                                 source_interval_start=source_start,
                                 source_interval_end=init_time,
+                                region=region,
                             )
                             processed_samples.append(processed_sample)
                             # Free memory immediately.

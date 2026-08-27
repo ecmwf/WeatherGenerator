@@ -22,10 +22,15 @@ dependencies = [
     "earthkit-data==0.17.0",
     "earthkit-utils==0.1.2",
     "imageio[ffmpeg]>=2.37.2",
+    "cfgrib",
     "scipy>=1.12",
     "scores",
     "pypdf>=4.0",
     ]
+
+[tool.uv.sources]
+cfgrib = { git = "https://github.com/ecmwf/cfgrib", rev = "322f38818bdd236a4fc4b70bf999212399bf79cf"}
+
 
 [dependency-groups]
 dev = [
