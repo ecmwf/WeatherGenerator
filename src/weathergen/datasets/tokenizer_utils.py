@@ -5,16 +5,13 @@ from astropy_healpix.healpy import ang2pix
 from torch import Tensor
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.healpix_domain import build_local_healpix_cell_splits
 from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
     locs_to_ctr_coords,
     r3tos2,
     s2tor3,
 )
-
-# on some clusters our numpy version is pinned to be 1.x.x where the np.argsort does not
-# the stable=True argument
-numpy_argsort_args = {"stable": True} if int(np.__version__.split(".")[0]) >= 2 else {}
 
 
 def theta_phi_to_standard_coords(coords):
@@ -95,34 +92,46 @@ def encode_times_target(times, time_win) -> torch.tensor:
     return time_tensor + 0.5
 
 
-def hpy_cell_splits(coords: torch.tensor, hl: int):
+def hpy_cell_splits(
+    coords: torch.tensor,
+    hl: int,
+    cell_start: int = 0,
+    cell_end: int | None = None,
+):
     """Compute healpix cell id for each coordinate on given level hl
 
     Returns
-      hpy_idxs_ord_split : list of per cell indices into thetas,phis,posr3
+      hpy_idxs_ord_split : list of per-local-cell indices into thetas,phis,posr3
       thetas : thetas in rad
       phis : phis in rad
     """
+    num_healpix_cells = 12 * 4**hl
+    cell_end = num_healpix_cells if cell_end is None else cell_end
+
     thetas, phis = theta_phi_to_standard_coords(coords)
     # healpix cells for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
 
-    # extract information to split according to cells by first sorting and then finding split idxs
-    hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
-    splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
-
-    # extract per cell data
-    hpy_idxs_ord_temp = np.split(hpy_idxs_ord, splits + 1)
-    hpy_idxs_ord_split = [np.array([], dtype=np.int64) for _ in range(12 * 4**hl)]
-    # TODO: split smarter (with a augmented splits list?) so that this loop is not needed
-    for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
-        hpy_idxs_ord_split[b] = x
+    # Nested HEALPix IDs make a consecutive interval a complete rank-local
+    # domain. The helper applies the point mask and builds only local cells.
+    hpy_idxs_ord_split = build_local_healpix_cell_splits(
+        hpy_idxs,
+        num_healpix_cells,
+        cell_start,
+        cell_end,
+    )
 
     return (hpy_idxs_ord_split, thetas, phis)
 
 
 def hpy_splits(
-    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
+    coords: torch.Tensor,
+    hl: int,
+    token_size: int,
+    pad_tokens: bool,
+    offset_step: int = 0,
+    cell_start: int = 0,
+    cell_end: int | None = None,
 ) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
     """Compute healpix cell for each data point and splitting information per cell;
        when the token_size is exceeded then splitting based on lat is used;
@@ -135,7 +144,9 @@ def hpy_splits(
     """
 
     # list of data points per healpix cell
-    (hpy_idxs_ord_split, thetas, phis) = hpy_cell_splits(coords, hl)
+    (hpy_idxs_ord_split, thetas, phis) = hpy_cell_splits(
+        coords, hl, cell_start=cell_start, cell_end=cell_end
+    )
 
     # if token_size is exceeed split based on latitude
     # TODO: split by hierarchically traversing healpix scheme
@@ -179,11 +190,21 @@ def tokenize_space(
     hl,
     pad_tokens=True,
     offset_step=0,
+    cell_start=0,
+    cell_end=None,
 ):
     """Process one window into tokens"""
 
     # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens = hpy_splits(rdata.coords, hl, token_size, pad_tokens, offset_step)
+    idxs_ord, idxs_ord_lens = hpy_splits(
+        rdata.coords,
+        hl,
+        token_size,
+        pad_tokens,
+        offset_step,
+        cell_start,
+        cell_end,
+    )
 
     return idxs_ord, idxs_ord_lens
 
@@ -193,14 +214,17 @@ def tokenize_spacetime(
     token_size,
     hl,
     pad_tokens=True,
+    cell_start=0,
+    cell_end=None,
 ):
     """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
     separately
     """
 
     num_healpix_cells = 12 * 4**hl
-    idxs_cells = [[] for _ in range(num_healpix_cells)]
-    idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
+    cell_end = num_healpix_cells if cell_end is None else cell_end
+    idxs_cells = [[] for _ in range(cell_end - cell_start)]
+    idxs_cells_lens = [[] for _ in range(cell_end - cell_start)]
 
     offset_step = 0
     t_unique = np.unique(rdata.datetimes)
@@ -210,7 +234,15 @@ def tokenize_spacetime(
         rdata_cur = IOReaderData(
             rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
         )
-        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
+        idxs_cur, idxs_cur_lens = tokenize_space(
+            rdata_cur,
+            token_size,
+            hl,
+            pad_tokens,
+            offset_step,
+            cell_start,
+            cell_end,
+        )
 
         # collect data for all time steps
         idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
