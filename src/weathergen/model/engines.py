@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -29,6 +30,11 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.positional_encoding import (
+    build_spherical_rope_coeff_tensors,
+    get_rope_mode,
+    get_rope_spherical_band,
+)
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -389,6 +395,7 @@ class QueryAggregationEngine(torch.nn.Module):
         super(QueryAggregationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+        rope_mode = get_rope_mode(self.cf)
 
         self.ae_aggregation_blocks = torch.nn.ModuleList()
 
@@ -409,7 +416,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_mode=rope_mode,
                     )
                 )
             else:
@@ -465,6 +472,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
         super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+        rope_mode = get_rope_mode(self.cf)
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
@@ -485,7 +493,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_mode=rope_mode,
                     )
                 )
             else:
@@ -502,7 +510,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_mode=rope_mode,
                     )
                 )
             # MLP block
@@ -554,6 +562,63 @@ class ForecastingEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
+        self.rope_2D = cf.get("rope_2D", False)
+        self.healpix_level = (
+            cf.get("fe_healpix_level")
+            if cf.get("fe_healpix_level") is not None
+            else cf.get("healpix_level")
+        )
+        self.dtype = get_dtype(cf.attention_dtype)
+
+        # RoPE coordinates
+        self.rope_mode = get_rope_mode(cf)
+        if self.rope_mode != "none":
+            self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
+            total_tokens = (
+                self.num_healpix_cells + self.num_extra_tokens
+            ) * cf.ae_local_num_queries
+            self.register_buffer(
+                "rope_coords",
+                torch.zeros(
+                    1,
+                    total_tokens,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+            self.register_buffer(
+                "rope_cell_coords",
+                torch.zeros(
+                    self.num_healpix_cells,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+            if self.rope_mode == "spherical":
+                rope_spherical_band = get_rope_spherical_band(cf)
+                num_modes = 2 * int(rope_spherical_band) + 1
+                self.register_buffer(
+                    "rope_spherical_coeffs",
+                    torch.zeros(1, total_tokens, num_modes, 2, dtype=self.dtype),
+                )
+                self.register_buffer(
+                    "rope_spherical_cell_coeffs",
+                    torch.zeros(self.num_healpix_cells, num_modes, 2, dtype=self.dtype),
+                )
+                self.register_buffer(
+                    "rope_spherical_extra_coeffs",
+                    torch.zeros(self.num_extra_tokens, num_modes, 2, dtype=self.dtype),
+                )
+            else:
+                self.rope_spherical_coeffs = None
+                self.rope_spherical_cell_coeffs = None
+                self.rope_spherical_extra_coeffs = None
+        else:
+            self.rope_coords = None
+            self.rope_cell_coords = None
+            self.rope_spherical_coeffs = None
+            self.rope_spherical_cell_coeffs = None
+            self.rope_spherical_extra_coeffs = None
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
@@ -572,7 +637,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_2d_rope=self.cf.get("rope_2D", False),
+                            rope_mode=self.rope_mode,
                         )
                     )
                 else:
@@ -590,7 +655,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_2d_rope=self.cf.get("rope_2D", False),
+                            rope_mode=self.rope_mode,
                         )
                     )
                 # Add MLP block
@@ -620,7 +685,52 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep, coords=None):
+    def reset_parameters(self) -> None:
+        """HEALPix neighbourhood based parameter initializing for target prediction."""
+
+        cf = self.cf
+
+        if self.rope_mode != "none":
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            self.rope_cell_coords.data.copy_(coords)
+            coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0)
+            offset = self.num_extra_tokens * cf.ae_local_num_queries
+            self.rope_coords.data.fill_(0.0)
+            self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
+
+            if self.rope_mode == "spherical":
+                band = int(get_rope_spherical_band(cf))
+                (
+                    (cell_real, cell_imag),
+                    (extra_real, extra_imag),
+                    (packed_extra_real, packed_extra_imag),
+                    (packed_real, packed_imag),
+                ) = build_spherical_rope_coeff_tensors(
+                    nside=2**self.healpix_level,
+                    band=band,
+                    num_local_queries=cf.ae_local_num_queries,
+                    num_extra_tokens=self.num_extra_tokens,
+                    device=self.rope_spherical_coeffs.device,
+                    dtype=self.rope_spherical_coeffs.dtype,
+                )
+                self.rope_spherical_cell_coeffs.data[..., 0].copy_(cell_real)
+                self.rope_spherical_cell_coeffs.data[..., 1].copy_(cell_imag)
+                self.rope_spherical_extra_coeffs.data[..., 0].copy_(extra_real)
+                self.rope_spherical_extra_coeffs.data[..., 1].copy_(extra_imag)
+
+                self.rope_spherical_coeffs.data.fill_(0.0)
+                self.rope_spherical_coeffs.data[:, :offset, :, 0].copy_(packed_extra_real)
+                self.rope_spherical_coeffs.data[:, :offset, :, 1].copy_(packed_extra_imag)
+                self.rope_spherical_coeffs.data[
+                    :, offset : offset + packed_real.shape[1], :, 0
+                ].copy_(packed_real)
+                self.rope_spherical_coeffs.data[
+                    :, offset : offset + packed_imag.shape[1], :, 1
+                ].copy_(packed_imag)
+
+    def forward(self, tokens, fstep):
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
@@ -632,7 +742,15 @@ class ForecastingEngine(torch.nn.Module):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = checkpoint(block, tokens, use_reentrant=False)
             else:
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+                tokens = checkpoint(
+                    block,
+                    tokens,
+                    self.rope_spherical_coeffs.unbind(dim=-1)
+                    if self.rope_spherical_coeffs is not None
+                    else self.rope_coords,
+                    aux_info,
+                    use_reentrant=False,
+                )
         return tokens
 
 
