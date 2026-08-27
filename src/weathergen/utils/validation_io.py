@@ -23,6 +23,16 @@ from weathergen.model.engines import LatentState
 _logger = logging.getLogger(__name__)
 
 
+def _empty_step(n_samples: int, n_ens: int, n_channels: int):
+    """Zero-sized target/prediction entries for a step that carries no data."""
+    return (
+        [np.zeros((n_ens, 0, n_channels), dtype=np.float32) for _ in range(n_samples)],
+        [np.zeros((0, n_channels), dtype=np.float32) for _ in range(n_samples)],
+        [np.zeros((0, 2), dtype=np.float32) for _ in range(n_samples)],
+        [np.array([]).astype("datetime64[ns]") for _ in range(n_samples)],
+    )
+
+
 def write_output(
     cf,
     val_cfg,
@@ -51,11 +61,17 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
-    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
-    forecast_offset = timestep_idxs[0]
+    # _get_output_length clamps to at least one output step, so this always holds
+    assert len(batch.get_output_idxs()) > 0, "Batch carries no output steps."
+    forecast_offset = batch.get_output_idxs()[0]
+
+    # the chunk describes which forecast steps it holds, including the leading empty steps
+    # that the first chunk keeps so it is indexed by global forecast step
+    timestep_idxs = model_output.forecast_steps
+
+    n_samples = len(batch.get_source_samples().get_samples())
     targets_lens = []
 
-    # TODO Maybe stopping at forecast_steps explained #1657
     for t_idx in timestep_idxs:
         preds_all += [[]]
         targets_all += [[]]
@@ -63,18 +79,29 @@ def write_output(
         targets_times_all += [[]]
         targets_lens += [[]]
         for sname in cf.streams.keys():
+            chunk_idx = model_output.chunk_idx(t_idx)
+            assert model_output.forecast_steps[chunk_idx] == t_idx, (
+                f"Prediction at index {chunk_idx} is valid for forecast step "
+                f"{model_output.forecast_steps[chunk_idx]}, but the target is valid for {t_idx}."
+            )
+
+            n_channels = len(cf.streams[sname].val_target_channels)
+
+            # leading empty steps of the first chunk carry a source but no target/prediction
+            if t_idx < forecast_offset:
+                preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
+
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
-            if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                targets = target_aux_out.physical[t_idx][sname]["target"]
-                # for-loop to make sure we have a consistent number of samples
-                preds_s = [np.zeros((1, 0, t.shape[1])) for t in targets]
-                targets_s = [np.zeros((0, t.shape[1])) for t in targets]
-                t_coords_s = [np.zeros((0, 2)) for t in targets]
-                t_times_s = [np.array([]).astype("datetime64[ns]") for t in targets]
+            elif target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+                preds = model_output.get_physical_prediction(chunk_idx, sname)
+                n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
+                preds_s, targets_s, t_coords_s, t_times_s = _empty_step(
+                    n_samples, n_ens, n_channels
+                )
 
             else:
-                preds = model_output.get_physical_prediction(t_idx, sname)
+                preds = model_output.get_physical_prediction(chunk_idx, sname)
                 targets = target_aux_out.physical[t_idx][sname]["target"]
 
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
@@ -185,6 +212,7 @@ def write_output(
         latents=latents_all,
         sample_start=sample_start,
         forecast_offset=forecast_offset,
+        forecast_steps=timestep_idxs,
     )
 
     store_path = config.get_path_results(cf, mini_epoch)
