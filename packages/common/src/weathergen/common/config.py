@@ -104,11 +104,6 @@ def _sanitize_delta_time_keys(sub_conf):
         if key in sub_conf:
             sub_conf = _patch_time(key, sub_conf, _TIMEDELTA_TYPE_NAME)
 
-    if sub_conf.get("forecast") is not None:
-        key = "time_step"
-        if key in sub_conf.forecast:
-            sub_conf.forecast = _patch_time(key, sub_conf.forecast, _TIMEDELTA_TYPE_NAME)
-
 
 def _sanitize_time_keys(conf: Config) -> Config:
     """
@@ -366,7 +361,6 @@ def _check_time_interpolation(config: Config) -> Config:
 
     time_keys = ["start_date", "end_date"]
     delta_keys = ["time_window_step", "time_window_len"]
-    forecast_step_dt = "time_step"
 
     config = config.copy()
     subconfs = [
@@ -379,8 +373,6 @@ def _check_time_interpolation(config: Config) -> Config:
         if subconf is not None:
             for key in (*time_keys, *delta_keys):
                 _convert_interpolation(subconf, key)
-            if "forecast" in subconf:
-                _convert_interpolation(subconf.forecast, forecast_step_dt)
 
     return config
 
