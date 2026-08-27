@@ -9,6 +9,8 @@
 
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
+mlp_type: mlp
+use_xsa: False
 
 ae_local_dim_embed: 1024
 ae_local_num_blocks: 2

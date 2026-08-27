@@ -200,6 +200,33 @@ def clean_plot_folder(plot_dir: Path):
 
 
 ####################################################################################################
+def _adjust_reset_x_axis(x_vals, x_col: str) -> np.ndarray:
+    """
+    Keep sample-based x-axes monotonic when chained jobs append metrics with a reset counter.
+    """
+    adjusted_x_vals = np.array(x_vals, dtype=np.float64, copy=True)
+
+    if adjusted_x_vals.size < 2 or "sample" not in x_col.lower():
+        return adjusted_x_vals
+
+    offset = 0.0
+    prev_raw = np.nan
+    prev_adjusted = np.nan
+    for idx, raw_val in enumerate(adjusted_x_vals):
+        if np.isnan(raw_val):
+            continue
+        if not np.isnan(prev_raw) and raw_val < prev_raw:
+            offset = prev_adjusted
+
+        adjusted_val = raw_val + offset
+        adjusted_x_vals[idx] = adjusted_val
+        prev_raw = raw_val
+        prev_adjusted = adjusted_val
+
+    return adjusted_x_vals
+
+
+####################################################################################################
 def get_stream_names(run_id: str, model_path: Path | None = "./model"):
     """
     Get the stream names from the model configuration file.
@@ -266,7 +293,7 @@ def plot_lr(
         x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
         data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
-        x_vals = run_data.train[x_col]
+        x_vals = _adjust_reset_x_axis(run_data.train[x_col], x_col)
         y_vals = np.array(run_data.train[data_cols])
         mask = y_vals > 1000.0
         y_vals[mask] = 0.0  # np.nan
@@ -325,7 +352,7 @@ def plot_loss_avg(
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
-        x_vals = np.array(run_data_stage["num_samples"])
+        x_vals = _adjust_reset_x_axis(run_data_stage["num_samples"], "num_samples")
         y_vals = np.array(run_data_stage["loss_avg_mean"])
 
         mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
@@ -471,7 +498,7 @@ def plot_loss_per_stream(
                                     title_col = col if title_col is None else title_col
 
                         for col in data_cols:
-                            x_vals = np.array(run_data_mode[x_col])
+                            x_vals = _adjust_reset_x_axis(run_data_mode[x_col], x_col)
                             y_data = np.array(run_data_mode[col])
                             mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_data))
 
@@ -642,7 +669,7 @@ def plot_loss_per_run(
                         if run_data_mode[col].shape[0] == 0:
                             continue
 
-                        x_vals = np.array(run_data_mode[x_col])
+                        x_vals = _adjust_reset_x_axis(run_data_mode[x_col], x_col)
                         y_data = np.array(run_data_mode[col])
 
                         plt.plot(

@@ -1,0 +1,42 @@
+# Pipeline for pre-training, fine-tuning, inference, and evaluation of a forecasting model. Each stage can have its own
+# configuration files, options, and resource requirements. The stages are executed sequentially, with the ability to
+# reference previous stages' run IDs for chaining jobs together.
+
+stages:
+  - name: pretrain
+    stage: train
+    config_files:
+      - config/config_forecasting.yml
+    options:
+      - training.max_epochs=256
+    chain_jobs: 7
+    nodes: 2
+    # slurm_args:
+    #   - "--time=12:00:00"
+
+  - name: finetune
+    stage: train
+    from_run_id: STAGE.pretrain.run_id   # optional; use STAGE.<name>.run_id to reference a previous stage's run_id
+    config_files:
+      - config/config_forecasting_finetuning.yml
+    chain_jobs: 4
+    nodes: 2
+    # slurm_args:
+    #   - "--time=12:00:00"
+    #   # - "--partition=booster"
+
+  - name: inference
+    stage: inference
+    from_run_id: STAGE.finetune.run_id
+    options:
+      # - test_config.streams_directory="./config/streams/era5_1deg_forecasting_inf/"
+      - test_config.start_date=202301010000
+      - test_config.end_date=202301310000
+      # - test_config.samples=16
+    nodes: 1
+  
+  - name: evaluation
+    stage: evaluation
+    eval_config: config/config_eval.yml
+    run_ids: [STAGE.inference.run_id]  # list of run_ids to evaluate; can reference previous stages or be hardcoded
+    nodes: 1
