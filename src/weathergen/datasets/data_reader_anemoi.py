@@ -17,7 +17,7 @@ from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 
-from weathergen.common.config import timedelta_to_str
+from weathergen.common.config import parse_timedelta, timedelta_to_str
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     ReaderData,
@@ -39,6 +39,8 @@ class DataReaderAnemoi(DataReaderTimestep):
         filename: Path,
         stream_info: dict,
         stage: Stage,
+        data_load_start: np.datetime64 | None = None,
+        data_load_end: np.datetime64 | None = None,
     ) -> None:
         """
         Construct data reader for anemoi dataset
@@ -55,31 +57,54 @@ class DataReaderAnemoi(DataReaderTimestep):
         None
         """
 
-        # open  dataset to peak that it is compatible with requested parameters
+        load_start = data_load_start if data_load_start is not None else tw_handler.t_start
+        load_end = data_load_end if data_load_end is not None else tw_handler.t_end
+
+        # Open dataset to check that it is compatible with requested parameters.
         ds0: Dataset = anemoi_datasets.open_dataset(filename)
-        # If there is no overlap with the time range, the dataset will be empty
-        if tw_handler.t_start >= ds0.dates[-1] or tw_handler.t_end <= ds0.dates[0]:
+        # Dataset dates are point samples, so a sample exactly at ``load_start``
+        # is still usable. The end of the requested range remains exclusive.
+        if load_start > ds0.dates[-1] or load_end <= ds0.dates[0]:
             name = stream_info["name"]
-            _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
-            super().__init__(tw_handler, stream_info)
-            self.init_empty()
+            _logger.warning(f"{name} is not supported over requested data range.")
+            self._init_missing_data(tw_handler, stream_info, stage, ds0)
             return
 
         kwargs = {}
         if "frequency" in stream_info:
             frequency = timedelta_to_str(stream_info["frequency"])
-            kwargs["frequency"] = frequency
+            requested_frequency = parse_timedelta(stream_info["frequency"])
+            # Subsampling to `frequency` needs anemoi-datasets to infer the
+            # window-restricted subset's own native frequency, which requires
+            # >=2 dates inside [t_start, t_end) and raises otherwise. Skip the
+            # (then redundant) kwarg when ds0 is already natively at that
+            # frequency, so a sparse real-time stream with one date in the
+            # window doesn't crash on what would be a no-op anyway.
+            try:
+                already_at_frequency = parse_timedelta(ds0.frequency) == requested_frequency
+            except ValueError:
+                already_at_frequency = False
+            if not already_at_frequency:
+                kwargs["frequency"] = frequency
+        if "statistics" in stream_info:
+            kwargs["statistics"] = stream_info["statistics"]
         if "subsampling_rate" in stream_info:
             name = stream_info["name"]
             _logger.warning(
                 f"subsampling_rate specified for anemoi dataset for stream {name}. "
                 + "Use frequency instead."
             )
-        ds: Dataset = anemoi_datasets.open_dataset(
-            ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
-        )
+        ds: Dataset = anemoi_datasets.open_dataset(ds0, **kwargs, start=load_start, end=load_end)
 
-        period = np.timedelta64(ds.frequency)
+        if len(ds.dates) >= 2:
+            period = parse_timedelta(ds.frequency)
+        elif "frequency" in stream_info:
+            period = requested_frequency
+        else:
+            # ds.frequency infers spacing from ds's own dates and needs >=2;
+            # a sparse real-time stream can have just one date inside the
+            # requested window even though the full dataset has more.
+            period = parse_timedelta(ds0.frequency)
         data_start_time = ds.dates[0]
         data_end_time = ds.dates[-1]
         assert data_start_time is not None and data_end_time is not None, (
@@ -94,13 +119,46 @@ class DataReaderAnemoi(DataReaderTimestep):
             period,
         )
         # If there is no overlap with the time range, no need to keep the dataset.
-        if tw_handler.t_start >= data_end_time or tw_handler.t_end <= data_start_time:
-            self.init_empty()
+        if load_start > data_end_time or load_end <= data_start_time:
+            self._init_missing_data(tw_handler, stream_info, stage, ds)
             return
         else:
             self.ds = ds
             self.len = len(ds)
 
+        self._set_metadata(ds, stream_info, stage)
+
+    def _init_missing_data(
+        self,
+        tw_handler: TimeWindowHandler,
+        stream_info: dict,
+        stage: Stage,
+        ds: Dataset,
+    ) -> None:
+        """Initialize an unavailable stream, retaining schema only when requested."""
+        if not stream_info.get("retain_schema_when_empty", False):
+            super().__init__(tw_handler, stream_info)
+            self.init_empty()
+            return
+
+        _logger.info(
+            "%s: retaining channel and normalization schema for missing-data fallback.",
+            stream_info["name"],
+        )
+        period = parse_timedelta(stream_info.get("frequency", ds.frequency))
+        super().__init__(
+            tw_handler,
+            stream_info,
+            ds.dates[0],
+            ds.dates[-1],
+            period,
+        )
+        self.ds = None
+        self.len = 0
+        self._set_metadata(ds, stream_info, stage)
+
+    def _set_metadata(self, ds: Dataset, stream_info: dict, stage: Stage) -> None:
+        """Populate channel, coordinate, and normalization metadata from an Anemoi dataset."""
         # caches lats and lons
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
