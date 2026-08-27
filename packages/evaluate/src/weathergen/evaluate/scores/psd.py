@@ -305,6 +305,25 @@ def _regular_lons_per_lat(nlat: int) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+def _reduced_lons_per_lat(
+    lats: np.typing.NDArray,
+    lons: np.typing.NDArray,
+) -> list[int] | None:
+    """Derive lons_per_lat from coordinate arrays for a reduced Gaussian grid.
+
+    Returns ``None`` if the ring structure is not symmetric (pole-to-pole mirror),
+    which is the hallmark of a Gaussian grid.
+    """
+    unique_lats = np.unique(lats)
+    counts = [int(np.sum(lats == lat)) for lat in unique_lats]
+    nlat = len(counts)
+    # Gaussian grids are symmetric: ring i from the north matches ring i from the south.
+    half = nlat // 2
+    if counts[:half] != counts[nlat - half :][::-1]:
+        return None
+    return counts
+
+
 def detect_grid_type(
     lats: np.typing.NDArray,
     lons: np.typing.NDArray,
@@ -313,8 +332,8 @@ def detect_grid_type(
     """Detect the grid type from latitude/longitude coordinates.
 
     Checks whether the point count matches known grid structures (octahedral
-    reduced Gaussian or regular lat-lon). Returns ``None`` with a warning if
-    the grid cannot be identified (e.g. regional subsets or non-standard grids).
+    reduced Gaussian, regular lat-lon, or generic reduced Gaussian).
+    Returns ``None`` with a warning if the grid cannot be identified.
 
     Parameters
     ----------
@@ -328,7 +347,7 @@ def detect_grid_type(
     Returns
     -------
     str | None
-        ``"octahedral"``, ``"regular"``, or ``None`` if detection fails.
+        ``"octahedral"``, ``"regular"``, ``"reduced"``, or ``None`` if detection fails.
     """
     unique_lats = np.unique(lats)
     nlat = len(unique_lats)
@@ -364,11 +383,20 @@ def detect_grid_type(
         _logger.debug(f"Detected regular grid (nlat={nlat}, nlon={len(unique_lons_global)}).")
         return "regular"
 
+    # Check generic reduced Gaussian (e.g. N320) — symmetric ring counts
+    reduced_lpl = _reduced_lons_per_lat(lats, lons)
+    if reduced_lpl is not None and sum(reduced_lpl) == n_points:
+        _logger.debug(
+            f"Detected reduced Gaussian grid (nlat={nlat}, "
+            f"max_nlon={max(reduced_lpl)}, n_points={n_points})."
+        )
+        return "reduced"
+
     _logger.warning(
         f"Grid detection: {n_points} points with {nlat} latitudes does not match "
-        f"octahedral ({expected_oct}) or regular ({expected_reg}) grids. "
-        f"The dataset may be regional or use an unsupported grid type."
-        "PSD via SHT skipped."
+        f"octahedral ({expected_oct}), regular ({expected_reg}), or reduced Gaussian grids. "
+        f"The dataset may be regional or use an unsupported grid type. "
+        f"PSD via SHT skipped."
     )
     return None
 
@@ -383,6 +411,7 @@ def sht_psd(
     nlat: int,
     truncation: int | None = None,
     grid_type: str = "octahedral",
+    lons_per_lat: list[int] | None = None,
 ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
     """Compute PSD via Spherical Harmonic Transform.
 
@@ -399,6 +428,10 @@ def sht_psd(
         Spectral truncation.  Defaults to ``nlat // 2 - 1``.
     grid_type : str
         One of ``"octahedral"``, ``"regular"``, ``"reduced"``.
+    lons_per_lat : list[int] | None
+        Pre-computed per-ring point counts (from ``detect_grid_type``).
+        When provided for ``"reduced"`` grids, avoids the need for an
+        ``anemoi.transform`` import.
 
     Returns
     -------
@@ -412,21 +445,18 @@ def sht_psd(
     n_samples, n_points = data.shape
 
     # Build the SHT for the appropriate grid
-    if grid_type == "octahedral":
+    if lons_per_lat is not None:
+        # Pre-computed ring counts take precedence (any grid type)
+        pass
+    elif grid_type == "octahedral":
         lons_per_lat = _octahedral_lons_per_lat(nlat)
     elif grid_type == "regular":
         lons_per_lat = _regular_lons_per_lat(nlat)
     elif grid_type == "reduced":
-        try:
-            from anemoi.transform.grids.named import lookup
-        except ImportError:
-            raise ImportError(
-                "anemoi.transform is required for grid_type='reduced'. "
-                "Install: pip install anemoi-transform"
-            ) from None
-        lats = lookup("N320")["latitudes"]
-        unique_lats = sorted(set(lats))
-        lons_per_lat = [int((lats == lat).sum()) for lat in unique_lats]
+        raise ValueError(
+            "grid_type='reduced' requires lons_per_lat to be provided. "
+            "Use detect_grid_type() to obtain it from coordinates."
+        )
     else:
         raise ValueError(f"Unknown grid_type: {grid_type!r}")
 
@@ -654,11 +684,18 @@ def compute_psd_for_field(
     if method == "sht":
         if nlat is None:
             raise ValueError("nlat is required for method='sht'")
+        # For reduced grids, derive lons_per_lat from coordinates
+        lons_per_lat = None
+        if grid_type == "reduced":
+            if lats is None or lons is None:
+                raise ValueError("lats and lons are required for grid_type='reduced'")
+            lons_per_lat = _reduced_lons_per_lat(lats, lons)
         return sht_psd(
             data=data,
             nlat=nlat,
             truncation=sht_truncation,
             grid_type=grid_type,
+            lons_per_lat=lons_per_lat,
         )
     elif method == "fft":
         if lats is None or lons is None:
@@ -712,7 +749,7 @@ def compute_psd_score(
     lat_range : tuple[float, float]
         Latitude bounds for fft method.
     grid_type : str | None
-        Pre-detected grid type (``"octahedral"``, ``"regular"``).
+        Pre-detected grid type (``"octahedral"``, ``"regular"``, ``"reduced"``).
         When ``None``, the grid type is auto-detected from lats/lons.
         Pass a pre-computed value to avoid repeated detection across channels.
 
@@ -741,6 +778,9 @@ def compute_psd_score(
             return np.nan, {}
         if grid_type is None:
             grid_type = detect_grid_type(lats_valid, lons_valid, gt.shape[-1])
+
+        if grid_type is None:
+            return np.nan, {}
 
         if grid_type == "octahedral":
             expected_pts = sum(_octahedral_lons_per_lat(nlat_valid))
