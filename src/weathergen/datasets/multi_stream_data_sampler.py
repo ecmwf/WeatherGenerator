@@ -43,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 FORECAST_DEFAULTS = {
     "offset": 0,
-    "time_step": np.timedelta64(0, "ms"),
     "policy": None,
     "num_steps": np.array([0], dtype=np.int32),
 }
@@ -112,7 +111,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
-        self.time_step = forecast_cfg["time_step"]
         self.forecast_policy = forecast_cfg["policy"]
         steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
         self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
@@ -159,7 +157,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         max_index = self.index_range.end - (
             (  # max time units needed to make a forecast
-                self.time_step * (fsm + self.output_offset)  # translation due to forecasting
+                self.step_timedelta * (fsm + self.output_offset)  # translation due to forecasting
                 + self.len_timedelta  # length of forecasting window
             )
             // self.step_timedelta  # as number of indexs
@@ -213,8 +211,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
-        perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
-
+        perms_len -= (fsm + self.output_offset)
         return np.arange(self.max_input_steps, perms_len)
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
@@ -457,7 +454,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # collect for all forecast steps
         num_output_steps = self._get_output_length(num_forecast_steps)
         for step, timestep_idx in enumerate(range(self.output_offset, num_output_steps)):
-            step_forecast_dt = idx + (self.time_step * timestep_idx) // self.step_timedelta
+            step_forecast_dt = idx + timestep_idx
             time_win_target = self.time_window_handler.window(step_forecast_dt)
 
             # collect all targets for current stream
@@ -590,7 +587,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         output_data = []
         num_output_steps = self._get_output_length(num_forecast_steps)
         for timestep_idx in range(self.output_offset, num_output_steps):
-            step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
+            step_forecast_dt = base_idx + timestep_idx
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
