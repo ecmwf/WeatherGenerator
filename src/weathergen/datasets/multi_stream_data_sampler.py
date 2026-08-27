@@ -119,25 +119,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.shuffle = mode_cfg.shuffle
 
-        self.len_timedelta = mode_cfg.time_window_len
-        self.step_timedelta = mode_cfg.time_window_step
-        tw = TimeWindowHandler(
-            self.mode_cfg.start_date,
-            self.mode_cfg.end_date,
-            self.len_timedelta,
-            self.step_timedelta,
-        )
-
         # needed as offset for permutations
         source_cfgs = self.mode_cfg.get("model_input")
         self.max_input_steps = np.array(
             [sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()]
         ).max()
 
-        self.time_window_handler = tw
+        self.time_window_handler = TimeWindowHandler(
+            self.mode_cfg.start_date,
+            self.mode_cfg.end_date,
+            self.mode_cfg.time_window_len,
+            self.mode_cfg.time_window_step,
+        )
         if is_root():
             logger.info(self.time_window_handler)
-        self.index_range = tw.get_index_range()
 
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
@@ -155,14 +150,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        max_index = self.index_range.end - (
-            (  # max time units needed to make a forecast
-                self.step_timedelta * (fsm + self.output_offset)  # translation due to forecasting
-                + self.len_timedelta  # length of forecasting window
-            )
-            // self.step_timedelta  # as number of indexs
-        )
-
+        max_index = self.time_window_handler.max_index(fsm + self.output_offset)
         available_samples = max_index * self.batch_size  # as number of samples
 
         assert available_samples > 0, (
@@ -210,8 +198,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _calc_baseperms(self, fsm: int) -> np.typing.NDArray:
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
-        perms_len = int(self.index_range.end - self.index_range.start)
-        perms_len -= (fsm + self.output_offset)
+        perms_len = len(self.time_window_handler.index_range) - (fsm + self.output_offset)
         return np.arange(self.max_input_steps, perms_len)
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
