@@ -158,17 +158,6 @@ class ThroughputTracker:
         return metrics
 
 
-class NullThroughputTracker:
-    """No-op throughput tracker used when performance tracking is disabled.
-
-    Implements the same interface as ``ThroughputTracker`` so call sites in the
-    training loop need no ``if`` guards.
-    """
-
-    def step(self, batch, istep: int, log_fn=None) -> None:
-        pass
-
-
 def compute_source_bytes(source_samples) -> int:
     """Count total bytes of all source token tensors in a batch.
 

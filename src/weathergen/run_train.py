@@ -21,10 +21,22 @@ from pathlib import Path
 
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
+from weathergen.common.config import Config
 from weathergen.common.logger import init_loggers
+from weathergen.train.profiling_trainer import ProfilingTrainer
 from weathergen.train.trainer import Trainer
+from weathergen.utils.profiling import PerformanceLoggingConfig, ProfilingConfig
 
 logger = logging.getLogger(__name__)
+
+
+def get_trainer(cf: Config) -> Trainer:
+    """Select the trainer: the ProfilingTrainer if the run is measured, a plain one otherwise."""
+    if ProfilingConfig.from_config(cf).enabled or PerformanceLoggingConfig.from_config(cf).enabled:
+        logger.info("Profiling or performance logging enabled: running with ProfilingTrainer.")
+        return ProfilingTrainer(cf.train_logging)
+
+    return Trainer(cf.train_logging)
 
 
 def train() -> None:
@@ -144,7 +156,7 @@ def run_continue(args):
     # track history of run to ensure traceability of results
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_logging)
+    trainer = get_trainer(cf)
 
     try:
         trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
@@ -185,7 +197,7 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.train_logging)
+    trainer = get_trainer(cf)
 
     try:
         trainer.run(cf, devices)

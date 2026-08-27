@@ -703,6 +703,11 @@ def get_path_run(config: Config) -> Path:
     return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
 
 
+def get_path_profiling_traces(config: Config) -> Path:
+    """Get the path for storing profiling traces."""
+    return _get_shared_wg_path() / "logs" / get_run_id_from_config(config) / "profiling_traces"
+
+
 def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
     if config or run_id:
