@@ -194,6 +194,10 @@ def read_metrics(
     # TODO: this should be a config option
     df = read_metrics_file(metrics_path)
 
+    # Sanitize LossPhysical column names to replace dots in channel names with underscores
+    new_columns = {col: sanitize_loss_physical_column(col) for col in df.columns}
+    df = df.rename(new_columns)
+
     if cols_patterns is not None:
         for col_pattern in cols_patterns:
             cols += [col for col in df.columns if col_pattern in col]
@@ -267,6 +271,38 @@ def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
 def _key_stddev(st_name: str) -> str:
     st_name = clean_name(st_name)
     return f"stream.{st_name}.stddev_avg"
+
+
+def sanitize_loss_physical_column(col: str) -> str:
+    """Replace dots in channel names with underscores for LossPhysical columns.
+
+    Adapts column names like:
+        LossPhysical.EERIE_OCEAN.mse.avg_thetao_2.5.0
+    to:
+        LossPhysical.EERIE_OCEAN.mse.avg_thetao_2_5.0
+
+    The format is: LossPhysical.{stream}.{error}.{channel}[.{forecast_step}]
+    """
+    if not col.startswith("LossPhysical."):
+        return col
+    parts = col.split(".")
+    if len(parts) < 4:
+        return col
+
+    if len(parts) > 4 and parts[-1].isdigit():
+        channel_parts = parts[3:-1]
+        forecast_step = parts[-1]
+        sanitized_channel = "_".join(channel_parts)
+        return f"LossPhysical.{parts[1]}.{parts[2]}.{sanitized_channel}.{forecast_step}"
+    else:
+        channel_parts = parts[3:]
+        sanitized_channel = "_".join(channel_parts)
+        return f"LossPhysical.{parts[1]}.{parts[2]}.{sanitized_channel}"
+
+
+def sanitize_channel_for_matching(channel: str) -> str:
+    """Replace dots with underscores for matching against sanitized column names."""
+    return channel.replace(".", "_")
 
 
 def prepare_losses_for_logging(
