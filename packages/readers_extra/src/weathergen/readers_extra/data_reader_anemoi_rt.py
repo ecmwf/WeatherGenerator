@@ -129,17 +129,15 @@ class DataReaderAnemoiRT(DataReaderTimestep):
             if k not in self.geoinfo_channels:
                 continue
 
-            if v.is_constant_in_time:
-                self.geoinfo_channels_static += [k]
-                self.geoinfo_idx_static += [ds.variables.index(k)]
-                self.geoinfo_idx_static_lin += [idx]
-            else:
-                assert k in _anemoi_dynamic_forcings(), (
-                    f"Dynamic forcing {k} not implemented in DataReaderAnemoiRT"
-                )
+            if k in _anemoi_dynamic_forcings():
                 self.geoinfo_channels_dynamic += [k]
                 self.geoinfo_idx_dynamic += [ds.variables.index(k)]
                 self.geoinfo_idx_dynamic_lin += [idx]
+            else:
+                # treat time-varying variables as static
+                self.geoinfo_channels_static += [k]
+                self.geoinfo_idx_static += [ds.variables.index(k)]
+                self.geoinfo_idx_static_lin += [idx]
             idx += 1
 
         # set geoinfo normalization statistics
