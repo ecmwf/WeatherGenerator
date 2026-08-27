@@ -92,6 +92,8 @@ load_chkpt: {}
 norm_type: "LayerNorm"
 qk_norm_type: null  # if null, defaults to norm_type
 
+lrp_enabled: False
+
 #####################################
 
 streams_directory: "./config/streams/era5_1deg/"
