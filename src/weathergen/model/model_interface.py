@@ -318,6 +318,12 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
             # Get all modules for quick lookup and initialize the new ones
             all_modules = dict(model.named_modules())
             for path in root_new_modules:
+                if path not in all_modules:
+                    # FSDP v2 state_dict() can emit duplicate parameter paths for shared modules
+                    # (e.g. MLP.lnorm == MLP.layers[0]). named_modules() deduplicates and only
+                    # retains the canonical path (layers.0), so the alias (lnorm) is absent.
+                    # The module will be initialised via its canonical path, so skip here.
+                    continue
                 if is_root():
                     logger.info(f"Initializing new module not found in checkpoint: {path}")
                 module_to_init = all_modules[path]
