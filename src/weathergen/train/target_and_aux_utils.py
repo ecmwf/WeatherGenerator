@@ -35,7 +35,9 @@ def get_target_aux_calculator(
 
     elif target_and_aux_calc == "EMATeacher":
         # work around for problems with FSDP2
-        assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"
+        assert not cf.distributed.data_parallel.with_fsdp, (
+            "EMATeacher not supported with FSDP(2) at the moment"
+        )
 
         meta_ema_model, _ = init_model_and_shard(
             cf,
@@ -44,8 +46,7 @@ def get_target_aux_calculator(
             None,
             "student",
             device,
-            with_ddp=False,
-            with_fsdp=False,
+            {"with_ddp": False, "with_fsdp": False},
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
 
@@ -60,7 +61,10 @@ def get_target_aux_calculator(
             meta_ema_model,
             halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
             rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
-            is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            is_model_sharded=(
+                cf.distributed.data_parallel.with_ddp
+                and cf.distributed.data_parallel.with_fsdp
+            ),
         )
 
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu

@@ -27,6 +27,7 @@ from weathergen.train.teacher_utils import (
     load_encoder_from_checkpoint,
     prepare_encoder_teacher,
 )
+from weathergen.utils.distributed import normalize_distributed_config
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,15 @@ class FrozenTeacher(EncoderTeacher):
 
         # Load teacher's config, create model with teacher's architecture
         teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, model_path=None)
-        teacher_config = merge_configs(teacher_config, {"with_ddp": False, "with_fsdp": False})
+        teacher_config = normalize_distributed_config(teacher_config)
+        teacher_config = merge_configs(
+            teacher_config,
+            {
+                "distributed": {
+                    "data_parallel": {"with_ddp": False, "with_fsdp": False}
+                }
+            },
+        )
 
         teacher_model = get_model(teacher_config, "student", dataset, {})
 

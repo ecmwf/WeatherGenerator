@@ -1,0 +1,245 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+import types
+
+import numpy as np
+import pytest
+import torch
+
+from weathergen.datasets.healpix_domain import build_local_healpix_cell_splits
+from weathergen.model.spatial_parallel import (
+    reassemble_packed_cell_shards,
+    select_healpix_neighborhood_shard,
+    select_packed_cell_shard,
+    split_cell_lens_by_shard,
+)
+from weathergen.utils import distributed
+
+
+def test_local_healpix_construction_matches_global_cell_slices():
+    num_cells = 48
+    cell_ids = np.repeat(np.arange(num_cells), np.arange(num_cells) % 3 + 1)
+    rng = np.random.default_rng(7)
+    cell_ids = cell_ids[rng.permutation(len(cell_ids))]
+    global_cells = build_local_healpix_cell_splits(
+        cell_ids,
+        num_cells,
+        cell_start=0,
+        cell_end=num_cells,
+    )
+    cells_per_rank = len(global_cells) // 4
+
+    local_cells_all = []
+    for spatial_rank in range(4):
+        cell_start = spatial_rank * cells_per_rank
+        cell_end = cell_start + cells_per_rank
+        local_cells = build_local_healpix_cell_splits(
+            cell_ids,
+            num_cells,
+            cell_start=cell_start,
+            cell_end=cell_end,
+        )
+
+        assert len(local_cells) == cells_per_rank
+        for local_cell, global_cell in zip(
+            local_cells,
+            global_cells[cell_start:cell_end],
+            strict=True,
+        ):
+            np.testing.assert_array_equal(local_cell, global_cell)
+        local_cells_all.extend(local_cells)
+
+    assert len(local_cells_all) == len(global_cells)
+    for local_cell, global_cell in zip(local_cells_all, global_cells, strict=True):
+        np.testing.assert_array_equal(local_cell, global_cell)
+
+
+def test_local_healpix_construction_rejects_invalid_range():
+    with pytest.raises(ValueError, match="invalid HEALPix cell range"):
+        build_local_healpix_cell_splits(
+            np.arange(12),
+            num_cells=12,
+            cell_start=6,
+            cell_end=13,
+        )
+
+
+def test_local_healpix_construction_handles_empty_domain():
+    cell_splits = build_local_healpix_cell_splits(
+        np.array([0, 1, 2], dtype=np.int64),
+        num_cells=12,
+        cell_start=6,
+        cell_end=9,
+    )
+
+    assert len(cell_splits) == 3
+    assert all(cell.dtype == np.int64 and cell.size == 0 for cell in cell_splits)
+
+
+def test_select_packed_cell_shard_preserves_cell_boundaries_across_rows():
+    cell_lens = torch.tensor(
+        [
+            [1, 0, 2, 1, 3, 0, 1, 2],
+            [0, 2, 1, 0, 1, 2, 0, 1],
+        ],
+        dtype=torch.int32,
+    )
+    tokens = torch.arange(cell_lens.sum(), dtype=torch.float32).unsqueeze(1)
+
+    shard, shard_lens = select_packed_cell_shard(
+        tokens, cell_lens.flatten(), num_cells=8, cell_start=2, cell_end=4
+    )
+
+    assert shard_lens.tolist() == [2, 1, 1, 0]
+    assert shard.squeeze(1).tolist() == [1, 2, 3, 12]
+
+
+def test_eight_shards_cover_every_packed_token_once_and_keep_gradients():
+    num_cells = 16
+    cell_lens = torch.tensor(
+        [
+            [0, 1, 2, 0, 1, 3, 0, 2, 1, 0, 2, 1, 0, 1, 2, 1],
+            [1, 0, 1, 2, 0, 1, 2, 0, 3, 1, 0, 1, 2, 0, 1, 1],
+        ],
+        dtype=torch.int32,
+    )
+    tokens = torch.arange(cell_lens.sum(), dtype=torch.float32, requires_grad=True)
+    shard_width = num_cells // 8
+
+    selected = []
+    for rank in range(8):
+        shard, _ = select_packed_cell_shard(
+            tokens,
+            cell_lens.flatten(),
+            num_cells,
+            rank * shard_width,
+            (rank + 1) * shard_width,
+        )
+        selected.append(shard)
+        shard.sum().backward(retain_graph=rank < 7)
+
+    assert sum(shard.numel() for shard in selected) == tokens.numel()
+    assert torch.equal(tokens.grad, torch.ones_like(tokens))
+
+
+@pytest.mark.parametrize(
+    ("num_cells", "cell_start", "cell_end"),
+    [(8, -1, 1), (8, 3, 3), (8, 0, 9)],
+)
+def test_select_packed_cell_shard_rejects_invalid_ranges(num_cells, cell_start, cell_end):
+    with pytest.raises(ValueError, match="invalid HEALPix cell range"):
+        select_packed_cell_shard(
+            torch.arange(num_cells),
+            torch.ones(num_cells, dtype=torch.int32),
+            num_cells,
+            cell_start,
+            cell_end,
+        )
+
+
+def test_spatial_parallel_size_requires_whole_rank_groups(monkeypatch):
+    monkeypatch.setattr(distributed, "get_world_size", lambda: 16)
+    assert distributed.get_spatial_parallel_size({"size": 4}) == 4
+    assert distributed.get_spatial_parallel_size({"size": 8}) == 8
+
+    with pytest.raises(ValueError, match="must be divisible"):
+        distributed.get_spatial_parallel_size({"size": 6})
+
+
+def test_normalize_distributed_config_moves_legacy_settings():
+    config = {
+        "with_ddp": True,
+        "with_fsdp": True,
+        "data_parallel_world_size": 2,
+        "ddp_find_unused_parameters": False,
+        "spatial_parallel_size": 4,
+        "spatial_parallel_size_original": 8,
+    }
+
+    result = distributed.normalize_distributed_config(config)
+
+    assert result == {
+        "distributed": {
+            "data_parallel": {
+                "with_ddp": True,
+                "with_fsdp": True,
+                "find_unused_parameters": False,
+                "world_size": 2,
+            },
+            "spatial_parallel": {"size": 4, "size_original": 8},
+        }
+    }
+
+
+def test_spatial_parallel_context_collects_topology_and_cell_ownership(monkeypatch):
+    monkeypatch.setattr(distributed, "get_world_size", lambda: 16)
+    config = types.SimpleNamespace(
+        distributed=types.SimpleNamespace(spatial_parallel={"size": 4}),
+        rank=6,
+        world_size=16,
+    )
+
+    context = distributed.SpatialParallelContext.from_config(config, num_cells=48)
+
+    assert context.size == 4
+    assert context.rank == 2
+    assert context.ddp_rank == 1
+    assert context.ddp_world_size == 4
+    assert context.local_num_cells == 12
+    assert (context.cell_start, context.cell_end) == (24, 36)
+    assert context.group is None
+
+
+def test_decoder_selects_nine_neighbours_for_each_rank_local_cell():
+    tokens = torch.arange(2 * 4 * 1 * 2).reshape(2, 4, 1, 2)
+    neighbours = torch.tensor(
+        [
+            [0, 1, 2, 3, 0, 1, 2, 3, 0],
+            [1, 0, 2, 3, 1, 0, 2, 3, 1],
+            [2, 0, 1, 3, 2, 0, 1, 3, 2],
+            [3, 0, 1, 2, 3, 0, 1, 2, 3],
+        ]
+    )
+
+    selected = select_healpix_neighborhood_shard(tokens, neighbours, 1, 3)
+    expected = tokens[:, neighbours[1:3]].flatten(0, 3)
+
+    assert selected.shape == (2 * 2 * 9, 2)
+    assert torch.equal(selected, expected)
+
+
+def test_decoder_reassembles_rank_shards_in_sample_cell_order():
+    # Rank packing is [sample 0 local cells, sample 1 local cells].
+    rank_0 = torch.tensor([[[0.0], [1.0], [4.0]]])
+    rank_1 = torch.tensor([[[2.0], [3.0], [5.0], [6.0]]])
+    rank_0_lens = torch.tensor([1, 1, 1, 0], dtype=torch.int32)
+    rank_1_lens = torch.tensor([1, 1, 1, 2], dtype=torch.int32)
+
+    assembled = reassemble_packed_cell_shards(
+        [rank_0, rank_1],
+        [rank_0_lens, rank_1_lens],
+        cells_per_shard=2,
+    )
+
+    assert assembled.squeeze().tolist() == [0, 1, 2, 3, 4, 5, 6]
+
+
+def test_decoder_derives_rank_lens_from_global_target_lens():
+    global_lens = torch.tensor(
+        [
+            [1, 0, 2, 3],
+            [0, 4, 1, 2],
+        ],
+        dtype=torch.int32,
+    )
+
+    shards = split_cell_lens_by_shard(global_lens, num_shards=2)
+
+    assert [shard.tolist() for shard in shards] == [[1, 0, 0, 4], [2, 3, 1, 2]]

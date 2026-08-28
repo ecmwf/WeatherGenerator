@@ -115,7 +115,10 @@ class EmbeddingEngine(torch.nn.Module):
         )
         " Increase ae_local_max_tokens_per_cell in config."
 
-        if batch.tokens_lens.shape[2] == 1:
+        if not x_embeds:
+            # This rank has no local observations.
+            return tokens_all
+        elif batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
             tokens_all = torch.cat(x_embeds)
 
