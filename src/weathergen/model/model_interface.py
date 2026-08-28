@@ -52,7 +52,8 @@ def init_model_and_shard(
     with_fsdp,
     overrides={},
 ):
-    model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
+    device = torch.device(device)
+    model_creation_device = "meta" if with_ddp and with_fsdp else device
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
@@ -162,14 +163,14 @@ def init_model_and_shard(
         model = load_model(cf, model, device, run_id, mini_epoch)
     else:
         if with_ddp and with_fsdp:
-            model.to_empty(device="cuda")
+            model.to_empty(device=device)
             if with_fsdp:
                 model.reset_parameters()
 
     # model params
     model_params = ModelParams(cf).create(cf)
     model_params.reset_parameters(cf)
-    model_params = model_params.to(f"cuda:{cf.local_rank}")
+    model_params = model_params.to(device)
 
     return model, model_params
 
@@ -227,7 +228,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
                 if is_root():
                     logger.info(f"Initializing new module not found in checkpoint: {path}")
                 module_to_init = all_modules[path]
-                module_to_init.to_empty(device="cuda")
+                module_to_init.to_empty(device=device)
                 module_to_init.reset_parameters()
 
     else:

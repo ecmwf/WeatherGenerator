@@ -47,7 +47,9 @@ class TrainerBase:
 
         use_cuda = torch.cuda.is_available()
         if not use_cuda:
-            return torch.device("cpu")
+            if torch.backends.mps.is_available():
+                return [torch.device("mps")]
+            return [torch.device("cpu")]
 
         # if local_id_node == "-1":
         local_id_node = dist.get_node_local_rank(fallback_rank=-1)

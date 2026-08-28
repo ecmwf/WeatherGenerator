@@ -195,8 +195,7 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
 
         cf = self.cf
-        device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{cf.local_rank}")
+        self.device = torch.device(devices[0])
         self.ema_model = None
 
         # create data loader
@@ -210,6 +209,8 @@ class Trainer(TrainerBase):
 
         # make sure number of loaders does not exceed requested samples
         loader_num_workers = min(self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers)
+        if self.device.type != "cuda":
+            loader_num_workers = 0
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
@@ -252,8 +253,7 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
         cf = self.cf
 
-        device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{cf.local_rank}")
+        self.device = torch.device(devices[0])
 
         # Update collapse monitor device
         self.collapse_monitor.device = self.device
@@ -262,11 +262,12 @@ class Trainer(TrainerBase):
         self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
         self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
 
+        loader_num_workers = 0 if self.device.type != "cuda" else cf.data_loading.num_workers
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
             "shuffle": False,
-            "num_workers": cf.data_loading.num_workers,
+            "num_workers": loader_num_workers,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         self.data_loader_validation = torch.utils.data.DataLoader(
@@ -338,6 +339,8 @@ class Trainer(TrainerBase):
             eps=eps,
             fused=True,
         )
+        self.grad_scaler = torch.amp.GradScaler(self.device.type, enabled=cf.with_mixed_precision)
+
         if cf.get("training_config").get("optimizer").get("grad_scaling", True):
             self.grad_scaler = torch.amp.GradScaler("cuda")
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"
@@ -449,14 +452,14 @@ class Trainer(TrainerBase):
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
             with self.training_loop_annotation_context(f"batch_{bidx}"):
-                if cf.data_loading.get("memory_pinning", False):
+                if cf.data_loading.get("memory_pinning", False) and self.device.type == "cuda":
                     # pin memory for faster CPU-GPU transfer
                     batch = batch.pin_memory()
 
                 batch.to_device(self.device)
 
                 with torch.autocast(
-                    device_type=f"cuda:{cf.local_rank}",
+                    device_type=self.device.type,
                     dtype=self.mixed_precision_dtype,
                     enabled=cf.with_mixed_precision,
                 ):
@@ -592,7 +595,7 @@ class Trainer(TrainerBase):
 
                     # evaluate model
                     with torch.autocast(
-                        device_type=f"cuda:{cf.local_rank}",
+                        device_type=self.device.type,
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
@@ -807,7 +810,7 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
+                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} :
                         {np.nanmean(avg_loss)}"""
                     )
 
