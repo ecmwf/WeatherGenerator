@@ -15,7 +15,9 @@ dispatched to loky / ProcessPoolExecutor workers.
 
 import contextlib
 import logging
+import threading
 
+import anemoi.datasets
 import numpy as np
 import zarr
 from numpy.typing import NDArray
@@ -23,6 +25,108 @@ from numpy.typing import NDArray
 from weathergen.evaluate.utils.derived_channels import is_derivable_channel
 
 _logger = logging.getLogger(__name__)
+
+# Module-level cache so that threading workers reuse the same anemoi dataset
+# handle across tasks dispatched to the same process.
+_anemoi_cache: dict[str, tuple] = {}
+_anemoi_lock = threading.Lock()
+
+
+def _open_anemoi_dataset(anemoi_cfg: dict) -> tuple:
+    """Open the anemoi dataset once and precompute target channel indices.
+
+    Uses a module-level cache keyed by filename so that threading workers
+    reuse the same handle. A lock ensures only one thread opens the dataset.
+
+    Returns ``(ds, target_idx, ds_dates)`` for reuse across forecast steps.
+    """
+    filename = anemoi_cfg["filename"]
+    if filename in _anemoi_cache:
+        return _anemoi_cache[filename]
+
+    with _anemoi_lock:
+        # Double-check after acquiring lock
+        if filename in _anemoi_cache:
+            return _anemoi_cache[filename]
+
+        target_channels = anemoi_cfg["channels"]
+
+        _logger.info(f"Opening anemoi dataset {filename} (lazy)")
+        ds = anemoi.datasets.open_dataset(filename)
+        target_idx = [ds.variables.index(ch) for ch in target_channels]
+        ds_dates = ds.dates.astype("datetime64[s]")
+        result = (ds, target_idx, ds_dates)
+        _anemoi_cache[filename] = result
+        return result
+
+
+def _read_anemoi_target(
+    ds,
+    target_idx: list[int],
+    ds_dates: np.ndarray,
+    times: np.ndarray,
+    channel_idxs: list[int] | None,
+) -> np.ndarray:
+    """Read target data from a pre-opened anemoi dataset for the given valid times.
+
+    Parameters
+    ----------
+    ds : anemoi dataset handle
+        Already-opened dataset (from ``_open_anemoi_dataset``).
+    target_idx : list[int]
+        Indices of val_target_channels within ``ds.variables``.
+    ds_dates : np.ndarray
+        ``ds.dates`` cast to ``datetime64[s]`` (precomputed).
+    times : np.ndarray
+        Valid times (datetime64) to extract from the dataset.
+    channel_idxs : list[int] | None
+        Channel indices to select (applied after reading).
+
+    Returns
+    -------
+    np.ndarray
+        Target data array, shape ``(n_points, n_channels)``, float32.
+    """
+    unique_times = np.unique(times)
+
+    # Handle empty times (some fsteps have no data)
+    if len(unique_times) == 0:
+        n_ch = len(target_idx)
+        if channel_idxs is not None:
+            n_ch = len(channel_idxs)
+        return np.empty((0, n_ch), dtype=np.float32)
+
+    # Read one time-slice at a time (typically ≤6 per fstep)
+    all_data = []
+    for ut in unique_times:
+        ut_s = np.datetime64(ut, "s")
+        matches = np.where(ds_dates == ut_s)[0]
+
+        if len(matches) == 0:
+            raise ValueError(
+                f"Time {ut} not found in anemoi dataset. "
+                f"Available range: {ds_dates[0]} .. {ds_dates[-1]}"
+            )
+
+        idx = int(matches[0])
+        # ds[idx] → shape (n_variables, n_ens, n_gridpoints)
+        data_slice = np.asarray(ds[idx])
+        # Select target channels and squeeze ensemble dim → (n_gridpoints, n_target_channels)
+        data_slice = data_slice[target_idx, 0, :].T
+        all_data.append(data_slice)
+
+    # For gridded data every grid point shares the same unique time,
+    # so each slice already has the right shape.
+    if len(all_data) == 1:
+        target_data = all_data[0]
+    else:
+        target_data = np.concatenate(all_data, axis=0)
+
+    # Apply the same early channel selection as the zarr path
+    if channel_idxs is not None:
+        target_data = target_data[:, channel_idxs]
+
+    return target_data.astype(np.float32)
 
 
 def _compute_early_channel_selection(
@@ -92,6 +196,7 @@ def _read_sample(
     read_coords: bool = False,
     is_gridded: bool = True,
     regrid_opts: dict | None = None,
+    anemoi_target_cfg: dict | None = None,
 ) -> tuple[list[NDArray], list[NDArray], list[NDArray], dict]:
     """
     Read all forecast steps for one sample via direct zarr array access.
@@ -172,22 +277,35 @@ def _read_sample(
             if source_interval:
                 break
 
-    for fs in fsteps:
+    # Open anemoi dataset once for all fsteps (if configured)
+    anemoi_handle = None
+    if anemoi_target_cfg is not None:
+        anemoi_handle = _open_anemoi_dataset(anemoi_target_cfg)
+
+    for fi, fs in enumerate(fsteps):
         base = f"{sample}/{stream}/{fs}"
 
         # Direct array access — bypasses OutputDataset/as_xarray/dask entirely
         pred_data = np.asarray(ds[f"{base}/prediction/data"])
-        target_data = np.asarray(ds[f"{base}/target/data"])
         times_data = np.asarray(ds[f"{base}/prediction/times"])
 
-        # Select channels by index
+        if anemoi_handle is not None:
+            # Read target from anemoi dataset
+            anemoi_ds, target_idx, ds_dates = anemoi_handle
+            target_data = _read_anemoi_target(
+                anemoi_ds, target_idx, ds_dates, times_data, channel_idxs
+            )
+        else:
+            target_data = np.asarray(ds[f"{base}/target/data"])
+            if channel_idxs is not None:
+                target_data = target_data[:, channel_idxs]
+
+        # Select channels by index for prediction
         if channel_idxs is not None:
             pred_data = (
                 pred_data[:, channel_idxs] if pred_data.ndim == 2 else pred_data[:, channel_idxs, :]
             )
-            target_data = target_data[:, channel_idxs]
-
-        # Handle sub-steps (gridded data with multiple valid_times per fstep).
+            # Handle sub-steps (gridded data with multiple valid_times per fstep).
         # For scatter/observation data each observation has its own timestamp,
         # so splitting by unique time would create one tiny array per obs —
         # thousands of them — causing the assembly code to hang.

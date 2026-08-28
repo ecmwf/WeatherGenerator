@@ -165,7 +165,7 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z, 64 epochs
 # load_chkpt: {'run_id': 'btnf4goa', 'epoch': -1}  # d2048 hl5 pre-training with z, 128 epochs
 # load_chkpt: {'run_id': 'c7d5iw3q', 'epoch': -1}  # n320, 82 epochs
-load_chkpt: {'run_id': 'y9futkc8', 'epoch': -1}  # n320 6h, 82 epochs
+load_chkpt: {'run_id': 'f9qbdiwi', 'epoch': -1}  # n320 6h, 82 epochs
 
 
 norm_type: "LayerNorm"
@@ -254,14 +254,14 @@ training_config:
       eps : 2e-08
 
   losses : {
-    #"physical": {
-    #    type: LossPhysical,
-    #    weight: 0.0,
-    #    loss_fcts: {
-    #      "mse": {},
-    #    },
-    #    target_and_aux_calc: "Physical",
-    #},
+    "physical": {
+       type: LossPhysical,
+       weight: 0.0,
+       loss_fcts: {
+         "mse": {},
+       },
+       target_and_aux_calc: "Physical",
+    },
     "latent_diff": {
         type: LossLatentDiffusion,
         weight: 1.0,

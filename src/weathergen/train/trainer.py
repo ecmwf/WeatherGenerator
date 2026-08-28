@@ -27,6 +27,7 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.model import inference_diagnostics
 from weathergen.model.ema import EMAModel
 from weathergen.model.model import ModelOutput
 from weathergen.model.model_interface import (
@@ -52,6 +53,7 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
+from weathergen.utils.latent_rmse import LatentRolloutRMSE
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
@@ -71,6 +73,16 @@ LOSS_SPIKE_DETECTION_DEFAULTS = {
 }
 
 # cfg_keys_to_filter = ["losses", "model_input", "target_input"]
+
+
+def _physical_loss_term(mode_cfg) -> str:
+    """Name of the LossPhysical term, i.e. the one carrying the physical targets and coords.
+
+    Same selection ``write_output`` makes; both consume ``target_aux_out.physical``.
+    """
+    terms = [name for name, term in mode_cfg.losses.items() if term.type == "LossPhysical"]
+    assert len(terms) == 1, f"Expected exactly one LossPhysical term, got {terms}"
+    return terms[0]
 
 
 def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
@@ -825,9 +837,33 @@ class Trainer(TrainerBase):
         all_losses: dict[str, list] = {}
         all_stddev: dict[str, list] = {}
 
+        # Per-ODE-step maps/spectra for the diffusion sampler (off unless diag_ode_maps).
+        ode_diag = inference_diagnostics.maybe_create(
+            cf, self.model, self.dataset_val.denormalize_target_channels
+        )
+        ode_diag_term = _physical_loss_term(mode_cfg) if ode_diag is not None else None
+
+        # Per-ODE-step maps/spectra for the diffusion sampler (off unless diag_ode_maps).
+        ode_diag = inference_diagnostics.maybe_create(
+            cf, self.model, self.dataset_val.denormalize_target_channels
+        )
+        ode_diag_term = _physical_loss_term(mode_cfg) if ode_diag is not None else None
+
+        # Latent rollout RMSE diagnostic (isolated side channel): the model records rolled-out
+        # latents under "latent_rollout_pred" while record_latent_rollout is set; the truth
+        # latents are encoded here from the isolated batch.latent_rmse_source. Accumulate only
+        # over the first (random noise-level) pass. Standard preds/losses/zarr are untouched.
+        base_model = getattr(self.model, "module", self.model)
+        latent_rmse = (
+            LatentRolloutRMSE(self.cf, mode_cfg, self.device)
+            if mode_cfg.get("latent_rollout_rmse", False)
+            else None
+        )
+
         for _noise_idx, noise_level in enumerate(noise_levels):
             if is_diffusion:
                 self._set_validation_noise_level(noise_level)
+            base_model.record_latent_rollout = latent_rmse is not None and _noise_idx == 0
 
             if noise_level is None:
                 loss_suffix = ""
@@ -840,6 +876,7 @@ class Trainer(TrainerBase):
                 stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
 
             dataset_val_iter = iter(self.data_loader_validation)
+            num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
             with torch.no_grad():
                 # print progress bar but only in interactive mode, i.e. when without ddp
@@ -856,6 +893,9 @@ class Trainer(TrainerBase):
                             chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
                             chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
                             batch.to_device_for_chunked_inference(self.device, chunks[-1])
+                        if ode_diag is not None:
+                            # Self-disables for every batch after the first.
+                            ode_diag.set_batch(bidx)
 
                         # evaluate model
                         with torch.autocast(
@@ -893,14 +933,48 @@ class Trainer(TrainerBase):
                             if is_diffusion:
                                 _expand_targets_to_match_preds(preds, targets_and_auxs)
 
-                            # Write output for diffusion — _process_validation_chunks
-                            # skips writing when is_diffusion=True because chunked IO
-                            # is incompatible with the ODE trajectory fstep layout.
-                            # Do it here instead, mirroring the non-diffusion path.
-                            num_samples_write = (
-                                mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+                        # Rendered here (not in the sampler): the ground truth, the point
+                        # coordinates and the idxs_inv permutation only exist in target_aux.
+                        # The target is identical across the trajectory (see
+                        # _expand_targets_to_match_preds), so take the first fstep.
+                        if ode_diag is not None and ode_diag.enabled:
+                            ode_diag.render(
+                                targets_and_auxs[ode_diag_term].physical[0][ode_diag.stream]
                             )
-                            if is_diffusion and _noise_idx == 0 and bidx < num_samples_write:
+
+                        _ = self.loss_calculator_val.compute_loss(
+                            preds=preds,
+                            targets_and_aux=targets_and_auxs,
+                            metadata=extract_batch_metadata(batch),
+                        )
+
+                        # Latent rollout RMSE: encode the isolated truth latents and pair them
+                        # with the recorded predictions by lead step (both valid at t+j). Encode
+                        # under the same autocast as the forward so truth and pred share dtype.
+                        if (
+                            latent_rmse is not None
+                            and _noise_idx == 0
+                            and batch.latent_rmse_source is not None
+                        ):
+                            with torch.autocast(
+                                device_type=f"cuda:{cf.local_rank}",
+                                dtype=self.mixed_precision_dtype,
+                                enabled=cf.with_mixed_precision,
+                            ):
+                                truth = base_model.encode_source_chunked(
+                                    self.model_params, batch.latent_rmse_source
+                                )  # [B, K, H, D]
+                            for j in range(truth.shape[1]):
+                                pl = (
+                                    preds.latent[j].get("latent_rollout_pred")
+                                    if j < len(preds.latent)
+                                    else None
+                                )
+                                if pl is not None:
+                                    latent_rmse.add(j, pl.z_pre_norm, truth[:, j])
+
+                        # log output
+                        if is_diffusion and _noise_idx == 0 and bidx < num_samples_write:
                                 denormalize_data_fct = (
                                     (lambda x0, x1: x1)
                                     if mode_cfg.get("output", {}).get("normalized_samples", False)
@@ -954,6 +1028,11 @@ class Trainer(TrainerBase):
         # reset fixed noise level
         if is_diffusion:
             self._set_validation_noise_level(None)
+
+        # latent rollout RMSE: reduce across ranks and plot like the evaluate package's curves
+        base_model.record_latent_rollout = False
+        if latent_rmse is not None:
+            latent_rmse.plot(config.get_path_run(self.cf))
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()

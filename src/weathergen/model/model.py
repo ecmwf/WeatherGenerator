@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import logging
 import math
 import typing
@@ -47,6 +48,35 @@ from weathergen.utils.utils import get_dtype, is_stream_reconstructed
 logger = logging.getLogger(__name__)
 
 type StreamName = str
+
+
+def _single_step_source_view(batch, step: int):
+    """
+    Shallow view of a source ``BatchSamples`` exposing only input ``step``.
+
+    The embedding engine concatenates the source tokens of *all* input steps into one tensor
+    before embedding, so encoding a sample that carries many input steps (as the latent
+    rollout RMSE truth samples do, K steps) costs Kx the memory and OOMs. Encoding step by
+    step through this view keeps peak memory at a single step. Only ``source_tokens_cells`` /
+    ``source_tokens_lens`` and ``tokens_lens`` are read per step; nothing is deep-copied, so
+    the views alias the original tensors.
+    """
+
+    view = copy.copy(batch)
+    view.tokens_lens = batch.tokens_lens[step : step + 1]
+    view.samples = []
+    for sample in batch.samples:
+        sample_view = copy.copy(sample)
+        sample_view.streams_data = {}
+        for stream_name, stream_data in sample.streams_data.items():
+            stream_view = copy.copy(stream_data)
+            stream_view.input_steps = 1
+            stream_view.source_tokens_cells = [stream_data.source_tokens_cells[step]]
+            stream_view.source_tokens_lens = [stream_data.source_tokens_lens[step]]
+            sample_view.streams_data[stream_name] = stream_view
+        view.samples += [sample_view]
+
+    return view
 
 
 class ModelOutput:
@@ -381,6 +411,10 @@ class Model(torch.nn.Module):
         # One-shot flag to avoid log spam when warning about an unsupported
         # diffusion-inference + multi-step-rollout combination.
         self._warned_diffusion_multi_step = False
+        # Set by the trainer for the latent rollout RMSE diagnostic: when True, forward()
+        # records the rolled-out latent per step under the "latent_rollout_pred" key. Purely
+        # additive — the standard path is unaffected.
+        self.record_latent_rollout = False
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -888,6 +922,19 @@ class Model(torch.nn.Module):
                 continue
 
             if self.forecast_engine:
+                # The ODE diagnostics decode intermediate sampler states, but the sampler lives
+                # inside the forecast engine, which has no access to the decoders. Hand it a
+                # closure bound to this step's batch before it runs.
+                diagnostics = getattr(self.forecast_engine, "diagnostics", None)
+                if diagnostics is not None:
+                    # step bound as a default arg: the loop variable would otherwise be captured
+                    # by reference and resolve to the last forecast step.
+                    diagnostics.bind_decoder(
+                        lambda toks, step=step: self.decode_tokens(
+                            model_params, step, toks, source_samples
+                        )
+                    )
+
                 # apply forecasting engine
                 tokens = self.forecast_engine(
                     tokens,
@@ -973,6 +1020,15 @@ class Model(torch.nn.Module):
                         output.add_physical_prediction(
                             step, sname, (torch.cat(list(pred_tuple), dim=0),)
                         )
+                    # Latent rollout RMSE diagnostic: record the rolled-out latent under a
+                    # dedicated key (never "latent_state") so the latent loss is unaffected. The
+                    # trainer pairs this with the encoded truth latent. Off by default.
+                    if self.record_latent_rollout:
+                        output.add_latent_prediction(
+                            step,
+                            "latent_rollout_pred",
+                            self.tokens_to_latent_state(None, member_final_tokens),
+                        )
                     # Store per-member conditioning for the next rollout step.
                     # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
                     # calls expand(N, ...) which is a no-op when the dim already matches.
@@ -998,6 +1054,20 @@ class Model(torch.nn.Module):
                 )
 
         return output
+
+    @torch.no_grad()
+    def encode_source_chunked(self, model_params: ModelParams, source_samples) -> torch.Tensor:
+        """
+        Encode a multi-input-step source ``BatchSamples`` one step at a time and stack the
+        latents to ``[B, T, H, D]``. Used by the latent rollout RMSE diagnostic to encode the
+        truth latents at the forecast times without the K-step concatenation OOM (see
+        _single_step_source_view). Read-only; does not touch model state.
+        """
+        step_tokens = []
+        for s in range(source_samples.get_num_steps()):
+            tok_s, _, _ = self.encoder(model_params, _single_step_source_view(source_samples, s))
+            step_tokens.append(tok_s)
+        return torch.stack(step_tokens, dim=1)
 
     @staticmethod
     def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
@@ -1034,6 +1104,23 @@ class Model(torch.nn.Module):
             )
 
         return source_samples, tokens, posteriors, intermediates
+
+    def decode_tokens(
+        self,
+        model_params: ModelParams,
+        step: int,
+        tokens: torch.Tensor,
+        batch: BatchSamples,
+    ) -> dict:
+        """Decode arbitrary latent tokens to physical space, outside the forward's bookkeeping.
+
+        Used by the ODE diagnostics, which need to decode intermediate sampler states (``x_t``,
+        ``x0_hat``, the latent target) that never enter the ModelOutput.
+        Returns ``{stream_name: (pred_per_batch_item, ...)}``.
+        """
+        return self.predict_decoders(
+            model_params, step, tokens, batch, ModelOutput([0], 0, batch), out_step=0
+        ).physical[0]
 
     def predict_latent(
         self,

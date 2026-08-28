@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 2048
+ae_local_dim_embed: 1024
 ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -26,22 +26,22 @@ ae_adapter_with_residual: true
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 4
-ae_global_num_heads: 32
+ae_global_num_blocks: 3
+ae_global_num_heads: 16
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: true
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
-ae_global_mlp_hidden_factor: 2
-ae_global_trailing_layer_norm: false
+ae_global_mlp_hidden_factor: 4
+ae_global_trailing_layer_norm: true
 
-ae_aggregation_num_blocks: 0
-ae_aggregation_num_heads: 32
+ae_aggregation_num_blocks: 5
+ae_aggregation_num_heads: 16
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: true
 ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
-ae_aggregation_mlp_hidden_factor: 2
+ae_aggregation_mlp_hidden_factor: 4
 
 decoder_type: "PerceiverIOCoordConditioning"
 pred_adapter_kv: false
@@ -49,10 +49,11 @@ pred_self_attention: true
 pred_dyadic_dims: false
 pred_mlp_adaln: true
 num_class_tokens: 0
-num_register_tokens: 0
+num_register_tokens: 64
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
+diffusion: {noise_stream: ERA5_in}
 fe_num_blocks: 12
 fe_num_heads: 16
 fe_dropout_rate: 0.1
@@ -80,32 +81,21 @@ rho: 7
 p_mean: 3.5  # only required if noise_distribution is log_normal
 p_std: 1.2  # only required if noise_distribution is log_normal
 
-# --- Per-ODE-step map & spectrum diagnostics (inference, single-step forecasting only) ---
-# Decodes x_t and x0_hat at each ODE step and plots maps (x_t | x0_hat | decode(z) | truth) plus
-# angular power spectra in latent and physical space, under <results>/<run_id>/plots/ode_diagnostics.
-# Requires training_config.forecast.num_steps=1 (rollout leaves no reference target). Off by default.
-diag_ode_maps: false           # master switch; costs 2 decoder passes + 4 map panels per step
-diag_ode_every_n_steps: 1      # 1 = every ODE step; raise to cut render time
-diag_channels: ["2t", "q_850"]
-diag_stream: ERA5
-diag_latent_channels: 128      # latent channels sampled for the mean C_l (0 = all)
-
 healpix_level: 5
 
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
-rope_2D: False
-# mlp_type: swiglu
-# use_xsa: True
+rope_2D: True
 mlp_type: mlp
 use_xsa: False
+# mlp_type: swiglu
+# use_xsa: True
 
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
 with_fsdp: True
-# ddp_static_graph: True
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -125,50 +115,11 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 #below for FE and DECODER training
 # freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 
-# load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.7
-# load_chkpt: {'run_id': 'dcl584vo', 'epoch': -1}  # z500 d2048 hl5, sigma_data=159.08
-# load_chkpt: {'run_id': 'tvkicam9', 'epoch': -1}  # z500 d2048 hl3 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'q9grso75', 'epoch': -1}  # z500 d2048 hl3, sigma_data=39.2936
-# load_chkpt: {'run_id': 'qxivdyqz', 'epoch': -1}  # z500 d2048 hl5 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'h8x1qgz3', 'epoch': -1}  # z500 d128 hl5, sigma_data=12.93
-# load_chkpt: {'run_id': '', 'epoch': -1}  # z500 d128 hl5 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'wvpb76ai', 'epoch': -1}  # multi-var d2048 hl3 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'ae4wlc5m', 'epoch': -1}  # multi-var d2048 hl3, sigma_data=2.7047
-# load_chkpt: {'run_id': 'r45iwyns', 'epoch': -1}  # multi-var d512 hl3, sigma_data=1.1785
-# load_chkpt: {'run_id': 'ydka6uql', 'epoch': -1}  # multi-var d512 hl4, sigma_data=0.827
-# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5, sigma_data=0.5789
-# load_chkpt: {'run_id': 'v8kd6xc1', 'epoch': -1}  # multi-var d512 hl5 nopos, sigma_data=0.6481
-# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'y1gu5md8', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'mal6u4gc', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 64 epochs, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'zrpncqb0', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 196 epochs, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'm6fs8wvj', 'epoch': -1}  # multi-var d512 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'cgxt9imf', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=0.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
-# load_chkpt: {'run_id': 'wo5mf2z4', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=1.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
-# load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
-# load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'riyz96d4', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=0.5, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'bokn5d2w', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=1.5, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'uwyv1zdh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.0, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'dvslhdp3', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.5, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'mtlfdgvh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=3.0, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'jnxvjtur', 'epoch': -1}  # d2048 hl5, p_mean=-2.5, forecasting
-# load_chkpt: {'run_id': 'ulw4wid5', 'epoch': -1}  # d2048 hl5, p_mean=-2.0, forecasting
-# load_chkpt: {'run_id': 'lxpbthna', 'epoch': -1}  # d2048 hl5, p_mean=-1.5, forecasting
-# load_chkpt: {'run_id': 'n1e97r8z', 'epoch': -1}  # d2048 hl5, p_mean=-1.2, forecasting
-# load_chkpt: {'run_id': 'halvwj21', 'epoch': -1}  # d2048 hl5, p_mean=-0.5, forecasting
-# load_chkpt: {'run_id': 'dlsp3k31', 'epoch': -1}  # d2048 hl5, p_mean=0.5, forecasting
-# load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
-# load_chkpt: {'run_id': 'i3y5fhda', 'epoch': -1}  # d2048 hl5, p_mean=2.5, forecasting
-# load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
-# load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z, 64 epochs
-# load_chkpt: {'run_id': 'btnf4goa', 'epoch': -1}  # d2048 hl5 pre-training with z, 128 epochs
-# load_chkpt: {'run_id': 'c7d5iw3q', 'epoch': -1}  # n320, 82 epochs
-load_chkpt: {'run_id': 'y9futkc8', 'epoch': -1}  # n320 6h, 82 epochs
+load_chkpt: {'run_id': 'oqkez8qs', 'mini_epoch': 84}  # n320 + obs sjepa encoder backbone, fine-tuned from zs4o66ch (matches models/oqkez8qs); note: config key is "mini_epoch", not "epoch" (see model_interface.py load_chkpt handling)
 
 
 norm_type: "LayerNorm"
+qk_norm_type: "RMSNorm"
 
 #####################################
 
@@ -210,7 +161,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 12
+  num_workers: 8
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
@@ -219,7 +170,7 @@ data_loading :
 training_config:
   
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
+  training_mode: ["student_teacher"] # ["student_teacher", "physical_loss"]  
 
   num_mini_epochs: 128
   samples_per_mini_epoch: 4096
@@ -254,14 +205,14 @@ training_config:
       eps : 2e-08
 
   losses : {
-    #"physical": {
+    # "physical": {
     #    type: LossPhysical,
     #    weight: 0.0,
     #    loss_fcts: {
     #      "mse": {},
     #    },
     #    target_and_aux_calc: "Physical",
-    #},
+    # },
     "latent_diff": {
         type: LossLatentDiffusion,
         weight: 1.0,
@@ -278,7 +229,7 @@ training_config:
         diffusion_rn: True,
         noise_distribution: *noise_distribution,
         sigma_min: *sigma_min,
-        sigma_max: *sigma_max
+        sigma_max: *sigma_max,
         },
       num_steps_input: 2,
       num_samples: 1,
@@ -288,7 +239,12 @@ training_config:
   target_input: {
     "forecasting" : {
       masking_strategy: "forecast",
-      masking_strategy_config: {diffusion_rn: True},
+      masking_strategy_config: {
+        diffusion_rn: True,
+        noise_distribution: *noise_distribution,
+        sigma_min: *sigma_min,
+        sigma_max: *sigma_max,
+        },
       num_steps_input: 1,
       num_samples: 1,
       }
@@ -332,7 +288,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: True
 
 
 # test config; full test config is merge of validation and test config

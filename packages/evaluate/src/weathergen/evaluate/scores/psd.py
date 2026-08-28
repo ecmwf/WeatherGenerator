@@ -327,7 +327,7 @@ def detect_grid_type(
     Returns
     -------
     str | None
-        ``"octahedral"``, ``"regular"``, or ``None`` if detection fails.
+        ``"octahedral"``, ``"regular"``, ``"reduced"``, or ``None`` if detection fails.
     """
     unique_lats = np.unique(lats)
     nlat = len(unique_lats)
@@ -356,6 +356,19 @@ def detect_grid_type(
     if n_points == expected_reg:
         _logger.debug(f"Detected regular lat-lon grid (nlat={nlat}).")
         return "regular"
+
+    # Check reduced Gaussian (ECMWF N320, e.g. ERA5's native grid)
+    if nlat == 640:  # sht_psd's "reduced" path is hard-wired to N320
+        try:
+            from anemoi.transform.grids.named import lookup
+
+            expected_reduced = len(np.asarray(lookup("N320")["latitudes"]))
+        except Exception as exc:  # noqa: BLE001 - anemoi missing / offline / unknown grid
+            _logger.warning(f"Reduced Gaussian (N320) grid check unavailable: {exc}")
+            expected_reduced = None
+        if expected_reduced is not None and n_points == expected_reduced:
+            _logger.debug(f"Detected reduced Gaussian (N320) grid (nlat={nlat}).")
+            return "reduced"
 
     # Check if all latitude rings have the same number of points (regular but non-standard ratio)
     unique_lons_global = np.unique(lons)
@@ -695,7 +708,7 @@ def compute_psd_score(
     lat_range : tuple[float, float]
         Latitude bounds for fft method.
     grid_type : str | None
-        Pre-detected grid type (``"octahedral"``, ``"regular"``).
+        Pre-detected grid type (``"octahedral"``, ``"regular"``, ``"reduced"``).
         When ``None``, the grid type is auto-detected from lats/lons.
         Pass a pre-computed value to avoid repeated detection across channels.
 
