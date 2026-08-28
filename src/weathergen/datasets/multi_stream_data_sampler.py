@@ -835,7 +835,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _build_field_conditioning_data(
         self, batch: ModelBatch, idx: int, num_forecast_steps: int
     ) -> ModelBatch:
-        """Collect per-step field conditioning data and store in conditioning_samples.streams_data."""
+        """Collect per-step field conditioning data and
+        store in conditioning_samples.streams_data."""
         num_output_steps = self._get_output_length(num_forecast_steps)
         for stream_name, stream_ds in self.field_conditioning_datasets.items():
             stream_info = stream_ds.info
