@@ -28,7 +28,7 @@ from weathergen.datasets.data_reader_base import (
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
-from weathergen.datasets.tokenizer_masking import TokenizerMasking
+from weathergen.datasets.tokenizer_masking import TokenizerMasking, readerdata_to_torch
 from weathergen.datasets.utils import (
     get_tokens_lens,
 )
@@ -230,7 +230,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         streams_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
             stream_info["data_paths"] = cf.get("data_paths", [])
-            ds_type = stream_info["type"]    
+            ds_type = stream_info["type"]
             # list of sources for current stream
             streams_datasets[stream_name] = _Stream(stream_info, [])
             kwargs = {
@@ -258,7 +258,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             else:
                 pass
 
-        
             for fname in filenames_cfg:
                 fname = pathlib.Path(fname)
                 # skip if explicitly pointing to current directory
@@ -683,12 +682,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         Perform necessary pre-processing of model batch
         """
         stream_names = list(self.streams_datasets.keys())
+        conditioning_stream_names = list(self.field_conditioning_datasets.keys())
         batch.source_samples.tokens_lens = get_tokens_lens(
             stream_names, batch.source_samples, source_input_steps
         )
         batch.target_samples.tokens_lens = get_tokens_lens(
             stream_names, batch.target_samples, target_input_steps
         )
+        if conditioning_stream_names:
+            batch.conditioning_samples.tokens_lens = get_tokens_lens(
+                conditioning_stream_names, batch.conditioning_samples, input_steps=1
+            )
 
         return batch
 
@@ -719,6 +723,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         num_output_steps = self._get_output_length(num_forecast_steps)
         batch = ModelBatch(
             list(self.streams_datasets.keys()),
+            list(self.field_conditioning_datasets.keys()),
             num_source_samples,
             num_target_samples,
             self.output_offset,
@@ -797,13 +802,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         source_in_steps = input_steps.max().item()
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
-        batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
         if self.scalar_conditioning_stream_names:
             batch = self._build_scalar_conditioning_data(batch, idx, num_forecast_steps)
 
         if self.field_conditioning_stream_names:
             batch = self._build_field_conditioning_data(batch, idx, num_forecast_steps)
+
+        batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
         return batch
 
@@ -817,9 +823,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             for timestep_idx in range(self.output_offset, num_output_steps):
                 step_dt = idx + (self.time_step * timestep_idx) // self.step_timedelta
                 rdata = stream_ds.readers[0].get_source(step_dt)
-                step_values.append(rdata.data.flatten().copy())
+                step_values.append(readerdata_to_torch(rdata).data.flatten())
             conditioning_values = (
-                np.stack(step_values, axis=0) if step_values else np.zeros((0, 1), dtype=np.float32)
+                torch.stack(step_values, dim=0)
+                if step_values
+                else torch.zeros((0, 1), dtype=torch.float32)
             )
             batch.add_scalar_conditioning_stream(stream_name, conditioning_values)
         return batch
@@ -827,7 +835,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _build_field_conditioning_data(
         self, batch: ModelBatch, idx: int, num_forecast_steps: int
     ) -> ModelBatch:
-        """Collect per-step field conditioning data and store in conditioning_streams_data."""
+        """Collect per-step field conditioning data and store in conditioning_samples.streams_data."""
         num_output_steps = self._get_output_length(num_forecast_steps)
         for stream_name, stream_ds in self.field_conditioning_datasets.items():
             stream_info = stream_ds.info

@@ -11,7 +11,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-
 from weathergen.common.config import Config
 from weathergen.datasets.stream_data import StreamData
 
@@ -47,21 +46,14 @@ class Sample:
                 if stream_data is not None and hasattr(stream_data, "pin_memory"):
                     stream_data.pin_memory()
 
-        # Pin StreamData objects in conditioning_streams_data
-        if hasattr(self, "conditioning_streams_data") and isinstance(
-            self.conditioning_streams_data, dict
-        ):
-            for _name, steps in self.conditioning_streams_data.items():
-                for sd in steps:
-                    if sd is not None and hasattr(sd, "pin_memory"):
-                        sd.pin_memory()
-
         # Pin tensors in meta_info
         if hasattr(self, "meta_info") and isinstance(self.meta_info, dict):
             for _key, meta_data in self.meta_info.items():
                 if isinstance(meta_data, SampleMetaData):
                     # Pin mask tensor
-                    if meta_data.mask is not None and isinstance(meta_data.mask, torch.Tensor):
+                    if meta_data.mask is not None and isinstance(
+                        meta_data.mask, torch.Tensor
+                    ):
                         meta_data.mask = meta_data.mask.pin_memory()
 
         return self
@@ -73,10 +65,6 @@ class Sample:
         for stream_name in stream_names:
             self.streams_data[stream_name] = None
 
-        # Field conditioning stream data, keyed by stream name then indexed by forecast step.
-        # Populated by MultiStreamDataSampler for streams with timestep_conditioning: field.
-        self.conditioning_streams_data: dict[str, list[StreamData | None]] = {}
-
     def to_device(self, device) -> None:
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
@@ -84,63 +72,80 @@ class Sample:
                 if self.meta_info[key].mask is not None
                 else None
             )
+            if self.meta_info[key].conditioning is not None:
+                self.meta_info[key].conditioning = self.meta_info[key].conditioning.to(
+                    device, non_blocking=True
+                )
 
         for key, val in self.streams_data.items():
             if val is not None:
                 self.streams_data[key] = val.to_device(device)
 
-        for name, steps in self.conditioning_streams_data.items():
-            self.conditioning_streams_data[name] = [
-                sd.to_device(device) if sd is not None else None for sd in steps
-            ]
-
     def is_empty(self) -> bool:
         """
         Check if sample is empty
         """
-        empty = [s.empty() if s is not None else True for _, s in self.streams_data.items()]
+        empty = [
+            s.empty() if s is not None else True for _, s in self.streams_data.items()
+        ]
         return np.array(empty).all()
 
     def is_nan(self) -> bool:
         """
         Check if sample is all NaN
         """
-        is_nan = [s.nan() if s is not None else False for _, s in self.streams_data.items()]
+        is_nan = [
+            s.nan() if s is not None else False for _, s in self.streams_data.items()
+        ]
         return np.array(is_nan).all()
 
     def sources_empty(self) -> bool:
         """
         Check if sources for sample are empty
         """
-        empty = [s.source_empty() if s is not None else True for _, s in self.streams_data.items()]
+        empty = [
+            s.source_empty() if s is not None else True
+            for _, s in self.streams_data.items()
+        ]
         return np.array(empty).all()
 
     def sources_nan(self) -> bool:
         """
         Check if sources for sample are all NaN
         """
-        is_nan = [s.source_nan() if s is not None else False for _, s in self.streams_data.items()]
+        is_nan = [
+            s.source_nan() if s is not None else False
+            for _, s in self.streams_data.items()
+        ]
         return np.array(is_nan).all()
 
     def targets_empty(self) -> bool:
         """
         Check if targets for sample are empty
         """
-        empty = [s.target_empty() if s is not None else True for _, s in self.streams_data.items()]
+        empty = [
+            s.target_empty() if s is not None else True
+            for _, s in self.streams_data.items()
+        ]
         return np.array(empty).all()
 
     def targets_nan(self) -> bool:
         """
         Check if targets for sample are all NaN
         """
-        is_nan = [s.target_nan() if s is not None else False for _, s in self.streams_data.items()]
+        is_nan = [
+            s.target_nan() if s is not None else False
+            for _, s in self.streams_data.items()
+        ]
         return np.array(is_nan).all()
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
         Add data for stream @stream_name to sample
         """
-        assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
+        assert self.streams_data.get(stream_name, -1) != -1, (
+            "stream name does not exist"
+        )
         self.streams_data[stream_name] = stream_data
 
     def add_meta_info(self, stream_name: str, meta_info: SampleMetaData) -> None:
@@ -153,7 +158,9 @@ class Sample:
         """
         Get data for stream @stream_name from sample
         """
-        assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
+        assert self.streams_data.get(stream_name, -1) != -1, (
+            "stream name does not exist"
+        )
         return self.streams_data[stream_name]
 
     def get_num_source_steps(self) -> int:
@@ -177,28 +184,6 @@ class Sample:
             if stream is not None
         ]
         return min(lens) if len(lens) > 0 else 0
-
-    def add_conditioning_stream_data(
-        self, stream_name: str, step: int, stream_data: StreamData | None
-    ) -> None:
-        """
-        Add StreamData for field conditioning stream @stream_name at forecast step @step to sample
-        """
-        if stream_name not in self.conditioning_streams_data:
-            self.conditioning_streams_data[stream_name] = []
-        steps = self.conditioning_streams_data[stream_name]
-        while len(steps) <= step:
-            steps.append(None)
-        steps[step] = stream_data
-
-    def get_conditioning_stream_data(self, stream_name: str, step: int) -> StreamData | None:
-        """
-        Get StreamData for field conditioning stream @stream_name at forecast step @step from sample
-        """
-        steps = self.conditioning_streams_data.get(stream_name)
-        if steps is None or step >= len(steps):
-            return None
-        return steps[step]
 
 
 class BatchSamples:
@@ -229,7 +214,9 @@ class BatchSamples:
             sample.to_device(device)
 
         self.tokens_lens = (
-            self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
+            self.tokens_lens.to(device, non_blocking=True)
+            if self.tokens_lens is not None
+            else None
         )
 
         self.device = device
@@ -247,7 +234,9 @@ class BatchSamples:
             # create copy and then select subset for samples and tokens_lens
             bs = copy.deepcopy(self)
             bs.samples = [bs.samples[i] for i in subset]
-            torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
+            torch_idxs = torch.tensor(
+                subset, dtype=torch.long, device=bs.tokens_lens.device
+            )
             bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
@@ -285,25 +274,33 @@ class BatchSamples:
         """
         Check if sources for all samples are empty
         """
-        return np.array([s.sources_empty() if s is not None else True for s in self.samples]).all()
+        return np.array(
+            [s.sources_empty() if s is not None else True for s in self.samples]
+        ).all()
 
     def targets_empty(self) -> bool:
         """
         Check if targets for all samples are empty
         """
-        return np.array([s.targets_empty() if s is not None else True for s in self.samples]).all()
+        return np.array(
+            [s.targets_empty() if s is not None else True for s in self.samples]
+        ).all()
 
     def sources_nan(self) -> bool:
         """
         Check if sources for all samples are all NaN
         """
-        return np.array([s.sources_nan() if s is not None else False for s in self.samples]).all()
+        return np.array(
+            [s.sources_nan() if s is not None else False for s in self.samples]
+        ).all()
 
     def targets_nan(self) -> bool:
         """
         Check if targets for all samples are all NaN
         """
-        return np.array([s.targets_nan() if s is not None else False for s in self.samples]).all()
+        return np.array(
+            [s.targets_nan() if s is not None else False for s in self.samples]
+        ).all()
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
@@ -345,6 +342,7 @@ class ModelBatch:
     def __init__(
         self,
         stream_names: list[str],
+        conditioning_stream_names: list[str],
         num_source_samples: int,
         num_target_samples: int,
         output_offset,
@@ -364,7 +362,16 @@ class ModelBatch:
             stream_names, num_target_samples, output_steps, self.output_idxs
         )
 
-        self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
+        self.conditioning_samples = BatchSamples(
+            stream_names=conditioning_stream_names,
+            num_samples=1,
+            output_steps=output_steps,
+            output_idxs=self.output_idxs,
+        )
+
+        self.source2target_matching_idxs = np.full(
+            num_source_samples, -1, dtype=np.int32
+        )
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
     def pin_memory(self):
@@ -376,6 +383,9 @@ class ModelBatch:
         # pin target samples
         self.target_samples.pin_memory()
 
+        # pin conditioning samples
+        self.conditioning_samples.pin_memory()
+
         return self
 
     def to_device(self, device):  # -> ModelBatch
@@ -385,6 +395,7 @@ class ModelBatch:
 
         self.source_samples.to_device(device)
         self.target_samples.to_device(device)
+        self.conditioning_samples.to_device(device)
 
         self.device = device
 
@@ -401,12 +412,18 @@ class ModelBatch:
         """
         Add data for one stream to sample @source_sample_idx
         """
-        self.source_samples.samples[source_sample_idx].add_stream_data(stream_name, stream_data)
+        self.source_samples.samples[source_sample_idx].add_stream_data(
+            stream_name, stream_data
+        )
 
         # add the meta_info
-        self.source_samples.samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
+        self.source_samples.samples[source_sample_idx].add_meta_info(
+            stream_name, source_meta_info
+        )
 
-        assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
+        assert target_sample_idx < len(self.target_samples), (
+            "invalid value for target_sample_idx"
+        )
         self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
 
     def add_target_stream(
@@ -420,10 +437,14 @@ class ModelBatch:
         """
         Add data for one stream to sample @target_sample_idx
         """
-        self.target_samples.samples[target_sample_idx].add_stream_data(stream_name, stream_data)
+        self.target_samples.samples[target_sample_idx].add_stream_data(
+            stream_name, stream_data
+        )
 
         # add the meta_info -- for target we have different
-        self.target_samples.samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
+        self.target_samples.samples[target_sample_idx].add_meta_info(
+            stream_name, target_meta_info
+        )
 
         if isinstance(source_sample_idx, int):
             assert source_sample_idx < len(self.source_samples), (
@@ -444,12 +465,14 @@ class ModelBatch:
                 sample.add_meta_info(stream_name, SampleMetaData(params={}))
             sample.meta_info[stream_name].conditioning = conditioning_values
 
-    def add_field_conditioning_stream(self, stream_name, step: int, stream_data: StreamData):
+    def add_field_conditioning_stream(
+        self, stream_name, step: int, stream_data: StreamData
+    ):
         """
         Add field conditioning values for all samples in the batch for a specific stream.
         """
-        for sample in self.source_samples.samples:
-            sample.add_conditioning_stream_data(stream_name, step, stream_data)
+        for sample in self.conditioning_samples.samples:
+            sample.streams_data[stream_name] = stream_data
 
     def get_scalar_conditioning_values(
         self, stream_name: str, step: int
@@ -461,35 +484,24 @@ class ModelBatch:
         for any sample.
         """
         values = []
-        for sample in self.samples:
+        for sample in self.source_samples.samples:
             meta = sample.meta_info.get(stream_name)
-            if meta is None or meta.conditioning is None or step >= len(meta.conditioning):
+            if (
+                meta is None
+                or meta.conditioning is None
+                or step >= len(meta.conditioning)
+            ):
                 return None
             values.append(meta.conditioning[step])
-        return np.stack(values, axis=0) if values else None
-
-    def get_field_conditioning_values(
-        self, stream_name: str, step: int
-    ) -> np.typing.NDArray | None:
-        """
-        Get field conditioning values for all samples at a specific forecast step.
-
-        Returns np.ndarray of shape (num_samples, ...) or None if not available
-        for any sample.
-        """
-        values = []
-        for sample in self.samples:
-            stream_data = sample.get_conditioning_stream_data(stream_name, step)
-            if stream_data is None:
-                return None
-            values.append(stream_data.data)
-        return np.stack(values, axis=0) if values else None
+        return torch.stack(values, dim=0) if values else None
 
     def is_empty(self):
         """
         Check if batch is empty
         """
-        return self.source_samples.sources_empty() or self.target_samples.targets_empty()
+        return (
+            self.source_samples.sources_empty() or self.target_samples.targets_empty()
+        )
 
     def is_nan(self):
         """

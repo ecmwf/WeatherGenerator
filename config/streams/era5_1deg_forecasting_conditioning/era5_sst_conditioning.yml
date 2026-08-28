@@ -13,10 +13,10 @@
 ERA5_SST:
   type: anemoi
   conditioning: True
-  filenames: ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr']
+  filenames: ['ERA5-1deg-6h-mean-forcing-1978-2024.zarr']
   timestep_conditioning: field
   stream_id: 99
-  source: ['sst']
+  source: ['sea_surface_temperature']
   token_size: 8
   tokenize_spacetime: False
   geoinfo_channels: []
