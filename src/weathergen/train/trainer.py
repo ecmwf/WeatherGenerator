@@ -415,6 +415,11 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
 
+        # Without this, NCCL's heartbeat monitor keeps polling a TCPStore whose server has
+        # already gone away, and the ranks never exit.
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
     def validate_before_training(self):
         """
         Perform validation before training (eg. to check validation pipeline or data normalization)
