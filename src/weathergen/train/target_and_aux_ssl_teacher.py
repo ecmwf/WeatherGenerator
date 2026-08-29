@@ -77,8 +77,8 @@ class EncoderTeacher(TargetAndAuxModuleBase):
             module.to(device)
         return self
 
-    def get_current_beta(self, cur_step: int) -> float:
-        beta = self.ema_model.get_current_beta(cur_step)
+    def get_current_beta(self, cur_step: int, batch_size: int) -> float:
+        beta = self.ema_model.get_current_beta(cur_step, batch_size)
         return beta
 
 
@@ -104,9 +104,9 @@ class EMATeacher(EncoderTeacher):
             self.ema_model.ema_model.reshard()
         self.ema_model.update(istep, self.batch_size)
 
-    def get_current_beta(self, cur_step: int) -> float:
+    def get_current_beta(self, cur_step: int, batch_size: int) -> float:
         """Return the current EMA interpolation beta for monitoring."""
-        return self.ema_model.get_current_beta(cur_step)
+        return self.ema_model.get_current_beta(cur_step, batch_size)
 
 
 class FrozenTeacher(EncoderTeacher):
