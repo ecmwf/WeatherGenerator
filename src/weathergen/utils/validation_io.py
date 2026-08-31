@@ -60,6 +60,10 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
+    # skip_target_values: targets have zero width (values were never read) and no
+    # target datasets are written; the target arrays below only provide row counts
+    write_targets = not val_cfg.get("skip_target_values", False)
+
     # _get_output_length clamps to at least one output step, so this always holds
     assert len(batch.get_output_idxs()) > 0, "Batch carries no output steps."
     forecast_offset = batch.get_output_idxs()[0]
@@ -132,9 +136,10 @@ def write_output(
 
                 # handle forcing streams or if sample is empty
                 if preds is None:
-                    # preds are empty so create copy of target and add ensemble dimension
+                    # preds are empty so create empty preds with ensemble dimension
+                    # (explicit width: targets have zero width under skip_target_values)
                     assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
-                    preds = [target.clone().unsqueeze(0) for target in targets]
+                    preds = [target.new_zeros((1, 0, n_channels)) for target in targets]
 
                 for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
                     target_data = target_aux_out.physical[t_idx][sname]
@@ -150,7 +155,12 @@ def write_output(
 
                     # denormalize data if requested and map to storage format
                     preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-                    targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+                    if write_targets:
+                        targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+                    else:
+                        # zero-width targets cannot be denormalized (channel-count
+                        # mismatch); only their row counts are used, for targets_lens
+                        targets_s += [target.detach().cpu().numpy()]
 
                     # extract original target coords and times from target data
                     t_coords_s += [t_coords.cpu().numpy()]
@@ -239,6 +249,7 @@ def write_output(
         sample_start=sample_start,
         forecast_offset=forecast_offset,
         forecast_steps=timestep_idxs,
+        write_targets=write_targets,
     )
 
     store_path = config.get_path_results(cf, mini_epoch)

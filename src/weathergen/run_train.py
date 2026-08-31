@@ -19,6 +19,10 @@ import time
 import traceback
 from pathlib import Path
 
+# Verify NCCL env vars are visible before any NCCL/CUDA init
+for _var in ("NCCL_CUMEM_ENABLE", "NCCL_MAX_NCHANNELS", "NCCL_P2P_DISABLE"):
+    print(f"[env-check] {_var}={os.environ.get(_var, 'NOT SET')}", flush=True)
+
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers

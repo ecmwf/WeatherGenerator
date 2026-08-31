@@ -602,6 +602,10 @@ class OutputBatchData:
     forecast_offset: int
     forecast_steps: list[int]
 
+    # if False, no target datasets are built/written (skip_target_values inference);
+    # self.targets then only provides row counts via targets_lens
+    write_targets: bool = True
+
     @functools.cached_property
     def samples(self):
         """Continous indices of all samples accross all batches."""
@@ -691,20 +695,26 @@ class OutputBatchData:
                 datapoints
             ]
 
-        assert len(data_coords.channels) == target_data.shape[1], (
-            "Number of channel names does not align with target data."
-        )
         assert len(data_coords.channels) == preds_data.shape[1], (
             "Number of channel names does not align with prediction data."
         )
 
-        target_dataset = OutputDataset(
-            "target",
-            key,
-            source_interval,
-            target_data,
-            **dataclasses.asdict(data_coords),
-        )
+        if self.write_targets:
+            assert len(data_coords.channels) == target_data.shape[1], (
+                "Number of channel names does not align with target data."
+            )
+            target_dataset = OutputDataset(
+                "target",
+                key,
+                source_interval,
+                target_data,
+                **dataclasses.asdict(data_coords),
+            )
+        else:
+            # target values were never read (skip_target_values); coords/times are
+            # still written as part of the prediction dataset
+            target_dataset = None
+
         prediction_dataset = OutputDataset(
             "prediction",
             key,

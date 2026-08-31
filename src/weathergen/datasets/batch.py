@@ -381,20 +381,27 @@ class ModelBatch:
         return self
 
     def to_device_for_chunked_inference(
-        self, device, loss_steps: list[int], include_target_source: bool = False
+        self, device, loss_steps: list[int], include_target_source: bool = False,
+        include_source_tokens: bool = True,
     ):
         """Move source inputs and the targets required for the final chunk loss.
 
         include_target_source additionally moves the target samples' source view, which
         target/aux calculators that encode the target window (SSL teachers, the diffusion
         latent target) need. It is left on the host otherwise.
+
+        include_source_tokens controls whether encoder input tokens are moved now.
+        Pass False to defer the load to just before the first encoder forward (via
+        load_source_tokens_to_device), which avoids occupying GPU HBM during the
+        DataLoader prefetch window and any pre-forward target computation.
         """
-        self.source_samples.to_device(
-            device,
-            target_steps=[],
-            include_target_coords=False,
-            include_target_tokens=False,
-        )
+        if include_source_tokens:
+            self.source_samples.to_device(
+                device,
+                target_steps=[],
+                include_target_coords=False,
+                include_target_tokens=False,
+            )
         self.target_samples.to_device(
             device,
             target_steps=loss_steps,
@@ -419,6 +426,67 @@ class ModelBatch:
     def clear_output_chunk_coordinates(self, target_steps: list[int]) -> None:
         """Release decoder coordinates after output for a forecast chunk was written."""
         self.source_samples.clear_target_coordinates(target_steps)
+
+    def offload_source_tokens(self) -> None:
+        """Move source observation tokens back to CPU after the encoder has run.
+
+        Source tokens (source_tokens_cells / source_tokens_lens / source_idxs_embed)
+        are only needed for the encoder, which runs on the *first* rollout chunk.
+        Offloading them immediately after that frees several hundred MiB of GPU memory
+        that would otherwise be held for the entire multi-step decoder rollout.
+        Only target coordinates (loaded per-chunk via to_device_for_output_chunk) and
+        the latent conditioning token stored in meta_info are needed on-device
+        for continuation chunks.
+        """
+        self.source_samples.to_device(
+            "cpu",
+            target_steps=[],
+            include_target_coords=False,
+            include_target_tokens=False,
+        )
+
+    def load_source_tokens_to_device(self, device) -> None:
+        """Move source observation tokens (encoder input) to *device*.
+
+        Counterpart to offload_source_tokens(). Calling this immediately before the
+        first chunk's encoder forward (instead of eagerly in to_device_for_chunked_inference)
+        keeps the tokens off the GPU during the DataLoader prefetch window and any
+        pre-forward target computation, reducing peak GPU HBM usage by the token
+        footprint (~456 MiB for this model).
+        """
+        self.source_samples.to_device(
+            device,
+            target_steps=[],
+            include_target_coords=False,
+            include_target_tokens=False,
+        )
+
+    def drop_source_observations(self) -> None:
+        """Drop all source observation data from memory after the encoder has run.
+
+        After offload_source_tokens() has moved the encoder inputs back to CPU, the
+        Python objects holding them (source_tokens_cells / source_tokens_lens /
+        source_idxs_embed / source_raw) are still alive in RAM.  This method nulls
+        them out so Python's reference-counting can reclaim the memory immediately.
+
+        ``target_coords`` and ``target_coords_lens`` inside each StreamData are
+        intentionally preserved: the decoder loads them per-chunk via
+        ``to_device_for_output_chunk`` and clears them via
+        ``clear_output_chunk_coordinates`` after each write.
+
+        ``meta_info`` is also preserved: the diffusion rollout stashes
+        ``LATENT_CONDITIONING_TOKENS`` there for continuation chunks.
+        """
+        for sample in self.source_samples.get_samples():
+            for stream_data in sample.streams_data.values():
+                if stream_data is None:
+                    continue
+                n_src = len(stream_data.source_tokens_cells)
+                stream_data.source_tokens_cells = [None] * n_src
+                stream_data.source_tokens_lens = [None] * n_src
+                stream_data.source_idxs_embed = [None] * n_src
+                stream_data.source_idxs_embed_pe = [None] * n_src
+                stream_data.source_raw = [None] * n_src
 
     def add_source_stream(
         self,

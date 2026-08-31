@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import dataclasses
+import functools
 import logging
 import pathlib
 from collections.abc import Sequence
@@ -35,7 +36,11 @@ from weathergen.datasets.utils import (
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
+from weathergen.utils.utils import (
+    is_stream_diagnostic,
+    is_stream_forcing,
+    is_stream_reconstructed,
+)
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -50,11 +55,15 @@ FORECAST_DEFAULTS = {
 }
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
+def collect_datasources(
+    stream_datasets: list, idx: int, type: str, rng, coords_geoinfos_only: bool = False
+) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
 
     rng and num_subset are used to drop data
+
+    coords_geoinfos_only (targets only): skip reading the data values; data has zero width
     """
 
     rdatas = []
@@ -68,7 +77,9 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
             normalize_channels = ds.normalize_source_channels
             shuffle = ds.stream_info.get("shuffle_source", False)
         elif type == "target":
-            get_reader_data = ds.get_target
+            get_reader_data = functools.partial(
+                ds.get_target, coords_geoinfos_only=coords_geoinfos_only
+            )
             normalize_channels = ds.normalize_target_channels
             num_subset = ds.stream_info.get("max_num_targets", -1)
             shuffle = ds.stream_info.get("shuffle_target", False)
@@ -79,7 +90,9 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
         rdata = (
             get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
         )
-        rdata.data = normalize_channels(rdata.data)
+        if not coords_geoinfos_only:
+            # zero-width data has nothing to normalize (and would fail the channel-count check)
+            rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
 
@@ -136,6 +149,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     "Ignoring teacher_time_offset (setting to 0)."
                 )
             self.teacher_time_offset = 0
+
+        # skip_target_values: inference-only; do not read/store target values for physically
+        # reconstructed streams, only coords/geoinfos/datetimes (data gets zero width)
+        self.skip_target_values = bool(mode_cfg.get("skip_target_values", False))
+        if self.skip_target_values and (
+            "student_teacher" in training_mode or "latent_loss" in training_mode
+        ):
+            raise ValueError(
+                "skip_target_values is incompatible with student_teacher/latent_loss modes: "
+                "target values are needed to build the teacher's network input."
+            )
 
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.num_workers = cf.data_loading.num_workers
@@ -271,8 +295,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         raise FileNotFoundError(msg)
 
                     # The same dataset can exist on different locations in the filesystem,
-                    # so we need to choose here.
-                    filename = filenames[0]
+                    # so pick the first data_paths root that actually has it (the check
+                    # above guarantees at least one exists).
+                    filename = next(f for f in filenames if f.exists())
 
                 ds_type = stream_info["type"]
                 if is_root():
@@ -586,7 +611,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
+    def _get_data_windows(
+        self,
+        base_idx,
+        num_forecast_steps,
+        num_steps_input_max,
+        stream_ds,
+        coords_geoinfos_only: bool = False,
+    ):
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
@@ -622,7 +654,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             for timestep_idx in range(self.output_offset, num_output_steps):
                 step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-                rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+                rdata = collect_datasources(
+                    stream_ds,
+                    step_forecast_dt,
+                    "target",
+                    self.rng,
+                    coords_geoinfos_only=coords_geoinfos_only,
+                )
 
                 if rdata.is_empty():
                     # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -632,7 +670,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         self.healpix_level,
                         time_win.start,
                         stream_ds[0].get_geoinfo_size(),
-                        len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                        # zero width to match the coords_geoinfos_only data downstream
+                        0
+                        if coords_geoinfos_only
+                        else len(stream_ds[0].mean[stream_ds[0].target_idx]),
                     )
                     rdata.is_spoof = True
 
@@ -919,9 +960,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            # assert self.world_size == 1, self.world_size
-            iter_start = 0
-            iter_end = len(self)
+            # no loader workers: each DDP rank still takes its own disjoint slice
+            iter_start = local_start
+            iter_end = local_end
 
         else:
             # ensure the rng seed is fully unique across workers and mini_epochs

@@ -268,6 +268,62 @@ class Trainer(TrainerBase):
             for start in range(0, len(output_idxs), chunk_size)
         ]
 
+    def _offload_encoder_weights(self) -> None:
+        """Move encoder parameter storage to CPU after the encoder has run.
+
+        FSDP2 uses lazy all-gather: it only fetches parameters for modules that are
+        actually called during a forward pass.  Continuation chunks (chunk_idx > 0)
+        never call the encoder — they resume from the cached latent state — so FSDP2
+        will never try to all-gather the encoder shards while they are on CPU.
+
+        **FSDP2 DTensor parameters are intentionally skipped.**  Some encoder parameters
+        (e.g. stream embedders in embed_engine) live in the *root* FSDP group rather than
+        in individually-sharded sub-modules.  Moving their _local_tensor to CPU outside
+        FSDP's knowledge causes FSDP's root pre-forward to trigger a spurious 1.95 GiB
+        all-gather on the next chunk.  Safe offloading of DTensor params would require
+        CPUOffload configured at shard time; we limit this method to the non-FSDP path.
+        """
+        try:
+            from torch.distributed.tensor import DTensor
+
+            base_model = getattr(self.model, "module", self.model)
+            encoder = getattr(base_model, "encoder", None)
+            if encoder is None:
+                return
+            for param in encoder.parameters():
+                # DTensor = FSDP-managed shard — do NOT move; see docstring.
+                if isinstance(param, DTensor):
+                    continue
+                if param.is_cuda:
+                    param.data = param.data.cpu()
+            torch.cuda.empty_cache()
+        except Exception:
+            pass  # best-effort; do not crash inference
+
+    def _reload_encoder_weights(self) -> None:
+        """Reload encoder parameter storage onto the inference device.
+
+        Counterpart to ``_offload_encoder_weights()``.  Called just before chunk 0's
+        model forward so that the encoder can run a fresh all-gather from its local
+        (now GPU-resident) shards.  DTensor parameters are skipped for the same reason
+        as in _offload_encoder_weights.
+        """
+        try:
+            from torch.distributed.tensor import DTensor
+
+            base_model = getattr(self.model, "module", self.model)
+            encoder = getattr(base_model, "encoder", None)
+            if encoder is None:
+                return
+            device = self.device
+            for param in encoder.parameters():
+                if isinstance(param, DTensor):
+                    continue  # FSDP-managed; do not touch
+                if not param.is_cuda:
+                    param.data = param.data.to(device, non_blocking=True)
+        except Exception:
+            pass  # best-effort
+
     def _process_validation_chunks(
         self,
         batch,
@@ -322,14 +378,41 @@ class Trainer(TrainerBase):
         forecast_chunk = batch.get_source_samples()
        
         if not compute_full_loss:
-            # bound here, not inside the write branch: the trailing trim below needs it on
-            # every batch, including the ones past output.num_samples that write nothing
+            # shallow copy is sufficient: .physical and .output_idxs are reassigned before
+            # any use, and the shared per-step target dicts are only read downstream
             target_aux = targets_and_auxs[physical_loss_names[0]]
-            target_aux_chunk = copy.deepcopy(target_aux)
+            target_aux_chunk = copy.copy(target_aux)
 
         for chunk_idx, chunk in enumerate(chunks):
+            # Return PyTorch's reserved-but-unallocated HBM cache to CUDA at the start
+            # of every chunk.  This is critical for chunk 0: the previous batch's latent
+            # conditioning tensor (~1 GiB) was freed by CPython ref-counting when 'batch'
+            # was reassigned at the top of the outer loop, but it sits in PyTorch's
+            # reserved cache until empty_cache() is called.  Without this, loading the new
+            # batch's source tokens (~444 MiB) fails even though the total freed+free
+            # exceeds the request.
+            torch.cuda.empty_cache()
+
             if not compute_full_loss:
                 batch.to_device_for_output_chunk(self.device, chunk)
+
+            # Load source tokens to GPU just before the encoder runs (chunk 0 only).
+            # They were intentionally left on CPU by to_device_for_chunked_inference
+            # (include_source_tokens=False) to keep peak GPU HBM free during the
+            # DataLoader prefetch and pre-forward target computation.
+            if chunk_idx == 0 and not compute_full_loss:
+                # Also reload encoder-only ModelParams embeddings (pe_global ~1-2 GiB,
+                # pe_embed ~65 KiB) that were offloaded after the previous batch.
+                if is_root():
+                    print(
+                        f"[memory] before encoder params + source tokens "
+                        f"rank={self.cf.rank} device={self.device}\n"
+                        + torch.cuda.memory_summary(device=self.device, abbreviated=True),
+                        flush=True,
+                    )
+                self.model_params.load_encoder_params_to_device(self.device)
+                self._reload_encoder_weights()  # bring encoder shards back to GPU
+                batch.load_source_tokens_to_device(self.device)
 
             if self.ema_model is None:
                 forecast_chunk = self.model(
@@ -343,6 +426,25 @@ class Trainer(TrainerBase):
                     forecast_chunk,
                     chunk,
                 )
+
+            # After the encoder has run on the first chunk, observation source tokens
+            # are no longer needed on GPU (continuation chunks only use the latent
+            # state and decoder coordinates).  Offloading them immediately keeps GPU
+            # memory constant regardless of the number of forecast steps.
+            if chunk_idx == 0 and not compute_full_loss:
+                batch.offload_source_tokens()
+                # Drop the now-CPU source tensors entirely (source_tokens_cells /
+                # source_tokens_lens / source_idxs_embed / source_raw).  target_coords
+                # and meta_info (LATENT_CONDITIONING_TOKENS) are preserved.
+                batch.drop_source_observations()
+                # Offload encoder-only ModelParams (pe_global ~1-2 GiB) — not needed
+                # by the forecast engine or decoder during the rollout.
+                self.model_params.offload_encoder_params()
+                # Offload encoder weight shards (~244 MiB FSDP-sharded / ~975 MiB full).
+                # FSDP2's lazy all-gather means it will not touch them on continuation
+                # chunks; they are reloaded by _reload_encoder_weights before the next
+                # sample's encoder forward.
+                self._offload_encoder_weights()
 
             if should_write_output:
                 if not compute_full_loss:
@@ -370,7 +472,9 @@ class Trainer(TrainerBase):
                 latent += forecast_chunk.latent
             elif chunk_idx == len(chunks) - 1:
                 physical = forecast_chunk.physical
-                latent = forecast_chunk.latent
+                # Latent states are only needed for loss computation; skip accumulation
+                # when losses are not computed (skip_target_values or chunked mode).
+                latent = [] if mode_cfg.get("skip_target_values", False) else forecast_chunk.latent
             else:
                 forecast_chunk.physical.clear()
                 forecast_chunk.latent = [forecast_chunk.latent[-1]]
@@ -450,6 +554,13 @@ class Trainer(TrainerBase):
             cf.with_fsdp,
         )
 
+        # Pre-emptively offload encoder-only ModelParams (pe_global ~1-2 GiB) to CPU.
+        # They will be reloaded just-in-time before each sample's encoder forward and
+        # offloaded again immediately after, keeping them off GPU during decoding and
+        # between samples.
+        self.model_params.offload_encoder_params()
+        torch.cuda.empty_cache()
+
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.test_cfg)
 
@@ -457,6 +568,12 @@ class Trainer(TrainerBase):
 
         if is_root():
             config.save(self.cf, mini_epoch=0)
+
+        if self.test_cfg.get("skip_target_values", False):
+            logger.warning(
+                "skip_target_values is active: target values are neither read nor written "
+                "(the output zarr has no target datasets) and no validation losses are computed."
+            )
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -468,6 +585,16 @@ class Trainer(TrainerBase):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
+
+        # skip_target_values is inference-only: without target values there is nothing
+        # to train against and validation losses would be meaningless
+        if self.training_cfg.get("skip_target_values", False) or self.validation_cfg.get(
+            "skip_target_values", False
+        ):
+            raise ValueError(
+                "skip_target_values is only allowed in inference (test_config), "
+                "not in training_config or validation_config."
+            )
 
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
@@ -880,7 +1007,8 @@ class Trainer(TrainerBase):
                                 for c in self.target_and_aux_calculators_val.values()
                             )
                             batch.to_device_for_chunked_inference(
-                                self.device, chunks[-1], include_target_source=needs_target_source
+                                self.device, chunks[-1], include_target_source=needs_target_source,
+                                include_source_tokens=False,
                             )
                             print(">>>>>>> chunk_size: " + str(chunk_size))
 
@@ -896,6 +1024,12 @@ class Trainer(TrainerBase):
                                 target_aux,
                             ) in self.target_and_aux_calculators_val.items():
                                 target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
+                                # DiffusionLatentTargetEncoder calls the encoder on
+                                # target samples, which needs pe_embed / pe_global on
+                                # device.  Reload them if they were offloaded and the
+                                # calculator encodes target samples.
+                                if getattr(target_aux, "encodes_target_samples", False):
+                                    self.model_params.load_encoder_params_to_device(self.device)
                                 targets_and_auxs[loss_name] = target_aux.compute(
                                     self.cf.general.istep,
                                     batch.get_target_samples(target_idxs),
@@ -951,11 +1085,14 @@ class Trainer(TrainerBase):
                                     targets_and_auxs,
                                 )
 
-                        _ = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            targets_and_aux=targets_and_auxs,
-                            metadata=extract_batch_metadata(batch),
-                        )
+                        # skip_target_values: target values are not read (zero width),
+                        # so no loss can be computed
+                        if not mode_cfg.get("skip_target_values", False):
+                            _ = self.loss_calculator_val.compute_loss(
+                                preds=preds,
+                                targets_and_aux=targets_and_auxs,
+                                metadata=extract_batch_metadata(batch),
+                            )
                         pbar.update(batch_size * self.cf.world_size)
 
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:

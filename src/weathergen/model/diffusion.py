@@ -640,7 +640,14 @@ class DiffusionForecastEngine(torch.nn.Module):
                     track["x"].append(self.cur_token.cpu())
 
             if return_trajectory:
-                intermediate_x.append(x_next)
+                # Move to CPU immediately so the GPU segment containing x_next
+                # is fully freed after the next step's allocations.  Keeping all
+                # num_steps tensors live on GPU causes non-releasable fragmentation
+                # (each step's denoised/d_cur holes land in segments that also hold
+                # earlier x_next entries, so those segments can never be returned to
+                # CUDA even after empty_cache()).  The decoder/writer accesses the
+                # trajectory sequentially, so a .to(device) there is sufficient.
+                intermediate_x.append(x_next.cpu())
 
         if log_diagnostics:
             self._plot_sampling_diagnostics(track, num_steps)

@@ -191,6 +191,33 @@ class ModelParams(torch.nn.Module):
         self.reset_parameters(cf)
         return self
 
+    def offload_encoder_params(self) -> None:
+        """Move encoder-only ModelParams tensors back to CPU after the encoder has run.
+
+        ``pe_global`` (shape: num_healpix_cells × ae_local_num_queries × ae_global_dim_embed)
+        is used exclusively by the encoder to build the global query tokens.  It is not
+        touched by the forecast engine or physical decoder, so it can be offloaded for the
+        entire multi-step rollout — saving ~1–2 GiB of HBM per GPU depending on config.
+
+        ``pe_embed`` (shape: max_tokens_local × ae_local_dim_embed) is similarly encoder-only
+        and offloaded here, though its contribution is negligible (~65 KiB).
+        """
+        if self.pe_global is not None:
+            self.pe_global.data = self.pe_global.data.cpu()
+        if self.pe_embed is not None:
+            self.pe_embed.data = self.pe_embed.data.cpu()
+
+    def load_encoder_params_to_device(self, device) -> None:
+        """Reload encoder-only ModelParams tensors onto *device* before the encoder forward.
+
+        Counterpart to offload_encoder_params().  Called immediately before chunk 0's
+        model forward so that the encoder finds ``pe_global`` on the correct device.
+        """
+        if self.pe_global is not None:
+            self.pe_global.data = self.pe_global.data.to(device, non_blocking=True)
+        if self.pe_embed is not None:
+            self.pe_embed.data = self.pe_embed.data.to(device, non_blocking=True)
+
     def reset_parameters(self, cf: Config) -> "ModelParams":
         """Creates positional embedding for each grid point for each stream used after stream
         embedding, positional embedding for all stream assimilated cell-level local embedding,
@@ -936,6 +963,11 @@ class Model(torch.nn.Module):
                         "fe_diffusion_predict_residual", False
                     )
                     for i, toks in enumerate(tokens):
+                        # tokens may be CPU tensors (offloaded by _run_ode to avoid
+                        # accumulating num_steps × ~1 GiB of non-releasable GPU memory).
+                        # Reload each step individually just before use.
+                        if not toks.is_cuda:
+                            toks = toks.to(cond.device, non_blocking=True)
                         toks_abs = cond + toks if predict_residual else toks
                         output = self.predict_decoders(
                             model_params, step, toks_abs, source_samples, output, out_step=i
@@ -946,7 +978,11 @@ class Model(torch.nn.Module):
                     # Feed the final denoised state back as conditioning for the next step.
                     # Pass tokens[-1] forward so inference diagnostics have a reference point;
                     # inference_forward always starts from pure noise regardless.
-                    final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
+                    # tokens[-1] is CPU-offloaded; reload to GPU before storing as conditioning.
+                    _final = tokens[-1]
+                    if not _final.is_cuda:
+                        _final = _final.to(cond.device, non_blocking=True)
+                    final_abs = cond + _final if predict_residual else _final
                     source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = final_abs
                     # NOTE: This is precautionary, might need to be handled differently.
                     # It should not be the same as conditioning tokens.
@@ -961,7 +997,10 @@ class Model(torch.nn.Module):
                 ):
                     if isinstance(tokens, list):
                         # diffusion_rollout=True: discard intermediate steps, keep the final state.
+                        # _run_ode offloads trajectory steps to CPU; reload the final one.
                         tokens = tokens[-1]  # (1, healpix_cells, embed_dim)
+                        if not tokens.is_cuda:
+                            tokens = tokens.cuda()
                     cond = source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                     predict_residual = self.cf.get("fe_diffusion_predict_residual", False)
                     # Apply residual correction; broadcasts cond (1, H, D) over all N members.
@@ -1227,20 +1266,27 @@ class Model(torch.nn.Module):
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
+
+            # For the Linear decoder we need tc_tokens upfront; for the TTE decoder we
+            # embed per-group inside the loop to avoid materialising the full
+            # (n_target_points × D_embed) tensor (e.g. 3.25 M × D ≈ 734 MiB for ERA5).
+            if self.cf.decoder_type == "Linear":
+                tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
+            else:
+                tc_tokens = None  # embedded on-demand per group below
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
-            if torch.isnan(tc_tokens).any():
+            if tc_tokens is not None and torch.isnan(tc_tokens).any():
                 logger.warning(
                     (
                         f"Skipping prediction for {stream_name} because",
                         f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
                     )
                 )
-                pred = torch.tensor([], device=tc_tokens.device)
+                pred = torch.tensor([], device=t_coords.device)
 
             # skip empty lengths
-            elif tc_tokens.shape[0] == 0:
+            elif tc_tokens is not None and tc_tokens.shape[0] == 0:
                 pred = torch.tensor([], device=tc_tokens.device)
 
             else:
@@ -1282,15 +1328,25 @@ class Model(torch.nn.Module):
                             continue
                         zero = torch.zeros(1, dtype=tcls.dtype, device=tcls.device)
                         group_lens = torch.cat([zero, tcls[g_start:g_end]])
+                        # Embed only this group's coordinates (cell-independent MLP →
+                        # chunked result is identical to full-batch embedding).
+                        # This avoids materialising the full (n_points × D_embed) tensor
+                        # for large streams such as ERA5.
+                        tc_tokens_group_input = (
+                            tc_tokens[p_start:p_end]  # Linear path: already embedded
+                            if tc_tokens is not None
+                            else checkpoint(tc_embed, t_coords[p_start:p_end], use_reentrant=False)
+                        )
                         tc_tokens_group = self.target_token_engines[stream_name](
                             latent=tokens_nbors[
                                 g_start * nbors_per_group : g_end * nbors_per_group
                             ],
-                            output=tc_tokens[p_start:p_end],
+                            output=tc_tokens_group_input,
                             latent_lens=tokens_nbors_lens[: g_end - g_start + 1],
                             output_lens=group_lens,
                             coordinates=t_coords[p_start:p_end],
                         )
+                        del tc_tokens_group_input
 
                         # final prediction head to map back to physical space
                         preds.append(self.pred_heads[stream_name](tc_tokens_group))
