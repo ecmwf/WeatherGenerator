@@ -6,10 +6,9 @@ from torch import Tensor
 
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.utils import (
-    locs_to_cell_coords_ctrs,
-    locs_to_ctr_coords,
     r3tos2,
     s2tor3,
+    vecs_to_rots,
 )
 
 # on some clusters our numpy version is pinned to be 1.x.x where the np.argsort does not
@@ -440,6 +439,20 @@ def get_source_coords_local(
     return vec_scaled
 
 
+def _rotate_points_per_cell(cell_rots, points, points_per_cell):
+    """Apply each healpix cell's 3x3 rotation to the points that belong to it.
+
+    ``points`` is already concatenated; ``points_per_cell[i]`` is the number of rows
+    that belong to cell ``i`` (zero for empty cells). Equivalent to concatenating a
+    per-cell list and then ``locs_to_cell_coords_ctrs``, but without building that list.
+    """
+    cell_index = torch.repeat_interleave(
+        torch.arange(points_per_cell.shape[0], device=points.device),
+        points_per_cell.to(device=points.device, dtype=torch.int64),
+    )
+    return torch.bmm(cell_rots[cell_index], points.unsqueeze(-1)).squeeze(-1)
+
+
 def get_target_coords_local(
     stream_id,
     hlc,
@@ -455,15 +468,10 @@ def get_target_coords_local(
     and for healpix cell vertices themselves
     """
 
-    # target_coords_lens = [len(t) for t in target_coords]
-    # tcs, target_coords = tcs_optimized(target_coords)
     target_coords = s2tor3(*theta_phi_to_standard_coords(coords))
-    tcs = torch.split(target_coords, masked_points_per_cell.tolist())
 
     if target_coords.shape[0] == 0:
         return torch.tensor([])
-    # target_geoinfos = torch.cat(target_geoinfos)
-    # target_times = torch.cat(target_times)
 
     verts00_rots, verts10_rots, verts11_rots, verts01_rots, vertsmm_rots = verts_rots
 
@@ -481,61 +489,64 @@ def get_target_coords_local(
     geoinfo_offset += target_geoinfos.shape[1]
 
     ref = torch.tensor([1.0, 0.0, 0.0])
+    counts = masked_points_per_cell
 
-    tcs_lens = torch.tensor([tt.shape[0] for tt in tcs], dtype=torch.int32)
-    tcs_lens_mask = tcs_lens > 0
-    tcs_lens = tcs_lens[tcs_lens_mask]
-
-    vls = torch.cat(
-        [
-            vl.repeat([tt, 1, 1])
-            for tt, vl in zip(tcs_lens, verts_local[tcs_lens_mask], strict=False)
-        ],
-        0,
-    )
-    vls = vls.transpose(0, 1)
+    occupied = counts > 0
+    vls = torch.repeat_interleave(verts_local[occupied], counts[occupied], dim=0).transpose(0, 1)
 
     zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts00_rots, tcs
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _rotate_points_per_cell(
+        verts00_rots, target_coords, counts
     )
 
     zi = 3
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
 
     zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts10_rots, tcs
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _rotate_points_per_cell(
+        verts10_rots, target_coords, counts
     )
 
     zi = 18
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
 
     zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts11_rots, tcs
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _rotate_points_per_cell(
+        verts11_rots, target_coords, counts
     )
 
     zi = 33
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
 
     zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts01_rots, tcs
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _rotate_points_per_cell(
+        verts01_rots, target_coords, counts
     )
 
     zi = 48
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
 
     zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        vertsmm_rots, tcs
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _rotate_points_per_cell(
+        vertsmm_rots, target_coords, counts
     )
 
     zi = 63
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
 
-    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
+    # Eight neighbor-center frames: one vecs_to_rots + batched matmul instead of
+    # eight list-split round trips through locs_to_ctr_coords.
+    n_nbors, n_cells, _ = nctrs.shape
+    nbor_rots = vecs_to_rots(nctrs.reshape(-1, 3)).to(torch.float32).reshape(n_nbors, n_cells, 3, 3)
+    cell_index = torch.repeat_interleave(
+        torch.arange(n_cells, device=target_coords.device),
+        counts.to(device=target_coords.device, dtype=torch.int64),
+    )
+    rotated_nbors = torch.matmul(
+        nbor_rots[:, cell_index],
+        target_coords.unsqueeze(0).unsqueeze(-1).expand(n_nbors, -1, -1, -1),
+    ).squeeze(-1)
+    tcs_ctrs = (ref - rotated_nbors).permute(1, 0, 2).reshape(target_coords.shape[0], -1)
     zi = 75
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
 
