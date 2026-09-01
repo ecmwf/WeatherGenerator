@@ -160,7 +160,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         max_index = self.index_range.end - (
             (  # max time units needed to make a forecast
                 self.time_step * (fsm + self.output_offset)  # translation due to forecasting
-                + self.len_timedelta  # length of forecasting window
             )
             // self.step_timedelta  # as number of indexs
         )
@@ -180,7 +179,7 @@ accomodate any number of samples or forecast steps"
 samples_per_mini_epoch reduced to {available_samples} to avoid repeating data. \
 Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
-                self.samples_per_mini_epoch = max(available_samples - 1, 1)
+                self.samples_per_mini_epoch = max(available_samples, 1)
             else:
                 logger.info("Sufficient available samples in the time range specified")
         else:
