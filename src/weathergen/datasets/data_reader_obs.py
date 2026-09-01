@@ -105,8 +105,8 @@ class DataReaderObs(DataReaderBase):
 
         # load additional properties (mean, var)
         self._load_properties()
-        self.mean = np.array(self.properties["means"])  # [data_idx]
-        self.stdev = np.sqrt(np.array(self.properties["vars"]))  # [data_idx])
+        self.mean = np.array(self.properties["means"])
+        self.stdev = np.sqrt(np.array(self.properties["vars"]))
         self.mean_geoinfo = np.array(self.properties["means"])[self.geoinfo_idx]
         self.stdev_geoinfo = np.sqrt(np.array(self.properties["vars"])[self.geoinfo_idx])
 
@@ -281,17 +281,11 @@ class DataReaderObs(DataReaderBase):
         data = self.data.oindex[start_row:end_row, channels_idx]
         datetimes = self.dt[start_row:end_row][:, 0]
 
-        # indices_start, indices_end above work with [t_start, t_end] and violate
-        # our convention [t_start, t_end) where endpoint is excluded
-        # compute mask to enforce it
-        t_win = self.time_window_handler.window(idx)
-        t_mask = np.logical_and(datetimes >= t_win.start, datetimes < t_win.end)
-
         rdata = ReaderData(
-            coords=coords[t_mask],
-            geoinfos=geoinfos[t_mask],
-            data=data[t_mask],
-            datetimes=datetimes[t_mask],
+            coords=coords,
+            geoinfos=geoinfos,
+            data=data,
+            datetimes=datetimes,
         )
 
         dtr = self.time_window_handler.window(idx)

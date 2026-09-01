@@ -288,7 +288,7 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
-    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
+    assert np.logical_and(rdata.datetimes > dtr.start, rdata.datetimes <= dtr.end).all(), (
         f"datetimes for data points violate window {dtr}."
     )
 
@@ -754,7 +754,7 @@ class DataReaderTimestep(DataReaderBase):
 
 # to avoid rounding issues
 # The basic time precision is 1 millisecond.
-# This should support all datasets (the small period expected is 1 second)
+# This should support all datasets (the smallest period expected is 1 second)
 t_epsilon = np.timedelta64(1, "ms")
 
 
@@ -803,8 +803,8 @@ def get_dataset_indexes_timestep(
         return (np.array([], dtype=np.int64), dtr)
 
     # relative time in dataset
-    delta_t_start = dtr.start - data_start_time
-    delta_t_end = dtr.end - data_start_time - t_epsilon
+    delta_t_start = dtr.start - data_start_time + t_epsilon
+    delta_t_end = dtr.end - data_start_time
     assert isinstance(delta_t_start, timedelta64), "delta_t_start must be timedelta64"
     start_didx = delta_t_start // period
     end_didx = delta_t_end // period
