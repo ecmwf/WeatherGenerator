@@ -1,0 +1,16 @@
+# Overlay for the performance integration test (issue #2092), applied on top
+# of the default config. Enables throughput tracking and shortens the run so
+# the test completes in minutes on a single node while leaving enough steps
+# for a stable throughput measurement.
+
+train_logging:
+  track_performance_metrics: True
+
+training_config:
+  # 800 samples at batch 1 = 200 optimizer steps on a 4-GPU node; fewer
+  # steps break the LR scheduler (ZeroDivisionError in OneCycleLR).
+  num_mini_epochs: 1
+  samples_per_mini_epoch: 800
+
+validation_config:
+  samples_per_mini_epoch: 5
