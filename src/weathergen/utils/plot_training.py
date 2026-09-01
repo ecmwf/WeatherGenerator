@@ -10,6 +10,7 @@
 import argparse
 import logging
 import pdb
+import shutil
 import subprocess
 import sys
 import traceback
@@ -18,7 +19,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
-import shutil
 
 import weathergen.common.config as config
 from weathergen.train.utils import TRAIN
@@ -31,6 +31,37 @@ MAX_FILENAME_LEN = 255
 PLOT_DPI_VALUE = 150
 
 
+def check_active_runs(runs_ids):
+    """
+    Check if the specified runs are active.
+
+    Parameters
+    ----------
+    runs_ids : dict
+        Dictionary of run IDs to check.
+
+    Returns
+    -------
+    list
+        List of booleans indicating if each run is active.
+    """
+    if shutil.which("squeue"):
+        sq_arg = "--format='%.18i %.9P %.30j %.8u %.8T %.10M %.9l %.6D %R' --me"
+        ret = subprocess.run(["squeue", sq_arg], capture_output=True)
+        running_state = "RUNNING"
+    else:
+        ret = subprocess.run(["bjobs", "-o", "jobid stat job_name"], capture_output=True)
+        running_state = "RUN"
+
+    lines = str(ret.stdout).split("\\n")
+    runs_active = [
+        any([run_id in line and running_state in line for line in lines[1:]])
+        for run_id in runs_ids.keys()
+    ]
+    return runs_active
+
+
+####################################################################################################
 def _add_legend(
     labels,
     outside: bool,
@@ -909,18 +940,7 @@ def plot_train(args=None):
     ]
 
     # determine which runs are still alive (as a process, though they might hang internally)
-    if shutil.which("squeue"):
-        sq_arg = "--format='%.18i %.9P %.30j %.8u %.8T %.10M %.9l %.6D %R' --me"
-        ret = subprocess.run(["squeue", sq_arg], capture_output=True)
-        running_state = "RUNNING"
-    else:
-        ret = subprocess.run(["bjobs", "-o", "jobid stat job_name"], capture_output=True)
-        running_state = "RUN"
-        lines = str(ret.stdout).split("\\n")
-        runs_active = [
-            any([run_id in line and running_state in line for line in lines[1:]])
-            for run_id in runs_ids.keys()
-        ]
+    runs_active = check_active_runs(runs_ids)
 
     x_scale_log = args.log_x
 
