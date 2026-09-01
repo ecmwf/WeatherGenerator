@@ -574,11 +574,7 @@ class Trainer(TrainerBase):
             self.cf.general.istep += 1
 
             if hasattr(self.cf, "healpix_curriculum") and self.cf.healpix_curriculum:
-                cumulative = 0
-                for hl, steps in self.cf.healpix_curriculum.items():
-                    cumulative += steps
-                    if self.cf.healpix_level == int(hl):
-                        break
+                cumulative = sum(steps for hl, steps in self.cf.healpix_curriculum.items() if int(hl) <= self.cf.healpix_level)
                 if self.cf.general.istep >= cumulative:
                     if is_root():
                         logger.info(f"Curriculum stage for HEALPix level {self.cf.healpix_level} finished at istep {self.cf.general.istep}. Exiting mini_epoch early.")

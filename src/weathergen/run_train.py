@@ -147,7 +147,27 @@ def run_continue(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+        from_run_id_iter = args.from_run_id
+        mini_epoch_iter = args.mini_epoch
+        first_run = True
+        while True:
+            if not first_run:
+                cf = config.load_merge_configs(
+                    args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, {}, cli_overwrite
+                )
+                cf = config.set_run_id(cf, cf.general.run_id, True)
+                cf.streams = config.load_streams(Path(cf.streams_directory))
+                trainer = Trainer(cf.train_logging)
+                
+            trainer.run(cf, devices, from_run_id_iter, mini_epoch_iter)
+            first_run = False
+            
+            if not getattr(cf, "_curriculum_exit", False):
+                break
+                
+            logger.info("Restarting training for next curriculum stage...")
+            from_run_id_iter = cf.general.run_id
+            mini_epoch_iter = -1
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -188,7 +208,26 @@ def run_train(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices)
+        from_run_id_iter = None
+        mini_epoch_iter = None
+        while True:
+            if from_run_id_iter is not None:
+                cf = config.load_merge_configs(
+                    args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, cli_overwrite
+                )
+                cf = config.set_run_id(cf, cf.general.run_id, True)
+                cf.streams = config.load_streams(Path(cf.streams_directory))
+                trainer = Trainer(cf.train_logging)
+                trainer.run(cf, devices, from_run_id_iter, mini_epoch_iter)
+            else:
+                trainer.run(cf, devices)
+                
+            if not getattr(cf, "_curriculum_exit", False):
+                break
+                
+            logger.info("Restarting training for next curriculum stage...")
+            from_run_id_iter = cf.general.run_id
+            mini_epoch_iter = -1
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
