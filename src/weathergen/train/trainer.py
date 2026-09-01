@@ -11,6 +11,7 @@
 import contextlib
 import copy
 import logging
+import shutil
 import time
 from math import sqrt
 
@@ -728,6 +729,19 @@ class Trainer(TrainerBase):
 
             # save config
             config.save(self.cf, mini_epoch)
+
+            # keep _latest always pointing to the most recent checkpoint
+            if mini_epoch != -1:
+                run_id = self.cf.general.run_id
+                latest_chkpt = base_path / (run_id + "_latest.chkpt")
+                shutil.copy2(file_out, latest_chkpt)
+
+                config_name = config._get_model_config_file_write_name(run_id, mini_epoch)
+                latest_config_name = config._get_model_config_file_write_name(run_id, -1)
+                config_file = base_path / config_name
+                latest_config_file = base_path / latest_config_name
+                if config_file.exists():
+                    shutil.copy2(config_file, latest_config_file)
 
     def _log(self, stage: Stage):
         """
