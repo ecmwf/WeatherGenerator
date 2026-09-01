@@ -229,8 +229,10 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
             path = get_path_model(run_id=run_id)
+            _logger.info(f"Loading config from default model_path: {path}")
         else:
             path = Path(model_path) / run_id
+            _logger.info(f"Loading config from provided model_path: {path}")
 
         config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
         config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
@@ -710,6 +712,10 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
     else:
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
+
+    if config is not None and config.get("path_model") is not None:
+        return Path(config.path_model) / run_id
+
     return _get_shared_wg_path() / "models" / run_id
 
 

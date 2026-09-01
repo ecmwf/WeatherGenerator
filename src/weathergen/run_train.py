@@ -179,7 +179,7 @@ def run_train(args):
     init_loggers(cf.general.run_id)
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
-
+    
     cf.streams = config.load_streams(Path(cf.streams_directory))
 
     if cf.with_flash_attention:
