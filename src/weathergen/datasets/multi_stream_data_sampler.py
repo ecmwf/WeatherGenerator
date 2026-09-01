@@ -15,9 +15,10 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
+from weathergen.readers_extra.registry import get_extra_reader
+
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
@@ -32,7 +33,6 @@ from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     get_tokens_lens,
 )
-from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 
@@ -276,6 +276,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 if ds.target_channel_weights is not None
                 else [1.0 for _ in ds.target_channels]
             )
+            if (n := getattr(ds, "n_latitudes", None)) is not None:
+                stream_info["n_latitudes"] = n
 
         return streams_datasets
 
