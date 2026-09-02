@@ -480,7 +480,12 @@ def load_merge_configs(
 def _load_streams_in_config(config: Config) -> Config:
     """If the config contains a streams_directory, loads the streams and returns the config with
     the streams set."""
-    streams_directory = config.get("streams_directory", None)
+    import omegaconf
+    try:
+        streams_directory = config.get("streams_directory", None)
+    except (omegaconf.errors.InterpolationKeyError, omegaconf.errors.InterpolationResolutionError):
+        streams_directory = None
+        
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)
