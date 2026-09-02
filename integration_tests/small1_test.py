@@ -128,7 +128,9 @@ def evaluate_results(run_id):
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id)
+    file_path = get_train_metrics_path(
+        base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id
+    )
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -138,7 +140,9 @@ def load_metrics(run_id):
 
 def assert_missing_metrics_file(run_id):
     """Test that a missing metrics file raises FileNotFoundError."""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results"/ run_id, run_id=run_id)
+    file_path = get_train_metrics_path(
+        base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id
+    )
     assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")

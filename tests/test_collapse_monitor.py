@@ -874,5 +874,9 @@ class TestSequenceVariance:
         metrics = var_monitor.compute_metrics(student_latent=latents)
 
         # var_min should decrease over steps (more dead dimensions)
-        assert metrics["collapse.student.var_min.step_0"] > metrics["collapse.student.var_min.step_1"]
-        assert metrics["collapse.student.var_min.step_1"] > metrics["collapse.student.var_min.step_2"]
+        assert (
+            metrics["collapse.student.var_min.step_0"] > metrics["collapse.student.var_min.step_1"]
+        )
+        assert (
+            metrics["collapse.student.var_min.step_1"] > metrics["collapse.student.var_min.step_2"]
+        )

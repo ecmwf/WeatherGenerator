@@ -47,7 +47,7 @@ def setup(test_run_id):
 @pytest.mark.parametrize("test_run_id", ["test_jepa1_" + commit_hash])
 def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id} {WEATHERGEN_HOME}")
-    
+
     main(
         [
             "train",
@@ -60,7 +60,6 @@ def test_train(setup, test_run_id):
     assert_missing_metrics_file(test_run_id)
     assert_nans_in_metrics_file(test_run_id)
     logger.info("end test_train")
-
 
 
 def load_metrics(run_id):
@@ -80,36 +79,34 @@ def assert_missing_metrics_file(run_id):
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
     assert metrics is not None, f"Failed to load metrics for run_id: {run_id}"
-    
+
+
 def assert_nans_in_metrics_file(run_id):
     """Test that there are no NaNs in the metrics file."""
     metrics = load_metrics(run_id)
     loss_values_train = np.array(
         [
-            entry.get('LossLatentSSLStudentTeacher.loss_avg')
-            for entry in metrics if entry.get("stage") == 'train'
+            entry.get("LossLatentSSLStudentTeacher.loss_avg")
+            for entry in metrics
+            if entry.get("stage") == "train"
         ]
     )
     loss_values_val = np.array(
         [
-            entry.get('LossLatentSSLStudentTeacher.loss_avg')
-            for entry in metrics if entry.get("stage") == 'val'
+            entry.get("LossLatentSSLStudentTeacher.loss_avg")
+            for entry in metrics
+            if entry.get("stage") == "val"
         ]
     )
-    
-    #remove nans if applicable
+
+    # remove nans if applicable
     loss_values_train = np.array(
-        [float(value) if value != 'nan' else np.nan for value in loss_values_train]
+        [float(value) if value != "nan" else np.nan for value in loss_values_train]
     )
     loss_values_val = np.array(
-        [float(value) if value != 'nan' else np.nan for value in loss_values_val]
-    )
-    
-    assert not np.isnan(loss_values_train).any(), (
-        "NaN values found in training loss metrics!"
-    )
-    
-    assert not np.isnan(loss_values_val).any(), (
-        "NaN values found in validation loss metrics!"
+        [float(value) if value != "nan" else np.nan for value in loss_values_val]
     )
 
+    assert not np.isnan(loss_values_train).any(), "NaN values found in training loss metrics!"
+
+    assert not np.isnan(loss_values_val).any(), "NaN values found in validation loss metrics!"
