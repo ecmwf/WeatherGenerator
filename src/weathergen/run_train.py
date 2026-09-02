@@ -156,6 +156,7 @@ def run_continue(args):
                     args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, {}, cli_overwrite
                 )
                 cf = config.set_run_id(cf, cf.general.run_id, True)
+                cf = Trainer.init_ddp(cf)
                 cf.streams = config.load_streams(Path(cf.streams_directory))
                 trainer = Trainer(cf.train_logging)
                 
@@ -216,6 +217,7 @@ def run_train(args):
                     args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, cli_overwrite
                 )
                 cf = config.set_run_id(cf, cf.general.run_id, True)
+                cf = Trainer.init_ddp(cf)
                 cf.streams = config.load_streams(Path(cf.streams_directory))
                 trainer = Trainer(cf.train_logging)
                 trainer.run(cf, devices, from_run_id_iter, mini_epoch_iter)
