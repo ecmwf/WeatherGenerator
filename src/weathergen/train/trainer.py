@@ -578,12 +578,14 @@ class Trainer(TrainerBase):
 
             if hasattr(self.cf, "healpix_curriculum") and self.cf.healpix_curriculum:
                 unique_curr = {int(hl): steps for hl, steps in self.cf.healpix_curriculum.items()}
-                cumulative = sum(steps for hl, steps in unique_curr.items() if hl <= self.cf.healpix_level)
-                if self.cf.general.istep >= cumulative:
-                    if is_root():
-                        logger.info(f"Curriculum stage for HEALPix level {self.cf.healpix_level} finished at istep {self.cf.general.istep}. Exiting mini_epoch early.")
-                    self.cf._curriculum_exit = True
-                    break
+                max_hl = max(unique_curr.keys())
+                if self.cf.healpix_level < max_hl:
+                    cumulative = sum(steps for hl, steps in unique_curr.items() if hl <= self.cf.healpix_level)
+                    if self.cf.general.istep >= cumulative:
+                        if is_root():
+                            logger.info(f"Curriculum stage for HEALPix level {self.cf.healpix_level} finished at istep {self.cf.general.istep}. Exiting mini_epoch early.")
+                        self.cf._curriculum_exit = True
+                        break
 
         self.dataset.advance()
 
