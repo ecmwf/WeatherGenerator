@@ -1,13 +1,13 @@
 healpix_curriculum:
-  3: 1000
-  4: 1000
-  5: 1500
-  6: 3000
+  3: 250
+  4: 250
+  5: 250
+  6: 250
 
 curriculum_streams:
-  3: "./config/streams/era5_8deg/"
-  4: "./config/streams/era5_4deg/"
-  5: "./config/streams/era5_2deg/"
+  3: "./config/streams/era5_1deg/"
+  4: "./config/streams/era5_1deg/"
+  5: "./config/streams/era5_1deg/"
   6: "./config/streams/era5_1deg/"
 
 streams_directory: "${curriculum_streams.${healpix_level}}"
