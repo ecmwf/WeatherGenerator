@@ -150,10 +150,11 @@ def run_continue(args):
         from_run_id_iter = args.from_run_id
         mini_epoch_iter = args.mini_epoch
         first_run = True
+        istep_override = {}
         while True:
             if not first_run:
                 cf = config.load_merge_configs(
-                    args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, {}, cli_overwrite
+                    args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, istep_override, cli_overwrite
                 )
                 cf = config.set_run_id(cf, cf.general.run_id, True)
                 cf = Trainer.init_ddp(cf)
@@ -169,6 +170,7 @@ def run_continue(args):
             logger.info("Restarting training for next curriculum stage...")
             from_run_id_iter = trainer.cf.general.run_id
             mini_epoch_iter = -1
+            istep_override = {"general": {"istep": trainer.cf.general.istep}}
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -211,10 +213,11 @@ def run_train(args):
     try:
         from_run_id_iter = None
         mini_epoch_iter = None
+        istep_override = {}
         while True:
             if from_run_id_iter is not None:
                 cf = config.load_merge_configs(
-                    args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, cli_overwrite
+                    args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, istep_override, cli_overwrite
                 )
                 cf = config.set_run_id(cf, cf.general.run_id, True)
                 cf = Trainer.init_ddp(cf)
@@ -230,6 +233,7 @@ def run_train(args):
             logger.info("Restarting training for next curriculum stage...")
             from_run_id_iter = trainer.cf.general.run_id
             mini_epoch_iter = -1
+            istep_override = {"general": {"istep": trainer.cf.general.istep}}
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
