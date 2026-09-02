@@ -425,13 +425,13 @@ class Trainer(TrainerBase):
                 )
             self.save_model(mini_epoch)
 
-            if getattr(self.cf, "_curriculum_exit", False):
+            if self.cf.get("_curriculum_exit", False):
                 if is_root():
                     logger.info("Curriculum stage completed. Exiting training loop.")
                 break
 
         # log final model
-        if getattr(self.cf, "_curriculum_exit", False):
+        if self.cf.get("_curriculum_exit", False):
             self.save_model(-1)
         else:
             self.save_model(self.training_cfg.num_mini_epochs)

@@ -170,7 +170,7 @@ def run_continue(args):
             trainer.run(cf, devices, from_run_id_iter, mini_epoch_iter)
             first_run = False
 
-            if not getattr(trainer.cf, "_curriculum_exit", False):
+            if not trainer.cf.get("_curriculum_exit", False):
                 break
 
             logger.info("Restarting training for next curriculum stage...")
@@ -239,7 +239,7 @@ def run_train(args):
             else:
                 trainer.run(cf, devices)
 
-            if not getattr(trainer.cf, "_curriculum_exit", False):
+            if not trainer.cf.get("_curriculum_exit", False):
                 break
 
             logger.info("Restarting training for next curriculum stage...")
