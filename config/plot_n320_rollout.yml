@@ -1,0 +1,59 @@
+train:
+  plot:
+    # nlwqm5vw :
+    #   slurm_id: 0
+    #   description: "fine-tuning, 8-step, fixed, 1979, smaller lr"
+    # rmcjxm0i :
+    #   slurm_id : 0
+    #   description: "dh00ll5c 8-step fine-tuning"
+    # lvicwsxf :
+    #   slurm_id : 0
+    #   description: "p2h3q0xw 8-step fine-tuning"
+    # fx276yn3:
+    #   slurm_id: 0
+    #   description: "temporal JEPA"
+    dy0jlrmw:
+      slurm_id: 0
+      description: "Christian's best forecast"
+    cw6a4szu:
+      slurm_id: 0
+      description: "temporal JEPA, channel weighting"
+    nhv6tkln:
+      slurm_id: 0
+      description: "temporal JEPA, channel weighting, low_noise"
+    # igsqdagc:
+    #   slurm_id: 0
+    #   description: "n320 8 step forecasting, temporal jepa, proper iasi channels"
+    # ifu34oup:
+    #   slurm_id: 0
+    #   description: "space JEPA, 2-step 92 epochs"
+    # dljc9u2f:
+    #   slurm_id: 0
+    #   description: "space JEPA, 2-step 96 epochs, channel weighting, 5e-6lr"
+    # pq6u8wcu:
+    #   slurm_id: 0
+    #   description: "space JEPA, 2-step 96 epochs, 5e-6lr"
+    # whzrt2cc:
+    #   slurm_id: 0
+    #   description: "space JEPA, 2-step 96 epochs, 6e-5lr, ch w"
+    # lnm4ud42:
+    #   slurm_id: 0
+    #   description: "space JEPA, 2-step 96 epochs, 6e-5lr"
+    xq65fhca:
+      slurm_id: 0
+      description: "MTM, ch w"
+    aets3ku5:
+      slurm_id: 0
+      description: "space JEPA, 1e-5, from f2esyc18"
+    # iklyvpdo:
+    #   slurm_id: 0
+    #   description: "space JEPA, 1e-5, from g248a1sz"
+    sraa7zcl:
+      slurm_id: 0
+      description: "space JEPA, 1e-5"
+    s5421fyi:
+      slurm_id: 0
+      description: "space JEPA, 1e-5, from onm76fjr"
+
+
+

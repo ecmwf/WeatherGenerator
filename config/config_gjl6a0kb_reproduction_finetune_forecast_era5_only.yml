@@ -3,7 +3,7 @@
 # Temporal JEPA has forecast.policy: null, so its ForecastingEngine has no blocks.
 # This recreates the historical 16-block fixed-rollout forecast engine from scratch.
 fe_num_blocks: 16
-streams_directory: ./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels/
+streams_directory: ./config/streams/gjl6a0kb_ablation_era5_only_forecast/
 freeze_modules: ""
 general:
   # `num_mini_epochs` is an absolute target. The first forecast `train_continue`
@@ -30,7 +30,7 @@ training_config:
     enabled: false
   context_loss:
     enabled: false
-  num_mini_epochs: 56
+  num_mini_epochs: 24
   samples_per_mini_epoch: 8192
   shuffle: true
   start_date: 1980-01-01T00:00

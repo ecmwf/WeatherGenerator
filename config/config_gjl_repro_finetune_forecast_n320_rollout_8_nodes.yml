@@ -15,7 +15,7 @@ data_loading:
   # Avoid DataLoader shared-memory transport during distributed validation.
   num_workers_validation: 4
 
-fe_impute_latent_noise_std: 2e-5
+fe_impute_latent_noise_std: 1e-5
 
 training_config:
   num_mini_epochs: 8
