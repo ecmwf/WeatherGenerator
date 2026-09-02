@@ -358,6 +358,24 @@ class Trainer(TrainerBase):
         if self.cf.general.istep > 0 and is_root():
             logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
+        if hasattr(self.cf, "healpix_curriculum") and self.cf.healpix_curriculum and is_root():
+            unique_curr = {int(hl): steps for hl, steps in self.cf.healpix_curriculum.items()}
+            max_hl = max(unique_curr.keys())
+            if self.cf.healpix_level < max_hl:
+                cumulative = sum(
+                    steps for hl, steps in unique_curr.items() if hl <= self.cf.healpix_level
+                )
+                logger.info(
+                    f"Curriculum active: Training HEALPix level {self.cf.healpix_level}. "
+                    f"Next stage will begin at istep {cumulative}. "
+                    f"(Note: Total run length is dictated by num_mini_epochs)"
+                )
+            else:
+                logger.info(
+                    f"Curriculum max level ({max_hl}) reached. "
+                    f"Continuing standard training until num_mini_epochs limit."
+                )
+
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
         val_cfg = self.validation_cfg
@@ -407,8 +425,16 @@ class Trainer(TrainerBase):
                 )
             self.save_model(mini_epoch)
 
+            if self.cf.get("_curriculum_exit", False):
+                if is_root():
+                    logger.info("Curriculum stage completed. Exiting training loop.")
+                break
+
         # log final model
-        self.save_model(self.training_cfg.num_mini_epochs)
+        if self.cf.get("_curriculum_exit", False):
+            self.save_model(-1)
+        else:
+            self.save_model(self.training_cfg.num_mini_epochs)
 
     def validate_before_training(self):
         """
@@ -567,6 +593,22 @@ class Trainer(TrainerBase):
                 self.save_model(-1)
 
             self.cf.general.istep += 1
+
+            if hasattr(self.cf, "healpix_curriculum") and self.cf.healpix_curriculum:
+                unique_curr = {int(hl): steps for hl, steps in self.cf.healpix_curriculum.items()}
+                max_hl = max(unique_curr.keys())
+                if self.cf.healpix_level < max_hl:
+                    cumulative = sum(
+                        steps for hl, steps in unique_curr.items() if hl <= self.cf.healpix_level
+                    )
+                    if self.cf.general.istep >= cumulative:
+                        if is_root():
+                            logger.info(
+                                f"Curriculum stage for HEALPix level {self.cf.healpix_level} "
+                                f"finished at istep {self.cf.general.istep}. Exiting early."
+                            )
+                        self.cf._curriculum_exit = True
+                        break
 
         self.dataset.advance()
 

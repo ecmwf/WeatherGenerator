@@ -23,6 +23,7 @@ import yaml
 import yaml.constructor
 import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
+from omegaconf.errors import InterpolationKeyError, InterpolationResolutionError
 from omegaconf.omegaconf import open_dict
 
 from weathergen.common.io import StoreType
@@ -139,25 +140,25 @@ def _strip_interpolation(conf: Config) -> Config:
     """Recursively convert interpolated timedelta/datetime objects to strings."""
     stripped = {}
     if OmegaConf.is_dict(conf):
-        for key in list(conf.keys()):
-            key = str(key)
-            if OmegaConf.is_missing(conf, key):
+        for orig_key in list(conf.keys()):
+            str_key = str(orig_key)
+            if OmegaConf.is_missing(conf, orig_key):
                 val = "???"
-            elif OmegaConf.is_config(conf[key]):
-                val = _strip_interpolation(conf[key])
-            elif key.startswith("_"):
+            elif OmegaConf.is_config(conf[orig_key]):
+                val = _strip_interpolation(conf[orig_key])
+            elif str_key.startswith("_"):
                 continue  # Skip hidden/backup keys
-            elif OmegaConf.is_interpolation(conf, key):
-                raw_key = f"_{key}"
+            elif OmegaConf.is_interpolation(conf, orig_key):
+                raw_key = f"_{str_key}"
                 assert raw_key in conf, (
-                    f"Backup key: {raw_key} expected for interpolated key: {key}"
+                    f"Backup key: {raw_key} expected for interpolated key: {orig_key}"
                 )
                 # Retrieve the value from the backup key (resolves interpolation)
                 val = conf[raw_key]
             else:
-                val = conf[key]
+                val = conf[orig_key]
 
-            stripped[key] = val
+            stripped[str_key] = val
     elif OmegaConf.is_list(conf):
         stripped = [
             _strip_interpolation(item) if OmegaConf.is_config(item) else item for item in conf
@@ -456,12 +457,30 @@ def load_merge_configs(
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
         # streams from an overwrite's streams_directory replace inherited streams
-        if any(o.get("streams_directory") is not None for o in overwrite_configs):
+        if any("streams_directory" in o for o in overwrite_configs):
             base_config.streams = None
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
+
+    if c.get("healpix_curriculum"):
+        istep = c.get("general", {}).get("istep", 0)
+        cumulative = 0
+        current_hl = None
+        unique_curr = {int(hl): steps for hl, steps in c.healpix_curriculum.items()}
+        for hl in sorted(unique_curr.keys()):
+            cumulative += unique_curr[hl]
+            current_hl = hl
+            if istep < cumulative:
+                break
+        c.healpix_level = current_hl
+
+        if c.get("curriculum_streams"):
+            # Support both integer and string keys in the yaml
+            c.streams_directory = c.curriculum_streams.get(current_hl) or c.curriculum_streams.get(
+                str(current_hl)
+            )
 
     return c
 
@@ -469,7 +488,11 @@ def load_merge_configs(
 def _load_streams_in_config(config: Config) -> Config:
     """If the config contains a streams_directory, loads the streams and returns the config with
     the streams set."""
-    streams_directory = config.get("streams_directory", None)
+    try:
+        streams_directory = config.get("streams_directory", None)
+    except (InterpolationKeyError, InterpolationResolutionError):
+        streams_directory = None
+
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)
