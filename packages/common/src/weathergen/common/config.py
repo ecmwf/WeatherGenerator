@@ -474,6 +474,10 @@ def load_merge_configs(
             if istep < cumulative:
                 break
         c.healpix_level = current_hl
+        
+        if c.get("curriculum_streams"):
+            # Support both integer and string keys in the yaml
+            c.streams_directory = c.curriculum_streams.get(current_hl) or c.curriculum_streams.get(str(current_hl))
 
     return c
 
