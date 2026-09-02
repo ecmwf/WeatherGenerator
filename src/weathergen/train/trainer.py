@@ -577,9 +577,6 @@ class Trainer(TrainerBase):
             self.cf.general.istep += 1
 
             if hasattr(self.cf, "healpix_curriculum") and self.cf.healpix_curriculum:
-                if bidx == 0 and is_root():
-                    cumulative_debug = sum(steps for hl, steps in self.cf.healpix_curriculum.items() if int(hl) <= self.cf.healpix_level)
-                    logger.info(f"[Curriculum] healpix_level={self.cf.healpix_level}, istep={self.cf.general.istep}, cumulative_exit_at={cumulative_debug}, curriculum={dict(self.cf.healpix_curriculum)}")
                 cumulative = sum(steps for hl, steps in self.cf.healpix_curriculum.items() if int(hl) <= self.cf.healpix_level)
                 if self.cf.general.istep >= cumulative:
                     if is_root():
