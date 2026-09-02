@@ -413,7 +413,10 @@ class Trainer(TrainerBase):
                 break
 
         # log final model
-        self.save_model(self.training_cfg.num_mini_epochs)
+        if getattr(self.cf, "_curriculum_exit", False):
+            self.save_model(-1)
+        else:
+            self.save_model(self.training_cfg.num_mini_epochs)
 
     def validate_before_training(self):
         """
