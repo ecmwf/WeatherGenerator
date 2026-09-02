@@ -468,9 +468,10 @@ def load_merge_configs(
         istep = c.get("general", {}).get("istep", 0)
         cumulative = 0
         current_hl = None
-        for hl, steps in c.healpix_curriculum.items():
-            cumulative += steps
-            current_hl = int(hl)
+        unique_curr = {int(hl): steps for hl, steps in c.healpix_curriculum.items()}
+        for hl in sorted(unique_curr.keys()):
+            cumulative += unique_curr[hl]
+            current_hl = hl
             if istep < cumulative:
                 break
         c.healpix_level = current_hl
