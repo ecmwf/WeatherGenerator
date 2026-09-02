@@ -24,6 +24,7 @@ import yaml.constructor
 import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
+from omegaconf.errors import InterpolationKeyError, InterpolationResolutionError
 
 from weathergen.common.io import StoreType
 from weathergen.common.paths import _REPO_ROOT, get_wg_private_path
@@ -456,7 +457,7 @@ def load_merge_configs(
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
         # streams from an overwrite's streams_directory replace inherited streams
-        if any(o.get("streams_directory") is not None for o in overwrite_configs):
+        if any("streams_directory" in o for o in overwrite_configs):
             base_config.streams = None
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
@@ -480,10 +481,9 @@ def load_merge_configs(
 def _load_streams_in_config(config: Config) -> Config:
     """If the config contains a streams_directory, loads the streams and returns the config with
     the streams set."""
-    import omegaconf
     try:
         streams_directory = config.get("streams_directory", None)
-    except (omegaconf.errors.InterpolationKeyError, omegaconf.errors.InterpolationResolutionError):
+    except (InterpolationKeyError, InterpolationResolutionError):
         streams_directory = None
         
     config = config.copy()
