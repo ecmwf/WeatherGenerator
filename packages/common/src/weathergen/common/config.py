@@ -140,25 +140,25 @@ def _strip_interpolation(conf: Config) -> Config:
     """Recursively convert interpolated timedelta/datetime objects to strings."""
     stripped = {}
     if OmegaConf.is_dict(conf):
-        for key in list(conf.keys()):
-            key = str(key)
-            if OmegaConf.is_missing(conf, key):
+        for orig_key in list(conf.keys()):
+            str_key = str(orig_key)
+            if OmegaConf.is_missing(conf, orig_key):
                 val = "???"
-            elif OmegaConf.is_config(conf[key]):
-                val = _strip_interpolation(conf[key])
-            elif key.startswith("_"):
+            elif OmegaConf.is_config(conf[orig_key]):
+                val = _strip_interpolation(conf[orig_key])
+            elif str_key.startswith("_"):
                 continue  # Skip hidden/backup keys
-            elif OmegaConf.is_interpolation(conf, key):
-                raw_key = f"_{key}"
+            elif OmegaConf.is_interpolation(conf, orig_key):
+                raw_key = f"_{str_key}"
                 assert raw_key in conf, (
-                    f"Backup key: {raw_key} expected for interpolated key: {key}"
+                    f"Backup key: {raw_key} expected for interpolated key: {orig_key}"
                 )
                 # Retrieve the value from the backup key (resolves interpolation)
                 val = conf[raw_key]
             else:
-                val = conf[key]
+                val = conf[orig_key]
 
-            stripped[key] = val
+            stripped[str_key] = val
     elif OmegaConf.is_list(conf):
         stripped = [
             _strip_interpolation(item) if OmegaConf.is_config(item) else item for item in conf
