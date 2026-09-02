@@ -9,5 +9,3 @@ curriculum_streams:
   4: "./config/streams/era5_1deg/"
   5: "./config/streams/era5_1deg/"
   6: "./config/streams/era5_1deg/"
-
-streams_directory: "${curriculum_streams.${healpix_level}}"
