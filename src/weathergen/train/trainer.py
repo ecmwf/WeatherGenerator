@@ -362,7 +362,9 @@ class Trainer(TrainerBase):
             unique_curr = {int(hl): steps for hl, steps in self.cf.healpix_curriculum.items()}
             max_hl = max(unique_curr.keys())
             if self.cf.healpix_level < max_hl:
-                cumulative = sum(steps for hl, steps in unique_curr.items() if hl <= self.cf.healpix_level)
+                cumulative = sum(
+                    steps for hl, steps in unique_curr.items() if hl <= self.cf.healpix_level
+                )
                 logger.info(
                     f"Curriculum active: Training HEALPix level {self.cf.healpix_level}. "
                     f"Next stage will begin at istep {cumulative}. "
@@ -596,10 +598,15 @@ class Trainer(TrainerBase):
                 unique_curr = {int(hl): steps for hl, steps in self.cf.healpix_curriculum.items()}
                 max_hl = max(unique_curr.keys())
                 if self.cf.healpix_level < max_hl:
-                    cumulative = sum(steps for hl, steps in unique_curr.items() if hl <= self.cf.healpix_level)
+                    cumulative = sum(
+                        steps for hl, steps in unique_curr.items() if hl <= self.cf.healpix_level
+                    )
                     if self.cf.general.istep >= cumulative:
                         if is_root():
-                            logger.info(f"Curriculum stage for HEALPix level {self.cf.healpix_level} finished at istep {self.cf.general.istep}. Exiting mini_epoch early.")
+                            logger.info(
+                                f"Curriculum stage for HEALPix level {self.cf.healpix_level} "
+                                f"finished at istep {self.cf.general.istep}. Exiting early."
+                            )
                         self.cf._curriculum_exit = True
                         break
 

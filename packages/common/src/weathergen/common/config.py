@@ -23,8 +23,8 @@ import yaml
 import yaml.constructor
 import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
-from omegaconf.omegaconf import open_dict
 from omegaconf.errors import InterpolationKeyError, InterpolationResolutionError
+from omegaconf.omegaconf import open_dict
 
 from weathergen.common.io import StoreType
 from weathergen.common.paths import _REPO_ROOT, get_wg_private_path
@@ -475,10 +475,12 @@ def load_merge_configs(
             if istep < cumulative:
                 break
         c.healpix_level = current_hl
-        
+
         if c.get("curriculum_streams"):
             # Support both integer and string keys in the yaml
-            c.streams_directory = c.curriculum_streams.get(current_hl) or c.curriculum_streams.get(str(current_hl))
+            c.streams_directory = c.curriculum_streams.get(current_hl) or c.curriculum_streams.get(
+                str(current_hl)
+            )
 
     return c
 
@@ -490,7 +492,7 @@ def _load_streams_in_config(config: Config) -> Config:
         streams_directory = config.get("streams_directory", None)
     except (InterpolationKeyError, InterpolationResolutionError):
         streams_directory = None
-        
+
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)

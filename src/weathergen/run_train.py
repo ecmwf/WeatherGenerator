@@ -154,19 +154,25 @@ def run_continue(args):
         while True:
             if not first_run:
                 cf = config.load_merge_configs(
-                    args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, istep_override, cli_overwrite
+                    args.private_config,
+                    from_run_id_iter,
+                    mini_epoch_iter,
+                    args.base_config,
+                    *args.config,
+                    istep_override,
+                    cli_overwrite,
                 )
                 cf = config.set_run_id(cf, cf.general.run_id, True)
                 cf = Trainer.init_ddp(cf)
                 cf.streams = config.load_streams(Path(cf.streams_directory))
                 trainer = Trainer(cf.train_logging)
-                
+
             trainer.run(cf, devices, from_run_id_iter, mini_epoch_iter)
             first_run = False
-            
+
             if not getattr(trainer.cf, "_curriculum_exit", False):
                 break
-                
+
             logger.info("Restarting training for next curriculum stage...")
             from_run_id_iter = trainer.cf.general.run_id
             mini_epoch_iter = -1
@@ -217,7 +223,13 @@ def run_train(args):
         while True:
             if from_run_id_iter is not None:
                 cf = config.load_merge_configs(
-                    args.private_config, from_run_id_iter, mini_epoch_iter, args.base_config, *args.config, istep_override, cli_overwrite
+                    args.private_config,
+                    from_run_id_iter,
+                    mini_epoch_iter,
+                    args.base_config,
+                    *args.config,
+                    istep_override,
+                    cli_overwrite,
                 )
                 cf = config.set_run_id(cf, cf.general.run_id, True)
                 cf = Trainer.init_ddp(cf)
@@ -226,10 +238,10 @@ def run_train(args):
                 trainer.run(cf, devices, from_run_id_iter, mini_epoch_iter)
             else:
                 trainer.run(cf, devices)
-                
+
             if not getattr(trainer.cf, "_curriculum_exit", False):
                 break
-                
+
             logger.info("Restarting training for next curriculum stage...")
             from_run_id_iter = trainer.cf.general.run_id
             mini_epoch_iter = -1
