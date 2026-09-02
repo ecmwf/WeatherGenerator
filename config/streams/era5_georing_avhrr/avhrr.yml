@@ -13,8 +13,11 @@ METOP_ABC_AVHRR_IASI :
   filenames : ['observations-ea-ofb-0001-2007-2021-metop-a-iasi-radiances-v1.zarr', 'observations-ea-ofb-0001-2013-2023-metop-b-iasi-radiances-v1.zarr', 'observations-ea-ofb-0001-2019-2023-metop-c-iasi-radiances-v1.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  masking_rate : 0.7
-  token_size : 64
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 0.2
+  token_size : 512 # 256
   forcing: True
   embed : 
     net : transformer

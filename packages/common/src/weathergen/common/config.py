@@ -185,7 +185,7 @@ def format_cf(config: Config) -> str:
     for key, value in clean_cf.items():
         match key:
             case "streams":
-                for rt in value:
+                for rt in value.values():
                     for k, v in rt.items():
                         whitespace = "" if k == "reportypes" else "  "
                         stream.write(f"{whitespace}{k} : {v}")
@@ -284,21 +284,39 @@ def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
     return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
+def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> list[Path]:
     """
-    Get the path to the model results zarr store from a given run_id and mini_epoch.
+    Find all model results zarr stores from a given run_id.
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
+    if not run_results.exists():
+        raise FileNotFoundError(
+            f"Results directory for run_id {run_id} does not exist: {run_results}"
+        )
 
-    for ext in StoreType.extensions():
-        zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
+    found_paths = []
 
-        if zarr_path.exists() or zarr_path.is_dir():
-            return zarr_path
-    raise FileNotFoundError(
-        f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
-        f"exist or is not a directory."
-    )
+    for rank in rank_list:
+        if isinstance(rank, int):
+            rank = f"{rank:04d}"
+        else:
+            rank = "*"
+
+        for mini_epoch_int in mini_epoch_list:
+            if isinstance(mini_epoch_int, int):
+                mini_epoch = f"{mini_epoch_int:05d}"
+            else:
+                mini_epoch = "*"
+
+            glob_str = f"validation_chkpt{mini_epoch}_rank{rank}"
+
+            for ext in StoreType.extensions():
+                found_paths.extend(run_results.glob(f"{glob_str}.{ext}"))
+
+    if not found_paths:
+        raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {run_results}")
+
+    return found_paths
 
 
 def _apply_fixes(config: Config) -> Config:
@@ -312,6 +330,7 @@ def _apply_fixes(config: Config) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
+    config = _check_streams(config)
     return config
 
 
@@ -363,6 +382,18 @@ def _check_time_interpolation(config: Config) -> Config:
             if "forecast" in subconf:
                 _convert_interpolation(subconf.forecast, forecast_step_dt)
 
+    return config
+
+
+def _check_streams(config: Config) -> Config:
+    """Convert streams stored as list to dict/DictConfig."""
+    config = config.copy()
+    stream_conf = config.get("streams")
+    assert stream_conf
+    if isinstance(stream_conf, list | ListConfig):
+        stream_conf = OmegaConf.create({conf["name"]: conf for conf in stream_conf})
+
+    config["streams"] = stream_conf
     return config
 
 
@@ -424,6 +455,9 @@ def load_merge_configs(
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
+        # streams from an overwrite's streams_directory replace inherited streams
+        if any(o.get("streams_directory") is not None for o in overwrite_configs):
+            base_config.streams = None
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
@@ -597,7 +631,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
     return conf
 
 
-def load_streams(streams_directory: Path) -> list[Config]:
+def load_streams(streams_directory: Path) -> Config:
     """Load all stream configurations from a directory."""
     # TODO: might want to put this into config later instead of hardcoding it here...
     streams_history = {
@@ -636,10 +670,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         try:
             config = OmegaConf.load(config_file)
             for stream_name, stream_config in config.items():
-                # Stream config schema is {stream_name: stream_config}
-                # where stream_config itself is a dict containing the actual options.
-                # stream_name needs to be added to this dict since only stream_config
-                # will be further processed.
+                # include key in value to have bidirectional key <-> value mapping
                 stream_config.name = stream_name
                 if stream_name in streams:
                     msg = f"Duplicate stream name found: {stream_name}."
@@ -664,7 +695,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         if stream.get("frequency", None) is not None:
             stream = _patch_time("frequency", stream, _TIMEDELTA_TYPE_NAME)
 
-    return list(streams.values())
+    return OmegaConf.create(streams)
 
 
 def get_path_run(config: Config) -> Path:

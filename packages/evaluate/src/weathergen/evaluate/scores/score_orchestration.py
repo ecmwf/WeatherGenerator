@@ -20,7 +20,7 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import scalar_coord_to_dim
-from weathergen.evaluate.utils.clim_utils import get_climatology
+from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -74,12 +74,15 @@ def _score_single_fstep(
     -------
     (fstep, combined_metrics, metric_attrs) or None if no valid scores.
     """
+    # The climatology is aligned to the full target, so it is masked with the data.
+    tars, preds, tars_next, preds_next, climatology = [
+        bbox.apply_mask(x) if x is not None else None
+        for x in (tars, preds, tars_next, preds_next, climatology)
+    ]
+
+    # Checked after masking: the region itself may contain no points.
     if preds.sizes.get("ipoint") == 0:
         return None
-
-    tars, preds, tars_next, preds_next = [
-        bbox.apply_mask(x) if x is not None else None for x in (tars, preds, tars_next, preds_next)
-    ]
 
     score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
 
@@ -174,7 +177,9 @@ def calc_scores_per_stream(
     da_preds = output_data.prediction
     da_tars = output_data.target
     fsteps = sorted(list(da_preds.keys()))
-    aligned_clim_data = get_climatology(reader, da_tars, stream)
+
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
     max_workers = reader.eval_cfg.get("max_workers", None)
     agg_dims = reader.eval_cfg.get("agg_dims", "ipoint")
@@ -375,10 +380,11 @@ def store_metrics_for_region(
     for fstep, combined_metrics, _fstep_attrs in fstep_results:
         criteria = {
             "forecast_step": int(fstep),
-            "sample": combined_metrics.sample.values,
             "channel": combined_metrics.channel.values,
             "metric": combined_metrics.metric.values,
         }
+        if "sample" in combined_metrics.dims:
+            criteria["sample"] = combined_metrics.sample.values
         if "ens" in combined_metrics.dims:
             criteria["ens"] = combined_metrics.ens.values
 
@@ -420,11 +426,20 @@ def store_metrics_for_region(
 
     for metric, parameters in metrics.items():
         metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
+
+        # Restore attrs from all fsteps, keyed by fstep so downstream code
+        # (plotting) can produce one plot per forecast step.
         for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
             if stored_metric == metric and attrs:
-                _logger.debug(f"Restoring {len(attrs)} attributes for {metric}")
-                metric_data.attrs.update(attrs)
-                break
+                for k, v in attrs.items():
+                    metric_data.attrs[f"fstep_{_stored_fstep}/{k}"] = v
+        # Also store the list of fsteps that have attrs
+        attr_fsteps = sorted(
+            {fs for (fs, m) in all_metric_attrs if m == metric and all_metric_attrs[(fs, m)]}
+        )
+        if attr_fsteps:
+            metric_data.attrs["attr_fsteps"] = attr_fsteps
+            _logger.debug(f"Stored per-fstep attributes for {metric}: fsteps={attr_fsteps}")
 
         local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
             run_id
@@ -453,6 +468,7 @@ def metric_list_to_json(
         Region names.
     """
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
+    eval_settings = reader.get_eval_settings(stream)
 
     for metric, metric_stream in metrics_dict.items():
         for region in regions:
@@ -469,6 +485,10 @@ def metric_list_to_json(
                         data_dict = json.load(f)
                     if "scores" not in data_dict:
                         data_dict = {"scores": [data_dict]}
+
+                    # Update eval_settings to current values
+                    data_dict["eval_settings"] = eval_settings
+
                     scores = data_dict.get("scores")
                     for i, existing_score in enumerate(scores):
                         if existing_score["attrs"] == metric_data.attrs:
@@ -480,7 +500,7 @@ def metric_list_to_json(
                         _logger.debug(f"Appending results to {save_path}")
                 else:
                     _logger.debug(f"Saving results to new file {save_path}")
-                    data_dict = {"scores": [metric_data_dict]}
+                    data_dict = {"eval_settings": eval_settings, "scores": [metric_data_dict]}
 
                 with open(save_path, "w") as f:
                     json.dump(data_dict, f, indent=4)

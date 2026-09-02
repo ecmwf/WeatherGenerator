@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import fnmatch
 import logging
 import os
 import warnings
@@ -69,6 +70,15 @@ np.seterr(divide="ignore", invalid="ignore")
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
 _logger.debug(f"Taking cartopy paths from {work_dir}")
+
+# Score maps use a continuous blue->red colormap (no diverging white midpoint,
+# unlike "coolwarm") so mid-range score values stay visually distinguishable.
+# The endpoints are coolwarm's own muted blue/red, just interpolated directly
+# instead of through coolwarm's near-white middle.
+SCORE_MAP_CMAP = mpl.colors.LinearSegmentedColormap.from_list(
+    "score_maps_blue_red",
+    [(0.2298057, 0.298717966, 0.753683153), (0.705673158, 0.01555616, 0.150232812)],
+)
 
 
 @dataclass
@@ -386,14 +396,13 @@ class Plotter:
         color_tar = "black"
         color_pred = "#00897B"  # teal / green-blue
 
-        # Create figure with two subplots: histogram + ratio
-        fig, (ax_hist, ax_ratio) = plt.subplots(
-            2,
-            1,
-            sharex=True,
-            figsize=self.fig_size or (8, 6),
-            gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
-        )
+        # Create figure with three rows: histogram, ratio, and stats text
+        fig = plt.figure(figsize=self.fig_size or (8, 8), constrained_layout=True)
+        gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 0.5])
+        ax_hist = fig.add_subplot(gs[0])
+        ax_ratio = fig.add_subplot(gs[1], sharex=ax_hist)
+        ax_text = fig.add_subplot(gs[2])
+        ax_text.set_axis_off()
 
         # Upper panel: histogram curves
         ax_hist.plot(
@@ -434,14 +443,15 @@ class Plotter:
             f"Wasserstein distance: {w_dist:.4g}\n{t_s.summary('Target:')}\n{p_s.summary('Pred:')}"
         )
 
-        fig.text(
+        ax_text.text(
             0.5,
-            -0.02,
+            0.5,
             stat_text,
             ha="center",
-            va="top",
+            va="center",
             fontsize=7,
             family="monospace",
+            transform=ax_text.transAxes,
             bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
         )
 
@@ -473,7 +483,7 @@ class Plotter:
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving histogram to {fname}")
-        fig.savefig(fname, bbox_inches="tight")
+        fig.savefig(fname)
         plt.close(fig)
 
         return name
@@ -516,8 +526,8 @@ class Plotter:
         """
         self.update_data_selection(select)
 
-        # copy global plotting options, not specific to any variable
-        map_kwargs_global = {
+        # copy stream plotting options, not specific to any variable
+        map_kwargs_stream = {
             key: value
             for key, value in (map_kwargs or {}).items()
             if not isinstance(value, oc.DictConfig)
@@ -573,7 +583,7 @@ class Plotter:
                         var,
                         region,
                         tag=tag,
-                        map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                        map_kwargs=self._match_glob_kwargs(map_kwargs, var) | map_kwargs_stream,
                         title=self.get_map_title(var, valid_time, da_t),
                     )
                     plot_names.append(name)
@@ -581,6 +591,39 @@ class Plotter:
         self.clean_data_selection()
 
         return plot_names
+
+    # glob pattern resolution
+    @staticmethod
+    def _match_glob_kwargs(map_kwargs: dict | None, var: str) -> dict:
+        """Resolve variable-specific plotting options, supporting exact and glob keys.
+
+        Keys under a stream section may be either:
+          - an exact channel name, e.g. "tp_imerg_0"
+          - a glob pattern containing one of ``* ? [ ]``, e.g. "tp_*"
+
+        All matching glob patterns are merged first (in config order), then the
+        exact channel key is merged on top, so an exact key overrides glob
+        values on key conflicts while non-conflicting keys from both are kept.
+        """
+        if map_kwargs is None:
+            return {}
+
+        resolved: dict = {}
+
+        # merge glob/pattern keys
+        for key, value in map_kwargs.items():
+            if not isinstance(value, oc.DictConfig | dict):
+                continue
+            k = str(key)
+            if any(ch in k for ch in "*?[]") and fnmatch.fnmatch(var, k):
+                resolved |= dict(value)
+
+        # override with exact key if present
+        exact = map_kwargs.get(var)
+        if isinstance(exact, oc.DictConfig | dict):
+            resolved |= dict(exact)
+
+        return resolved
 
     # map_kwargs parsing
     @staticmethod
@@ -593,9 +636,9 @@ class Plotter:
         ----------
         map_kwargs : dict or None
             Raw keyword arguments from the caller. Known keys (``marker_size``,
-            ``scale_marker_size``, ``marker``, ``vmin``, ``vmax``, ``colormap``,
-            ``use_datashader``, ``levels``, and HEALPix-related keys) are extracted;
-            remaining keys are collected under ``"extra"``.
+            ``scale_marker_size``, ``marker``, ``vmin``, ``vmax``, ``colormap``,``colors``,
+            ``use_datashader``, ``levels``, ``colorbar_scale`` and HEALPix-related keys) are
+            extracted; remaining keys are collected under ``"extra"``.
         stream : str or None
             Stream name used to look up the default marker size when
             ``marker_size`` is not provided in *map_kwargs*.
@@ -609,6 +652,7 @@ class Plotter:
                 - marker (str)
                 - vmin, vmax (float or None)
                 - cmap (matplotlib.colors.Colormap)
+                - colors (list or None)
                 - use_datashader (bool)
                 - norm (matplotlib.colors.Normalize or BoundaryNorm)
                 - add_healpix_grid (bool) and related healpix_* keys
@@ -624,8 +668,11 @@ class Plotter:
             "marker": kw.pop("marker", "o"),
             "vmin": kw.pop("vmin", None),
             "vmax": kw.pop("vmax", None),
-            "cmap": plt.get_cmap(kw.pop("colormap", "coolwarm")),
+            "cmap": kw.pop("colormap", "coolwarm"),
+            "colors": kw.pop("colors", None),
             "use_datashader": kw.pop("use_datashader", False),
+            "levels": kw.pop("levels", None),
+            "colorbar_scale": kw.pop("colorbar_scale", "linear"),
             # HEALPix grid
             "add_healpix_grid": kw.pop("add_healpix_grid", False),
             "healpix_nside": kw.pop("healpix_nside", 4),
@@ -635,18 +682,87 @@ class Plotter:
             "healpix_linestyle": kw.pop("healpix_linestyle", "-"),
         }
 
-        # Colour normalisation
-        if isinstance(kw.get("levels", False), oc.listconfig.ListConfig):
-            parsed["norm"] = mpl.colors.BoundaryNorm(
-                kw.pop("levels", None), parsed["cmap"].N, extend="both"
-            )
-        else:
-            parsed["norm"] = mpl.colors.Normalize(
-                vmin=parsed["vmin"], vmax=parsed["vmax"], clip=False
-            )
-
         parsed["extra"] = kw  # remaining kwargs forwarded to scatter
         return parsed
+
+    @staticmethod
+    def _resolve_cmap(opts: dict, tag: str) -> mpl.colors.Colormap:
+        """Resolve the colormap for the plot.
+
+        Parameters
+        ----------
+        opts : dict
+            Parsed map kwargs from ``_parse_map_kwargs``.
+        tag : str
+            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``, ``'score_maps_<metric>'``).
+
+        Returns
+        -------
+        matplotlib.colors.Colormap
+            The resolved colormap.
+        """
+
+        # Score maps always use a continuous blue->red colormap (overrides config)
+        if str(tag).startswith("score_maps"):
+            return SCORE_MAP_CMAP
+        # Bias maps always use coolwarm for visual consistency (overrides config)
+        if str(tag).startswith("bias"):
+            return plt.get_cmap("coolwarm")
+        # Explicit colors take precedence over colormap
+        elif isinstance(opts["colors"], oc.listconfig.ListConfig):
+            return mpl.colors.ListedColormap(list(opts["colors"]))
+        # Otherwise use the specified colormap (default "coolwarm")
+        else:
+            return plt.get_cmap(opts["cmap"])
+
+    @staticmethod
+    def _resolve_norm(opts: dict, tag: str) -> mpl.colors.Normalize:
+        """Resolve the colorbar scale and build color normalisation.
+
+        Parameters
+        ----------
+        opts : dict
+            Parsed map kwargs from ``_parse_map_kwargs``.
+        tag : str
+            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``).
+
+        Returns
+        -------
+        matplotlib.colors.Normalize
+            LogNorm, SymLogNorm, BoundaryNorm or linear Normalize.
+        """
+
+        is_bias = str(tag).startswith("bias")
+        vmin, vmax = opts["vmin"], opts["vmax"]
+
+        scale = opts["colorbar_scale"]
+        if scale not in {"linear", "log", "symlog"}:
+            _logger.warning("Unknown colorbar_scale=%r. Falling back to linear.", scale)
+            scale = "linear"
+
+        # Bias maps are always signed, use symlog instead of plain log
+        if scale != "linear" and is_bias:
+            scale = "symlog"
+
+        # Explicit levels override continuous norm (preds/targets only)
+        if isinstance(opts["levels"], oc.listconfig.ListConfig) and not is_bias:
+            return mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
+
+        if scale == "log" and vmin is not None and vmin > 0:
+            return mpl.colors.LogNorm(vmin=vmin, vmax=vmax)
+        elif scale == "log" and vmin is not None and vmin <= 0:
+            _logger.warning(
+                "colorbar_scale='log' but vmin=%.3g <= 0; falling back to linear norm.",
+                vmin,
+            )
+
+        # Symlog (default for bias maps with non-linear scale)
+        if scale == "symlog" and vmin is not None and vmax is not None:
+            vmax_abs = max(abs(float(vmin)), abs(float(vmax)))
+            linthresh = max(vmax_abs * 1e-3, 1e-8)
+            return mpl.colors.SymLogNorm(linthresh=linthresh, vmin=vmin, vmax=vmax)
+
+        return mpl.colors.Normalize(vmin=vmin, vmax=vmax, clip=False)
 
     # rendering backends
     @staticmethod
@@ -886,10 +1002,19 @@ class Plotter:
         # canvas so fine structure is visible; sparse grids use the default.
         figsize = self.fig_size
         if figsize is None and data.size >= 200_000:
-            figsize = (15, 7)
+            figsize = (16, 8)
 
-        proj = ccrs.Robinson() if regionname == "global" else ccrs.PlateCarree()
-        fig = plt.figure(figsize=figsize, dpi=self.dpi_val)
+        proj = ccrs.PlateCarree()
+        if regionname:
+            try:
+                # This uses the method already available in RegionBoundingBox
+                bbox = RegionBoundingBox.from_region_name(regionname)
+                proj = bbox.projection
+            except ValueError:
+                # If regionname isn't in the library, fall back to PlateCarree
+                _logger.warning(f"Region '{regionname}' not found in library, using PlateCarree.")
+                proj = ccrs.PlateCarree()
+        fig = plt.figure(figsize=figsize, dpi=self.dpi_val, constrained_layout=True)
         ax = fig.add_subplot(1, 1, 1, projection=proj)
         try:
             ax.coastlines(linewidth=0.3)
@@ -907,10 +1032,10 @@ class Plotter:
                     opts["vmin"] = float(p_lo)
                 if opts["vmax"] is None:
                     opts["vmax"] = float(p_hi)
-                # Rebuild norm with the robust limits
-                opts["norm"] = mpl.colors.Normalize(
-                    vmin=opts["vmin"], vmax=opts["vmax"], clip=False
-                )
+
+        # resolve cmap and norm based on options and tag
+        opts["cmap"] = self._resolve_cmap(opts, tag)
+        opts["norm"] = self._resolve_norm(opts, tag)
 
         if regionname == "global":
             ax.set_global()
@@ -927,7 +1052,7 @@ class Plotter:
 
         # render points
         if opts["use_datashader"] and HAS_DATASHADER:
-            artist = self._render_datashader(
+            self._render_datashader(
                 ax, proj, data, opts["norm"], opts["cmap"], opts["marker_size_base"]
             )
         else:
@@ -945,7 +1070,7 @@ class Plotter:
                 lat=data["lat"],
             )
 
-            artist = self._render_scatter(
+            self._render_scatter(
                 ax, data, opts["norm"], opts["cmap"], marker_size, opts["marker"], opts["extra"]
             )
 
@@ -963,7 +1088,7 @@ class Plotter:
             ax.gridlines(draw_labels=False, linestyle="--", color="gray", linewidth=0.6, alpha=0.7)
 
         cbar = plt.colorbar(
-            artist,
+            mpl.cm.ScalarMappable(norm=opts["norm"], cmap=opts["cmap"]),
             ax=ax,
             fraction=0.03,
             pad=0.02,
@@ -979,7 +1104,7 @@ class Plotter:
         name = self._build_map_filename(varname, regionname, tag, data)
         fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
         _logger.debug(f"Saving map to {fname}")
-        plt.savefig(fname, bbox_inches="tight")
+        plt.savefig(fname, pad_inches=0)
         plt.close()
 
         return name

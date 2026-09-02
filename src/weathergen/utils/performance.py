@@ -12,6 +12,7 @@
 import logging
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 
 import torch
 
@@ -184,3 +185,33 @@ def compute_source_bytes(source_samples) -> int:
             for t in stream_data.source_tokens_cells:
                 total += t.nbytes
     return total
+
+
+@contextmanager
+def nvtx_range(name):
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+
+
+def _nvtx_push(name: str):
+    torch.cuda.nvtx.range_push(name)
+
+
+def _nvtx_pop():
+    torch.cuda.nvtx.range_pop()
+
+
+def register_nvtx_hooks(model, scope: str = "global"):
+    torch.nn.modules.module.register_module_forward_pre_hook(
+        lambda m, args: _nvtx_push(f"{m.__class__.__name__}.forward")
+    )
+    torch.nn.modules.module.register_module_forward_hook(
+        lambda m, input, output: _nvtx_pop(), always_call=True
+    )
+    torch.nn.modules.module.register_module_full_backward_pre_hook(
+        lambda m, args: _nvtx_push(f"{m.__class__.__name__}.backward")
+    )
+    torch.nn.modules.module.register_module_full_backward_hook(lambda m, input, output: _nvtx_pop())

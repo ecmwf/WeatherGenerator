@@ -1,7 +1,7 @@
 EERIE_OCEAN_NODE:  
   type: mesh
   stream_id: 2138
-  loss_weight: 1.0
+  loss_weight: 0.1
   filenames:
   - /work/ab0995/a270225/data_transformation/eerie_ocean_gr025_2d_gridded_daily.parq
   source:
@@ -13,6 +13,8 @@ EERIE_OCEAN_NODE:
   - avg_sos
   - avg_zos
   location_weight : cosine_latitude
+  sampling_mode: 'global_sparse' # loads given number of random points globally for each time step. 
+  sample_points: 32768 
   masking_rate : 0.6
   masking_rate_none : 0.05
   token_size : 32

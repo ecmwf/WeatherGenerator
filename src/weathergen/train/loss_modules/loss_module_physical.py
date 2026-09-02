@@ -31,6 +31,55 @@ def get_num_samples(config) -> np.typing.NDArray:
     return np.array([s_cfg.get("num_samples", 1) for _, s_cfg in config.items()])
 
 
+class DynamicLossEMA:
+    """
+    Tracks and applies dynamic channel weights using an Exponential Moving Average (EMA)
+    of inverse MSE, as described in Samudra 2.
+    """
+
+    def __init__(self, cfg: dict | None, streams_cfg: dict, device: str):
+        self.enabled = cfg is not None
+        if self.enabled:
+            self.window = cfg.get("window", 100)
+            self.L = cfg.get("L", 20.0)
+            self.channel_weights_ema = {}
+            for stream_name, stream_info in streams_cfg.items():
+                num_channels = len(stream_info.train_target_channels)
+                self.channel_weights_ema[stream_name] = torch.ones(num_channels, device=device)
+
+    def get_weights(
+        self, stream_name: str, weights_channels_static: torch.Tensor | None
+    ) -> torch.Tensor | None:
+        if not self.enabled:
+            return None
+
+        ema = self.channel_weights_ema[stream_name]
+        if ema.numel() > 0:
+            l_min = ema.min().clamp(min=1e-6)
+            # Clamp max weight to L * min weight as per Samudra 2 paper
+            clamped_ema = ema.clamp(max=self.L * l_min)
+            # Normalize so mean is 1.0 to preserve overall learning rate scale
+            weights_channels = clamped_ema / clamped_ema.mean()
+        else:
+            weights_channels = ema.clone()
+
+        if weights_channels_static is not None and weights_channels_static.numel() > 0:
+            weights_channels = weights_channels * weights_channels_static
+
+        return weights_channels
+
+    def update(self, stream_name: str, loss_lfct_chs: torch.Tensor):
+        if not self.enabled:
+            return
+
+        with torch.no_grad():
+            mse_per_chan = loss_lfct_chs.detach().clamp(min=1e-6)
+            inv_mse = 1.0 / mse_per_chan
+            self.channel_weights_ema[stream_name] = (
+                1.0 - 1.0 / self.window
+            ) * self.channel_weights_ema[stream_name] + (1.0 / self.window) * inv_mse
+
+
 class LossPhysical(LossModuleBase):
     """
     Manages and computes the overall loss for a WeatherGenerator model during
@@ -57,6 +106,10 @@ class LossPhysical(LossModuleBase):
         self.device = device
         self.name = "LossPhysical"
 
+        # Dynamic Loss state (extract it before parsing the actual loss functions)
+        self.dynamic_loss_cfg = loss_fcts.get("dynamic_loss")
+        self.forecast_offset = self.mode_cfg.forecast.offset
+
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [
@@ -65,9 +118,16 @@ class LossPhysical(LossModuleBase):
                 name,
             ]
             for name, params in loss_fcts.items()
+            if name != "dynamic_loss"
         ]
 
-    def _get_weights(self, stream_info):
+        self.dynamic_loss_ema = DynamicLossEMA(
+            self.dynamic_loss_cfg if self.stage == TRAIN else None,
+            self.cf.streams,
+            self.device,
+        )
+
+    def _get_weights(self, stream_name, stream_info):
         """
         Get weights for current stream
         """
@@ -78,17 +138,28 @@ class LossPhysical(LossModuleBase):
         if self.stage == TRAIN:
             # set loss_weights to 1. when not specified
             stream_info_loss_weight = stream_info.get("loss_weight", 1.0)
-            weights_channels = (
+            weights_channels_static = (
                 torch.tensor(stream_info["target_channel_weights"]).to(
                     device=device, non_blocking=True
                 )
-                if "target_channel_weights" in stream_info
+                if stream_info.get("target_channel_weights")
                 else None
             )
         elif self.stage == VAL:
             # in validation mode, always unweighted loss
             stream_info_loss_weight = 1.0
-            weights_channels = None
+            weights_channels_static = None
+
+        if self.dynamic_loss_ema.enabled:
+            weights_channels = self.dynamic_loss_ema.get_weights(
+                stream_name, weights_channels_static
+            )
+        else:
+            weights_channels = (
+                weights_channels_static
+                if weights_channels_static is None or weights_channels_static.numel() > 0
+                else None
+            )
 
         return stream_info_loss_weight, weights_channels
 
@@ -100,13 +171,14 @@ class LossPhysical(LossModuleBase):
         decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
         return weights_timestep_fct(len_forecast_steps, decay_factor)
 
-    def _get_location_weights(self, stream_info, target_coords):
+    def _get_location_weights(self, stream_info, target_coords, substep_masks):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
-            return None
+            return [None for _ in substep_masks]
+
+        target_coords = target_coords.to(self.device, non_blocking=True)
         weights_locations_fct = getattr(loss_fns, location_weight_type)
-        weights_locations = weights_locations_fct(target_coords)
-        weights_locations = weights_locations.to(device=self.device, non_blocking=True)
+        weights_locations = [weights_locations_fct(target_coords[mask]) for mask in substep_masks]
 
         return weights_locations
 
@@ -132,7 +204,7 @@ class LossPhysical(LossModuleBase):
         pred: torch.Tensor,
         substep_masks: list[torch.Tensor],
         weights_channels: torch.Tensor,
-        weights_locations: torch.Tensor,
+        weights_locations: list[torch.Tensor],
     ):
         """
         Compute loss for given loss function
@@ -142,11 +214,15 @@ class LossPhysical(LossModuleBase):
         losses_chs = torch.zeros(target.shape[-1], device=target.device, dtype=torch.float32)
 
         ctr_substeps = 0
-        for mask_t in substep_masks:
-            assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
+        for i_t, mask_t in enumerate(substep_masks):
+            assert (
+                mask_t.sum() == len(weights_locations[i_t])
+                if weights_locations[i_t] is not None
+                else True
+            )
 
             loss, loss_chs = loss_fct(
-                target[mask_t], pred[:, mask_t], weights_channels, weights_locations
+                target[mask_t], pred[:, mask_t], weights_channels, weights_locations[i_t]
             )
 
             # accumulate loss
@@ -205,8 +281,7 @@ class LossPhysical(LossModuleBase):
         source2target_idxs, output_info, target2source_idxs, target_info = metadata
 
         # TODO: iterate over batch dimension
-        for stream_info in self.cf.streams:
-            stream_name = stream_info["name"]
+        for stream_name, stream_info in self.cf.streams.items():
             # TODO: avoid this
             target_channels = (
                 stream_info.val_target_channels
@@ -216,7 +291,13 @@ class LossPhysical(LossModuleBase):
 
             losses_all[stream_name] = defaultdict(dict)
 
-            stream_loss_weight, weights_channels = self._get_weights(stream_info)
+            stream_loss_weight, weights_channels = self._get_weights(stream_name, stream_info)
+            if self.dynamic_loss_ema.enabled and weights_channels is not None:
+                losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"] = {}
+                for ch_n, w in zip(target_channels, weights_channels, strict=True):
+                    losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"][ch_n] = (
+                        w.item()
+                    )
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
@@ -261,9 +342,16 @@ class LossPhysical(LossModuleBase):
                     assert len(target_idx) == 1
                     target_idx = target_idx[0]
 
+                    # current target data
+                    target = targets_batch[target_idx]
+                    target_times = targets_times_batch[target_idx]
+
+                    # get masks for sub-time steps
+                    substep_masks = self._get_substep_masks(stream_info, timestep_idx, target_times)
+
                     # get weights for locations
                     weights_locations = self._get_location_weights(
-                        stream_info, targets_coords_batch[target_idx]
+                        stream_info, targets_coords_batch[target_idx], substep_masks
                     )
 
                     # loss_st_corr: loss for give source-target correspondence
@@ -273,9 +361,6 @@ class LossPhysical(LossModuleBase):
                         # skip is loss is not computed for this sample
                         if loss_fct_name not in pred_params.global_params["loss"]:
                             continue
-
-                        target = targets_batch[target_idx]
-                        target_times = targets_times_batch[target_idx]
 
                         # spoofed inputs are masked in the output calculations
                         is_spoof = targets_is_spoof[target_idx]
@@ -291,11 +376,6 @@ class LossPhysical(LossModuleBase):
                         # expected shape of pred is [ensemble_size, num_samples, num_channels].
                         pred = pred.reshape([pred.shape[0], *target.shape])
                         assert pred.shape[1] > 0
-
-                        # get masks for sub-time steps
-                        substep_masks = self._get_substep_masks(
-                            stream_info, timestep_idx, target_times
-                        )
 
                         losses_all[stream_name][str(timestep_idx)][loss_fct_name] = defaultdict(
                             dict
@@ -315,6 +395,15 @@ class LossPhysical(LossModuleBase):
                             losses_all[stream_name][str(timestep_idx)][loss_fct_name][ch_n] = (
                                 spoof_weight * v if v != 0.0 and not is_spoof else torch.nan
                             )
+
+                        # Update EMA for dynamic loss if enabled
+                        if (
+                            self.dynamic_loss_ema.enabled
+                            and timestep_idx == self.forecast_offset
+                            and loss_fct_name == "mse"
+                            and not is_spoof
+                        ):
+                            self.dynamic_loss_ema.update(stream_name, loss_lfct_chs)
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
@@ -362,6 +451,7 @@ class LossPhysical(LossModuleBase):
                 for ch_n, output_step_dict in ch_dict.items():
                     if ch_n != "avg":
                         for _, v in output_step_dict.items():
+                            v = 0.0 if type(v) is float and np.isnan(v) else v
                             reordered_losses[stream_name][loss_fct_name]["avg"] += v
                             count += 1
                 reordered_losses[stream_name][loss_fct_name]["avg"] /= count

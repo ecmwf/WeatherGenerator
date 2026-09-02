@@ -1,12 +1,3 @@
-# (C) Copyright 2025 WeatherGenerator contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation
-# nor does it submit to any jurisdiction.
-
 import glob
 import logging
 from pathlib import Path
@@ -26,6 +17,7 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     t_epsilon,
 )
+from weathergen.train.utils import Stage
 
 _logger = logging.getLogger(__name__)
 
@@ -43,6 +35,7 @@ class DataReaderFesom(DataReaderTimestep):
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
+        stage: Stage,
     ) -> None:
         # Store configuration but DO NOT open files here
         self.filenames = sorted(glob.glob(str(filename) + "/*"))
@@ -312,16 +305,16 @@ class DataReaderFesom(DataReaderTimestep):
         self.source_mean = np.concatenate(
             (np.array([0, 0]), np.array(s_groups[0]["data"].attrs["means"]))
         )
-        self.source_stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(s_groups[0]["data"].attrs["std"])))
+        self.source_stdev = np.concatenate(
+            (np.array([1, 1]), np.array(s_groups[0]["data"].attrs["std"]))
         )
         self.source_stdev[self.source_stdev <= 1e-5] = 1.0
 
         self.target_mean = np.concatenate(
             (np.array([0, 0]), np.array(t_groups[0]["data"].attrs["means"]))
         )
-        self.target_stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(t_groups[0]["data"].attrs["std"])))
+        self.target_stdev = np.concatenate(
+            (np.array([1, 1]), np.array(t_groups[0]["data"].attrs["std"]))
         )
         self.target_stdev[self.target_stdev <= 1e-5] = 1.0
 

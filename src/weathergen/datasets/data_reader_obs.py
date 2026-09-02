@@ -21,12 +21,15 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     check_reader_data,
 )
+from weathergen.train.utils import Stage
 
 _logger = logging.getLogger(__name__)
 
 
 class DataReaderObs(DataReaderBase):
-    def __init__(self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict) -> None:
+    def __init__(
+        self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict, stage: Stage
+    ) -> None:
         super().__init__(tw_handler, stream_info)
 
         self.filename = filename
@@ -45,36 +48,60 @@ class DataReaderObs(DataReaderBase):
         # To read idx convert to a string, format e.g.: 197001010000
         base_date_str = dt_obj.strftime("%Y%m%d%H%M")
         self.hrly_index = self.z[f"idx_{base_date_str}_1"]
-        self.colnames = self.data.attrs["colnames"]
+        self.colnames = list(self.data.attrs["colnames"])
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
-        data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
 
         # determine source / target channels and corresponding idx using include and exclude lists
 
-        s_chs = stream_info.get("source")
-        s_chs_exclude = stream_info.get("source_exclude", [])
-
-        t_chs = stream_info.get("target")
-        t_chs_exclude = stream_info.get("target_exclude", [])
-
-        # source_n_empty = len(s_chs) > 0 if s_chs is not None else True
-        # assert source_n_empty, "source is empty; at least one channels must be present."
-        # target_n_empty = len(t_chs) > 0 if t_chs is not None else True
-        # assert target_n_empty, "target is empty; at least one channels must be present."
-
-        self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
+        if stream_info.get(str(stage) + "_source_channels") is None:
+            s_chs = stream_info.get("source")
+            s_chs_exclude = stream_info.get("source_exclude", [])
+            self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
+        else:
+            self.source_channels = stream_info.get(str(stage) + "_source_channels")
         self.source_idx = [self.colnames.index(c) for c in self.source_channels]
         self.source_idx = np.array(self.source_idx, dtype=np.int64)
 
-        self.target_channels = self.select_channels(data_colnames, t_chs, t_chs_exclude)
+        if stream_info.get(str(stage) + "_target_channels") is None:
+            t_chs = stream_info.get("target")
+            t_chs_exclude = stream_info.get("target_exclude", [])
+            self.target_channels = self.select_channels(data_colnames, t_chs, t_chs_exclude)
+        else:
+            self.target_channels = stream_info.get(str(stage) + "_target_channels")
         self.target_idx = [self.colnames.index(c) for c in self.target_channels]
         self.target_idx = np.array(self.target_idx, dtype=np.int64)
 
         # determine idx for coords and geoinfos
-        self.coords_idx = [self.colnames.index("lat"), self.colnames.index("lon")]
-        self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
-        self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
+        coords_channels = stream_info.get("coords_channels", ["lat", "lon"])
+        assert len(coords_channels) == 2, (
+            f"{stream_info['name']}: 'coords_channels' must be a list of exactly two "
+            f"names [lat, lon], got {coords_channels!r}."
+        )
+        lat_name, lon_name = coords_channels
+        for name in (lat_name, lon_name):
+            n = self.colnames.count(name)
+            assert n == 1, (
+                f"{stream_info['name']}: coordinate column not found in {self.filename}. "
+                f"Looked for '{lat_name}'/'{lon_name}'; available colnames: {self.colnames}. "
+                f"Set 'coords_channels' in the stream config to match data."
+            )
+        self.coords_idx = [self.colnames.index(lat_name), self.colnames.index(lon_name)]
+
+        # geoinfo channels
+        sname = stream_info["name"]
+        geoinfo_channels = stream_info.get("geoinfo_channels")
+        assert geoinfo_channels is not None, (
+            f"{sname}: 'geoinfo_channels' must be specified in the stream config."
+        )
+        self.geoinfo_idx, self.geoinfo_channels = [], []
+        for c in geoinfo_channels:
+            if c not in self.colnames:
+                _logger.warning(f"{sname} : geoinfo {c} specified in config but not present.")
+            else:
+                self.geoinfo_idx.append(self.colnames.index(c))
+                self.geoinfo_channels.append(c)
+        _logger.info(f"{sname} geoinfos : {self.geoinfo_channels}")
 
         # load additional properties (mean, var)
         self._load_properties()
@@ -185,7 +212,7 @@ class DataReaderObs(DataReaderBase):
                 self.indices_start = np.append(
                     self.indices_start,
                     np.ones(
-                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs, dtype=int
+                        (diff_in_hours_end - (self.hrly_index.shape[0] - 1)) // step_hrs, dtype=int
                     )
                     * self.indices_start[-1],
                 )
@@ -194,7 +221,8 @@ class DataReaderObs(DataReaderBase):
                     self.indices_end,
                     np.ones(
                         # add (len_hrs + 1) since above we also have diff_in_hours_start + len_hrs
-                        (diff_in_hours_end - self.hrly_index.shape[0] + (len_hrs + 1)) // step_hrs,
+                        (diff_in_hours_end - (self.hrly_index.shape[0] - 1) + (len_hrs + 1))
+                        // step_hrs,
                         dtype=int,
                     )
                     * self.indices_end[-1],
@@ -231,6 +259,11 @@ class DataReaderObs(DataReaderBase):
         """
 
         if len(channels_idx) == 0:
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
+        if idx >= len(self.indices_start) or idx >= len(self.indices_end):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )

@@ -15,6 +15,8 @@ import xarray as xr
 from scipy.spatial import cKDTree
 from tqdm import tqdm
 
+from weathergen.evaluate.utils.derived_channels import scale_z_channels
+
 _logger = logging.getLogger(__name__)
 
 
@@ -130,6 +132,13 @@ def align_clim_data(
                 ),
                 dims=["statistic"] + list(target_da.dims),
                 coords=all_stat_coords,
+            ).assign_coords(
+                # Keep the target's non-dimension coords (lat/lon) for region masking
+                {
+                    name: coord
+                    for name, coord in target_da.coords.items()
+                    if name not in all_stat_coords
+                }
             )
         else:
             aligned_clim[fstep] = xr.DataArray(
@@ -245,6 +254,26 @@ def get_climatology(reader, da_tars, stream: str) -> dict | None:
     if clim_data_path is not None:
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
-        return align_clim_data(da_tars, clim_data)
+        aligned = align_clim_data(da_tars, clim_data)
+        return {fstep: scale_z_channels(da, stream) for fstep, da in aligned.items()}
 
     return None
+
+
+def needs_climatology(metrics_dict: dict) -> bool:
+    """
+    Check if any of the specified metrics require climatology data.
+
+    Parameters
+    ----------
+    metrics : dict
+        Dictionary mapping metric names to their parameters.
+
+    Returns
+    -------
+    bool
+        True if any metric requires climatology, False otherwise
+    """
+    metrics = [m for metrics in metrics_dict.values() for m in metrics.keys()]
+    req_clim = ["acc", "rps", "rpss", "seeps"]
+    return any(m in req_clim for m in metrics)

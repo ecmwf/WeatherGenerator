@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+import contextlib
 import copy
 import logging
 import time
@@ -37,6 +38,7 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
     VAL,
+    NoOpGradScaler,
     Stage,
     cfg_keys_to_filter,
     extract_batch_metadata,
@@ -46,7 +48,7 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
+from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -68,7 +70,7 @@ class Trainer(TrainerBase):
         self.dataset_val: MultiStreamDataSampler | None = None
         self.device: torch.device = None
         self.ema_model = None
-        self.grad_scaler: torch.amp.GradScaler | None = None
+        self.grad_scaler: torch.amp.GradScaler | NoOpGradScaler = NoOpGradScaler()
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
@@ -86,6 +88,8 @@ class Trainer(TrainerBase):
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
         self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
+        self.t_training_start: float = 0
+        self.training_loop_annotation_context = contextlib.nullcontext
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -167,6 +171,8 @@ class Trainer(TrainerBase):
                 warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
                 batch_size_per_gpu=self.batch_size_per_gpu,
             )
+        if cf.get("profiling", {}).get("nvtx_annotate", False):
+            self.training_loop_annotation_context = nvtx_range
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -321,7 +327,7 @@ class Trainer(TrainerBase):
         # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
         # aiming for beta2 = 0.95 at one node, ie B=4
-        beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
+        beta2 = max(0.9, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2))
         eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
         self.optimizer = torch.optim.AdamW(
@@ -330,9 +336,10 @@ class Trainer(TrainerBase):
             weight_decay=self.training_cfg.optimizer.weight_decay,
             betas=(beta1, beta2),
             eps=eps,
+            fused=True,
         )
-        self.grad_scaler = torch.amp.GradScaler("cuda")
-
+        if cf.get("training_config").get("optimizer").get("grad_scaling", True):
+            self.grad_scaler = torch.amp.GradScaler("cuda")
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"
 
         # lr is updated after each batch so account for this
@@ -349,9 +356,7 @@ class Trainer(TrainerBase):
         )
 
         if self.cf.general.istep > 0 and is_root():
-            str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            if is_root():
-                logger.info(str)
+            logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
@@ -363,7 +368,7 @@ class Trainer(TrainerBase):
             mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu)
+                max(1, len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu))
             ) * self.batch_size_per_gpu
             mini_epoch_base = int(
                 self.cf.general.istep
@@ -381,19 +386,25 @@ class Trainer(TrainerBase):
         self.validate_before_training()
 
         # training loop
+        self.t_training_start = time.time()
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
-            logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train."
+                )
             self.train(mini_epoch)
 
-            logger.info(
-                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
-            )
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
+                )
             self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
 
-            logger.info(
-                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
-            )
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
+                )
             self.save_model(mini_epoch)
 
         # log final model
@@ -437,90 +448,91 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            if cf.data_loading.get("memory_pinning", False):
-                # pin memory for faster CPU-GPU transfer
-                batch = batch.pin_memory()
+            with self.training_loop_annotation_context(f"batch_{bidx}"):
+                if cf.data_loading.get("memory_pinning", False):
+                    # pin memory for faster CPU-GPU transfer
+                    batch = batch.pin_memory()
 
-            batch.to_device(self.device)
+                batch.to_device(self.device)
 
-            with torch.autocast(
-                device_type=f"cuda:{cf.local_rank}",
-                dtype=self.mixed_precision_dtype,
-                enabled=cf.with_mixed_precision,
-            ):
-                preds = self.model(
-                    self.model_params,
-                    batch.get_source_samples(),
-                )
-
-                targets_and_auxs = {}
-                for loss_name, target_aux in self.target_and_aux_calculators.items():
-                    # find targets for this target-aux calculator
-                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
-                    # apply target-aux calculator
-                    targets_and_auxs[loss_name] = target_aux.compute(
-                        self.cf.general.istep,
-                        batch.get_target_samples(target_idxs),
-                        self.model_params,
-                        self.model,
+                with torch.autocast(
+                    device_type=f"cuda:{cf.local_rank}",
+                    dtype=self.mixed_precision_dtype,
+                    enabled=cf.with_mixed_precision,
+                ):
+                    preds = self.model(
+                        model_params=self.model_params,
+                        batch=batch.get_source_samples(),
                     )
 
-            loss = self.loss_calculator.compute_loss(
-                preds=preds,
-                targets_and_aux=targets_and_auxs,
-                metadata=extract_batch_metadata(batch),
-            )
+                    targets_and_auxs = {}
+                    for loss_name, target_aux in self.target_and_aux_calculators.items():
+                        # find targets for this target-aux calculator
+                        target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                        # apply target-aux calculator
+                        targets_and_auxs[loss_name] = target_aux.compute(
+                            self.cf.general.istep,
+                            batch.get_target_samples(target_idxs),
+                            self.model_params,
+                            self.model,
+                        )
 
-            # TODO re-enable this, need to think on how to make it compatible with
-            # student-teacher training
-            # if cf.latent_noise_kl_weight > 0.0:
-            #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
-            #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+                loss = self.loss_calculator.compute_loss(
+                    preds=preds,
+                    targets_and_aux=targets_and_auxs,
+                    metadata=extract_batch_metadata(batch),
+                )
 
-            [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators_val.items()
-            ]
+                # TODO re-enable this, need to think on how to make it compatible with
+                # student-teacher training
+                # if cf.latent_noise_kl_weight > 0.0:
+                #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
+                #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
-            # backward pass
-            self.optimizer.zero_grad()
-            self.grad_scaler.scale(loss).backward()
+                [
+                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators.items()
+                ]
+                [
+                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators_val.items()
+                ]
 
-            # gradient clipping
-            self.grad_scaler.unscale_(self.optimizer)
-            total_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
-            )
+                # backward pass
+                self.optimizer.zero_grad()
+                self.grad_scaler.scale(loss).backward()
 
-            # log gradient norms
-            if self.log_grad_norms:
-                if bidx % self.train_logging.terminal == 0:
-                    self.last_grad_norm = self._get_tensor_item(total_norm)
-                if bidx % self.train_logging.metrics == 0:
-                    self._log_instant_grad_norms(TRAIN)
+                # gradient clipping
+                self.grad_scaler.unscale_(self.optimizer)
+                total_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
+                )
 
-            # optimizer step
-            self.grad_scaler.step(self.optimizer)
-            self.grad_scaler.update()
+                # log gradient norms
+                if self.log_grad_norms:
+                    if bidx % self.train_logging.terminal == 0:
+                        self.last_grad_norm = self._get_tensor_item(total_norm)
+                    if bidx % self.train_logging.metrics == 0:
+                        self._log_instant_grad_norms(TRAIN)
 
-            # update learning rate
-            self.lr_scheduler.step()
+                # optimizer step
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
 
-            batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-            step = batch_size_total * self.cf.general.istep
+                # update learning rate
+                self.lr_scheduler.step()
 
-            [
-                target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators_val.items()
-            ]
+                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+                step = batch_size_total * self.cf.general.istep
+
+                [
+                    target_aux.update_state_post_opt_step(step, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators.items()
+                ]
+                [
+                    target_aux.update_state_post_opt_step(step, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators_val.items()
+                ]
 
             # EMA update
             if self.validate_with_ema:
@@ -576,10 +588,6 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    if cf.data_loading.get("memory_pinning", False):
-                        # pin memory for faster CPU-GPU transfer
-                        batch = batch.pin_memory()
-
                     batch.to_device(self.device)
 
                     # evaluate model
@@ -748,6 +756,7 @@ class Trainer(TrainerBase):
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.general.istep >= 0:
+                elapsed_time = time.time() - self.t_training_start
                 self.train_logger.add_logs(
                     stage,
                     samples,
@@ -755,6 +764,7 @@ class Trainer(TrainerBase):
                     stddev_all,
                     avg_loss=avg_loss,
                     lr=self.lr_scheduler.get_lr(),
+                    elapsed_training_time_seconds=elapsed_time,
                 )
 
         loss_calculator.loss_hist = []
@@ -818,8 +828,9 @@ class Trainer(TrainerBase):
 
                 for key, value in losses_all.items():
                     if key.endswith("avg"):
+                        val = np.nan if np.isnan(value).all() else f"{np.nanmean(value):0.4E}"
                         logger.info(
-                            f"{key} : {np.nanmean(value):0.4E} \t",
+                            f"{key} : {val} \t",
                         )
                 logger.info("\n")
 

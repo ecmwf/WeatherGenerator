@@ -191,3 +191,19 @@ def filter_config_by_enabled(cfg: dict | OmegaConf, keys: list[str]):
         cfg_out[key] = filtered
 
     return cfg_out
+
+
+class NoOpGradScaler:
+    """Drop-in replacement for torch.amp.GradScaler when gradient scaling is disabled."""
+
+    def scale(self, loss):
+        return loss
+
+    def unscale_(self, optimizer):
+        return None
+
+    def step(self, optimizer):
+        return optimizer.step()
+
+    def update(self):
+        return None
