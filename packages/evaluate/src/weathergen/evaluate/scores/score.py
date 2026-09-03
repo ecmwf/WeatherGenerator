@@ -22,6 +22,9 @@ from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_lis
 
 _logger = logging.getLogger(__name__)
 
+# Upper bound on the number of rank-histogram entries serialized into score attributes.
+_RANK_HISTOGRAM_MAX_ATTR_SIZE = 100_000
+
 try:
     import xskillscore
     from xhistogram.xarray import histogram
@@ -213,6 +216,8 @@ class Scores:
             "crps": self.calc_crps,
             "rank_histogram": self.calc_rank_histogram,
             "spread": self.calc_spread,
+            # RMSE of the ensemble-mean field; complements the per-member "rmse" above
+            "rmse_ens_mean": self.calc_rmse_ens_mean,
         }
 
     def get_score(
@@ -265,12 +270,15 @@ class Scores:
             f = self.det_metrics_dict[score_name]
             _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
-            assert self._ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self._ens_dim} "
-                "not found in prediction data. Skipping score calculation."
-            )
-            return None
+            if self._ens_dim not in data.prediction.dims:
+                _logger.warning(
+                    f"Probabilistic score '{score_name}' chosen, but ensemble dimension "
+                    f"'{self._ens_dim}' not found in prediction data dims "
+                    f"{data.prediction.dims}. Skipping score calculation."
+                )
+                return None
             f = self.prob_metrics_dict[score_name]
+            _logger.debug(f"Using probabilistic metric: {score_name}")
         else:
             raise ValueError(
                 f"Unknown score chosen. Supported scores: {
@@ -1542,6 +1550,40 @@ class Scores:
             return np.sqrt((ens_size + 1) / ens_size) * spread / rmse
         return spread / rmse
 
+    def calc_rmse_ens_mean(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
+        """
+        Calculate the RMSE of the ensemble mean forecast w.r.t. reference data.
+
+        The ensemble members are averaged into a single field *before* the RMSE is taken.
+        This is the skill component of the spread-skill ratio (see ``calc_ssr``) and is a
+        different quantity from the ``rmse`` score, which is evaluated per member and hence
+        does not benefit from the error cancellation of ensemble averaging. Both scores can
+        be requested side by side.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If provided, the RMSE will be weighted by these values.
+
+        Returns
+        -------
+        xr.DataArray
+            Root mean squared error of the ensemble mean
+        """
+        ens_mean = p.mean(dim=self._ens_dim)
+
+        return self.calc_rmse(ens_mean, gt, latitude_weights=latitude_weights)
+
     def calc_crps(
         self,
         p: xr.DataArray,
@@ -1665,9 +1707,11 @@ class Scores:
                     da.random.random(size=fcst_stacked.shape, chunks=fcst_stacked.chunks)
                     * noise_fac
                 )
-        # preserve the other coordinates
+        # preserve the other coordinates, keeping their dimension names so that
+        # non-dimension coordinates (e.g. init_times on "sample") are reattached
+        # to the correct dimension instead of spawning a new one
         preserved_coords = {
-            c: obs_stacked[c].values
+            c: (obs_stacked[c].dims, obs_stacked[c].values)
             for c in obs_stacked.coords
             if all(dim not in {self._ens_dim, "npoints"} for dim in obs_stacked[c].dims)
         }
@@ -1684,18 +1728,58 @@ class Scores:
         )
 
         # Reattach preserved coordinates by broadcasting
-        for coord_name, coord_values in preserved_coords.items():
+        for coord_name, (coord_dims, coord_values) in preserved_coords.items():
             # Only keep unique values along npoints if necessary
             if coord_name in rank_counts.coords:
                 continue
-            rank_counts = rank_counts.assign_coords({coord_name: coord_values})
+            # Coordinates whose dimensions did not survive the histogram cannot be
+            # reattached (e.g. dims consumed by the aggregation).
+            if not all(dim in rank_counts.dims for dim in coord_dims):
+                continue
+            rank_counts = rank_counts.assign_coords({coord_name: (coord_dims, coord_values)})
+
+        npoints = len(fcst_stacked["npoints"])
 
         # provide normalized rank counts if desired
         if norm:
-            npoints = len(fcst_stacked["npoints"])
             rank_counts = rank_counts / npoints
 
-        return rank_counts
+        # The histogram carries a bin dimension which the score storage array cannot
+        # hold (it only has sample/forecast_step/channel/metric/ens). Following the
+        # same convention as the PSD and Q-Q metrics, the full histogram is stored in
+        # the attributes for JSON serialization and a scalar summary is returned.
+        bin_dim = next((d for d in rank_counts.dims if d not in rank.dims), None)
+        if bin_dim is None:
+            return rank_counts
+
+        rank_freq = rank_counts if norm else rank_counts / npoints
+        n_bins = rank_counts.sizes[bin_dim]
+
+        # Reliability index (Delle Monache et al., 2006): summed absolute deviation of
+        # the observed rank frequencies from the uniform frequency 1/(M+1) of a
+        # perfectly calibrated ensemble. 0 means a perfectly flat rank histogram.
+        reliability_index = np.abs(rank_freq - 1.0 / n_bins).sum(dim=bin_dim)
+
+        attrs = {
+            "rank_bins": np.asarray(rank_counts[bin_dim].values).tolist(),
+            "normalized": bool(norm),
+            "n_points": int(npoints),
+        }
+        # Only serialize the histogram itself when it is small enough to be a useful
+        # JSON payload. On the score-map path the spatial dimension survives, which
+        # would otherwise produce a nested list with one histogram per grid point.
+        if rank_freq.size <= _RANK_HISTOGRAM_MAX_ATTR_SIZE:
+            attrs["rank_counts"] = np.asarray(rank_freq.values).tolist()
+            attrs["rank_counts_dims"] = list(rank_freq.dims)
+        else:
+            _logger.debug(
+                f"Rank histogram with {rank_freq.size} entries exceeds the attribute "
+                f"limit of {_RANK_HISTOGRAM_MAX_ATTR_SIZE}; storing only the scalar "
+                "reliability index."
+            )
+        reliability_index.attrs.update(attrs)
+
+        return reliability_index
 
     def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """

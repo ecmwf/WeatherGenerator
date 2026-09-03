@@ -16,6 +16,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
 import seaborn as sns
 import xarray as xr
 
@@ -28,6 +29,24 @@ from weathergen.evaluate.plotting.plot_utils import (
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
+# Visual encoding shared by every ensemble line plot. Colour identifies the run, these
+# styles identify what the curve is. Faded == derived from the individual members;
+# full opacity == a score computed once on the ensemble as a whole.
+ENSEMBLE_STYLES = {
+    "members": {"linestyle": "--", "alpha": 0.2},
+    "members_mean": {"linestyle": "-", "alpha": 0.2},
+    "ensemble_score": {"linestyle": "-", "alpha": 1.0},
+}
+
+
+def _is_constant_over(data: xr.DataArray, dim: str) -> bool:
+    """Whether *data* carries no information along *dim* (all slices identical)."""
+    if dim not in data.dims or data.sizes[dim] <= 1:
+        return True
+    # move *dim* first so the leading slice broadcasts against the full array
+    arr = np.asarray(data.transpose(dim, ...).values)
+    return bool(np.allclose(arr, arr[:1], equal_nan=True))
 
 
 class LinePlots:
@@ -148,6 +167,63 @@ class LinePlots:
                 _logger.info("--------------------------")
         return
 
+    def _build_style_legend(
+        self,
+        drew_members: bool,
+        drew_ensemble_score: bool,
+        overlay_names: list[str] | None,
+    ) -> list[Line2D]:
+        """Build neutral proxy handles explaining the line-style encoding.
+
+        The main legend names the runs (one entry per model, colour-coded). This second
+        legend says what each line *style* means, so the styles are self-documenting
+        without adding a legend entry per metric. Returns an empty list when the plot
+        uses a single style and needs no explanation.
+
+        Parameters
+        ----------
+        drew_members: bool
+            Whether individual members and their mean were drawn.
+        drew_ensemble_score: bool
+            Whether an overlaid whole-ensemble score was drawn.
+        overlay_names: list[str] | None
+            Names of the overlaid metrics, used to label the ensemble-score entry.
+
+        Returns
+        -------
+        list[Line2D]
+            Proxy artists for the style legend.
+        """
+        if not (drew_members and drew_ensemble_score):
+            return []
+
+        entries = []
+        if drew_members:
+            member_label = {
+                "std": "member spread (std)",
+                "minmax": "member spread (min-max)",
+            }.get(self.plot_ensemble, "individual members")
+            entries.append((member_label, ENSEMBLE_STYLES["members"]))
+            entries.append(("mean over members", ENSEMBLE_STYLES["members_mean"]))
+        if drew_ensemble_score:
+            label = ", ".join(overlay_names) if overlay_names else "whole-ensemble score"
+            entries.append((label, ENSEMBLE_STYLES["ensemble_score"]))
+
+        # A key drawn at the true alpha=0.2 is illegible, so lift faded entries to a
+        # readable value that still reads as lighter than the full-opacity one.
+        return [
+            Line2D(
+                [],
+                [],
+                color="0.3",
+                linewidth=1.4,
+                label=lbl,
+                linestyle=style["linestyle"],
+                alpha=1.0 if style["alpha"] >= 1.0 else 0.5,
+            )
+            for lbl, style in entries
+        ]
+
     def _plot_ensemble(
         self, data: xr.DataArray, x_dim: str, label: str, color: str | None = None
     ) -> None:
@@ -172,12 +248,15 @@ class LinePlots:
             x_dim
         )
 
+        # Faded marks a quantity derived from the individual members (this solid line is
+        # their mean); a full-opacity solid line is a score computed once on the ensemble
+        # as a whole (e.g. rmse_ens_mean, crps). See ENSEMBLE_STYLES.
         plot_kwargs = dict(
             label=label,
             marker="o",
             markersize=4,
             linewidth=1.2,
-            linestyle="-",
+            **ENSEMBLE_STYLES["members_mean"],
         )
         if color is not None:
             plot_kwargs["color"] = color
@@ -224,7 +303,7 @@ class LinePlots:
                     ens[x_dim],
                     ens.isel(ens=j).values,
                     color=color,
-                    alpha=0.2,
+                    **ENSEMBLE_STYLES["members"],
                 )
         else:
             _logger.warning(
@@ -279,6 +358,7 @@ class LinePlots:
         title: str | None = None,
         colors: list[str | None] | None = None,
         line: float | None = None,
+        overlay_names: list[str] | None = None,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -315,22 +395,36 @@ class LinePlots:
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
         ax = fig.add_subplot(111)
 
+        # Curves whose label starts with "_" are overlaid ensemble scores belonging to a
+        # run already in the legend; they are styled apart instead of labelled again.
+        drew_members = False
+        drew_ensemble_score = False
+
         for i, data in enumerate(data_list):
             non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
             color = colors[i] if colors and i < len(colors) else None
 
-            if self.plot_ensemble and "ens" in non_zero_dims:
+            # Metrics that consume the ensemble dimension (e.g. rmse_ens_mean, crps) are
+            # broadcast across the ens slots and carry no per-member information, so the
+            # ensemble overlay would just draw identical lines on top of each other.
+            varies_over_ens = "ens" in non_zero_dims and not _is_constant_over(data, "ens")
+
+            if self.plot_ensemble and varies_over_ens:
                 _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
                 self._plot_ensemble(data, x_dim, label_list[i], color=color)
+                drew_members = True
             else:
                 averaged = self._preprocess_data(data, x_dim)
+
+                is_overlay = str(label_list[i]).startswith("_")
+                drew_ensemble_score = drew_ensemble_score or is_overlay
 
                 plot_kwargs = dict(
                     label=label_list[i],
                     marker="o",
                     markersize=4,
                     linewidth=1.2,
-                    linestyle="-",
+                    **(ENSEMBLE_STYLES["ensemble_score"] if is_overlay else {"linestyle": "-"}),
                 )
                 if color is not None:
                     plot_kwargs["color"] = color
@@ -340,6 +434,10 @@ class LinePlots:
                     averaged.values,
                     **plot_kwargs,
                 )
+
+        style_legend = self._build_style_legend(
+            drew_members, drew_ensemble_score, overlay_names
+        )
 
         parts = ["compare", tag]
         name = "_".join(filter(None, parts))
@@ -357,6 +455,7 @@ class LinePlots:
             line=line,
             title=title,
             out_plot_dir=self.out_plot_dir_lines,
+            style_legend=style_legend,
         )
 
     def _plot_base(
@@ -371,6 +470,7 @@ class LinePlots:
         title: str | None = None,
         out_plot_dir: Path = None,
         range: tuple[float, float] | None = None,
+        style_legend: list[Line2D] | None = None,
     ) -> None:
         """
         Apply labels, title, legend, save and optionally print summary.
@@ -429,7 +529,25 @@ class LinePlots:
             fontsize=11,
             fontweight="medium",
         )
-        ax.legend(frameon=False, fancybox=False, edgecolor="0.6", fontsize=8)
+        run_legend = ax.legend(frameon=False, fancybox=False, edgecolor="0.6", fontsize=8)
+
+        # The run's representative curve may be faded (it is the mean over members), but
+        # the legend swatch identifies the model and has to stay readable.
+        for handle in getattr(run_legend, "legend_handles", []):
+            handle.set_alpha(1.0)
+
+        if style_legend:
+            # Keep the run legend, then add a second one explaining the line styles.
+            ax.add_artist(run_legend)
+            ax.legend(
+                handles=style_legend,
+                loc="lower right",
+                frameon=False,
+                fontsize=7,
+                labelcolor="0.3",
+                title="line style",
+                title_fontsize=7,
+            )
         ax.tick_params(axis="both", labelsize=9, direction="in", top=True, right=True)
 
         # Thin spines
