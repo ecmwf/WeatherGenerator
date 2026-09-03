@@ -54,6 +54,15 @@ train:
     s5421fyi:
       slurm_id: 0
       description: "space JEPA, 1e-5, from onm76fjr"
+    z2b79ian:
+      slurm_id: 0
+      description: "space JEPA, 1.5e-5"
+    v7tq6cxh:
+      slurm_id: 0
+      description: "space JEPA, 2e-5"
+    a5a9mw07:
+      slurm_id: 0
+      description: "temp JEPA, ERA5 only"
 
 
 
