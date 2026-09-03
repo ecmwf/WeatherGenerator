@@ -835,14 +835,23 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _build_field_conditioning_data(
         self, batch: ModelBatch, idx: int, num_forecast_steps: int
     ) -> ModelBatch:
-        """Collect per-step field conditioning data and
+        """Collect per-step field conditioning data with sliding window and
         store in conditioning_samples.streams_data."""
         num_output_steps = self._get_output_length(num_forecast_steps)
+
         for stream_name, stream_ds in self.field_conditioning_datasets.items():
             stream_info = stream_ds.info
-            for step, timestep_idx in enumerate(range(self.output_offset, num_output_steps)):
-                step_dt = idx + (self.time_step * timestep_idx) // self.step_timedelta
-                rdata = collect_datasources(stream_ds.readers, step_dt, "source", self.rng)
+
+            # Create ONE StreamData with input_steps=num_output_steps
+            # Each source step corresponds to one forecast step's conditioning window
+            stream_data = StreamData(idx, num_forecast_steps, 1, self.num_healpix_cells)
+
+            # Collect data for each forecast step
+            for step, _ in enumerate(range(self.output_offset, num_output_steps)):
+                # Conditioning window for forecast step N is at idx + (N - output_offset)
+                # For output_offset=1: forecast step 1 → idx+0, step 2 → idx+1, etc.
+                rdata = collect_datasources(stream_ds.readers, idx + step, "source", self.rng)
+
                 if rdata.is_empty():
                     stream_data = None
                 else:
@@ -851,17 +860,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     if token_data[0] is None:
                         stream_data = None
                     else:
-                        time_win = self.time_window_handler.window(step_dt)
+                        time_win = self.time_window_handler.window(idx + step)
                         src_cells, src_lens = self.tokenizer.get_source(
-                            stream_info,
-                            rdata,
-                            token_data,
-                            (time_win.start, time_win.end),
-                            None,
+                            stream_info, rdata, token_data, (time_win.start, time_win.end), None
                         )
-                        stream_data = StreamData(step_dt, 1, 1, self.num_healpix_cells)
-                        stream_data.add_source(self._stage, 0, rdata, src_lens, src_cells, False)
-                batch.add_field_conditioning_stream(stream_name, step, stream_data)
+
+                        # Add to the correct step index (step = 0, 1, 2, ...)
+                        stream_data.add_source(self._stage, step, rdata, src_lens, src_cells, False)
+
+            # Add the complete StreamData once (not in the loop)
+            batch.add_field_conditioning_stream(stream_name, stream_data)
+
         return batch
 
     def __iter__(self) -> ModelBatch:

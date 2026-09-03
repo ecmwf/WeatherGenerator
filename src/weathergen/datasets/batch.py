@@ -420,9 +420,10 @@ class ModelBatch:
                 sample.add_meta_info(stream_name, SampleMetaData(params={}))
             sample.meta_info[stream_name].conditioning = conditioning_values
 
-    def add_field_conditioning_stream(self, stream_name, step: int, stream_data: StreamData):
+    def add_field_conditioning_stream(self, stream_name, stream_data: StreamData):
         """
         Add field conditioning values for all samples in the batch for a specific stream.
+        The StreamData contains one source step per forecast step.
         """
         for sample in self.conditioning_samples.samples:
             sample.streams_data[stream_name] = stream_data
