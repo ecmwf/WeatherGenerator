@@ -611,6 +611,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
         sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
+        # sigma_min_eff = 0.1
+        
         if log_diagnostics:
             _churn = (
                 f", stochastic churn: s_churn={self.s_churn}, s_min={self.s_min}, "

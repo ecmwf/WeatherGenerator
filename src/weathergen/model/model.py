@@ -957,7 +957,9 @@ class Model(torch.nn.Module):
                         )
                         self._warned_diffusion_multi_step = True
                     # Resize output to fit the diffusion trajectory.
-                    output = self._reindex_output_for_trajectory(output, len(tokens))
+                    output = self._reindex_output_for_trajectory(
+                        output=output, n_steps=len(tokens), source_samples=source_samples
+                    )
                     cond = source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                     predict_residual = self.cf.get("fe_diffusion_model", False) and self.cf.get(
                         "fe_diffusion_predict_residual", False
@@ -1079,12 +1081,21 @@ class Model(torch.nn.Module):
         return output
 
     @staticmethod
-    def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
+    def _reindex_output_for_trajectory(
+        output: ModelOutput, n_steps: int, source_samples: BatchSamples
+    ) -> ModelOutput:
         """
-        Resize a ModelOutput to hold ``n_steps`` forecast steps, preserving any latent entries
-        that were already attached to fstep 0 (e.g. encoder posteriors).
+        Resize a ModelOutput to hold ``n_steps`` ODE trajectory steps, preserving any latent
+        entries that were already attached to fstep 0 (e.g. encoder posteriors).
+
+        forecast_offset is always 0 here: trajectory steps are enumerated 0..n_steps-1
+        (they are ODE pseudo-time indices, not physical forecast steps), and
+        validation_io.py's write path keys off ``forecast_offset == 0`` to recognise a
+        trajectory-mode output and label its steps accordingly.
         """
-        new_output = ModelOutput(n_steps)
+        new_output = ModelOutput(
+            forecast_steps=list(range(n_steps)), forecast_offset=0, source_samples=source_samples
+        )
         if len(output.latent) > 0:
             for k, v in output.latent[0].items():
                 new_output.add_latent_prediction(0, k, v)
@@ -1355,6 +1366,6 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-            output.add_physical_prediction(chunk_idx, stream_name, pred)
+            output.add_physical_prediction(out_step, stream_name, pred)
 
         return output

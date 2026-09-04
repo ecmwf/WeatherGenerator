@@ -87,25 +87,37 @@ def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
     the lengths already agree.
     """
     n_pred = len(preds.physical)
+
+    def _expand_field(field: list[dict]) -> list[dict]:
+        # Entries before the batch's forecast_offset are structural padding (empty
+        # dicts), not real target data (see BatchSamples.output_idxs / TargetAuxOutput).
+        # A naive index-proportional stretch (`i // (n_pred // n_tgt)`) replicates that
+        # padding right alongside the real target, scattering empty dicts through the
+        # expanded list instead of repeating the one target that is actually identical
+        # across the whole trajectory. Diffusion inference supports a single physical
+        # forecast step, so there is at most one real (non-empty) entry to replicate.
+        real = [d for d in field if d]
+        if len(real) > 1:
+            logger.warning(
+                "Cannot expand target/aux with %d real (non-empty) forecast steps to "
+                "%d trajectory steps; leaving unchanged.",
+                len(real),
+                n_pred,
+            )
+            return field
+        fill = real[0] if real else {}
+        return [fill for _ in range(n_pred)]
+
     for t_aux in targets_and_auxs.values():
         n_tgt = len(t_aux.physical)
         if n_tgt == n_pred or n_tgt == 0:
             continue
-        if n_pred % n_tgt != 0:
-            logger.warning(
-                "Cannot expand target/aux from %d to %d fsteps (not a multiple); "
-                "leaving unchanged.",
-                n_tgt,
-                n_pred,
-            )
-            continue
-        repeat = n_pred // n_tgt
-        t_aux.physical = [t_aux.physical[i // repeat] for i in range(n_pred)]
-        t_aux.latent = [t_aux.latent[i // repeat] for i in range(n_pred)]
+        t_aux.physical = _expand_field(t_aux.physical)
+        t_aux.latent = _expand_field(t_aux.latent)
         # output_idxs is consumed by validation IO via batch.get_output_idxs(), but we
         # keep the dataclass internally consistent in case other consumers read it.
-        if t_aux.output_idxs is not None and len(t_aux.output_idxs) == n_tgt:
-            t_aux.output_idxs = [t_aux.output_idxs[i // repeat] for i in range(n_pred)]
+        if t_aux.output_idxs is not None and len(t_aux.output_idxs) == 1:
+            t_aux.output_idxs = [t_aux.output_idxs[0] for _ in range(n_pred)]
 
 
 class Trainer(TrainerBase):
