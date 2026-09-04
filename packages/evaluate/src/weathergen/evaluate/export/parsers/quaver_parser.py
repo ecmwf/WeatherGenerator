@@ -209,7 +209,7 @@ class QuaverParser(CfParser):
         """
         return (
             Path(self.output_dir)
-            / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}.{self.file_extension}"
+            / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}_rank{int(self.rank):04d}.{self.file_extension}"
         )
 
     def assign_coords(self, data: xr.DataArray) -> xr.DataArray:

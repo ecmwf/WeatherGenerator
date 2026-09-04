@@ -442,6 +442,14 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
+    def _has_group(self, item: ItemKey) -> bool:
+        """Check if an output item exists in this store."""
+        assert self.data_root is not None, "ZarrIO must be opened before accessing data."
+        try:
+            return self.data_root.get(item.path) is not None
+        except KeyError:
+            return False
+
     def _get_group(self, item: ItemKey, create: bool) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
@@ -492,20 +500,31 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
-        # Stores written with test_config.forecast.offset=1 and num_steps_input=1 have no
-        # step-0 source group and begin at forecast step 1; a missing step 0 implies offset=1.
-        if self.example_key.forecast_step != 0:
+        key = self.example_key
+        if not self._has_group(key):
+            # No fstep 0 group at all => no targets at fstep 0 => offset 1.
+            _logger.debug(f"No group at {key.path}, inferring forecast_offset=1.")
             return 1
-        fstep0_datasets = self._get_datasets(self.example_key)
+        fstep0_datasets = self._get_datasets(key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
     @functools.cached_property
     def example_key(self) -> ItemKey:
         try:
             sample, example_sample = next(self.data_root.groups())
+            # Find the first stream that has prediction/target data (not just source)
+            for stream, example_stream in example_sample.groups():
+                fstep_keys = sorted(example_stream.group_keys(), key=int)
+                for fk in fstep_keys:
+                    fstep_group = example_stream[fk]
+                    child_names = set(fstep_group.group_keys())
+                    if "prediction" in child_names or "target" in child_names:
+                        # Return fstep 0 of this stream for correct forecast_offset detection
+                        return ItemKey(sample, 0, stream)
+            # Fallback: use first stream / fstep 0
             stream, example_stream = next(example_sample.groups())
-            fstep = min((int(s) for s in example_stream.group_keys()), default=0)
-        except StopIteration as e:
+            fstep = 0
+        except (StopIteration, IndexError) as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
 
@@ -532,11 +551,11 @@ class ZarrIO:
 
         all_steps = sorted(example_stream.group_keys(), key=int)
 
-        # Drop the leading step only when it is the step-0 source slot; stores that already
-        # begin at step 1 (offset=1, num_steps_input=1) keep every step.
-        if self.forecast_offset == 1 and all_steps and int(all_steps[0]) == 0:
-            return all_steps[1:]
-        return all_steps
+        if self.forecast_offset == 1:
+            # exclude fstep with no targets/preds (may be absent from the store entirely)
+            return [step for step in all_steps if int(step) != 0]
+        else:
+            return all_steps
 
 
 class ZipZarrIO(ZarrIO):
