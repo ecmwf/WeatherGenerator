@@ -382,7 +382,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                 for sample, _fstep, data in pool.imap_unordered(
                     get_data_worker, batch_tasks, chunksize=1
                 ):
-                    sample_results[sample].append(data)
+                    sample_results[sample].append((_fstep, data))
                     pbar.update(1)
 
                     # Check if this sample is complete (all fsteps received).
@@ -390,7 +390,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                         b_idx = sample_to_batch_idx[sample]
                         source_start = batch_source_starts[b_idx]
                         source_end = batch_source_ends[b_idx]
-                        results_iter = iter(sample_results[sample])
+                        # Sort by forecast step so accumulation is in order.
+                        sample_results[sample].sort(key=lambda x: x[0])
+                        results_iter = iter([d for _, d in sample_results[sample]])
                         processed = parser.process_sample(
                             results_iter,
                             ref_time=source_end,
