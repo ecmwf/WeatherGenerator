@@ -14,8 +14,6 @@ import os
 import pathlib
 from functools import cache
 
-from weathergen.common.config import _load_private_conf
-
 LOGGING_CONFIG = """
 {
     "version": 1,
@@ -96,9 +94,12 @@ class ColoredRelPathFormatter(logging.Formatter):
 
 
 @cache
-def init_loggers(run_id=None, logging_config=None):
+def init_loggers(log_path=None, logging_config=None):
     """
     Initialize the logger for the package and set output streams/files.
+
+    log_path is the directory resolved by config.get_path_logs(cf).
+    When omitted, the default logging configuration writes only to the console.
 
     WARNING: this function resets all the logging handlers.
 
@@ -115,21 +116,11 @@ def init_loggers(run_id=None, logging_config=None):
                 not supported
     """
 
-    # Get current time
-    # Shelved until decided how to change logging directory structure
-    # now = datetime.now()
-    # timestamp = now.strftime("%Y-%m-%d-%H%M")
-
-    # output_dir = f"./output/{timestamp}-{run_id}"
-    output_dir = ""
-    if run_id is not None:
-        output_dir = f"./logs/{run_id}"
-
     # load the structure for logging config
     if logging_config is None:
         logging_config = json.loads(LOGGING_CONFIG)
 
-        if run_id is None:
+        if log_path is None:
             del logging_config["handlers"]["logfile"]
             del logging_config["handlers"]["errorfile"]
             del logging_config["root"]["handlers"][2:]
@@ -139,12 +130,7 @@ def init_loggers(run_id=None, logging_config=None):
             if k == "formatter":
                 handler[k] = v
             elif k == "filename":
-                filename = f"{output_dir}/{v}"
-                ofile = pathlib.Path(filename)
-                # make sure the path is independent of path where job is launched
-                if not ofile.is_absolute():
-                    work_dir = pathlib.Path(_load_private_conf().get("path_shared_working_dir"))
-                    ofile = work_dir / ofile
+                ofile = pathlib.Path(log_path or ".") / v
                 pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
                 handler[k] = ofile
             else:
@@ -153,7 +139,7 @@ def init_loggers(run_id=None, logging_config=None):
     # make sure the parent directory exists
     logging.config.dictConfig(logging_config)
 
-    if output_dir:
-        logging.info(f"Logging set up. Logs are in {output_dir}")
+    if log_path is not None:
+        logging.info(f"Logging set up. Logs are in {log_path}")
     else:
         logging.info("Logging set up. No log files created.")
