@@ -230,9 +230,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         t_start = self.time_window_handler.t_start
         step = self.time_window_handler.t_window_step
         times = t_start + all_indices * step
+        forecast_horizon = (fsm + self.output_offset) * self.time_step
         mask = np.zeros(len(all_indices), dtype=bool)
         for p_start, p_end in self._valid_ranges:
-            mask |= (times >= p_start) & (times < p_end)
+            mask |= (times >= p_start) & (times + forecast_horizon <= p_end)
         return all_indices[mask]
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
