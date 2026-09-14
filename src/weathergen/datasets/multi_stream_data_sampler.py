@@ -125,7 +125,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.step_timedelta = mode_cfg.time_window_step
 
         # date_ranges: non-contiguous training periods; indices that fall in gaps are excluded
-        raw_ranges = mode_cfg.get("date_ranges", None)
+        raw_ranges = mode_cfg.get("date_ranges")
         if raw_ranges is not None:
             self._valid_ranges: list[tuple] | None = [
                 (r.start_date, r.end_date) for r in raw_ranges
