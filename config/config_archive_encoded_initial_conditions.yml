@@ -1,0 +1,24 @@
+# Inference override for a chronological archive of encoded initial conditions.
+# Use with a trained model via `inference --from-run-id <run-id> --config <this file>`.
+# The model's stream and forecast settings are inherited from the checkpoint configuration.
+
+# A directory-backed store is preferable to ZipStore for a large, restartable archive.
+zarr_store: zarr
+
+test_config:
+  # Ten years of 6-hourly source windows: 2010-01-01 through 2019-12-31.
+  # Keep enough trailing data available for the inherited forecast horizon.
+  start_date: 2010-01-01T00:00
+  end_date: 2020-01-02T00:00
+  time_window_len: 06:00:00
+  time_window_step: 06:00:00
+  shuffle: False
+
+  # 3,652 days from 2010-01-01 through 2019-12-31 at four windows per day.
+  samples_per_mini_epoch: 14608
+
+  output:
+    # Write every batch selected by samples_per_mini_epoch.
+    num_samples: 14608
+    normalized_samples: False
+    streams: [latent]
