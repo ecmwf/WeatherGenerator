@@ -359,8 +359,8 @@ class Trainer(TrainerBase):
             logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
         # handle ending of HL curriculum
-        if is_root() and getattr(self.cf, "healpix_curriculum", None):
-            if getattr(self.cf, "_curriculum_exit_step", None):
+        if is_root() and self.cf.get("healpix_curriculum", None):
+            if self.cf.get("_curriculum_exit_step", None):
                 logger.info(
                     f"Curriculum active: Training HEALPix level {self.cf.healpix_level}. "
                     f"Next stage will begin at istep {self.cf._curriculum_exit_step}. "
@@ -592,7 +592,7 @@ class Trainer(TrainerBase):
 
             # exit HL curriculum stage
             if (
-                getattr(self.cf, "_curriculum_exit_step", None)
+                self.cf.get("_curriculum_exit_step", None)
                 and self.cf.general.istep >= self.cf._curriculum_exit_step
             ):
                 if is_root():
