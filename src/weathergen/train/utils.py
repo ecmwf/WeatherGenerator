@@ -171,11 +171,15 @@ def get_active_stage_config(
     """
 
     base_config = copy.deepcopy(base_config)
-    # date_ranges must not leak from base into a stage that overrides start_date/end_date
-    if "date_ranges" in base_config and (
-        "start_date" in merge_config or "end_date" in merge_config
-    ):
-        del base_config["date_ranges"]
+    # date_ranges must not leak into a stage that explicitly overrides start_date/end_date,
+    # whether the stale date_ranges comes from the base config (e.g. inherited from
+    # training_config) or from the merge config itself (e.g. a previously saved test_config).
+    if "start_date" in merge_config or "end_date" in merge_config:
+        if "date_ranges" in base_config:
+            del base_config["date_ranges"]
+        if "date_ranges" in merge_config:
+            merge_config = copy.deepcopy(merge_config)
+            del merge_config["date_ranges"]
 
     result_cfg = merge_configs(base_config, merge_config)
     result_cfg = filter_config_by_enabled(result_cfg, keys_to_filter)
