@@ -22,6 +22,7 @@ from pathlib import Path
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
+from weathergen.train.healpix_curriculum import apply_curriculum
 from weathergen.train.trainer import Trainer
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,7 @@ def run_continue(args):
         {},
         cli_overwrite,
     )
+    apply_curriculum(cf)
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     mp_method = cf.general.get("multiprocessing_method", "fork")
@@ -162,6 +164,7 @@ def run_continue(args):
                     istep_override,
                     cli_overwrite,
                 )
+                apply_curriculum(cf)
                 cf = config.set_run_id(cf, cf.general.run_id, True)
                 cf = Trainer.init_ddp(cf)
                 cf.streams = config.load_streams(Path(cf.streams_directory))
@@ -196,6 +199,7 @@ def run_train(args):
     cf = config.load_merge_configs(
         args.private_config, None, None, args.base_config, *args.config, cli_overwrite
     )
+    apply_curriculum(cf)
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.data_loading.rng_seed = int(time.time())
@@ -231,6 +235,7 @@ def run_train(args):
                     istep_override,
                     cli_overwrite,
                 )
+                apply_curriculum(cf)
                 cf = config.set_run_id(cf, cf.general.run_id, True)
                 cf = Trainer.init_ddp(cf)
                 cf.streams = config.load_streams(Path(cf.streams_directory))
