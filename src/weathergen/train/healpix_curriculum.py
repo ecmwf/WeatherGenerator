@@ -1,7 +1,7 @@
 import logging
-from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
+
 
 def apply_curriculum(cf) -> None:
     """
@@ -23,14 +23,14 @@ def apply_curriculum(cf) -> None:
 
         if cf.get("curriculum_streams"):
             # Support both integer and string keys in the yaml
-            cf.streams_directory = cf.curriculum_streams.get(current_hl) or cf.curriculum_streams.get(
-                str(current_hl)
-            )
+            cf.streams_directory = cf.curriculum_streams.get(
+                current_hl
+            ) or cf.curriculum_streams.get(str(current_hl))
 
         # Pre-calculate the exact istep when this curriculum stage should exit
         cf._curriculum_exit_step = None
         max_hl = max(unique_curr.keys())
         if current_hl < max_hl:
-            cf._curriculum_exit_step = sum(steps for hl, steps in unique_curr.items() if hl <= current_hl)
-
-
+            cf._curriculum_exit_step = sum(
+                steps for hl, steps in unique_curr.items() if hl <= current_hl
+            )

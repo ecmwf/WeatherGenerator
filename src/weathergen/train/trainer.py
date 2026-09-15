@@ -368,8 +368,8 @@ class Trainer(TrainerBase):
                 )
             else:
                 logger.info(
-                    f"Curriculum max level reached. "
-                    f"Continuing standard training until num_mini_epochs limit."
+                    "Curriculum max level reached. "
+                    "Continuing standard training until num_mini_epochs limit."
                 )
 
         # Instantiate loss calculator modules to compute losses
@@ -591,7 +591,10 @@ class Trainer(TrainerBase):
             self.cf.general.istep += 1
 
             # exit HL curriculum stage
-            if getattr(self.cf, "_curriculum_exit_step", None) and self.cf.general.istep >= self.cf._curriculum_exit_step:
+            if (
+                getattr(self.cf, "_curriculum_exit_step", None)
+                and self.cf.general.istep >= self.cf._curriculum_exit_step
+            ):
                 if is_root():
                     logger.info(
                         f"Curriculum stage for HEALPix level {self.cf.healpix_level} "

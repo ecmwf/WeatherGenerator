@@ -471,7 +471,6 @@ def load_merge_configs(
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
 
-
     return c
 
 
