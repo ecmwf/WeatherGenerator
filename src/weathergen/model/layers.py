@@ -105,6 +105,7 @@ class MLP(torch.nn.Module):
         elif dim_aux is not None:
             self.layers.append(AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps))
         else:
+            # this was dealiased – may cause some .lnorm modeluse to not appear when loading oder models
             self.layers.append(norm(dim_in, eps=norm_eps))
 
         if self.mlp_type == "swiglu":
