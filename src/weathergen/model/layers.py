@@ -103,15 +103,8 @@ class MLP(torch.nn.Module):
             self.noise_conditioning = LinearNormConditioning(dim_in)
             self.noise_conditioning = LinearNormConditioning(dim_in)
         elif dim_aux is not None:
-            # Registered only in self.layers, never as self.lnorm: binding one module to two
-            # attribute paths makes state_dict() emit it under both names ("lnorm.*" and
-            # "layers.0.*"). FSDP2 then reports duplicate parameter paths, and every checkpoint
-            # written this way carries two identical copies of each norm tensor, which later
-            # loads report as unmatched. forward() applies it via the self.layers loop, which
-            # already special-cases AdaLayerNorm to pass ada_ln_aux.
             self.layers.append(AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps))
         else:
-            # See comment above: kept out of self.lnorm for the same reason.
             self.layers.append(norm(dim_in, eps=norm_eps))
 
         if self.mlp_type == "swiglu":
