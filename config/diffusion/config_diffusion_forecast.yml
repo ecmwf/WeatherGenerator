@@ -163,16 +163,20 @@ diffusion_conditioning_noise_fstep_decay: 0.0
 # perturbs low-magnitude tokens relatively more).
 diffusion_conditioning_noise_norm_scope: "token"
 # How the perturbation is applied along the denoising trajectory:
+#   "fixed" One draw per forecast step, added to the conditioning and held constant through
+#           the whole ODE, so the member keeps a persistent perturbed state to forecast
+#           from -- the latent analogue of an ensemble of initial conditions.
 #   "cads"  CADS (Sadat et al., ICLR 2024, arXiv:2310.17347). The conditioning is
 #           re-corrupted at every denoising step as sqrt(gamma)*c + s*sqrt(1-gamma)*noise,
 #           with gamma rising from 0 to 1 along the trajectory: destroyed at high sigma,
 #           where the trajectory decides which mode it falls into and diversity is won, and
 #           fully restored by the end, where condition alignment is what matters. The member
 #           is therefore left with an unbiased conditioning.
-#   "fixed" One draw per forecast step, added to the conditioning and held constant through
-#           the whole ODE, so the member keeps a persistent perturbed state to forecast
-#           from -- the latent analogue of an ensemble of initial conditions.
-diffusion_conditioning_noise_schedule: "cads"
+# Note the two read the scale s differently: under "fixed" it is the persistent relative
+# perturbation the member carries, under "cads" (with rescaling) only a noise-to-signal
+# ratio inside the ramp, so the same s is the more aggressive setting under "fixed".
+# The tau1/tau2/psi knobs below apply to "cads" only.
+diffusion_conditioning_noise_schedule: "fixed"
 # CADS gamma(t) thresholds on trajectory progress t (1.0 at the first denoising step, 0.0 at
 # the last): conditioning is clean for t <= tau1, fully destroyed for t >= tau2, and mixed
 # linearly in between, so the corruption covers the first (1 - tau1) of the denoising steps.
