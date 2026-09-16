@@ -16,6 +16,7 @@ dispatched to loky / ProcessPoolExecutor workers.
 import contextlib
 import logging
 import threading
+from collections import OrderedDict
 
 import anemoi.datasets
 import numpy as np
@@ -31,6 +32,45 @@ _logger = logging.getLogger(__name__)
 _anemoi_cache: dict[str, tuple] = {}
 _anemoi_lock = threading.Lock()
 
+# Bounded LRU cache of already-read (and channel-selected) anemoi date slices,
+# keyed by (filename, date_idx).  Consecutive forecast steps share valid times,
+# so caching avoids re-reading the same full-grid slice (~hundreds of MB each)
+# many times.  The bound keeps peak memory in check.
+_ANEMOI_SLICE_CACHE_MAXSIZE = 8
+_anemoi_slice_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
+_anemoi_slice_lock = threading.Lock()
+
+
+def _get_anemoi_date_slice(
+    ds,
+    filename: str,
+    date_idx: int,
+    target_idx: list[int],
+) -> np.ndarray:
+    """Return the ``(n_gridpoints, n_target_channels)`` slice for one date.
+
+    Uses a bounded module-level LRU cache so repeated requests for the same
+    anemoi date (across overlapping forecast steps) avoid re-reading the
+    full grid from disk.
+    """
+    key = (filename, date_idx)
+    with _anemoi_slice_lock:
+        cached = _anemoi_slice_cache.get(key)
+        if cached is not None:
+            _anemoi_slice_cache.move_to_end(key)
+            return cached
+
+    # Read outside the lock (I/O bound); tolerate a duplicate concurrent read.
+    # ds[idx] → (n_variables, n_ens, n_gridpoints)
+    data_slice = np.asarray(ds[date_idx])[target_idx, 0, :].T.astype(np.float32)
+
+    with _anemoi_slice_lock:
+        _anemoi_slice_cache[key] = data_slice
+        _anemoi_slice_cache.move_to_end(key)
+        while len(_anemoi_slice_cache) > _ANEMOI_SLICE_CACHE_MAXSIZE:
+            _anemoi_slice_cache.popitem(last=False)
+    return data_slice
+
 
 def _open_anemoi_dataset(anemoi_cfg: dict) -> tuple:
     """Open the anemoi dataset once and precompute target channel indices.
@@ -38,7 +78,10 @@ def _open_anemoi_dataset(anemoi_cfg: dict) -> tuple:
     Uses a module-level cache keyed by filename so that threading workers
     reuse the same handle. A lock ensures only one thread opens the dataset.
 
-    Returns ``(ds, target_idx, ds_dates)`` for reuse across forecast steps.
+    Returns ``(ds, target_idx, ds_dates, ds_lats, ds_lons)`` for reuse across
+    forecast steps.  ``ds_lats``/``ds_lons`` are the dataset grid coordinates
+    (longitudes normalised to ``[-180, 180)``) used for nearest-neighbour
+    matching to the prediction grid points.
     """
     filename = anemoi_cfg["filename"]
     if filename in _anemoi_cache:
@@ -52,12 +95,107 @@ def _open_anemoi_dataset(anemoi_cfg: dict) -> tuple:
         target_channels = anemoi_cfg["channels"]
 
         _logger.info(f"Opening anemoi dataset {filename} (lazy)")
-        ds = anemoi.datasets.open_dataset(filename)
-        target_idx = [ds.variables.index(ch) for ch in target_channels]
+        # Pre-select only the target variables so each read materialises just
+        # those channels (not all ~113), cutting per-read memory ~4x.  After
+        # ``select`` the variables are returned in the requested order, so the
+        # target index is simply 0..len(channels)-1.
+        try:
+            ds = anemoi.datasets.open_dataset(filename, select=list(target_channels))
+            # ``select`` reduces the variable axis; re-index against the
+            # post-select variable order (do not assume it preserves the
+            # requested order).
+            target_idx = [ds.variables.index(ch) for ch in target_channels]
+        except Exception as exc:
+            _logger.warning(
+                f"Anemoi 'select' failed ({type(exc).__name__}: {exc}); "
+                f"falling back to full-variable read."
+            )
+            ds = anemoi.datasets.open_dataset(filename)
+            target_idx = [ds.variables.index(ch) for ch in target_channels]
         ds_dates = ds.dates.astype("datetime64[s]")
-        result = (ds, target_idx, ds_dates)
+        ds_lats = np.asarray(ds.latitudes, dtype=np.float64)
+        # Normalise dataset longitudes to [-180, 180) to match prediction coords.
+        ds_lons = ((np.asarray(ds.longitudes, dtype=np.float64) + 180.0) % 360.0) - 180.0
+        result = (ds, target_idx, ds_dates, ds_lats, ds_lons)
         _anemoi_cache[filename] = result
         return result
+
+
+# Cache of prediction-coord → anemoi grid-index mappings, keyed by
+# (filename, coords bytes) so repeated fsteps reuse the nearest-neighbour result.
+_anemoi_index_cache: dict[tuple, np.ndarray] = {}
+
+
+def _match_anemoi_indices(
+    ds_lats: np.ndarray,
+    ds_lons: np.ndarray,
+    pred_coords: np.ndarray,
+    filename: str,
+) -> np.ndarray:
+    """Find the nearest anemoi grid index for each prediction coordinate.
+
+    Parameters
+    ----------
+    ds_lats, ds_lons : np.ndarray
+        Anemoi grid latitudes and longitudes (longitudes in [-180, 180)).
+    pred_coords : np.ndarray, shape (n_pred, 2)
+        Prediction (lat, lon) coordinates.
+    filename : str
+        Anemoi dataset filename (for caching).
+
+    Returns
+    -------
+    np.ndarray, shape (n_pred,)
+        Index into the anemoi grid for each prediction point.
+    """
+    key = (filename, pred_coords.tobytes())
+    cached = _anemoi_index_cache.get(key)
+    if cached is not None:
+        return cached
+
+    pred_lat = pred_coords[:, 0].astype(np.float64)
+    # Normalise prediction longitudes to [-180, 180) as well.
+    pred_lon = ((pred_coords[:, 1].astype(np.float64) + 180.0) % 360.0) - 180.0
+
+    # Great-circle-ish nearest neighbour via chord distance on the unit sphere.
+    deg2rad = np.pi / 180.0
+    ds_lat_r = ds_lats * deg2rad
+    ds_lon_r = ds_lons * deg2rad
+    ds_xyz = np.stack(
+        [
+            np.cos(ds_lat_r) * np.cos(ds_lon_r),
+            np.cos(ds_lat_r) * np.sin(ds_lon_r),
+            np.sin(ds_lat_r),
+        ],
+        axis=1,
+    )
+
+    pred_lat_r = pred_lat * deg2rad
+    pred_lon_r = pred_lon * deg2rad
+    pred_xyz = np.stack(
+        [
+            np.cos(pred_lat_r) * np.cos(pred_lon_r),
+            np.cos(pred_lat_r) * np.sin(pred_lon_r),
+            np.sin(pred_lat_r),
+        ],
+        axis=1,
+    )
+
+    try:
+        from scipy.spatial import cKDTree
+
+        tree = cKDTree(ds_xyz)
+        _, indices = tree.query(pred_xyz, k=1)
+        indices = np.asarray(indices, dtype=np.int64)
+    except ImportError:
+        # Fallback: brute-force nearest neighbour (fine for small n_pred).
+        indices = np.empty(pred_xyz.shape[0], dtype=np.int64)
+        for i in range(pred_xyz.shape[0]):
+            d = np.sum((ds_xyz - pred_xyz[i]) ** 2, axis=1)
+            indices[i] = int(np.argmin(d))
+
+    _anemoi_index_cache[key] = indices
+    return indices
 
 
 def _read_anemoi_target(
@@ -66,6 +204,8 @@ def _read_anemoi_target(
     ds_dates: np.ndarray,
     times: np.ndarray,
     channel_idxs: list[int] | None,
+    grid_indices: np.ndarray | None = None,
+    filename: str | None = None,
 ) -> np.ndarray:
     """Read target data from a pre-opened anemoi dataset for the given valid times.
 
@@ -81,6 +221,9 @@ def _read_anemoi_target(
         Valid times (datetime64) to extract from the dataset.
     channel_idxs : list[int] | None
         Channel indices to select (applied after reading).
+    grid_indices : np.ndarray | None
+        If provided, select only these grid-point indices from the full
+        anemoi grid so the target matches the prediction grid points.
 
     Returns
     -------
@@ -97,30 +240,70 @@ def _read_anemoi_target(
         return np.empty((0, n_ch), dtype=np.float32)
 
     # Read one time-slice at a time (typically ≤6 per fstep)
-    all_data = []
-    for ut in unique_times:
-        ut_s = np.datetime64(ut, "s")
-        matches = np.where(ds_dates == ut_s)[0]
+    if grid_indices is not None:
+        # Row-aligned assembly: each prediction point has its own valid time
+        # (``times``) and its own anemoi grid index (``grid_indices``).  Build
+        # a target with exactly one row per prediction point.
+        n_pred = grid_indices.shape[0]
+        n_ch_full = len(target_idx)
+        target_data = np.empty((n_pred, n_ch_full), dtype=np.float32)
 
-        if len(matches) == 0:
-            raise ValueError(
-                f"Time {ut} not found in anemoi dataset. "
-                f"Available range: {ds_dates[0]} .. {ds_dates[-1]}"
-            )
+        # Resolve the anemoi date index for each unique valid time.
+        ut_to_idx: dict = {}
+        for ut in unique_times:
+            ut_s = np.datetime64(ut, "s")
+            matches = np.where(ds_dates == ut_s)[0]
+            if len(matches) == 0:
+                raise ValueError(
+                    f"Time {ut} not found in anemoi dataset. "
+                    f"Available range: {ds_dates[0]} .. {ds_dates[-1]}"
+                )
+            ut_to_idx[ut] = int(matches[0])
 
-        idx = int(matches[0])
-        # ds[idx] → shape (n_variables, n_ens, n_gridpoints)
-        data_slice = np.asarray(ds[idx])
-        # Select target channels and squeeze ensemble dim → (n_gridpoints, n_target_channels)
-        data_slice = data_slice[target_idx, 0, :].T
-        all_data.append(data_slice)
+        # Batch-read a contiguous span of dates in one call.  The anemoi zarr
+        # stores one date per chunk, so a slice read decompresses all chunks
+        # in parallel — much faster than many single-date reads.  Only batch
+        # when the span is compact to avoid pulling unrelated dates.
+        idxs = sorted(ut_to_idx.values())
+        span = idxs[-1] - idxs[0] + 1
+        date_slices: dict = {}
+        if len(idxs) > 1 and span <= 2 * len(idxs):
+            lo = idxs[0]
+            block = np.asarray(ds[lo : idxs[-1] + 1])  # (span, n_var, n_ens, n_grid)
+            for ut, idx in ut_to_idx.items():
+                date_slices[ut] = block[idx - lo][target_idx, 0, :].T.astype(np.float32)
+        else:
+            for ut, idx in ut_to_idx.items():
+                date_slices[ut] = _get_anemoi_date_slice(ds, filename, idx, target_idx)
 
-    # For gridded data every grid point shares the same unique time,
-    # so each slice already has the right shape.
-    if len(all_data) == 1:
-        target_data = all_data[0]
+        for ut in unique_times:
+            data_slice = date_slices[ut]
+            # Rows of the prediction that share this valid time.
+            row_mask = times == ut
+            target_data[row_mask] = data_slice[grid_indices[row_mask]]
     else:
-        target_data = np.concatenate(all_data, axis=0)
+        all_data = []
+        for ut in unique_times:
+            ut_s = np.datetime64(ut, "s")
+            matches = np.where(ds_dates == ut_s)[0]
+
+            if len(matches) == 0:
+                raise ValueError(
+                    f"Time {ut} not found in anemoi dataset. "
+                    f"Available range: {ds_dates[0]} .. {ds_dates[-1]}"
+                )
+
+            idx = int(matches[0])
+            # Cached full-grid slice for this date (channel-selected).
+            data_slice = _get_anemoi_date_slice(ds, filename, idx, target_idx)
+            all_data.append(data_slice)
+
+        # For gridded data every grid point shares the same unique time,
+        # so each slice already has the right shape.
+        if len(all_data) == 1:
+            target_data = all_data[0]
+        else:
+            target_data = np.concatenate(all_data, axis=0)
 
     # Apply the same early channel selection as the zarr path
     if channel_idxs is not None:
@@ -291,14 +474,28 @@ def _read_sample(
 
         if anemoi_handle is not None:
             # Read target from anemoi dataset
-            anemoi_ds, target_idx, ds_dates = anemoi_handle
+            anemoi_ds, target_idx, ds_dates, ds_lats, ds_lons = anemoi_handle
+            # Match the anemoi full grid to the prediction grid points via
+            # nearest-neighbour on lat/lon so the target aligns with the
+            # (possibly sparse) prediction output.
+            pred_coords = np.asarray(ds[f"{base}/prediction/coords"])
+            grid_indices = _match_anemoi_indices(
+                ds_lats, ds_lons, pred_coords, anemoi_target_cfg["filename"]
+            )
             if fi == 0:
                 _logger.info(
                     f"Sample {sample} fstep {fs}: reading target from anemoi "
-                    f"(times shape={times_data.shape}, unique={len(np.unique(times_data))})"
+                    f"(times shape={times_data.shape}, unique={len(np.unique(times_data))}, "
+                    f"pred_points={pred_coords.shape[0]})"
                 )
             target_data = _read_anemoi_target(
-                anemoi_ds, target_idx, ds_dates, times_data, channel_idxs
+                anemoi_ds,
+                target_idx,
+                ds_dates,
+                times_data,
+                channel_idxs,
+                grid_indices,
+                filename=anemoi_target_cfg["filename"],
             )
         else:
             target_data = np.asarray(ds[f"{base}/target/data"])

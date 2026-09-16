@@ -284,7 +284,7 @@ def _build_io_state(
     anemoi_target_cfg = None
     if inference_cfg:
         stream_info = inference_cfg.get("streams", {}).get(stream, {})
-        if stream_info.get("type") in ("anemoi", "anemoi_operan") and stream_info.get("filenames"):
+        if stream_info.get("type") in ("anemoi", "anemoi_operan", "anemoi_rt") and stream_info.get("filenames"):
             data_path = inference_cfg.get("data_path_anemoi", "")
             filename = str(Path(data_path) / stream_info["filenames"][0])
             anemoi_target_cfg = {
