@@ -54,10 +54,12 @@ class ModelOutput:
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
+    initial_latent: LatentState | None
 
     def __init__(self, len_output: int) -> None:
         self.physical = [{} for _ in range(len_output)]
         self.latent = [{} for _ in range(len_output)]
+        self.initial_latent = None
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
@@ -689,6 +691,7 @@ class Model(torch.nn.Module):
         shape = (len(batch), batch.get_num_source_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
+        output.initial_latent = self.tokens_to_latent_state(self.latent_pre_norm(tokens), tokens)
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
