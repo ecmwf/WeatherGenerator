@@ -495,7 +495,7 @@ def ratio_plot_metric_region(
                 continue
             selected_data.append(data)
             label = run_data.get("label", run_id)
-            if label != run_id:
+            if run_data.get("ratio_include_run_id", True) and label != run_id:
                 label = f"{run_id} - {label}"
             labels.append(label)
             run_ids.append(run_id)

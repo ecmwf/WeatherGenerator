@@ -61,6 +61,7 @@ class LinePlots:
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
         self.baseline = plotter_cfg.get("baseline")
+        self.ratio_ylim = plotter_cfg.get("ratio_ylim")
         self.out_plot_dir_lines = Path(output_basedir) / "line_plots"
         self.out_plot_dir_ratio = Path(output_basedir) / "ratio_plots"
         self.out_plot_dir_psd = Path(output_basedir) / "psd_plots"
@@ -462,7 +463,7 @@ class LinePlots:
         plt.tight_layout()
         if out_plot_dir is None:
             raise ValueError("Output plot directory not provided.")
-        plt.savefig(f"{out_plot_dir.joinpath(name)}.{self.image_format}")
+        plt.savefig(f"{out_plot_dir.joinpath(name)}.{self.image_format}", dpi=self.dpi_val)
         plt.close()
 
     def ratio_plot(
@@ -517,9 +518,11 @@ class LinePlots:
             if baseline_idx is not None:
                 _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
                 baseline = data_list[baseline_idx]
+                baseline_label = label_list[baseline_idx]
             else:
                 baseline_name = run_ids[0]
                 baseline = data_list[0]
+                baseline_label = label_list[0]
 
         ref_raw = self._preprocess_data(baseline, ["forecast_step", "channel"], verbose=False)
 
@@ -567,6 +570,8 @@ class LinePlots:
             margin = 0.05 * (global_ymax - global_ymin) if global_ymax > global_ymin else 0.1
             global_ymin -= margin
             global_ymax += margin
+        if self.ratio_ylim is not None:
+            global_ymin, global_ymax = self.ratio_ylim
 
         # Plot each forecast step
         for f_step in all_fsteps:
@@ -586,7 +591,7 @@ class LinePlots:
             plt.grid(True, linestyle="--", color="gray", alpha=0.2)
             title = (
                 f"{descr.replace('_', ' ')} {tag.split('_')[0]} | fstep {f_step} | "
-                f" {tag.split('_')[-1]} (baseline: {baseline_name})"
+                f" {tag.split('_')[-1]} (baseline: {baseline_label})"
             )
 
             y_dim_opts = (y_dim, "improvement", None)
