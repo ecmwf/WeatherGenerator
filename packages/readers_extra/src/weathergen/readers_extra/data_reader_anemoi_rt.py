@@ -125,7 +125,7 @@ class DataReaderAnemoiRT(DataReaderTimestep):
             self.geoinfo_idx_dynamic_lin,
         ) = [], []
         idx = 0
-        for _, (k, v) in enumerate(ds.typed_variables.items()):
+        for _, (k, _) in enumerate(ds.typed_variables.items()):
             if k not in self.geoinfo_channels:
                 continue
 
