@@ -103,6 +103,95 @@ sigma_min_quantile: 0.05
 # Number of ODE denoising steps at inference. If null, uses diffusion.forward's default.
 fe_diffusion_num_inference_steps: null
 
+# --- Particle guidance (diverse ensemble sampling) ---
+# Denoise the ensemble members jointly with a repulsive force between them instead of
+# independently (Corso et al. 2024, repulsion-only / "fixed potential" variant). The RBF
+# kernel acts per HEALPix cell, so the spread it creates is local. Only has an effect when
+# fe_diffusion_num_ensemble_members > 1; with it False the sampler is the plain EDM ODE.
+diffusion_particle_guidance: False
+# Repulsion magnitude as a fraction of the ODE drift at sigma_max, annealed by the schedule
+# below. 0.1 perturbs each step by ~10%; raise it until the member spread in the sampling
+# diagnostics plot moves, and stop before per-member forecast skill degrades.
+diffusion_particle_guidance_strength: 0.1
+# Exponent p in alpha(sigma) = strength * (sigma / sigma_max_eff) ** p. Repulsion is
+# strongest at high sigma, where the trajectory still decides which mode it falls into,
+# and anneals to zero so that members finish on-manifold.
+diffusion_particle_guidance_sigma_power: 1.0
+# Space in which pairwise member distances are measured: "x0" (denoiser output; distances
+# reflect differences in the predicted forecast) or "xt" (the noisy state, where at high
+# sigma the distances are dominated by the independent noise draws).
+diffusion_particle_guidance_kernel_space: "x0"
+# Time constant tau, in forecast steps, of an exponential fade exp(-fstep / tau) applied to
+# the strength across the rollout; 0 disables it. Worth setting: members share identical
+# conditioning only at the first forecast step, which is where the repulsion does real work
+# (picking different modes from the same information). Later steps start from per-member
+# conditioning that has already diverged, so more repulsion double-counts spread the
+# dynamics already produce -- and it compounds, k steps of a (1+eps) inflation giving
+# (1+eps)^k. Under the fade the total stays ~exp(eps*tau) regardless of rollout length.
+# tau of 2-4 is a sensible starting range. Measured from the rollout's first generated
+# step, so forecast.offset > 0 still starts at full strength.
+diffusion_particle_guidance_fstep_decay: 0.0
+# HEALPix cells per batch when computing the repulsion; 0 = all at once. Memory/speed
+# trade-off only -- the cells are independent, so the result is identical either way.
+diffusion_particle_guidance_cell_chunk: 4096
+
+# --- Conditioning noise (per-member perturbation of the latent conditioning) ---
+# Inference-only: before denoising, each ensemble member's copy of the latent conditioning
+# tokens gets its own Gaussian perturbation, so the members forecast from slightly
+# different starting states instead of from identical information -- the
+# ensemble-of-initial-conditions idea applied in latent space. Complementary to particle
+# guidance: that pushes members apart inside one denoising pass, this hands them different
+# information to begin with, and the model's own dynamics amplify it over the rollout.
+# Amplitude as a fraction of the token norm (see the scope knob below), so 0.01 perturbs
+# each conditioning token by ~1% of its own magnitude. 0.0 disables it entirely, leaving
+# the conditioning and the RNG stream untouched. Start around 0.005-0.02 and raise it until
+# the ensemble spread moves, stopping before per-member forecast skill degrades. Applies to
+# single-sample inference too, so independent jobs differ from one another when the ensemble
+# is assembled from separate runs rather than from one batched pass.
+diffusion_conditioning_noise_std: 0.0
+# Time constant tau, in forecast steps, of an exponential fade exp(-fstep / tau) on the
+# amplitude across the rollout; 0 keeps it constant. Same reasoning as the particle
+# guidance fade: the conditioning is identical across members only at the first forecast
+# step, which is where the perturbation buys spread that is not already there. Later steps
+# start from conditioning that has diverged on its own, and re-injecting a fixed relative
+# perturbation every step compounds as (1+eps)^k. Measured from the rollout's first
+# generated step, so forecast.offset > 0 still starts at full amplitude.
+diffusion_conditioning_noise_fstep_decay: 0.0
+# Which norm the amplitude is relative to: "token" (each HEALPix token's own RMS, so the
+# perturbation follows the local token magnitude and stays proportional across the map) or
+# "member" (one RMS per member, i.e. a spatially uniform absolute amplitude, which
+# perturbs low-magnitude tokens relatively more).
+diffusion_conditioning_noise_norm_scope: "token"
+# How the perturbation is applied along the denoising trajectory:
+#   "fixed" One draw per forecast step, added to the conditioning and held constant through
+#           the whole ODE, so the member keeps a persistent perturbed state to forecast
+#           from -- the latent analogue of an ensemble of initial conditions.
+#   "cads"  CADS (Sadat et al., ICLR 2024, arXiv:2310.17347). The conditioning is
+#           re-corrupted at every denoising step as sqrt(gamma)*c + s*sqrt(1-gamma)*noise,
+#           with gamma rising from 0 to 1 along the trajectory: destroyed at high sigma,
+#           where the trajectory decides which mode it falls into and diversity is won, and
+#           fully restored by the end, where condition alignment is what matters. The member
+#           is therefore left with an unbiased conditioning.
+# Note the two read the scale s differently: under "fixed" it is the persistent relative
+# perturbation the member carries, under "cads" (with rescaling) only a noise-to-signal
+# ratio inside the ramp, so the same s is the more aggressive setting under "fixed".
+# The tau1/tau2/psi knobs below apply to "cads" only.
+diffusion_conditioning_noise_schedule: "fixed"
+# CADS gamma(t) thresholds on trajectory progress t (1.0 at the first denoising step, 0.0 at
+# the last): conditioning is clean for t <= tau1, fully destroyed for t >= tau2, and mixed
+# linearly in between, so the corruption covers the first (1 - tau1) of the denoising steps.
+# Paper defaults are tau1=0.6, tau2=1.0, ablated as tau1=0.2 degrading quality and tau1=0.9
+# barely helping diversity. tau2 < 1.0 keeps some conditioning at every step, which is the
+# knob to reach for first if a forecast drifts away from its initial state.
+diffusion_conditioning_noise_tau1: 0.6
+diffusion_conditioning_noise_tau2: 1.0
+# CADS rescaling mix psi: after corruption the conditioning is renormalised back to the
+# clean per-member mean/std, and psi is how much of that renormalised version is used
+# (1.0 = fully rescaled, the paper's recommendation; 0.0 = no rescaling). It prevents
+# divergence at high noise scales at a small cost in diversity. With psi > 0 the scale s
+# above sets the noise-to-signal ratio inside the ramp rather than an absolute magnitude.
+diffusion_conditioning_noise_rescale_psi: 1.0
+
 healpix_level: 5
 
 # Use 2D RoPE instead of traditional global positional encoding

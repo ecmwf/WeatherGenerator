@@ -136,8 +136,14 @@ class LossLatentDiffusion(LossModuleBase):
             target_tokens_all = [tokens[:, num_extra_tokens:] for tokens in target_tokens_all]
 
         # In ensemble mode predict_latent is not called, so latent predictions are absent.
-        # Return a zero loss rather than crashing.
-        if not pred_tokens_all:
+        # In diffusion-rollout mode the model instead stores a per-step `latent_state` to
+        # carry the rolled-forward state forward (for continuation / physical decoding), not
+        # a per-fstep denoising prediction — so pred and target fstep counts do not
+        # correspond and the latent diffusion loss is not meaningful. In all of these
+        # inference-only cases, return a zero loss rather than crashing.
+        is_ensemble = self.cf.get("fe_diffusion_num_ensemble_members", 1) > 1
+        is_rollout = self.cf.get("diffusion_rollout", False)
+        if not pred_tokens_all or is_ensemble or is_rollout:
             nan = torch.tensor(torch.nan).to(self.device)
             return LossValues(
                 loss=torch.zeros(1, device=self.device),
