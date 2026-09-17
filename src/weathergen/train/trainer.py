@@ -26,7 +26,6 @@ import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
-from weathergen.model.model import ModelOutput
 from weathergen.model.model_interface import (
     init_model_and_shard,
 )
@@ -207,53 +206,28 @@ class Trainer(TrainerBase):
         mini_epoch,
         bidx,
         targets_and_auxs,
-    ) -> ModelOutput:
+        denormalize_data_fct,
+    ):
         """
         Run the rollout in chunks and assemble the predictions for the whole batch.
         """
         forecast_cfg = mode_cfg.get("forecast", {})
 
         output_idxs = batch.get_output_idxs()
-        # Diffusion consumes the output's fstep dimension for the ODE denoising trajectory,
-        # which neither the reassembly below nor a per-chunk write can handle. Roll out in a
-        # single chunk and let validate() write the output as it did before chunking.
         chunk_size = forecast_cfg.get("chunk_size", len(output_idxs))
         chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
-        # This assumes that you only have a physical loss, else this breaks
-        compute_full_loss = mode_cfg.get("compute_loss", True)
-        should_write_output = bidx < num_samples_write
-        if should_write_output:
-            denormalize_data_fct = (
-                (lambda x0, x1: x1)
-                if mode_cfg.get("output", {}).get("normalized_samples", False)
-                else self.dataset_val.denormalize_target_channels
-            )
-            if not targets_and_auxs:
-                raise ValueError(
-                    "Writing validation output requires targets. "
-                    "Configure validation losses or set output.num_samples=0."
-                )
 
-        physical_loss_names = [
-            name for name, loss_cfg in mode_cfg.losses.items() if loss_cfg.type == "LossPhysical"
-        ]
-        assert len(physical_loss_names) == 1 or chunk_size == len(output_idxs), (
-            "Chunked non-full validation requires one LossPhysical term."
-        )
-
-        physical, latent = [], []
+        # inital data for forecast stepping
         forecast_chunk = batch.get_source_samples()
 
-        if not compute_full_loss:
-            target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
+        # process chunk-by-chunk
+        for chunk in chunks:
+            # move to chunk to device
+            batch.to_device_for_output_chunk(self.device, chunk)
 
-        for chunk_idx, chunk in enumerate(chunks):
-            if not compute_full_loss:
-                batch.to_device_for_output_chunk(self.device, chunk)
-
-            logger.info(f"Chunked inference: processing chunk: {chunk}")
+            # model forward
             if self.ema_model is None:
                 forecast_chunk = self.model(
                     self.model_params,
@@ -266,18 +240,9 @@ class Trainer(TrainerBase):
                     forecast_chunk,
                     chunk,
                 )
+            logger.info(f"Chunked inference: processed chunk: {chunk}")
 
-            if should_write_output:
-                if not compute_full_loss:
-                    target_aux = targets_and_auxs[physical_loss_names[0]]
-                    target_aux_chunk.physical = [None for _ in range(chunk[0])] + [
-                        target_aux.physical[step] for step in chunk
-                    ]
-                    target_aux_chunk.output_idxs = chunk
-                    target_output = {physical_loss_names[0]: target_aux_chunk}
-                else:
-                    target_output = targets_and_auxs
-
+            if bidx < num_samples_write:
                 # write output incrementally
                 write_output(
                     self.cf,
@@ -288,36 +253,12 @@ class Trainer(TrainerBase):
                     denormalize_data_fct,
                     batch,
                     forecast_chunk,
-                    target_output,
+                    targets_and_auxs,
                 )
 
-            if compute_full_loss:
-                physical += forecast_chunk.physical
-                latent += forecast_chunk.latent
-            elif chunk_idx == len(chunks) - 1:
-                physical = forecast_chunk.physical
-                latent = forecast_chunk.latent
-            else:
-                forecast_chunk.physical.clear()
-                forecast_chunk.latent = [forecast_chunk.latent[-1]]
-
-            if not compute_full_loss:
-                batch.clear_output_chunk_coordinates(chunk)
-
-        # Data for validation purposes => accumulates in memory!?
-        preds = ModelOutput(chunk, output_idxs[0], batch.get_source_samples())
-        assert len(physical) == len(preds.physical), (
-            f"Chunks cover {len(physical)} forecast steps, expected {len(preds.physical)}."
-        )
-        preds.physical = physical
-        preds.latent = latent
-
-        if not compute_full_loss:
-            # this modifies targets_and_auxs in place
-            target_aux_chunk.physical = [target_aux.physical[step] for step in chunk]
-            targets_and_auxs[physical_loss_names[0]] = target_aux_chunk
-
-        return preds, targets_and_auxs
+            forecast_chunk.physical.clear()
+            forecast_chunk.latent = [forecast_chunk.latent[-1]]
+            batch.clear_output_chunk_coordinates(chunk)
 
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
@@ -713,6 +654,12 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         dataset_val_iter = iter(self.data_loader_validation)
+        # denormalization function for data
+        denormalize_data_fct = (
+            (lambda x0, x1: x1)
+            if mode_cfg.get("output", {}).get("normalized_samples", False)
+            else self.dataset_val.denormalize_target_channels
+        )
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
@@ -744,29 +691,68 @@ class Trainer(TrainerBase):
                                 self.model,
                             )
 
-                            preds, targets_and_auxs = self._process_validation_chunks(
+                        # standard validation
+                        if mode_cfg.forecast.get("chunk_size") is None:
+                            if self.ema_model is None:
+                                preds = self.model(
+                                    self.model_params,
+                                    batch.get_source_samples(),
+                                    batch.get_output_idxs(),
+                                )
+                            else:
+                                preds = self.ema_model.forward_eval(
+                                    self.model_params,
+                                    batch.get_source_samples(),
+                                    batch.get_output_idxs(),
+                                )
+
+                        # chunked model evaluation across forceast steps; for inference mode
+                        else:
+                            self._process_validation_chunks(
                                 batch,
                                 mode_cfg,
                                 batch_size,
                                 mini_epoch,
                                 bidx,
                                 targets_and_auxs,
+                                denormalize_data_fct,
                             )
 
-                    if mode_cfg.get("compute_loss", True):
+                    # compute validation loss and write output if not in chunked inference mode
+                    # where no loss is computed and writing is done per chunk
+                    if mode_cfg.forecast.get("chunk_size") is None:
+                        # compute validation loss
                         _ = self.loss_calculator_val.compute_loss(
                             preds=preds,
                             targets_and_aux=targets_and_auxs,
                             metadata=extract_batch_metadata(batch),
                         )
 
+                        # write output
+                        num_samples_write = (
+                            mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+                        )
+                        if bidx < num_samples_write:
+                            write_output(
+                                self.cf,
+                                mode_cfg,
+                                batch_size,
+                                mini_epoch,
+                                bidx,
+                                denormalize_data_fct,
+                                batch,
+                                preds,
+                                targets_and_auxs,
+                            )
+
                     pbar.update(batch_size)
 
                     if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                         break
 
-                self._log_terminal(0, mini_epoch, VAL)
-                self._log(VAL)
+                if mode_cfg.forecast.get("chunk_size") is None:
+                    self._log_terminal(0, mini_epoch, VAL)
+                    self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
