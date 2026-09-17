@@ -11,8 +11,8 @@ import datetime
 import logging
 import re
 from collections.abc import Iterable, Sequence
+from enum import Enum
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
@@ -20,25 +20,21 @@ from numpy.typing import NDArray
 _logger = logging.getLogger(__name__)
 
 
-def resolve_run_colors(run_ids: Sequence[str], runs: dict) -> dict[str, str]:
-    """Assign one fixed colour per run.
+class PlotSubdir(str, Enum):
+    """Known plot subdirectory names produced by the plotting pipeline.
 
-    A run's configured ``color`` wins; otherwise the run takes the next entry of
-    matplotlib's default property cycle, which reproduces the colours matplotlib would
-    have picked anyway. Pinning them explicitly lets every curve belonging to the same
-    run (members, per-member mean, overlaid ensemble scores) share a single colour.
+    Being a ``str`` subclass, members compare and format exactly like plain
+    strings (e.g. ``PlotSubdir.line_plots == "line_plots"``), so they can be
+    used as drop-in replacements wherever the raw directory name is expected
+    (e.g. ``Path(base) / PlotSubdir.line_plots``).
     """
-    cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
 
-    run_colors: dict[str, str] = {}
-    for i, run_id in enumerate(run_ids):
-        configured = runs.get(run_id, {}).get("color")
-        if configured:
-            run_colors[run_id] = configured
-        elif cycle:
-            run_colors[run_id] = cycle[i % len(cycle)]
-
-    return run_colors
+    line_plots = "line_plots"
+    ratio_plots = "ratio_plots"
+    psd_plots = "psd_plots"
+    score_cards = "score_cards"
+    bar_plots = "bar_plots"
+    qq_plots = "qq_plots"
 
 
 # Shared helpers
@@ -82,18 +78,7 @@ def calculate_average_over_dim(
 
 def lower_is_better(metric: str) -> bool:
     """Determine whether lower or higher is better."""
-    return metric in {
-        "l1",
-        "l2",
-        "mae",
-        "mse",
-        "rmse",
-        "rmse_ens_mean",
-        "vrmse",
-        "bias",
-        "crps",
-        "spread",
-    }
+    return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
 
 
 def compute_offsets(n, spacing=0.11):
@@ -376,7 +361,6 @@ def plot_metric_region(
     scores_dict: dict,
     plotter: object,
     print_summary: bool,
-    overlay_metrics: list[str] | None = None,
 ) -> None:
     """Plot data for all streams and channels for a given metric and region.
 
@@ -394,15 +378,10 @@ def plot_metric_region(
         Plotter object to handle the plotting part
     print_summary: bool
         Option to print plot values to screen
-    overlay_metrics: list[str] | None
-        Additional metrics to draw into the same figure as ``metric``, e.g. overlaying
-        ``rmse_ens_mean`` onto the ``rmse`` plot to compare the ensemble-mean skill with
-        the individual members. Each overlay is drawn as its own labelled curve.
 
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
-    run_colors = resolve_run_colors(list(runs), runs)
 
     for stream in streams_set:
         for ch in channels_set:
@@ -416,44 +395,18 @@ def plot_metric_region(
                 selected_data.append(data.sel(channel=ch))
                 labels.append(runs[run_id].get("label", run_id))
                 run_ids.append(run_id)
-                colors.append(run_colors.get(run_id))
-
-            for ov_metric in overlay_metrics or []:
-                ov_scores = scores_dict.get(ov_metric, {}).get(region, {}).get(stream, {})
-                if not ov_scores:
-                    _logger.warning(
-                        f"Overlay metric '{ov_metric}' requested for '{metric}' but no scores "
-                        f"are available for {region} - {stream}. It is skipped; make sure it "
-                        "is listed under evaluation.metrics."
-                    )
-                    continue
-                for run_id, data in ov_scores.items():
-                    if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
-                        continue
-
-                    selected_data.append(data.sel(channel=ch))
-                    # Overlays belong to the same model as the base curve, so they share its
-                    # colour and are kept out of the legend (matplotlib skips "_"-prefixed
-                    # labels); the line style alone distinguishes them.
-                    run_label = runs[run_id].get("label", run_id)
-                    labels.append(f"_{run_label} - {ov_metric}")
-                    run_ids.append(run_id)
-                    colors.append(run_colors.get(run_id))
+                colors.append(runs[run_id].get("color", None))
 
             if selected_data:
                 _logger.info(f"Creating line plot for {metric} - {region} - {stream} - {ch}.")
 
-                plotted_metrics = [metric, *(overlay_metrics or [])]
-
                 name = create_filename(
-                    prefix=[*plotted_metrics, region],
-                    middle=sorted(set(run_ids)),
-                    suffix=[stream, ch],
+                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
                 )
 
                 selected_data, time_dim = _assign_time_coord(selected_data)
 
-                title = f"{' + '.join(m.upper() for m in plotted_metrics)} | {stream} | {ch}"
+                title = f"{metric.upper()} | {stream} | {ch}"
 
                 ref_line_dict = {"ssr_adj": 1.0}
                 line = ref_line_dict.get(metric)
@@ -468,7 +421,6 @@ def plot_metric_region(
                     title=title,
                     colors=colors,
                     line=line,
-                    overlay_names=list(overlay_metrics or []),
                 )
 
 
