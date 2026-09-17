@@ -163,7 +163,7 @@ def get_reader(
     region: str | None = None,
     metric: dict[str, object] | None = None,
 ):
-    if reader_type == "zarr":
+    if reader_type == "zarr" or reader_type == "anemoi-target":
         reader = WeatherGenZarrReader(run, run_id, private_paths)
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
@@ -221,13 +221,14 @@ def _process_stream(
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
         return run_id, stream, {}, {}
 
-    needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
+    is_zarr_like = type_ in ("zarr", "anemoi-target")
+    needs_plotting = stream_dict.get("plotting") and is_zarr_like
     needs_scoring = stream_dict.get("evaluation", False)
 
     # --- Determine scoring state before loading any data ---
-    plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ == "zarr"
+    plot_score_maps = plot_score_options.get("plot_score_maps", False) and is_zarr_like
     plot_score_init_time_series = (
-        plot_score_options.get("plot_score_init_time_series", False) and type_ == "zarr"
+        plot_score_options.get("plot_score_init_time_series", False) and is_zarr_like
     )
 
     recomputable_metrics = {}
@@ -238,7 +239,7 @@ def _process_stream(
         stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
         needs_score_recomputation = (
             plot_score_maps or plot_score_init_time_series or bool(recomputable_metrics)
-        ) and type_ == "zarr"
+        ) and is_zarr_like
 
     # --- Load data only when necessary ---
     output_data = None

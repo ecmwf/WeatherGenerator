@@ -85,6 +85,7 @@ class IOState:
         None  # fallback offset in hours for init_time when source_interval is missing
     )
     sample_labels: list[int] | None = None  # global sample indices for coordinate labeling
+    anemoi_target_cfg: dict | None = None  # if set, read targets from anemoi dataset
 
     def get_sample_labels(self) -> list[int]:
         """Return global sample labels (falls back to local samples if not set)."""
@@ -261,6 +262,7 @@ def build_io_state(
     ens_select: EnsembleSelect,
     rank: str = "",
     sample_labels: list[int] | None = None,
+    inference_cfg: dict | None = None,
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -287,6 +289,19 @@ def build_io_state(
 
     regridder = Regridder(regrid_opts) if regrid_opts else None
 
+    # ---- Resolve anemoi target config from inference config ----
+    anemoi_target_cfg = None
+    if inference_cfg:
+        stream_info = inference_cfg.get("streams", {}).get(stream, {})
+        if stream_info.get("type") in ("anemoi", "anemoi_operan") and stream_info.get("filenames"):
+            data_path = inference_cfg.get("data_path_anemoi", "")
+            filename = str(Path(data_path) / stream_info["filenames"][0])
+            anemoi_target_cfg = {
+                "filename": filename,
+                "channels": stream_info.get("val_target_channels", []),
+            }
+            _logger.info(f"Anemoi target source: {filename}")
+
     return IOState(
         run_id=run_id,
         zarr_path=zarr_path,
@@ -304,11 +319,12 @@ def build_io_state(
         coords=coords,
         lat=lat,
         lon=lon,
-        n_workers=n_io_workers,
+        n_workers=min(n_io_workers, 20) if anemoi_target_cfg is not None else n_io_workers,
         rank=rank,
         offset=offset,
         regridder=regridder,
         sample_labels=sample_labels,
+        anemoi_target_cfg=anemoi_target_cfg,
     )
 
 
@@ -324,6 +340,7 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
+    anemoi_target_cfg: dict | None = None,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -341,6 +358,7 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
+        anemoi_target_cfg=anemoi_target_cfg,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -558,6 +576,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
+            anemoi_target_cfg=state.anemoi_target_cfg,
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
@@ -631,7 +650,13 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
+        anemoi_target_cfg=state.anemoi_target_cfg,
     )
+    if state.anemoi_target_cfg is not None:
+        _logger.info(
+            f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
+            f"Target data will be read from anemoi dataset (not zarr)."
+        )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
         for s in state.samples
