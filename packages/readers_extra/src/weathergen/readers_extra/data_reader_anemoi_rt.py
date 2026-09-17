@@ -188,7 +188,7 @@ class DataReaderAnemoiRT(DataReaderTimestep):
             axis=0,
         ).transpose()
         # repeat latlon len(t_idxs) times
-        coords = np.vstack((latlon,) * len(t_idxs))
+        coords = np.vstack(list((latlon,) * len(t_idxs)))
 
         # use time_window and frequency to compute required time information
         datetimes = []
