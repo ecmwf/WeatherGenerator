@@ -428,6 +428,7 @@ def plot_loss_per_stream(
                 legend_strs = []
                 min_val = np.finfo(np.float32).max
                 max_val = 0.0
+                title_col = None
                 for mode in modes:
                     legend_strs += [[]]
                     linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
@@ -448,12 +449,14 @@ def plot_loss_per_stream(
                         suffix = f".{stream_name}.{err}.{channel}"
                         for col in run_data_mode.columns:
                             if col.lower().endswith(suffix.lower()):
+                                title_col = col if title_col is None else title_col
                                 data_cols += [col]
                             else:
                                 for fstep in forecast_steps:
                                     if col.lower().endswith(
                                         f"{suffix}.{fstep}".lower()
                                     ):
+                                        title_col = col if title_col is None else title_col
                                         data_cols += [col]
                                         break
 
@@ -507,7 +510,12 @@ def plot_loss_per_stream(
                 if x_lim is not None:
                     plt.xlim(x_lim)
 
-                plt.title(f"{stream_name}.{err}.{channel} ({', '.join(modes)})")
+                if title_col is not None:
+                    idx = title_col.lower().find(f".{stream_name.lower()}")
+                    title_prefix = f"{title_col[:idx]}." if idx > 0 else ""
+                    plt.title(f"{title_prefix}{stream_name}.{err}.{channel} ({', '.join(modes)})")
+                else:
+                    plt.title(f"{stream_name}.{err}.{channel} ({', '.join(modes)})")
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
                 plt.tight_layout()
