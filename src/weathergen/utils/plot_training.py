@@ -453,9 +453,7 @@ def plot_loss_per_stream(
                                 data_cols += [col]
                             else:
                                 for fstep in forecast_steps:
-                                    if col.lower().endswith(
-                                        f"{suffix}.{fstep}".lower()
-                                    ):
+                                    if col.lower().endswith(f"{suffix}.{fstep}".lower()):
                                         title_col = col if title_col is None else title_col
                                         data_cols += [col]
                                         break
