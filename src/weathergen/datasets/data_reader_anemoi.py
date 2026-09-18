@@ -32,6 +32,21 @@ from weathergen.utils.distributed import is_root
 _logger = logging.getLogger(__name__)
 
 
+def _take_var_axis(arr: NDArray[np.float32], var_idx: list[int] | NDArray) -> NDArray[np.float32]:
+    """Select variables from a (time, var, grid) cube.
+
+    Matches ``arr.transpose(0, 2, 1).reshape(time * grid, n_var)[:, var_idx]`` without
+    materialising the unused variables. The n320 ERA5 chunk stores all 113 variables
+    together, so the zarr read cannot be smaller; this only cuts the CPU transpose.
+    """
+    n_time, _, n_grid = arr.shape
+    n_sel = len(var_idx)
+    if n_sel == 0:
+        return np.empty((n_time * n_grid, 0), dtype=arr.dtype)
+    selected = arr[:, np.asanyarray(var_idx, dtype=np.intp), :]
+    return np.ascontiguousarray(selected.transpose(0, 2, 1)).reshape(n_time * n_grid, n_sel)
+
+
 class DataReaderAnemoi(DataReaderTimestep):
     "Wrapper for Anemoi datasets"
 
@@ -117,8 +132,9 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.len = len(ds)
 
         # caches lats and lons
-        self.latitudes = _clip_lat(ds.latitudes)
-        self.longitudes = _clip_lon(ds.longitudes)
+        latitudes = _clip_lat(ds.latitudes)
+        longitudes = _clip_lon(ds.longitudes)
+        self.latlon = np.column_stack((latitudes, longitudes))
 
         # select/filter requested source channels
         if stream_info.get(str(stage) + "_source_channels") is None:
@@ -210,31 +226,16 @@ class DataReaderAnemoi(DataReaderTimestep):
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
         try:
-            data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
+            data = np.asarray(self.ds[didx_start:didx_end][:, :, 0], dtype=np.float32)
         except MissingDateError as e:
             _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # coords-first representation and collapse multiple steps
-        data = data.transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
-
-        # extract geoinfo channels (can be time-varying, so read from dataset)
-        geoinfos = data[:, list(self.geoinfo_idx)]
-        # extract channels
-        data = data[:, list(channels_idx)]
-
-        # construct lat/lon coords
-        latlon = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-            ],
-            axis=0,
-        ).transpose()
-        # repeat latlon len(t_idxs) times
-        coords = np.vstack((latlon,) * len(t_idxs))
+        geoinfos = _take_var_axis(data, self.geoinfo_idx)
+        data = _take_var_axis(data, channels_idx)
+        coords = np.tile(self.latlon, (len(t_idxs), 1))
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
