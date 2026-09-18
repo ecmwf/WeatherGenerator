@@ -170,6 +170,9 @@ def get_active_stage_config(
     final config that is used
     """
 
+    # resolve date_ranges vs. start_date/end_date precedence
+    base_config, merge_config = config.reconcile_date_ranges(base_config, merge_config)
+
     result_cfg = merge_configs(base_config, merge_config)
     result_cfg = filter_config_by_enabled(result_cfg, keys_to_filter)
 

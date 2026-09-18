@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import functools
 import io
 import json
@@ -95,6 +96,13 @@ def _sanitize_start_end_time_keys(sub_conf):
     for key in time_keys:
         if key in sub_conf:
             sub_conf = _patch_time(key, sub_conf, _DATETIME_TYPE_NAME)
+
+    # Support for non-contiguous training: list of {start_date, end_date} dicts
+    if "date_ranges" in sub_conf:
+        for entry in sub_conf.date_ranges:
+            for key in time_keys:
+                if key in entry:
+                    _patch_time(key, entry, _DATETIME_TYPE_NAME)
 
 
 def _sanitize_delta_time_keys(sub_conf):
@@ -411,6 +419,37 @@ def merge_configs(base_config: Config, update_config: Config):
     return OmegaConf.merge(base_config, update_config)
 
 
+def reconcile_date_ranges(base_stage: Config, override_stage: Config) -> tuple[Config, Config]:
+    """
+    Resolve date_ranges vs. start_date/end_date precedence between two configs of the
+    same stage (e.g. two training_config blocks, or a training_config and a
+    validation_config) before they get merged with OmegaConf.merge.
+    """
+    if override_stage.get("start_date") is not None or override_stage.get("end_date") is not None:
+        if "date_ranges" in base_stage:
+            base_stage = copy.deepcopy(base_stage)
+            del base_stage["date_ranges"]
+        if "date_ranges" in override_stage:
+            override_stage = copy.deepcopy(override_stage)
+            del override_stage["date_ranges"]
+    return base_stage, override_stage
+
+
+def _reconcile_stage_date_ranges(acc: Config, nxt: Config) -> tuple[Config, Config]:
+    """Apply reconcile_date_ranges to every stage sub-config (training/validation/test)"""
+    acc = acc.copy()
+    nxt = nxt.copy()
+    for stage_key in ("training_config", "validation_config", "test_config"):
+        base_stage = acc.get(stage_key)
+        override_stage = nxt.get(stage_key)
+        if base_stage is None or override_stage is None:
+            continue
+        base_stage, override_stage = reconcile_date_ranges(base_stage, override_stage)
+        acc[stage_key] = base_stage
+        nxt[stage_key] = override_stage
+    return acc, nxt
+
+
 def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
@@ -465,8 +504,13 @@ def load_merge_configs(
         # streams from an overwrite's streams_directory replace inherited streams
         if any(o.get("streams_directory") is not None for o in overwrite_configs):
             base_config.streams = None
-    # use OmegaConf.unsafe_merge if too slow
-    c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
+    # merge one config at a time so date_ranges vs. start_date/end_date precedence (see
+    # reconcile_date_ranges) is resolved at each step, e.g. when continuing/fine-tuning
+    # training from a run whose training_config used date_ranges
+    c = base_config
+    for nxt in (private_config, *overwrite_configs):
+        c, nxt = _reconcile_stage_date_ranges(c, nxt)
+        c = OmegaConf.merge(c, nxt)
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
 
