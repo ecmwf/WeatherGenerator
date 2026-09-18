@@ -169,6 +169,7 @@ def write_output(
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
     latents_all = get_latent_output(batch, model_output) if write_latents else None
+    latent_indexes = [0] + [forecast_step + 1 - forecast_offset for forecast_step in timestep_idxs]
 
     data = io.OutputBatchData(
         sources,
@@ -201,10 +202,13 @@ def write_output(
                 batch,
                 batch_idx,
                 batch_size,
+                latent_indexes,
             )
 
 
-def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
+def _write_latent_data_to_zarr(
+    zio, data, cf, batch, batch_idx, batch_size, latent_indexes: list[int]
+):
     """Write latent data directly to zarr store.
 
     This bypasses OutputItem validation which incorrectly requires source datasets
@@ -215,8 +219,12 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
     # Calculate sample start index for this batch
     sample_start = batch_idx * batch_size
 
-    # Iterate over latent data
-    for t_idx, latents_in_step in enumerate(data.latents):
+    assert len(data.latents) == len(latent_indexes), (
+        "Latent outputs and latent indexes must have matching lengths: "
+        f"{len(data.latents)} != {len(latent_indexes)}."
+    )
+
+    for latent_index, latents_in_step in zip(data.latents, latent_indexes, strict=True):
         for sample_idx_in_batch, latents_in_sample in enumerate(latents_in_step):
             if not latents_in_sample:
                 continue
@@ -224,8 +232,7 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
             # Calculate global sample index
             global_sample_idx = sample_start + sample_idx_in_batch
 
-            # Reserve latent step 0 for the initial encoded state.
-            group_path = f"{global_sample_idx}/{io.LATENT_STREAM}/{t_idx + 1}"
+            group_path = f"{global_sample_idx}/{io.LATENT_STREAM}/{latent_index}"
 
             npoints = _infer_latent_points_for_metadata(latents_in_sample)
             (
@@ -433,6 +440,8 @@ def get_latent_output(batch, model_output):
     fp32 = torch.float32
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+    latent_preds = [{"latent_state": model_output.initial_latent}]
+    latent_preds.extend(model_output.get_latent_prediction(t_idx) for t_idx in timestep_idxs)
 
     sample_idxs = [
         list(sample.streams_data.values())[0].sample_idx
@@ -440,13 +449,14 @@ def get_latent_output(batch, model_output):
     ]
 
     latents_all: list[list[dict]] = []
-    for t_idx in timestep_idxs:
+    for latent_pred in latent_preds:
         latents_all.append([])
-        latent_pred = model_output.get_latent_prediction(t_idx)
         n_samples = len(sample_idxs)
         for i_sample in range(n_samples):
             per_sample: dict = {}
             for lname, lval in latent_pred.items():
+                if lval is None or lname == "posteriors":
+                    continue
                 if isinstance(lval, LatentState):
                     fields = {
                         "tokens": lval.z_pre_norm,
