@@ -34,7 +34,7 @@ from weathergen.datasets.utils import (
 )
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import SpatialParallelContext, is_root
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -100,15 +100,32 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mini_epoch = 0
         self.mask_value = 0.0
-        self.rank = cf.rank
-        self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # initialise healpic
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
+        # Ranks in one spatial group must consume the same batch. Data
+        # parallelism therefore operates across groups, not individual ranks.
+        self.spatial_parallel = SpatialParallelContext.from_config(
+            cf,
+            self.num_healpix_cells,
+        )
         self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+        self.tokenizer = TokenizerMasking(
+            cf.healpix_level,
+            self.masker,
+            self.spatial_parallel.cell_start,
+            self.spatial_parallel.cell_end,
+        )
+        if self.spatial_parallel.size > 1:
+            logger.info(
+                "Spatial rank %d/%d constructs source HEALPix cells [%d, %d)",
+                self.spatial_parallel.rank,
+                self.spatial_parallel.size,
+                self.spatial_parallel.cell_start,
+                self.spatial_parallel.cell_end,
+            )
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -190,11 +207,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         epoch_len = self.samples_per_mini_epoch
 
         # ensure epoch_len is large enough to produce at least one batch per rank
-        min_samples = self.world_size * self.batch_size
+        min_samples = self.spatial_parallel.ddp_world_size * self.batch_size
         if epoch_len < min_samples:
             logger.warning(
                 f"samples_per_mini_epoch={epoch_len} is too small for "
-                f"world_size={self.world_size} and batch_size={self.batch_size}. "
+                f"ddp_world_size={self.spatial_parallel.ddp_world_size} "
+                f"and batch_size={self.batch_size}. "
                 f"samples_per_mini_epoch has to be equal to or larger than"
                 f"world_size*batch_size to ensure that each rank can produce at least one sample. "
                 f"Automatically increasing to {min_samples}."
@@ -203,9 +221,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             self.samples_per_mini_epoch = min_samples
 
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        self.len = ((epoch_len // self.world_size) // self.batch_size) * self.batch_size
+        self.len = (
+            (epoch_len // self.spatial_parallel.ddp_world_size) // self.batch_size
+        ) * self.batch_size
 
-        n_duplicates = self.len * self.world_size - available_samples
+        n_duplicates = self.len * self.spatial_parallel.ddp_world_size - available_samples
         if not self.repeat_data:
             assert n_duplicates <= 0
 
@@ -532,6 +552,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             num_steps_input,
             num_output_steps,
             self.num_healpix_cells,
+            source_num_healpix_cells=self.spatial_parallel.local_num_cells,
         )
 
         stream_data = self._build_stream_data_input(
@@ -703,7 +724,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
+            input_tokens = self.tokenizer.get_tokens_windows(
+                stream_info, input_data, True, local_source=True
+            )
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
             for sidx, source_mask in enumerate(source_masks.masks):
@@ -791,7 +814,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # ensure the batch is valid, i.e. not completely empty and no NaN values
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
-                not_valid = batch.sources_empty() or batch.is_nan()
+                # A valid global sample may have no observations in one rank's
+                # local source domain. All spatial ranks must still emit the
+                # same sample and enter encoder collectives in lockstep.
+                local_sources_empty = batch.sources_empty()
+                not_valid = (
+                    local_sources_empty if self.spatial_parallel.size == 1 else False
+                ) or batch.is_nan()
                 not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
 
                 # skip completely empty batch item or when all targets are empty -> no grad
@@ -806,12 +835,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         return self.len
 
     def worker_workset(self):
-        local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
+        local_start = self.spatial_parallel.ddp_rank * self.len
+        local_end = (self.spatial_parallel.ddp_rank + 1) * self.len
 
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            assert self.world_size == 1, self.world_size
+            assert self.spatial_parallel.ddp_world_size == 1
             iter_start = 0
             iter_end = len(self)
 
@@ -822,9 +852,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # happens for each mini_epoch, for train and validation, and independently for each DDP
             # worker. After the bit-wise copy, the rng seed needs to be made unique for
             # DDP workers, loader process, mini_epoch.
-            dist = torch.distributed
             self.data_loader_rng_seed *= (
-                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
+                ((self.spatial_parallel.ddp_rank + 1) * 73)
                 * ((worker_info.id + 1) * 37)
                 * (self.mini_epoch + 13)
                 * 7
@@ -836,7 +865,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             if worker_info.id + 1 == worker_info.num_workers:
                 iter_end = local_end
             logger.info(
-                f"{self.rank}::{worker_info.id}"
+                f"{self.spatial_parallel.ddp_rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
             )
 

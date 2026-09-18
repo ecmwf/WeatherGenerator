@@ -48,10 +48,11 @@ def init_model_and_shard(
     mini_epoch_contd,
     training_mode,
     device,
-    with_ddp,
-    with_fsdp,
+    data_parallel_cfg,
     overrides={},
 ):
+    with_ddp = data_parallel_cfg["with_ddp"]
+    with_fsdp = data_parallel_cfg["with_fsdp"]
     model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
@@ -72,7 +73,7 @@ def init_model_and_shard(
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             broadcast_buffers=True,
-            find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
+            find_unused_parameters=data_parallel_cfg.get("find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
         )
@@ -191,7 +192,9 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
 
-    is_model_sharded = cf.with_ddp and cf.with_fsdp
+    is_model_sharded = (
+        cf.distributed.data_parallel.with_ddp and cf.distributed.data_parallel.with_fsdp
+    )
     if is_model_sharded:
         meta_sharded_sd = model.state_dict()
         maybe_sharded_sd = {}

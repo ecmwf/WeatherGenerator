@@ -40,11 +40,28 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
 
 
 class TokenizerMasking(Tokenizer):
-    def __init__(self, healpix_level: int, masker: Masker):
+    def __init__(
+        self,
+        healpix_level: int,
+        masker: Masker,
+        source_cell_start: int = 0,
+        source_cell_end: int | None = None,
+    ):
         super().__init__(healpix_level)
         self.masker = masker
         self.rng = None
         self.token_size = None
+        self.source_cell_start = source_cell_start
+        self.source_cell_end = (
+            self.num_healpix_cells_source if source_cell_end is None else source_cell_end
+        )
+        if not (
+            0 <= self.source_cell_start < self.source_cell_end <= self.num_healpix_cells_source
+        ):
+            raise ValueError(
+                f"invalid source HEALPix cell range "
+                f"[{self.source_cell_start}, {self.source_cell_end})"
+            )
 
     def reset_rng(self, rng) -> None:
         """
@@ -53,7 +70,7 @@ class TokenizerMasking(Tokenizer):
         self.masker.reset_rng(rng)
         self.rng = rng
 
-    def get_tokens_windows(self, stream_info, data, pad_tokens):
+    def get_tokens_windows(self, stream_info, data, pad_tokens, local_source=False):
         """
         Tokenize data (to amortize over the different views that are generated)
 
@@ -63,6 +80,8 @@ class TokenizerMasking(Tokenizer):
         tok = tokenize_spacetime if tok_spacetime else tokenize_space
         hl = self.healpix_level
         token_size = stream_info["token_size"]
+        cell_start = self.source_cell_start if local_source else 0
+        cell_end = self.source_cell_end if local_source else self.num_healpix_cells_source
 
         tokens = []
         for rdata in data:
@@ -72,7 +91,12 @@ class TokenizerMasking(Tokenizer):
                 continue
             # tokenize data
             idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens
+                readerdata_to_torch(rdata),
+                token_size,
+                hl,
+                pad_tokens,
+                cell_start=cell_start,
+                cell_end=cell_end,
             )
             tokens += [(idxs_cells, idxs_cells_lens)]
 
@@ -129,6 +153,7 @@ class TokenizerMasking(Tokenizer):
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
+        cell_mask = cell_mask[self.source_cell_start : self.source_cell_end]
 
         # select strategy from XXX depending on stream and if student or teacher
 
@@ -144,7 +169,7 @@ class TokenizerMasking(Tokenizer):
             stream_info["stream_id"],
             rdata,
             time_win,
-            self.hpy_verts_rots_source[-1],
+            self.hpy_verts_rots_source[-1][self.source_cell_start : self.source_cell_end],
             encode_times_source,
         )
 

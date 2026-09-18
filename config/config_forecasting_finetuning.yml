@@ -17,7 +17,6 @@ general:
   world_size: ???
 
   # local_rank, 
-  # with_ddp,
   # data_path_*, 
   # model_path, 
   # run_path, 
@@ -57,4 +56,3 @@ training_config:
       offset: 1
       num_steps: 8
       policy: "fixed"
-
