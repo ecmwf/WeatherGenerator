@@ -155,7 +155,7 @@ def get_target_idxs_from_cfg(cfg, loss_name) -> list[int] | None:
     Extract target idxs from training/validation/test config
     """
 
-    tc = [v.get("target_source_correspondence") for _, v in cfg.losses[loss_name].loss_fcts.items()]
+    tc = [v.get("target_source_correspondence") for _, v in cfg.losses[loss_name].loss_fcts.items() if v is not None]
     tc = [list(t.keys()) for t in tc if t is not None]
     target_idxs = list(set([int(i) for t in tc for i in t])) if len(tc) > 0 else None
 
