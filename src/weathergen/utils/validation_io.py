@@ -23,6 +23,68 @@ from weathergen.model.engines import LatentState
 _logger = logging.getLogger(__name__)
 
 
+def _filter_output_channels(
+    filter_cfg,
+    stream_names: list[str],
+    target_channels: list[list[str]],
+    targets_all: list,
+    preds_all: list,
+) -> None:
+    """Apply per-stream channel filtering in-place.
+
+    Args:
+        filter_cfg: The ``filter_output_channels`` config mapping
+            ``{STREAM_NAME: [channels]}``.  An empty list or ``None`` for a
+            stream means no filtering for that stream.
+        stream_names: Ordered list of stream names.
+        target_channels: Per-stream list of channel names (mutated in-place).
+        targets_all: Nested list ``[t_idx][stream_idx]`` of target arrays
+            (mutated in-place).
+        preds_all: Nested list ``[t_idx][stream_idx]`` of prediction arrays
+            (mutated in-place).
+    """
+    if not filter_cfg:
+        return
+
+    for stream_idx, stream_name in enumerate(stream_names):
+        write_vars = filter_cfg.get(stream_name)
+        if write_vars is None or (isinstance(write_vars, str) and write_vars.lower() == "all"):
+            continue
+        write_vars = [write_vars] if isinstance(write_vars, str) else list(write_vars)
+        if len(write_vars) == 0:
+            continue
+
+        all_channels = target_channels[stream_idx]
+        write_vars_set = set(write_vars)
+        keep_idxs = [i for i, ch in enumerate(all_channels) if ch in write_vars_set]
+
+        missing = write_vars_set - set(all_channels)
+        if missing:
+            _logger.warning(
+                f"filter_output_channels for stream {stream_name} "
+                f"contains unknown channels, which will be skipped: {missing}"
+            )
+        if not keep_idxs:
+            _logger.warning(
+                f"filter_output_channels for stream {stream_name} matched no channels; "
+                f"skipping filter."
+            )
+            continue
+        if len(keep_idxs) == len(all_channels):
+            continue
+        keep_names = [all_channels[i] for i in keep_idxs]
+        removed_names = [ch for ch in all_channels if ch not in keep_names]
+        _logger.debug(
+            f"Filtering output channels for stream {stream_name}: "
+            f"{len(all_channels)} -> {len(keep_idxs)} channels; "
+            f"kept: {keep_names}; removed: {removed_names}"
+        )
+        target_channels[stream_idx] = [all_channels[i] for i in keep_idxs]
+        for t_idx in range(len(targets_all)):
+            targets_all[t_idx][stream_idx] = targets_all[t_idx][stream_idx][:, keep_idxs]
+            preds_all[t_idx][stream_idx] = preds_all[t_idx][stream_idx][:, :, keep_idxs]
+
+
 def write_output(
     cf,
     val_cfg,
@@ -130,8 +192,6 @@ def write_output(
         for sample in batch.get_source_samples().get_samples()
     ]
 
-    # more prep work
-
     # output stream names to be written, use specified ones or all if nothing specified
     stream_names = list(cf.streams.keys())
     stream_infos = list(cf.streams.values())
@@ -149,7 +209,10 @@ def write_output(
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
     source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in stream_infos]
 
-    geoinfo_channels = [[] for _ in stream_infos]  # TODO obtain channels
+    filter_cfg = val_cfg.get("output", {}).get("channels", None)
+    _filter_output_channels(filter_cfg, stream_names, target_channels, targets_all, preds_all)
+
+    geoinfo_channels = [[] for _ in stream_names]  # TODO obtain channels
 
     # calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * batch_size
