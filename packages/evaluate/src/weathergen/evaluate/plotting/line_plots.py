@@ -18,8 +18,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import xarray as xr
+from matplotlib.lines import Line2D
 
 from weathergen.evaluate.plotting.plot_utils import (
+    _average_target_psd,
+    _target_legend_label,
     align_labels,
     channel_sort_key,
     clean_label,
@@ -762,9 +765,11 @@ class LinePlots:
         out_dir = Path(self.out_plot_dir_psd)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use the target from the first run as reference
-        freq = np.asarray(psd_datasets[0]["frequencies"])
-        tar_psd = np.asarray(psd_datasets[0]["psd_target"])
+        # The target belongs to the verification data, not to any one model: average it
+        # across every run on this plot rather than taking the first run's.
+        freq, tar_psd, n_tgt_runs = _average_target_psd(
+            psd_datasets, context=f"{variable} step {forecast_step}"
+        )
 
         fig, (ax_spec, ax_ratio) = plt.subplots(
             2,
@@ -774,7 +779,7 @@ class LinePlots:
         )
 
         # Upper panel: log-log spectra
-        ax_spec.loglog(freq, tar_psd, color="black", lw=1.5, label="Target")
+        ax_spec.loglog(freq, tar_psd, color="black", lw=1.5, label=_target_legend_label(n_tgt_runs))
         colors = plt.cm.tab10.colors
         for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
             c = colors[i % len(colors)]
@@ -796,15 +801,18 @@ class LinePlots:
         ax_spec.legend(frameon=False, fontsize=7)
         ax_spec.grid(True, which="both", ls="--", alpha=0.4)
 
-        # Lower panel: ratio (pred / target)
+        # Lower panel: ratio against each run's OWN target, so every curve is an honest
+        # pred/target for that run (unlike the averaged reference drawn above).
         for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
             c = colors[i % len(colors)]
             pred = np.asarray(ds["psd_prediction"])
+            own_freq = np.asarray(ds["frequencies"])
+            own_tar = np.asarray(ds["psd_target"])
             with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = np.where(tar_psd > 0, pred / tar_psd, np.nan)
-            ax_ratio.semilogx(freq, ratio, color=c, lw=1.2, label=label)
+                ratio = np.where(own_tar > 0, pred / own_tar, np.nan)
+            ax_ratio.semilogx(own_freq, ratio, color=c, lw=1.2, label=label)
         ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
-        ax_ratio.set_ylabel("Pred / Target")
+        ax_ratio.set_ylabel("Pred / Target (own run)")
         ax_ratio.set_xlabel("Frequency (1/deg)")
         ax_ratio.set_ylim(0, 2)
         ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
@@ -812,5 +820,118 @@ class LinePlots:
         name = tag or "psd"
         fname = out_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving PSD summary plot to {fname}")
+        fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
+        plt.close(fig)
+
+    def psd_evolution_plot(
+        self,
+        per_fstep_datasets: dict[int, dict],
+        tag: str = "",
+        variable: str = "",
+        label: str = "",
+    ) -> None:
+        """Overlay one run's PSD spectra across forecast lead times, colour-coded by step.
+
+        Mirrors the diffusion-diagnostics "evolution" plot style (viridis colormap keyed to
+        the swept step) applied to forecast lead time, and ``psd_plot``'s two-panel
+        spectra + ratio layout. Solid colour-coded lines are the per-step predictions.
+
+        This is a single-run figure, so no cross-run averaging applies. The target spectrum
+        is nearly lead-time invariant, so it is averaged over the forecast steps and drawn
+        once in grey instead of once per step; the ratio panel divides every step's
+        prediction by that same averaged target, matching the upper panel.
+
+        Parameters
+        ----------
+        per_fstep_datasets : dict[int, dict]
+            Maps forecast step -> dict with keys ``frequencies``, ``psd_target``,
+            ``psd_prediction``, ``psd_method`` (as produced by ``_extract_psd_attrs``).
+        tag : str
+            Filename tag.
+        variable : str
+            Channel name, used in the title.
+        label : str
+            Run label, used in the title.
+        """
+        out_dir = Path(self.out_plot_dir_psd)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        fsteps = sorted(per_fstep_datasets)
+        if len(fsteps) < 2:
+            return
+
+        fig, (ax_spec, ax_ratio) = plt.subplots(
+            2,
+            1,
+            figsize=(7, 7),
+            gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
+        )
+        cmap = plt.get_cmap("viridis")
+        n = max(len(fsteps) - 1, 1)
+
+        ref_freq = np.asarray(per_fstep_datasets[fsteps[0]]["frequencies"])
+        targets = [np.asarray(per_fstep_datasets[f]["psd_target"]) for f in fsteps]
+        if all(t.shape == targets[0].shape for t in targets):
+            tar_mean = np.nanmean(np.vstack(targets), axis=0)
+        else:
+            _logger.warning(
+                f"PSD evolution ({label} / {variable}): target spectra differ in length across "
+                "forecast steps; falling back to the first step's target as reference."
+            )
+            tar_mean = targets[0]
+
+        for i, fstep in enumerate(fsteps):
+            ds = per_fstep_datasets[fstep]
+            freq = np.asarray(ds["frequencies"])
+            pred = np.asarray(ds["psd_prediction"])
+            c = cmap(i / n)
+
+            ax_spec.loglog(freq, pred, color=c, lw=1.0)
+
+            if pred.shape == tar_mean.shape:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    ratio = np.where(tar_mean > 0, pred / tar_mean, np.nan)
+                ax_ratio.semilogx(freq, ratio, color=c, lw=1.0)
+
+        # Single, step-independent grey target on top of the prediction bundle.
+        ax_spec.loglog(ref_freq, tar_mean, color="0.45", lw=1.8, ls="-", alpha=0.85, zorder=5)
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(fsteps[0], fsteps[-1]))
+        fig.colorbar(sm, ax=[ax_spec, ax_ratio], label="Forecast step")
+
+        ax_spec.legend(
+            handles=[
+                Line2D([], [], color=cmap(0.5), lw=1.0, ls="-", label="Prediction (per step)"),
+                Line2D(
+                    [],
+                    [],
+                    color="0.45",
+                    lw=1.8,
+                    ls="-",
+                    alpha=0.85,
+                    label="Target (mean over steps)",
+                ),
+            ],
+            frameon=False,
+            fontsize=8,
+        )
+        psd_method = next(iter(per_fstep_datasets.values())).get("psd_method", "sht")
+        title_parts = [f"PSD evolution ({psd_method})"]
+        if variable:
+            title_parts.append(variable)
+        if label:
+            title_parts.append(label)
+        ax_spec.set_title(" – ".join(title_parts))
+        ax_spec.set_ylabel("Power")
+        ax_spec.grid(True, which="both", ls="--", alpha=0.4)
+
+        ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
+        ax_ratio.set_ylabel("Pred / Target (mean over steps)")
+        ax_ratio.set_xlabel("Frequency (1/deg)")
+        ax_ratio.set_ylim(0, 2)
+        ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+
+        fname = out_dir / f"{tag or 'psd_evolution'}.{self.image_format}"
+        _logger.debug(f"Saving PSD evolution plot to {fname}")
         fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
         plt.close(fig)

@@ -811,6 +811,51 @@ def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict]
     return None
 
 
+def _average_target_psd(
+    psd_datasets: Sequence[dict], context: str = ""
+) -> tuple[NDArray, NDArray, int]:
+    """Average the target power spectra across runs.
+
+    The target is a property of the verification data, not of any single model, so when
+    several runs are overlaid on one axes the reference curve drawn against them is the
+    arithmetic mean of their targets (mean of *power*, not of log-power) rather than
+    whichever run happens to come first in the list.
+
+    ``_extract_psd_attrs`` does not guarantee a common frequency axis across runs, so runs
+    whose axis length differs from the first one's are dropped from the mean with a warning.
+
+    Parameters
+    ----------
+    psd_datasets : Sequence[dict]
+        One dict per run, each with ``frequencies`` and ``psd_target``.
+    context : str
+        Free-text identifier (stream/channel/step) used in the warning message.
+
+    Returns
+    -------
+    tuple[NDArray, NDArray, int]
+        The frequency axis, the averaged target spectrum, and the number of runs that
+        actually contributed to the mean.
+    """
+    freq = np.asarray(psd_datasets[0]["frequencies"])
+    targets = [np.asarray(ds["psd_target"]) for ds in psd_datasets]
+    usable = [t for t in targets if t.shape == targets[0].shape]
+
+    if len(usable) < len(targets):
+        _logger.warning(
+            f"PSD target averaging{f' ({context})' if context else ''}: "
+            f"{len(targets) - len(usable)} of {len(targets)} runs have a target spectrum of "
+            "a different length; they are excluded from the average."
+        )
+
+    return freq, np.nanmean(np.vstack(usable), axis=0), len(usable)
+
+
+def _target_legend_label(n_runs: int) -> str:
+    """Legend text for a target curve, stating explicitly when it is a cross-run average."""
+    return "Target" if n_runs < 2 else f"Target (mean of {n_runs} runs)"
+
+
 def psd_plot_metric_region(
     metric: str,
     region: str,
@@ -822,12 +867,19 @@ def psd_plot_metric_region(
 
     PSD curves (frequencies, target PSD, prediction PSD) are stored in
     ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+
+    For a given forecast step, every run is overlaid on a single plot, against one target
+    curve averaged over all the runs contributing to that plot. Evolution plots (spectra
+    across forecast steps) remain one per run.
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
 
     for stream in streams_set:
         for ch in channels_set:
+            # First pass: gather each run's per-fstep PSD data for this stream/channel.
+            run_fstep_datasets: dict[str, dict] = {}
+            run_labels: dict[str, str] = {}
             for run_id, data in scores_dict[metric][region].get(stream, {}).items():
                 if ch not in np.atleast_1d(data.channel.values):
                     continue
@@ -841,26 +893,59 @@ def psd_plot_metric_region(
                     _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
                     continue
 
-                label = runs[run_id].get("label", run_id)
-
+                per_fstep_datasets = {}
                 for fstep in attr_fsteps:
                     psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
                     if psd_datasets is None:
                         continue
+                    per_fstep_datasets[fstep] = psd_datasets[0]
 
-                    method_tag = psd_datasets[0].get("psd_method", "sht")
-                    name = create_filename(
-                        prefix=[metric, method_tag, region],
-                        middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
-                    )
-                    plotter.psd_plot(
-                        psd_datasets,
-                        [label],
-                        tag=name,
-                        variable=ch,
-                        forecast_step=str(fstep),
-                    )
+                if not per_fstep_datasets:
+                    continue
+
+                run_fstep_datasets[run_id] = per_fstep_datasets
+                run_labels[run_id] = runs[run_id].get("label", run_id)
+
+            if not run_fstep_datasets:
+                continue
+
+            # Second pass: one combined plot per forecast step, overlaying every run that
+            # has data for it.
+            all_fsteps = sorted({fstep for d in run_fstep_datasets.values() for fstep in d})
+            for fstep in all_fsteps:
+                run_ids = [rid for rid, d in run_fstep_datasets.items() if fstep in d]
+                psd_datasets = [run_fstep_datasets[rid][fstep] for rid in run_ids]
+                labels = [run_labels[rid] for rid in run_ids]
+
+                method_tag = psd_datasets[0].get("psd_method", "sht")
+                name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=run_ids,
+                    suffix=[stream, ch, f"fstep{fstep}"],
+                )
+                plotter.psd_plot(
+                    psd_datasets,
+                    labels,
+                    tag=name,
+                    variable=ch,
+                    forecast_step=str(fstep),
+                )
+
+            # Third pass: per-run evolution across forecast steps.
+            for run_id, per_fstep_datasets in run_fstep_datasets.items():
+                method_tag = next(iter(per_fstep_datasets.values())).get("psd_method", "sht")
+                ev_name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=[run_id],
+                    suffix=[stream, ch, "evolution"],
+                )
+                plotter.psd_evolution_plot(
+                    per_fstep_datasets,
+                    tag=ev_name,
+                    variable=ch,
+                    label=run_labels[run_id],
+                )
+
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 
