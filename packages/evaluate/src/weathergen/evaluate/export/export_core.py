@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-from omegaconf import OmegaConf
+from omegaconf import ListConfig, OmegaConf
 from tqdm import tqdm
 
 from weathergen.common.config import (
@@ -198,9 +198,10 @@ def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
     """
     with zarrio_reader(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
-        dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
-        all_channels = dummy_out.target.channels
-
+        print("get_data",1,stream,zio_forecast_steps[0])
+        dummy_out = zio.get_data(1, stream, zio_forecast_steps[0])
+        # if target doesn't exist, try prediction
+        all_channels = list(dummy_out.prediction.channels) if dummy_out.prediction is not None else dummy_out.target.channels
         if channels is not None:
             existing_channels = set(all_channels) & set(channels)
             if existing_channels != set(channels):
@@ -273,7 +274,8 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
             source_group = zio.data_root.get(group_path)
 
             if source_group is None:
-                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
+                _logger.warning(f"Nothing found at {group_path}, using default source interval for sample {sample}.")
+                return [None] * len(samples), [None] * len(samples)
 
             times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
             source_start = np.min(times_arr)
@@ -331,7 +333,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
     # --- Discover rank files ---
     # get_model_results accepts lists of epochs and ranks ("all" or list of ints).
-    rank_arg = ["all"] if rank == "all" else (rank if isinstance(rank, list) else [rank])
+    rank_arg = ["all"] if rank == "all" else (rank if isinstance(rank, ListConfig) else [rank])
     rank_files = get_model_results(run_id, [epoch], rank_arg)
     if not rank_files:
         raise FileNotFoundError(

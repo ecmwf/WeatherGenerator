@@ -195,7 +195,6 @@ dimensions:
       wg: forecast_period
       std: forecast_period
       long: time since forecast_reference_time
-      std_unit: hours
     ncells:
       wg: ncells
       std: ncells

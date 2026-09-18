@@ -178,10 +178,10 @@ class Regridder:
             # find type of Gaussian grid
             n_lats = len(set(lat_ds)) // 2  ## UNEXPECTED LOGIC
             num_cells = len(ds["ncells"])
-            if num_cells == 4 * n_lats**2:
-                return f"N{n_lats}"
-            else:
+            if num_cells == 4 * n_lats* (n_lats + 9):
                 return f"O{n_lats}"
+            else:
+                return f"N{n_lats}"
             _logger.info(f"Detected Gaussian grid type: {self.earthkit_input}")
         if self.input_grid_type == "regular_ll":
             ## Needs to be tested properly when there are regular grids

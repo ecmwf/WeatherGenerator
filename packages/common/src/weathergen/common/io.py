@@ -496,12 +496,16 @@ class ZarrIO:
     def example_key(self) -> ItemKey:
         try:
             sample, example_sample = next(self.data_root.groups())
-            stream, example_stream = next(example_sample.groups())
-            fstep = 0
+            for stream, candidate in example_sample.groups():
+                if self.validate_stream(sample, stream, candidate):
+                    break
+            if candidate is None:
+                msg = f"No stream with forecast steps found in {self._store_path}"
+                raise FileNotFoundError(msg)
+            fstep = 1
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
-
         return ItemKey(sample, fstep, stream)
 
     @functools.cached_property
@@ -524,11 +528,19 @@ class ZarrIO:
         _, example_stream = next(example_sample.groups())
 
         all_steps = sorted(list(example_stream.group_keys()))
+        return all_steps
 
-        if self.forecast_offset == 1:
-            return all_steps[1:]  # exclude fstep with no targets/preds
-        else:
-            return all_steps
+    def validate_stream(self, sample: str, stream:str, candidate: zarr.Group) -> bool:
+        """Check if a stream exists and has non zero time data in fsteps"""
+        if list(candidate.group_keys()):
+            item_path = ItemKey(sample, forecast_step=list(candidate.group_keys())[0], stream=stream).path
+            fstep_data = self.data_root.get(item_path)
+            available_arrays = next(fstep_data.group_keys())
+            array_data = self.data_root.get(item_path + "/" + available_arrays)
+            if np.squeeze(array_data["times"].shape) != 0:
+                return True
+
+        return False
 
 
 class ZipZarrIO(ZarrIO):
