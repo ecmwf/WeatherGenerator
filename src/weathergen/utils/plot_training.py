@@ -891,7 +891,6 @@ def plot_train(args=None):
                 )
             else:
                 cf = config.load_merge_configs(
-                    private_home=None,
                     from_run_id=run_id,
                     mini_epoch=None,
                 )
