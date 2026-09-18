@@ -169,9 +169,7 @@ def write_output(
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
     latents_all = get_latent_output(batch, model_output) if write_latents else None
-    latent_indexes = [0] + [
-        forecast_step + 1 - forecast_offset for forecast_step in timestep_idxs
-    ]
+    latent_indexes = [0] + [forecast_step + 1 - forecast_offset for forecast_step in timestep_idxs]
 
     data = io.OutputBatchData(
         sources,
