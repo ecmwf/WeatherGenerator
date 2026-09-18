@@ -30,10 +30,10 @@ class EMAModel:
         self.rampup_ratio = rampup_ratio
         self.ema_model = empty_model
         self.is_model_sharded = is_model_sharded
-        self.batch_size = 1
-        # Build a name → param map once
+        # Build a name → param map once; used to precompute the update pairs.
         self.src_params = dict(self.original_model.named_parameters())
-
+        self._ema_update_params: list[torch.nn.Parameter] = []
+        self._src_update_params: list[torch.nn.Parameter] = []
         self.reset()
 
     @torch.no_grad()
@@ -56,13 +56,35 @@ class EMAModel:
         if needs_strip:
             maybe_sharded_sd = {k.removeprefix("module."): v for k, v in maybe_sharded_sd.items()}
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
+        self._rebuild_update_pairs()
         self.ema_model.eval()
 
-    def requires_grad_(self, flag: bool):
-        for p in self.ema_model.parameters():
-            p.requires_grad = flag
+    def _resolve_src_param(self, name: str):
+        p_src = self.src_params.get(name, None)
+        if p_src is None:
+            p_src = self.src_params.get("module." + name, None)
+        return p_src
 
-    def get_current_beta(self, cur_step: int) -> float:
+    def _rebuild_update_pairs(self):
+        """Precompute EMA/source parameter pairs once so update() stays branch-light."""
+        ema_params = []
+        src_params = []
+        for name, p_ema in self.ema_model.named_parameters():
+            if "identity" in name.lower() or "q_cells" in name.lower():
+                continue
+            p_src = self._resolve_src_param(name)
+            if p_src is None:
+                # EMA-only param or intentionally excluded
+                raise AssertionError(
+                    f"{name}: All parameters of the EMA model must be in the base model."
+                )
+            ema_params.append(p_ema)
+            src_params.append(p_src)
+
+        self._ema_update_params = ema_params
+        self._src_update_params = src_params
+
+    def get_current_beta(self, cur_step: int, batch_size: int) -> float:
         """
         Get current EMA beta value for monitoring.
 
@@ -78,30 +100,20 @@ class EMAModel:
         halflife_steps = self.halflife_steps
         if self.rampup_ratio is not None:
             halflife_steps = min(halflife_steps, cur_step * self.rampup_ratio)
-        beta = 0.5 ** (self.batch_size / max(halflife_steps, 1e-6))
+        beta = 0.5 ** (batch_size / max(halflife_steps, 1e-6))
         return beta
 
     @torch.no_grad()
-    def update(self, cur_step, batch_size):
+    def update(self, cur_step: int, batch_size: int):
         # ensure model remains sharded
         if self.is_model_sharded:
             self.ema_model.reshard()
+
         # determine correct interpolation params
-        self.batch_size = batch_size
-        beta = self.get_current_beta(cur_step)
+        beta = self.get_current_beta(cur_step, batch_size)
 
-        for name, p_ema in self.ema_model.named_parameters():
-            p_src = self.src_params.get(name, None)
-            # Due to DDP only being applied only to the student the names may missmatch
-            # Thus, we check for the alternate naming scheme
-            p_src = self.src_params.get("module." + name, None) if p_src is None else p_src
-            if "identity" in name.lower() or "q_cells" in name.lower():
-                continue
-            if p_src is None:
-                # EMA-only param or intentionally excluded
-                assert False, f"{name}: All parameters of the EMA model must be in the base model."
-
-            p_ema.lerp_(p_src, 1.0 - beta)
+        torch._foreach_mul_(self._ema_update_params, beta)
+        torch._foreach_add_(self._ema_update_params, self._src_update_params, alpha=1.0 - beta)
 
     @torch.no_grad()
     def forward_eval(self, *args, **kwargs):
