@@ -443,7 +443,10 @@ def sht_psd(
     coeffs = sht.transform(data)  # (n_samples, L, M)
 
     # PSD = sum |coeffs|^2 over m for each total wavenumber l, averaged over samples
-    psd_per_sample = np.sum(np.abs(coeffs) ** 2, axis=-1)  # (n_samples, L)
+    # For real fields, rfft stores only m >= 0; double m > 0 power to include conjugate -m modes.
+    psd_per_sample = np.abs(coeffs[..., 0]) ** 2 + 2.0 * np.sum(
+        np.abs(coeffs[..., 1:]) ** 2, axis=-1
+    )  # (n_samples, L)
     psd = psd_per_sample.mean(axis=0)
 
     n_wavenumbers = psd.shape[0]
