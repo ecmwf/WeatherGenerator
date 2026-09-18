@@ -499,9 +499,19 @@ class ZarrIO:
     def example_key(self) -> ItemKey:
         try:
             sample, example_sample = next(self.data_root.groups())
+            # Find the first stream that has prediction/target data (not just source)
+            for stream, example_stream in example_sample.groups():
+                fstep_keys = sorted(example_stream.group_keys())
+                for fk in fstep_keys:
+                    fstep_group = example_stream[fk]
+                    child_names = set(fstep_group.group_keys())
+                    if "prediction" in child_names or "target" in child_names:
+                        return ItemKey(sample, int(fk), stream)
+            # Fallback: use first stream / first fstep even without prediction/target
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
-        except StopIteration as e:
+            fstep_keys = sorted(example_stream.group_keys())
+            fstep = int(fstep_keys[0]) if fstep_keys else 0
+        except (StopIteration, IndexError) as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
 

@@ -79,6 +79,16 @@ p_std: 1.2
 
 healpix_level: 5
 
+# --- Per-ODE-step map & spectrum diagnostics (inference, single-step forecasting only) ---
+# Decodes x_t and x0_hat at each ODE step and plots maps (x_t | x0_hat | decode(z) | truth) plus
+# angular power spectra in latent and physical space, under <results>/<run_id>/plots/ode_diagnostics.
+# Requires training_config.forecast.num_steps=1 (rollout leaves no reference target). Off by default.
+diag_ode_maps: false           # master switch; costs 2 decoder passes + 4 map panels per step
+diag_ode_every_n_steps: 1      # 1 = every ODE step; raise to cut render time
+diag_channels: ["2t", "q_850"]
+diag_stream: ERA5
+diag_latent_channels: 128      # latent channels sampled for the mean C_l (0 = all)
+
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
