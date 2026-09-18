@@ -47,6 +47,9 @@ class TimeIndexRange:
     start: TIndex
     end: TIndex
 
+    def __len__(self) -> int:
+        return int(self.end - self.start)
+
 
 @dataclass
 class DTRange:
@@ -94,8 +97,13 @@ class TimeWindowHandler:
         self.t_window_len: NPTDel64 = t_window_len_hours
         self.t_window_step: NPTDel64 = t_window_step_hours
 
+        idx_start: TIndex = np.int64(0)
+        idx_end = np.int64((self.t_end - self.t_start) // self.t_window_step)
+        self.index_range = TimeIndexRange(idx_start, idx_end)
+
         assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
         assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
+        assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
 
     def __str__(self) -> str:
         # Helper to ensure readable timedelta formatting
@@ -104,26 +112,6 @@ class TimeWindowHandler:
         return (
             f"TimeWindowHandler: start={self.t_start}, end={self.t_end}, len={l_str}, step={s_str}"
         )
-
-    def get_index_range(self) -> TimeIndexRange:
-        """
-        Temporal window corresponding to index
-
-        Parameters
-        ----------
-        idx :
-            index of temporal window
-
-        Returns
-        -------
-            start and end of temporal window
-        """
-
-        idx_start: TIndex = np.int64(0)
-        idx_end = np.int64((self.t_end - self.t_start) // self.t_window_step)
-        assert idx_start <= idx_end, f"time window idxs invalid: {idx_start} <= {idx_end}"
-
-        return TimeIndexRange(idx_start, idx_end)
 
     def window(self, idx: TIndex) -> DTRange:
         """
@@ -143,6 +131,14 @@ class TimeWindowHandler:
         t_end_win = t_start_win + self.t_window_len
 
         return DTRange(t_start_win, t_end_win)
+
+    def max_index(self, n_steps) -> int:
+        """Last viable index to make a n_steps long forecast (including offset)."""
+        return self.index_range.end - (
+            # time that windows for n_steps cover
+            (self.t_window_step * n_steps + self.t_window_len)
+            // self.t_window_step  # as number of indexes
+        )
 
 
 @dataclass
