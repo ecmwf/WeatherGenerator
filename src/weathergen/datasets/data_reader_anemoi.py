@@ -17,8 +17,8 @@ from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 from omegaconf import OmegaConf
-
 from weathergen.common.config import timedelta_to_str
+
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     ReaderData,
@@ -119,6 +119,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         # caches lats and lons
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
+        self.n_latitudes = len(self.latitudes)
 
         # select/filter requested source channels
         if stream_info.get(str(stage) + "_source_channels") is None:
