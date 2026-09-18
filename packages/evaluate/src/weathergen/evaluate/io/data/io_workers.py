@@ -63,10 +63,10 @@ def _open_anemoi_dataset(anemoi_cfg: dict) -> tuple:
 def _read_anemoi_target(
     ds,
     target_idx: list[int],
-    ds_dates: np.ndarray,
-    times: np.ndarray,
+    ds_dates: NDArray,
+    times: NDArray,
     channel_idxs: list[int] | None,
-) -> np.ndarray:
+) -> NDArray:
     """Read target data from a pre-opened anemoi dataset for the given valid times.
 
     Parameters
@@ -195,7 +195,6 @@ def _read_sample(
     is_zip: bool,
     read_coords: bool = False,
     is_gridded: bool = True,
-    regrid_opts: dict | None = None,
     anemoi_target_cfg: dict | None = None,
 ) -> tuple[list[NDArray], list[NDArray], list[NDArray], dict]:
     """
@@ -310,7 +309,8 @@ def _read_sample(
             pred_data = (
                 pred_data[:, channel_idxs] if pred_data.ndim == 2 else pred_data[:, channel_idxs, :]
             )
-            # Handle sub-steps (gridded data with multiple valid_times per fstep).
+
+        # Handle sub-steps (gridded data with multiple valid_times per fstep).
         # For scatter/observation data each observation has its own timestamp,
         # so splitting by unique time would create one tiny array per obs —
         # thousands of them — causing the assembly code to hang.
