@@ -16,6 +16,7 @@ import os
 import pdb
 import sys
 import time
+from torch import distributed as dist
 import traceback
 from pathlib import Path
 
@@ -109,6 +110,9 @@ def run_inference(args):
     trainer = Trainer(cf.train_logging)
     try:
         trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+        # Ensure ranks exit when TCPStore server is gone.
+        if dist.is_initialized():
+            dist.destroy_process_group()
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -148,6 +152,9 @@ def run_continue(args):
 
     try:
         trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+        # Ensure ranks exit when TCPStore server is gone.
+        if dist.is_initialized():
+            dist.destroy_process_group()
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -189,6 +196,9 @@ def run_train(args):
 
     try:
         trainer.run(cf, devices)
+        # Ensure ranks exit when TCPStore server is gone.
+        if dist.is_initialized():
+            dist.destroy_process_group()
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
