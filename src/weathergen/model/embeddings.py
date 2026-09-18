@@ -113,11 +113,25 @@ class StreamEmbedTransformer(torch.nn.Module):
         if self.unembed_mode == "full":
             out = self.unembed(self.ln_final(x.flatten(-2, -1)))
         elif self.unembed_mode == "block":
-            out = [
-                ue(ln(x[:, i]))
-                for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=True))
-            ]
-            out = torch.stack(out, dim=1).flatten(-2, -1)
+            b, c, d = x.shape
+
+            ln_w = torch.stack([ln.weight for ln in self.ln_final])
+            ln_b = torch.stack([ln.bias for ln in self.ln_final])
+            w = torch.stack([ue.weight for ue in self.unembed])
+            ue_bias = torch.stack([ue.bias for ue in self.unembed])
+
+            x_normed = torch.nn.functional.layer_norm(
+                x.reshape(b * c, d), [d], weight=None, bias=None
+            )
+            x_normed = x_normed.reshape(b, c, d) * ln_w + ln_b
+
+            out = torch.bmm(
+                x_normed.transpose(0, 1),
+                w.transpose(1, 2),
+            ).transpose(0, 1)
+
+            out = out.add(ue_bias).flatten(-2, -1).to(x.dtype)
+
         else:
             raise ValueError(f"Unknown unembed mode: {self.unembed_mode}")
 
