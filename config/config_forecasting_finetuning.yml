@@ -35,25 +35,25 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 16
+  num_mini_epochs: 32
 
   start_date: 2014-01-01T00:00
   end_date: 2022-12-31T00:00
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 1e-4
+    lr_max: 7e-5
     lr_final_decay: 2e-6
     lr_final: 0.0
-    num_steps_warmup: 256
-    num_steps_cooldown: 512
+    num_steps_warmup: 1024
+    num_steps_cooldown: 16384
     policy_warmup: "cosine"
     policy_decay: "cosine"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
 
   forecast :
-      time_step: 06:00:00
+      # time_step: 06:00:00
       offset: 1
       num_steps: 8
       policy: "fixed"
