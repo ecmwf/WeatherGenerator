@@ -1,0 +1,52 @@
+verbose: true
+image_format: png
+dpi_val: 300
+summary_plots: true
+print_summary: false
+plot_animations: true
+plot_bias: false
+plot_target: true
+global_plotting_options:
+  image_format: png
+  animation_format: mp4
+  dpi_val: 300
+  ERA5:
+    use_datashader: false
+    marker_size: 4
+    scale_marker_size: true
+evaluation:
+  metrics: ["ssr", "rmse", "psd"]
+  regions:
+  - global
+  summary_plots: true
+  summary_dir: ./plots/testing_ssr/ #[INSERT DECODER (LIST) ID(S) HERE]
+  print_summary: false
+  log_scale: false
+  add_grid: false
+  plot_maps: false
+  plot_animations: false
+  plot_bias: false
+  plot_target: false
+  plot_ensemble: "members"
+  psd_step_montage_n: 25
+    
+default_streams:
+  ERA5:
+    channels: ['q_850', '2t']
+    evaluation:
+      sample: "all"
+      forecast_step: "all"
+    plotting:
+      sample: "all"
+      forecast_step: "all"
+      plot_maps: false
+      plot_animations: false
+      plot_bias: false
+      plot_target: false
+      plot_histograms: false
+      plot_ensemble: "members"
+
+run_ids:
+  #[INSERT RUN ID HERE]:
+    label: #[INSERT SEQUENCE PRETRAINED -> DIFFUSION -> DECODER ID HERE]
+  # [ADD MORE RUN IDS HERE IF NEEDED]
