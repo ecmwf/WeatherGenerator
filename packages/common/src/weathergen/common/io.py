@@ -521,7 +521,20 @@ class ZarrIO:
         """Query available forecast steps in this zarr store."""
         # assume stream/samples/forecast_steps are orthogonal
         _, example_sample = next(self.data_root.groups())
-        _, example_stream = next(example_sample.groups())
+
+        # Find the first stream that actually contains forecast step groups.
+        # The first stream alphabetically (e.g. "latent") may be empty or
+        # have a different structure than the primary data streams.
+        example_stream = None
+        for _, candidate in example_sample.groups():
+            child_keys = list(candidate.group_keys())
+            if child_keys:
+                example_stream = candidate
+                break
+
+        if example_stream is None:
+            msg = f"No stream with forecast steps found in {self._store_path}"
+            raise FileNotFoundError(msg)
 
         all_steps = sorted(list(example_stream.group_keys()))
 
