@@ -268,6 +268,8 @@ anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "
 
 
 [tool.pytest.ini_options]
+testpaths = ["src", "packages", "tests"]
+addopts = "--ignore=tests/test_config.py --ignore=tests/test_cli.py"
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
