@@ -76,7 +76,7 @@ def _extract_one_tstep(
             idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
             if idxs_inv is not None:
                 pred = pred[:, idxs_inv]
-                target = target[idxs_inv]
+                target = target[idxs_inv] if len(target) > 0 else target
                 t_coords = t_coords[idxs_inv]
                 t_times = t_times[idxs_inv]
 

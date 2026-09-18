@@ -118,27 +118,23 @@ class DataReaderAnemoiRT(DataReaderTimestep):
         assert stream_info.get("geoinfo_channels") is not None, "pretrained model expected."
         self.geoinfo_channels = stream_info.get("geoinfo_channels")
         self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
+
         self.geoinfo_channels_static, self.geoinfo_channels_dynamic = [], []
         self.geoinfo_idx_static, self.geoinfo_idx_dynamic = [], []
         (
             self.geoinfo_idx_static_lin,
             self.geoinfo_idx_dynamic_lin,
         ) = [], []
-        idx = 0
-        for _, (k, _) in enumerate(ds.typed_variables.items()):
-            if k not in self.geoinfo_channels:
-                continue
-
-            if k in _anemoi_dynamic_forcings():
-                self.geoinfo_channels_dynamic += [k]
-                self.geoinfo_idx_dynamic += [ds.variables.index(k)]
+        for idx, ch in enumerate(self.geoinfo_channels):
+            if ch in _anemoi_dynamic_forcings():
+                self.geoinfo_channels_dynamic += [ch]
+                self.geoinfo_idx_dynamic += [ds.variables.index(ch)]
                 self.geoinfo_idx_dynamic_lin += [idx]
             else:
                 # treat time-varying variables as static
-                self.geoinfo_channels_static += [k]
-                self.geoinfo_idx_static += [ds.variables.index(k)]
+                self.geoinfo_channels_static += [ch]
+                self.geoinfo_idx_static += [ds.variables.index(ch)]
                 self.geoinfo_idx_static_lin += [idx]
-            idx += 1
 
         # set geoinfo normalization statistics
         if len(self.geoinfo_idx) > 0:
@@ -198,16 +194,16 @@ class DataReaderAnemoiRT(DataReaderTimestep):
             t_cur += self.frequency
 
         # extract geoinfo channels (can be time-varying, so read from dataset)
-        geoinfos_static = np.repeat(
-            self.ds[0, list(self.geoinfo_idx_static)][0], len(t_idxs), axis=1
-        )
+        geoinfos_static = self.ds[0, list(self.geoinfo_idx_static)][0].transpose()
+        geoinfos_static = np.concatenate([geoinfos_static for _ in t_idxs])
         geoinfos_dynamic = _anemoi_get_dynamic_forcings(
             datetimes, self.latitudes, self.longitudes, self.geoinfo_channels_dynamic
         )
+        # insert static and dynamic into common array
         geoinfos = np.empty((coords.shape[0], len(self.geoinfo_idx)))
-        for i, data in zip(self.geoinfo_idx_static_lin, geoinfos_static, strict=False):
-            geoinfos[:, i] = data
-        for i, ch in zip(self.geoinfo_idx_dynamic_lin, self.geoinfo_channels_dynamic, strict=False):
+        for idx, i in enumerate(self.geoinfo_idx_static_lin):
+            geoinfos[:, i] = geoinfos_static[:, idx]
+        for i, ch in zip(self.geoinfo_idx_dynamic_lin, self.geoinfo_channels_dynamic, strict=True):
             geoinfos[:, i] = geoinfos_dynamic[ch]
 
         # extract channels
