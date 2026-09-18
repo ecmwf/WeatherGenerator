@@ -22,6 +22,7 @@ from pathlib import Path
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
+from weathergen.train.healpix_curriculum import apply_curriculum
 from weathergen.train.trainer import Trainer
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,7 @@ def run_continue(args):
         {},
         cli_overwrite,
     )
+    apply_curriculum(cf)
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     mp_method = cf.general.get("multiprocessing_method", "fork")
@@ -147,7 +149,37 @@ def run_continue(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+        from_run_id_iter = args.from_run_id
+        mini_epoch_iter = args.mini_epoch
+        first_run = True
+        istep_override = {}
+        while True:
+            if not first_run:
+                cf = config.load_merge_configs(
+                    args.private_config,
+                    from_run_id_iter,
+                    mini_epoch_iter,
+                    args.base_config,
+                    *args.config,
+                    istep_override,
+                    cli_overwrite,
+                )
+                apply_curriculum(cf)
+                cf = config.set_run_id(cf, cf.general.run_id, True)
+                cf = Trainer.init_ddp(cf)
+                cf.streams = config.load_streams(Path(cf.streams_directory))
+                trainer = Trainer(cf.train_logging)
+
+            trainer.run(cf, devices, from_run_id_iter, mini_epoch_iter)
+            first_run = False
+
+            if not trainer.cf.get("_curriculum_exit", False):
+                break
+
+            logger.info("Restarting training for next curriculum stage...")
+            from_run_id_iter = trainer.cf.general.run_id
+            mini_epoch_iter = -1
+            istep_override = {"general": {"istep": trainer.cf.general.istep}}
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -167,6 +199,7 @@ def run_train(args):
     cf = config.load_merge_configs(
         args.private_config, None, None, args.base_config, *args.config, cli_overwrite
     )
+    apply_curriculum(cf)
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.data_loading.rng_seed = int(time.time())
@@ -188,7 +221,36 @@ def run_train(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices)
+        from_run_id_iter = None
+        mini_epoch_iter = None
+        istep_override = {}
+        while True:
+            if from_run_id_iter is not None:
+                cf = config.load_merge_configs(
+                    args.private_config,
+                    from_run_id_iter,
+                    mini_epoch_iter,
+                    args.base_config,
+                    *args.config,
+                    istep_override,
+                    cli_overwrite,
+                )
+                apply_curriculum(cf)
+                cf = config.set_run_id(cf, cf.general.run_id, True)
+                cf = Trainer.init_ddp(cf)
+                cf.streams = config.load_streams(Path(cf.streams_directory))
+                trainer = Trainer(cf.train_logging)
+                trainer.run(cf, devices, from_run_id_iter, mini_epoch_iter)
+            else:
+                trainer.run(cf, devices)
+
+            if not trainer.cf.get("_curriculum_exit", False):
+                break
+
+            logger.info("Restarting training for next curriculum stage...")
+            from_run_id_iter = trainer.cf.general.run_id
+            mini_epoch_iter = -1
+            istep_override = {"general": {"istep": trainer.cf.general.istep}}
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
