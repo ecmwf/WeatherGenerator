@@ -1573,7 +1573,16 @@ class Scores:
         noise_fac=1.0e-03,
     ) -> xr.DataArray:
         """
-        Calculate the rank histogram of the forecast data w.r.t. reference data.
+        Calculate the rank histogram (Talagrand diagram) of the forecast data w.r.t.
+        reference data.
+
+        A rank histogram is a distribution over rank bins, not a per-sample scalar, so
+        (like ``calc_psd``/``calc_quantiles``) this returns a scalar flatness score - the
+        RMS deviation of the (normalized) rank frequencies from a perfectly flat/uniform
+        histogram, 0 meaning perfectly calibrated - and stores the full per-bin counts in
+        ``.attrs`` (keyed per preserved dimension, e.g. channel) for plotting downstream.
+        Ranks are pooled across all spatial points *and* samples for this forecast step,
+        since individual samples rarely contain enough points for a meaningful histogram.
 
         Parameters
         ----------
@@ -1583,7 +1592,7 @@ class Scores:
             Ground truth data array
         norm: bool
             Flag if normalized counts should be returned. If True, the rank histogram will be
-            normalized by the number of ensemble members in the forecast data.
+            normalized by the number of verification points.
         add_noise: bool
             Flag if a small amount of random noise should be added to the data to avoid ties in the
             rank histogram.
@@ -1595,7 +1604,7 @@ class Scores:
         Returns
         -------
         xr.DataArray
-            Rank histogram data array averaged over the provided dimensions
+            Rank histogram flatness score, one value per preserved dimension (e.g. channel).
         """
 
         # unstack stacked time-dimension beforehand if required (time may be stacked for forecast
@@ -1610,9 +1619,15 @@ class Scores:
             if isinstance(prediction.indexes["time"], pd.MultiIndex):
                 prediction = prediction.reset_index("time")
 
+        # pool ranks across the aggregation dims *and* samples (if present) - a rank
+        # histogram needs many pooled points to be statistically meaningful.
+        hist_dims = list(self._agg_dims)
+        if "sample" in ground_truth.dims and "sample" not in hist_dims:
+            hist_dims = [*hist_dims, "sample"]
+
         # perform the stacking
-        obs_stacked = ground_truth.stack({"npoints": self._agg_dims})
-        fcst_stacked = prediction.stack({"npoints": self._agg_dims})
+        obs_stacked = ground_truth.stack({"npoints": hist_dims})
+        fcst_stacked = prediction.stack({"npoints": hist_dims})
 
         # add noise to data if desired
         if add_noise:
@@ -1631,37 +1646,61 @@ class Scores:
                     da.random.random(size=fcst_stacked.shape, chunks=fcst_stacked.chunks)
                     * noise_fac
                 )
-        # preserve the other coordinates
-        preserved_coords = {
-            c: obs_stacked[c].values
-            for c in obs_stacked.coords
-            if all(dim not in {self._ens_dim, "npoints"} for dim in obs_stacked[c].dims)
-        }
 
         # calculate ranks for all data points
         rank = (obs_stacked >= fcst_stacked).sum(dim=self._ens_dim)
-        # and count occurence of rank values
         rank.name = "rank"  # name for xr.DataArray is required for histogram-method
-        rank_counts = histogram(
-            rank,
-            dim=["npoints"],
-            bins=np.arange(len(fcst_stacked[self._ens_dim]) + 2),
-            block_size=None if rank.chunks is None else "auto",
-        )
 
-        # Reattach preserved coordinates by broadcasting
-        for coord_name, coord_values in preserved_coords.items():
-            # Only keep unique values along npoints if necessary
-            if coord_name in rank_counts.coords:
-                continue
-            rank_counts = rank_counts.assign_coords({coord_name: coord_values})
+        n_bins = len(fcst_stacked[self._ens_dim]) + 1
+        bins = np.arange(n_bins + 1)
 
-        # provide normalized rank counts if desired
-        if norm:
-            npoints = len(fcst_stacked["npoints"])
-            rank_counts = rank_counts / npoints
+        # dims still remaining after pooling into "npoints" (typically just "channel")
+        preserve_dims = [d for d in rank.dims if d != "npoints"]
 
-        return rank_counts
+        def _counts_and_score(rank_slice: xr.DataArray) -> tuple[np.ndarray, float]:
+            counts = histogram(
+                rank_slice,
+                dim=["npoints"],
+                bins=bins,
+                block_size=None if rank_slice.chunks is None else "auto",
+            ).values.astype(np.float64)
+            npoints = counts.sum()
+            if norm and npoints > 0:
+                counts = counts / npoints
+            expected = 1.0 / n_bins if norm else npoints / n_bins
+            score_val = float(np.sqrt(np.mean((counts - expected) ** 2)))
+            return counts, score_val
+
+        if not preserve_dims:
+            counts, score_val = _counts_and_score(rank)
+            score = xr.DataArray(score_val)
+            score.attrs["rank_counts"] = counts.tolist()
+            score.attrs["n_bins"] = n_bins
+            return score
+
+        shape = tuple(rank.sizes[d] for d in preserve_dims)
+        score_values = np.empty(shape)
+        all_attrs: dict = {}
+
+        for idx in np.ndindex(*shape):
+            sel = dict(zip(preserve_dims, idx, strict=False))
+            rank_slice = rank.isel(**sel)
+            rank_slice.name = "rank"
+            counts, score_val = _counts_and_score(rank_slice)
+            score_values[idx] = score_val
+
+            key = "_".join(
+                str(rank.coords[d].values[i]) if d in rank.coords else str(i)
+                for d, i in sel.items()
+            )
+            all_attrs[f"{key}/rank_counts"] = counts.tolist()
+
+        coords = {d: rank.coords[d] for d in preserve_dims if d in rank.coords}
+        score = xr.DataArray(score_values, dims=preserve_dims, coords=coords)
+        all_attrs["n_bins"] = n_bins
+        all_attrs["preserve_dims"] = preserve_dims
+        score.attrs.update(all_attrs)
+        return score
 
     def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """

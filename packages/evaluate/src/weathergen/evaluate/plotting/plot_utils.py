@@ -35,6 +35,7 @@ class PlotSubdir(str, Enum):
     score_cards = "score_cards"
     bar_plots = "bar_plots"
     qq_plots = "qq_plots"
+    rank_histogram_plots = "rank_histogram_plots"
 
 
 # Shared helpers
@@ -862,6 +863,81 @@ def psd_plot_metric_region(
                         forecast_step=str(fstep),
                     )
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
+
+
+def _extract_rank_histogram_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> dict | None:
+    """Extract rank histogram counts from DataArray attrs for a given fstep/channel.
+
+    Returns a dict with ``rank_counts``/``n_bins`` ready for the plotter, or None if
+    the keys are missing (e.g. metric skipped for this fstep/channel).
+    """
+    attrs = data_ch.attrs
+    fp = f"fstep_{fstep}/"
+    n_bins = attrs.get(f"{fp}n_bins", attrs.get("n_bins"))
+
+    for prefix in (f"{fp}{ch}/", fp):
+        if f"{prefix}rank_counts" in attrs and n_bins is not None:
+            return {
+                "rank_counts": np.array(attrs[f"{prefix}rank_counts"]),
+                "n_bins": int(n_bins),
+            }
+    return None
+
+
+def rank_histogram_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+) -> None:
+    """Create rank histogram (Talagrand diagram) bar plots for all streams and channels.
+
+    Per-bin rank counts are stored in ``score.attrs`` by ``Scores.calc_rank_histogram``
+    and read back here; unlike deterministic score-vs-lead-time metrics, a rank histogram
+    is a distribution, so it is plotted as one bar chart per (stream, channel, forecast
+    step) rather than a line plot.
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        for ch in channels_set:
+            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+                if ch not in np.atleast_1d(data.channel.values):
+                    continue
+
+                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
+                if data_ch.isnull().all():
+                    continue
+
+                attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
+                if not attr_fsteps:
+                    _logger.warning(
+                        f"Rank histogram attrs missing for {run_id}/{stream}/{ch}. Skipping."
+                    )
+                    continue
+
+                label = runs[run_id].get("label", run_id)
+
+                for fstep in attr_fsteps:
+                    rank_hist_dataset = _extract_rank_histogram_attrs(data_ch, fstep, ch)
+                    if rank_hist_dataset is None:
+                        continue
+
+                    name = create_filename(
+                        prefix=[metric, region],
+                        middle=[run_id],
+                        suffix=[stream, ch, f"fstep{fstep}"],
+                    )
+                    title = f"{metric.upper()} | {stream} | {ch} | fstep {fstep}"
+                    plotter.rank_histogram_plot(
+                        [rank_hist_dataset],
+                        [label],
+                        tag=name,
+                        title=title,
+                    )
+    _logger.info(f"Rank histogram plots saved successfully into: {plotter.out_plot_dir_rank_hist}")
 
 
 def create_filename(
