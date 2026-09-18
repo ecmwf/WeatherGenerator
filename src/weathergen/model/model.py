@@ -34,6 +34,7 @@ from weathergen.model.engines import (
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
     LatentState,
+    MLPProbeDecoder,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -453,6 +454,17 @@ class Model(torch.nn.Module):
                             dims_embed[0],
                             cf.ae_global_dim_embed,
                             self.targets_num_channels[i_stream],
+                        )
+                    elif cf.decoder_type in ("MLPProbe", "MLPProbeNorm"):
+                        tte = MLPProbeDecoder(
+                            stream_name,
+                            dims_embed[0],
+                            cf.ae_global_dim_embed,
+                            self.targets_num_channels[i_stream],
+                            hidden_dims=cf.get("mlp_probe_hidden_dims", [cf.ae_global_dim_embed]),
+                            activation=cf.get("mlp_probe_activation", "GELU"),
+                            dropout_rate=cf.get("mlp_probe_dropout_rate", 0.0),
+                            with_layer_norm=(cf.decoder_type == "MLPProbeNorm"),
                         )
                     else:
                         # target prediction engines
