@@ -318,8 +318,11 @@ class Trainer(TrainerBase):
         forecast_chunk = batch.get_source_samples()
        
         if not compute_full_loss:
-            target_aux_chunk = copy.deepcopy(targets_and_auxs[physical_loss_names[0]])
-        
+            # shallow copy is sufficient: .physical and .output_idxs are reassigned before
+            # any use, and the shared per-step target dicts are only read downstream
+            target_aux = targets_and_auxs[physical_loss_names[0]]
+            target_aux_chunk = copy.copy(target_aux)
+
         for chunk_idx, chunk in enumerate(chunks):
             if not compute_full_loss:
                 batch.to_device_for_output_chunk(self.device, chunk)
@@ -339,7 +342,6 @@ class Trainer(TrainerBase):
 
             if should_write_output:
                 if not compute_full_loss:
-                    target_aux = targets_and_auxs[physical_loss_names[0]]
                     target_aux_chunk.physical = [None for _ in range(chunk[0])] + [target_aux.physical[step] for step in chunk]
                     target_aux_chunk.output_idxs = chunk
                     target_output = { physical_loss_names[0]: target_aux_chunk }
@@ -427,6 +429,10 @@ class Trainer(TrainerBase):
             self.dataset, **loader_params, sampler=None
         )
 
+        # Inference runs under torch.no_grad with no gradient synchronization, so the
+        # DDP/FSDP wrappers are not needed; skipping them avoids allocating DDP gradient
+        # buckets (~one model-size buffer per rank). The process group set up by torchrun
+        # is still used for per-rank data sharding.
         self.model, self.model_params = init_model_and_shard(
             cf,
             self.dataset,
@@ -434,8 +440,8 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.test_cfg.training_mode,
             devices[0],
-            cf.with_ddp,
-            cf.with_fsdp,
+            with_ddp=False,
+            with_fsdp=cf.with_fsdp,
         )
 
         # get target_aux calculators for different loss terms
@@ -445,6 +451,12 @@ class Trainer(TrainerBase):
 
         if is_root():
             config.save(self.cf, mini_epoch=0)
+
+        if self.test_cfg.get("skip_target_values", False):
+            logger.warning(
+                "skip_target_values is active: target values are neither read nor written "
+                "(the output zarr has no target datasets) and no validation losses are computed."
+            )
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -456,6 +468,16 @@ class Trainer(TrainerBase):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
+
+        # skip_target_values is inference-only: without target values there is nothing
+        # to train against and validation losses would be meaningless
+        if self.training_cfg.get("skip_target_values", False) or self.validation_cfg.get(
+            "skip_target_values", False
+        ):
+            raise ValueError(
+                "skip_target_values is only allowed in inference (test_config), "
+                "not in training_config or validation_config."
+            )
 
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
@@ -918,11 +940,14 @@ class Trainer(TrainerBase):
                                     targets_and_auxs,
                                 )
 
-                        _ = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            targets_and_aux=targets_and_auxs,
-                            metadata=extract_batch_metadata(batch),
-                        )
+                        # skip_target_values: target values are not read (zero width),
+                        # so no loss can be computed
+                        if not mode_cfg.get("skip_target_values", False):
+                            _ = self.loss_calculator_val.compute_loss(
+                                preds=preds,
+                                targets_and_aux=targets_and_auxs,
+                                metadata=extract_batch_metadata(batch),
+                            )
                         pbar.update(batch_size * self.cf.world_size)
 
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:

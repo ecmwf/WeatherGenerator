@@ -389,7 +389,7 @@ class DataReaderBase(metaclass=ABCMeta):
 
         return rdata
 
-    def get_target(self, idx: TIndex) -> ReaderData:
+    def get_target(self, idx: TIndex, coords_geoinfos_only: bool = False) -> ReaderData:
         """
         Get target data for idx
 
@@ -397,13 +397,33 @@ class DataReaderBase(metaclass=ABCMeta):
         ----------
         idx : int
             Index of temporal window
+        coords_geoinfos_only : bool
+            If True, only coords, geoinfos and datetimes are provided; data has zero
+            width (shape (num_datapoints, 0)) so no target values are read or stored.
 
         Returns
         -------
         target data (coords, geoinfos, data, datetimes)
         """
 
+        if coords_geoinfos_only:
+            return self._get_coords_geoinfos_only(idx, self.target_idx)
+
         rdata = self._get(idx, self.target_idx)
+
+        return rdata
+
+    def _get_coords_geoinfos_only(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+        """
+        Get data for window with zero-width data values (coords, geoinfos, datetimes only)
+
+        Default implementation performs a full read and drops the values; subclasses can
+        override to avoid reading the values altogether. The width-0 slice keeps the row
+        count so all row-alignment invariants (is_empty, shuffle, tokenization) hold.
+        """
+
+        rdata = self._get(idx, channels_idx)
+        rdata.data = rdata.data[:, :0]
 
         return rdata
 
