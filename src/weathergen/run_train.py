@@ -16,9 +16,10 @@ import os
 import pdb
 import sys
 import time
-from torch import distributed as dist
 import traceback
 from pathlib import Path
+
+from torch import distributed as dist
 
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
