@@ -39,6 +39,7 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
+from weathergen.train.loss_modules.utils import compute_cos_sim_to_prev
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
 
@@ -325,6 +326,7 @@ class Model(torch.nn.Module):
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
+        self.compute_cos_sim_to_prev: bool = False
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
@@ -397,6 +399,10 @@ class Model(torch.nn.Module):
             loss_terms += [
                 v.type for _, v in cf.validation_config.losses.items() if v.get("enabled", True)
             ]
+
+        # cos_sim_to_prev is only needed by the latent loss; compute it
+        # (and keep prev_tokens around for it) only when that loss is configured.
+        self.compute_cos_sim_to_prev = "LossLatent" in loss_terms
 
         if "LossPhysical" in loss_terms:
             for i_stream, (stream_name, si) in enumerate(self.streams.items()):
@@ -699,8 +705,14 @@ class Model(torch.nn.Module):
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
-
+            prev_tokens = tokens if self.compute_cos_sim_to_prev else None
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+
+            # per-token cosine similarity between current and previous patch tokens
+            if self.compute_cos_sim_to_prev:
+                cos_sim_to_prev = compute_cos_sim_to_prev(tokens, prev_tokens, self.num_aux_tokens)
+                output.add_latent_prediction(step, "cos_sim_to_prev", cos_sim_to_prev)
+
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
