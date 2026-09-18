@@ -95,9 +95,10 @@ def parse_args(args: list) -> argparse.Namespace:
         "--format",
         dest="output_format",
         type=str,
-        choices=["netcdf", "verif", "quaver"],
+        choices=["netcdf", "verif", "quaver", "grib"],
         help="Output file format; netcdf (CF-compliant netcdfs), \
-        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool)",
+        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool), \
+        grib (CF-compliant GRIB files)",
         required=True,
     )
 
@@ -227,11 +228,25 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--verif-template",
-        default="verif/%S/%V/%R_%S_%V_%M_%D.nc",
-        help="Template for the output nc filenames, default will be to create output/verif/%S/%V \
-              repertories where %S, %V, %M, %D, %R are replaced by the "
-        "streams, variable, method, date, and run ID",
+        "--filename-template",
+        default=None,
+        help="Template for the output nc filenames, "
+        "default for VERIF files will be to create verif/%S/%V/%R_%S_%V_%M_%D.nc"
+        "default for netcdf/grib will be %D_%T_%R_%S.grib or %D_%T_%R_%S.nc, "
+        "where %S, %V, %M, %D, %R, %T are replaced by the "
+        "streams, variable, method, data type, run ID, and timestamp. "
+        "%T timestamp option only available for netcdf/grib. "
+        "To provide your own, please include the extension in the template.",
+    )
+
+    parser.add_argument(
+        "--region",
+        type=float,
+        nargs=4,
+        default=None,
+        help="Region to subset the data to, specified as a list of"
+        "[lat_min, lat_max, lon_min, lon_max]. "
+        "If not provided, no subsetting is performed.",
     )
 
     args, unknown_args = parser.parse_known_args(args)

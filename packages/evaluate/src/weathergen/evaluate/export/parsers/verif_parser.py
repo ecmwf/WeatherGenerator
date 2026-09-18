@@ -72,6 +72,7 @@ class VerifParser(CfParser):
         obs_data_channels = ["10u", "10v", "sp", "2t", "msl", "tp"]
         self.channels = list(set(self.channels) & set(obs_data_channels))
         self.zarr_dt: np.timedelta64 | None = None
+        self.filename_template: str | None = None
 
     def process_sample(
         self,
@@ -79,6 +80,7 @@ class VerifParser(CfParser):
         ref_time: np.datetime64,
         source_interval_start: np.datetime64 = None,
         source_interval_end: np.datetime64 = None,
+        **kwargs,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -172,8 +174,10 @@ class VerifParser(CfParser):
         Outputs:
             None
         """
+        if self.filename_template is None:
+            self.filename_template = "verif/%S/%V/%R_%S_%V_%M_%D.nc"
         outfile = Path(
-            self.verif_template.replace("%S", self.stream)
+            self.filename_template.replace("%S", self.stream)
             .replace("%V", variable)
             .replace("%M", self.method)
             .replace("%D", self.data_type)

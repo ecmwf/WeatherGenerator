@@ -7,6 +7,8 @@ import numpy as np
 import xarray as xr
 from earthkit.regrid import interpolate
 
+from weathergen.evaluate.export.verif_interpolator import InterpolatorFactory
+
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
@@ -39,7 +41,22 @@ def get_obs_coordinates(obs: xr.Dataset):
 
 
 def get_grid_points(data: xr.DataArray):
-    return np.column_stack((data.lat.values, data.lon.values))
+    """
+    Get lat lon from xarray dataset.
+    Only return the first column if multiple stesp/pressure levels involved
+    Args:
+        data: xarray dataset
+    Outputs:
+        np.ndarray: Array of grid points with shape (n_points, 2), where each row is (lat, lon).
+    """
+
+    og_lats = data.lat.values
+    og_lons = data.lon.values
+    if og_lats.ndim > 1 or og_lons.ndim > 1:
+        og_lats = og_lats[:, 0]
+        og_lons = og_lons[:, 0]
+
+    return np.column_stack((og_lats, og_lons))
 
 
 def detect_grid_type(data: xr.DataArray) -> str:
@@ -115,11 +132,13 @@ class Regridder:
     Class to handle regridding of xarray Datasets using earthkit regrid options available.
     """
 
-    def __init__(self, ds, output_grid_type: str, degree: float):
+    def __init__(self, ds, output_grid_type: str, degree: float, region=None, zarr_coords=None):
         self.output_grid_type = output_grid_type
         self.degree = degree
         self.dataset = ds
         self.indices = self.find_lat_lon_ordering()  # to store lat/lon ordering indices
+        self.region = region
+        self.zarr_coords = zarr_coords
 
         self.earthkit_input: str = ""
         self.earthkit_output: str = ""
@@ -202,7 +221,7 @@ class Regridder:
         """
         if self.output_grid_type == "regular_ll":
             earthkit_output = [self.degree, self.degree]
-            grid_shape = [int(180 // self.degree + 1), int(360 // self.degree)]
+            grid_shape = [int(180 / self.degree) + 1, int(360 / self.degree)]
             return earthkit_output, grid_shape
         elif self.output_grid_type in ["N", "O"]:
             earthkit_output = self.output_grid_type + str(int(self.degree))
@@ -211,6 +230,79 @@ class Regridder:
         else:
             raise ValueError(f"Unsupported output grid type: {self.output_grid_type}")
         # TODO add other grid types if needed
+
+    def regional_gaussian_regular_da(self, data: xr.DataArray) -> xr.DataArray:
+        """
+        Regrid a single xarray Dataset to regular lat/lon grid.
+        Requires a change in number of dimensions (not just size), so handled separately.
+
+        Parameters
+        ----------
+            data : Input xarray DataArray containing the inference data on native grid.
+        Returns
+        -------
+            Regridded xarray DataArray.
+        """
+        # create degree grid
+        # round to nearest 0.025
+        lat_min, lat_max, lon_min, lon_max = self.region
+        lat_min = np.round(lat_min / self.degree) * self.degree
+        lat_max = np.round(lat_max / self.degree) * self.degree
+        lon_min = np.round(lon_min / self.degree) * self.degree
+        lon_max = np.round(lon_max / self.degree) * self.degree
+        # create new grid
+        new_lat = np.arange(lat_min, lat_max + self.degree, self.degree)
+        new_lon = np.arange(lon_min, lon_max + self.degree, self.degree)
+        grid_coords = np.meshgrid(new_lat, new_lon)
+        grid_coords = np.column_stack([grid_coords[0].ravel(), grid_coords[1].ravel()])
+
+        # set interpolation method
+        method_factory = InterpolatorFactory("lat_lon")
+        interpolator = method_factory.get_interpolator(self.zarr_coords, grid_coords)
+        # set coords
+        new_coords = data.coords.copy()
+        new_coords.update(
+            {
+                "valid_time": data["valid_time"].values,
+                "latitude": new_lat,
+                "longitude": new_lon,
+            }
+        )
+        new_coords._drop_coords(["ncells"])
+        # set attrs
+        attrs = data.attrs.copy()
+        with contextlib.suppress(KeyError):
+            del attrs["ncells"]
+
+        # find new dims and loop through extra dimensions
+        original_shape = data.shape
+        new_shape = list(original_shape)
+        pos = data.dims.index("ncells")
+        new_shape[pos : pos + 1] = [len(new_lat), len(new_lon)]
+        new_shape = tuple(new_shape)
+
+        original_index = [list(range(original_shape_i)) for original_shape_i in original_shape]
+        original_index[pos] = [slice(None)]  # :placeholder
+        regridded_values = np.empty(new_shape)
+        result = product(*original_index)
+        for item in result:
+            original_data_slice = data.values[item]
+            regridded_slice = interpolator.interpolate(original_data_slice)
+            # reshape into grid shape
+            regridded_slice = regridded_slice.reshape(len(new_lat), len(new_lon))
+            # set in regridded_values
+            new_index = list(item)
+            new_index[pos : pos + 1] = [slice(None), slice(None)]
+            regridded_values[tuple(new_index)] = regridded_slice
+
+        dims = list(data.dims)
+        pos = dims.index("ncells")
+        dims[pos : pos + 1] = ["latitude", "longitude"]
+        dims = tuple(dims)
+        regrid_data = xr.DataArray(
+            data=regridded_values, dims=dims, coords=new_coords, attrs=attrs, name=data.name
+        )
+        return regrid_data
 
     def gaussian_regular_da(self, data: xr.DataArray) -> xr.DataArray:
         """
@@ -560,7 +652,28 @@ class Regridder:
         -------
         """
         if self.input_grid_type == "gaussian" and self.output_grid_type == "regular_ll":
-            regrid_da = self.gaussian_regular_da(da)
+            if self.degree < 0.1 and self.region is not None:
+                _logger.info("Regridding using verif 2d method")
+                regrid_da = self.regional_gaussian_regular_da(da)
+            elif self.degree >= 0.1 and self.region is not None:
+                _logger.info("Regridding using earthkit then regional mask")
+                try:
+                    regrid_da = self.gaussian_regular_da(da)
+                    # apply regional mask
+                    lat_min, lat_max, lon_min, lon_max = self.region
+                    # get closest points in original dataset with some buffer
+                    region_mask = (
+                        (regrid_da.latitude >= lat_min - 1)
+                        & (regrid_da.latitude <= lat_max + 1)
+                        & (regrid_da.longitude >= lon_min - 1)
+                        & (regrid_da.longitude <= lon_max + 1)
+                    )
+                    regrid_da = regrid_da.where(region_mask, drop=True)
+                except ValueError as e:
+                    _logger.error(
+                        f"Error during regridding: {e}, using verif 2d method as fallback."
+                    )
+                    regrid_da = self.regional_gaussian_regular_da(da)
         elif self.input_grid_type == "regular_ll" and self.output_grid_type == "gaussian":
             regrid_da = self.regular_gaussian_da(da)
         elif self.input_grid_type == self.output_grid_type:
