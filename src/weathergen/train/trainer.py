@@ -222,6 +222,8 @@ class Trainer(TrainerBase):
         # inital data for forecast stepping
         forecast_chunk = batch.get_source_samples()
 
+        batch.to_device_for_chunked_inference(self.device, chunks[-1])
+
         # process chunk-by-chunk
         for chunk in chunks:
             # move to chunk to device
@@ -667,13 +669,9 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    if mode_cfg.get("compute_loss", True):
+                    # in chunked inference the data is pushed to the device also in chunks
+                    if mode_cfg.forecast.get("chunk_size") is None:
                         batch.to_device(self.device)
-                    else:
-                        output_idxs = batch.get_output_idxs()
-                        chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
-                        chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
-                        batch.to_device_for_chunked_inference(self.device, chunks[-1])
 
                     # evaluate model
                     with torch.autocast(
@@ -691,7 +689,7 @@ class Trainer(TrainerBase):
                                 self.model,
                             )
 
-                        # standard validation
+                        # standard validation/inference
                         if mode_cfg.forecast.get("chunk_size") is None:
                             if self.ema_model is None:
                                 preds = self.model(
@@ -706,7 +704,7 @@ class Trainer(TrainerBase):
                                     batch.get_output_idxs(),
                                 )
 
-                        # chunked model evaluation across forceast steps; for inference mode
+                        # chunked model evaluation across forceast steps (for inference)
                         else:
                             self._process_validation_chunks(
                                 batch,
