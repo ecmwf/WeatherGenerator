@@ -10,12 +10,10 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-import math
 import typing
 import warnings
 
 import astropy_healpix as hp
-import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
@@ -23,7 +21,6 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
-from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -92,50 +89,6 @@ class ModelParams(torch.nn.Module):
 
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
-        self.dtype = get_dtype(cf.attention_dtype)
-
-        # Positional embeddings
-        self.max_tokens_local_per_cell = cf.get("ae_local_max_tokens_per_cell", 64)
-        self.pe_embed = torch.nn.Parameter(
-            torch.zeros(self.max_tokens_local_per_cell, cf.ae_local_dim_embed, dtype=self.dtype),
-            requires_grad=False,
-        )
-
-        pe = torch.zeros(
-            self.num_healpix_cells,
-            cf.ae_local_num_queries,
-            cf.ae_global_dim_embed,
-            dtype=self.dtype,
-        )
-        self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
-
-        # RoPE coordinates
-        self.rope_2D = cf.get("rope_2D", False)
-        if self.rope_2D:
-            self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
-            total_tokens = (
-                self.num_healpix_cells + self.num_extra_tokens
-            ) * cf.ae_local_num_queries
-            self.register_buffer(
-                "rope_coords",
-                torch.zeros(
-                    1,
-                    total_tokens,
-                    2,
-                    dtype=self.dtype,
-                ),
-            )
-            self.register_buffer(
-                "rope_cell_coords",
-                torch.zeros(
-                    self.num_healpix_cells,
-                    2,
-                    dtype=self.dtype,
-                ),
-            )
-        else:
-            self.rope_coords = None
-            self.rope_cell_coords = None
 
         # HEALPix neighbours
         hlc = self.healpix_level
@@ -151,97 +104,15 @@ class ModelParams(torch.nn.Module):
             requires_grad=False,
         )
 
-        self.q_cells_lens = torch.nn.Parameter(
-            torch.ones(self.num_healpix_cells + 1, dtype=torch.int32), requires_grad=False
-        )
-        self.q_cells_lens.data[0] = 0
-
     def create(self, cf: Config) -> "ModelParams":
-        self.reset_parameters(cf)
+        self.reset_parameters()
         return self
 
-    def reset_parameters(self, cf: Config) -> "ModelParams":
-        """Creates positional embedding for each grid point for each stream used after stream
-        embedding, positional embedding for all stream assimilated cell-level local embedding,
-        initializing queries for local-to-global adapters, HEALPix neighbourhood based parameter
-        initializing for target prediction.
-
-        Sinusoidal positional encoding: Harmonic positional encoding based upon sine and cosine for
-            both per stream after stream embedding and per cell level for local assimilation.
-
-        HEALPix neighbourhood structure: Determine the neighbors for each cell and initialize each
-            with its own cell number as well as the cell numbers of its neighbors. If a cell has
-            fewer than eight neighbors, use its own cell number to fill the remaining slots.
-
-        Query len based parameter creation: Calculate parameters for the calculated token length at
-            each cell after local assimilation.
-
-        Args:
-            cf : Configuration
+    def reset_parameters(self) -> "ModelParams":
+        """HEALPix neighbourhood structure: Determine the neighbors for each cell and initialize
+        each with its own cell number as well as the cell numbers of its neighbors. If a cell has
+        fewer than eight neighbors, use its own cell number to fill the remaining slots.
         """
-
-        # positional encodings
-
-        dim_embed = cf.ae_local_dim_embed
-        token_idx_bias = 16
-        freq_bias = 8
-        self.pe_embed.data.fill_(0.0)
-        position = torch.arange(
-            token_idx_bias,
-            token_idx_bias + self.max_tokens_local_per_cell,
-            device=self.pe_embed.device,
-        ).unsqueeze(1)
-        div = torch.exp(
-            torch.arange(freq_bias, freq_bias + dim_embed, 2, device=self.pe_embed.device)
-            * -(math.log(self.max_tokens_local_per_cell) / dim_embed),
-        )
-        self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
-        self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
-
-        dim_embed = cf.ae_global_dim_embed
-
-        if self.rope_2D:
-            # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
-            # Shape: (num_healpix_cells, ae_local_num_queries, 2)
-            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
-            coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
-            # Per-cell coords for QueryAggregationEngine (no query expansion)
-            self.rope_cell_coords.data.copy_(coords)
-            coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
-            coords_flat = coords.flatten(0, 1).unsqueeze(0)
-            offset = self.num_extra_tokens * cf.ae_local_num_queries
-            self.rope_coords.data.fill_(0.0)
-            self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
-
-        # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
-        # provides per-cell token identity which is critical for masked cells that have no
-        # content from local assimilation. Without it, masked cells are identical and the
-        # teacher representation (evaluated without dropout) collapses to low rank.
-        self.pe_global.data.fill_(0.0)
-        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
-        self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
-            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 0::2] += (
-            torch.sin(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
-        self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
-            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 1::2] += (
-            torch.cos(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
-
-        # healpix neighborhood structure
-
         hlc = self.healpix_level
         num_healpix_cells = self.num_healpix_cells
         with warnings.catch_warnings(action="ignore"):
@@ -252,12 +123,6 @@ class ModelParams(torch.nn.Module):
         # nbors *and* self
         self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
         self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
-
-        # precompute for varlen attention
-        self.q_cells_lens.data.fill_(1)
-        self.q_cells_lens.data[0] = 0
-
-        # ensure all params have grad set to False
 
         return
 
@@ -588,6 +453,10 @@ class Model(torch.nn.Module):
                 pass
 
         self.apply(_reset_params)
+        if self.encoder is not None:
+            self.encoder.reset_parameters()
+        if self.forecast_engine is not None:
+            self.forecast_engine.reset_parameters()
 
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
@@ -682,7 +551,7 @@ class Model(torch.nn.Module):
 
         output = ModelOutput(batch.get_output_len())
 
-        tokens, posteriors = self.encoder(model_params, batch)
+        tokens, posteriors = self.encoder(batch)
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
@@ -697,20 +566,19 @@ class Model(torch.nn.Module):
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
-                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                tokens = self.forecast_engine(tokens, step)
                 continue
 
-            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            tokens = self.forecast_engine(tokens, step)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output)
+            output = self.predict_latent(step, tokens, batch, output)
 
         return output
 
     def predict_latent(
         self,
-        model_params: ModelParams,
         step: int,
         tokens: torch.Tensor,
         batch: ModelBatch,
