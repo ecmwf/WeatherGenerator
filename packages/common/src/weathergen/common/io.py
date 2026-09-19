@@ -138,7 +138,7 @@ class IOReaderData:
         """
         Test if data object is empty
         """
-        return len(self.data) == 0
+        return len(self.datetimes) == 0
 
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
@@ -147,16 +147,13 @@ class IOReaderData:
 
         other should be such an instance.
         """
-        coords = np.asarray(other.coords)
-        geoinfos = np.asarray(other.geoinfos)
-        data = np.asarray(other.data)
-        datetimes = np.asarray(other.datetimes)
 
-        n_datapoints = len(data)
-
-        assert coords.shape == (n_datapoints, 2), "number of datapoints do not match data"
-        assert geoinfos.shape[0] == n_datapoints, "number of datapoints do not match data"
-        assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
+        assert other.coords.shape[0] == other.datetimes.shape[0], (
+            "number of datapoints do not match data"
+        )
+        assert other.geoinfos.shape[0] == other.datetimes.shape[0], (
+            "number of datapoints do not match data"
+        )
 
         return cls(**dataclasses.asdict(other))
 
@@ -177,10 +174,9 @@ class IOReaderData:
         is_spoof = True
 
         for other in others:
-            n_datapoints = len(other.data)
+            n_datapoints = len(other.datetimes)
             assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
             assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
-            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
 
             coords = np.concatenate([coords, other.coords])
             geoinfos = np.concatenate([geoinfos, other.geoinfos])
@@ -582,6 +578,13 @@ class OutputBatchData:
 
     sample_start: int
     forecast_offset: int
+    forecast_steps_override: list[int] | None = None
+
+    @functools.cached_property
+    def _forecast_step_to_index(self) -> dict[int, int] | None:
+        if self.forecast_steps_override is None:
+            return None
+        return {step: idx for idx, step in enumerate(self.forecast_steps_override)}
 
     @functools.cached_property
     def samples(self):
@@ -595,6 +598,17 @@ class OutputBatchData:
         """Indices of all forecast steps adjusted by the forecast offset"""
         # forecast offset should be either 1 for forecasting or 0 for MTM
         assert self.forecast_offset in (0, 1)
+        if self.forecast_steps_override is not None:
+            forecast_steps = np.array(self.forecast_steps_override)
+            if self.forecast_offset == 1 and len(forecast_steps) > 0:
+                # Only the first validation chunk should expose the synthetic source step 0.
+                # Later chunks carry absolute forecast steps only, otherwise source output is
+                # written repeatedly and collides in the zarr store.
+                if forecast_steps[0] == self.forecast_offset:
+                    return np.concatenate(([0], forecast_steps))
+            if self.forecast_offset == 1 and len(forecast_steps) == 0:
+                return np.concatenate(([0], forecast_steps))
+            return forecast_steps
         return np.arange(len(self.targets) + self.forecast_offset)
 
     def items(self) -> typing.Generator[OutputItem, None, None]:
@@ -652,9 +666,16 @@ class OutputBatchData:
             - `forecast_step` is adjusted from including `forecast_offset` to indexing
                the data (always starts at 0)
         """
-        return ItemKey(
-            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
-        )
+        if self._forecast_step_to_index is None:
+            forecast_step = key.forecast_step - self.forecast_offset
+        elif key.with_source and self.forecast_offset == 1:
+            forecast_step = 0
+        else:
+            if key.forecast_step not in self._forecast_step_to_index:
+                raise KeyError(f"Unknown forecast_step {key.forecast_step}")
+            forecast_step = self._forecast_step_to_index[key.forecast_step]
+
+        return ItemKey(key.sample - self.sample_start, forecast_step, key.stream)
 
     def _extract_targets_predictions(self, stream_idx, offset_key, key, source_interval):
         datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)

@@ -14,7 +14,7 @@ from typing import override
 import numpy as np
 from anemoi.datasets.data import MissingDateError
 
-from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
+from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi, _take_var_axis
 from weathergen.datasets.data_reader_base import (
     ReaderData,
     TimeWindowHandler,
@@ -145,31 +145,18 @@ class DataReaderAnemoiOperan(DataReaderAnemoi):
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
         try:
-            data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
+            data = np.asarray(self.ds[didx_start:didx_end][:, :, 0], dtype=np.float32)
         except MissingDateError as e:
             _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # coords-first representation and collapse multiple steps
-        data = data.transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
-
-        # extract geoinfo channels (can be time-varying, so read from dataset)
-        geoinfos = data[:, list(self.geoinfo_idx)]
-        # extract channels
-        data = data[:, list(channels_idx)]
-
-        # construct lat/lon coords
-        latlon = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-            ],
-            axis=0,
-        ).transpose()
-        # repeat latlon len(t_idxs) times
-        coords = np.vstack((latlon,) * len(t_idxs))
+        # extract all information
+        geoinfos = _take_var_axis(data, self.geoinfo_idx)
+        data = _take_var_axis(data, channels_idx)
+        # duplicate lat/lon for all sub-steps
+        coords = np.tile(self.latlon, (len(t_idxs), 1))
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
