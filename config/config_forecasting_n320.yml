@@ -7,11 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 2048
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -89,7 +90,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting/"
+streams_directory: "./config/streams/era5_n320_forecasting/"
 streams: ???
 
 # type of zarr_store
@@ -127,6 +128,7 @@ data_loading :
   num_workers: 12
   rng_seed: ???
   repeat_data_in_mini_epoch : False
+  # memory_pinning: True
 
 
 # config for training
@@ -216,9 +218,25 @@ validation_config:
   # run validation before training starts (mainly for model development)
   validate_before_training: False
 
-
 # test config; full test config is merge of validation and test config
-# test config is used by default when running inference
+test_config: 
+
+  samples_per_mini_epoch: 128
+  shuffle: False
+
+  start_date: 2023-06-01T00:00
+  end_date: 2023-08-30T00:00
+
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 128,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
+
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val
