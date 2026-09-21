@@ -435,19 +435,25 @@ def reconcile_date_ranges(base_stage: Config, override_stage: Config) -> tuple[C
     return base_stage, override_stage
 
 
-def _reconcile_stage_date_ranges(acc: Config, nxt: Config) -> tuple[Config, Config]:
-    """Apply reconcile_date_ranges to every stage sub-config (training/validation/test)"""
-    acc = acc.copy()
-    nxt = nxt.copy()
+def _reconcile_stage_date_ranges(
+    base_run_config: Config, override_run_config: Config
+) -> tuple[Config, Config]:
+    """
+    Apply reconcile_date_ranges to each of training_config/validation_config/test_config
+    found in both configs. Both arguments are full run configs (not a single stage), since
+    e.g. training_config can appear in both base_config and an overwrite_config.
+    """
+    base_run_config = base_run_config.copy()
+    override_run_config = override_run_config.copy()
     for stage_key in ("training_config", "validation_config", "test_config"):
-        base_stage = acc.get(stage_key)
-        override_stage = nxt.get(stage_key)
+        base_stage = base_run_config.get(stage_key)
+        override_stage = override_run_config.get(stage_key)
         if base_stage is None or override_stage is None:
             continue
         base_stage, override_stage = reconcile_date_ranges(base_stage, override_stage)
-        acc[stage_key] = base_stage
-        nxt[stage_key] = override_stage
-    return acc, nxt
+        base_run_config[stage_key] = base_stage
+        override_run_config[stage_key] = override_stage
+    return base_run_config, override_run_config
 
 
 def load_merge_configs(
