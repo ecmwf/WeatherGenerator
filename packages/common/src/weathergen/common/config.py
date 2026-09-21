@@ -504,11 +504,10 @@ def load_merge_configs(
         # streams from an overwrite's streams_directory replace inherited streams
         if any(o.get("streams_directory") is not None for o in overwrite_configs):
             base_config.streams = None
-    # merge one config at a time so date_ranges vs. start_date/end_date precedence (see
-    # reconcile_date_ranges) is resolved at each step, e.g. when continuing/fine-tuning
-    # training from a run whose training_config used date_ranges
-    c = base_config
-    for nxt in (private_config, *overwrite_configs):
+    # overwrite_configs are folded in one at a time so date_ranges vs. start_date/end_date
+    # precedence (see reconcile_date_ranges) is resolved at each step
+    c = OmegaConf.merge(base_config, private_config)
+    for nxt in overwrite_configs:
         c, nxt = _reconcile_stage_date_ranges(c, nxt)
         c = OmegaConf.merge(c, nxt)
     assert isinstance(c, Config)
