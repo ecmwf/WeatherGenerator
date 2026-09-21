@@ -512,11 +512,14 @@ def load_merge_configs(
             base_config.streams = None
     # overwrite_configs are folded in one at a time so date_ranges vs. start_date/end_date
     # precedence (see reconcile_date_ranges) is resolved at each step
-    c = OmegaConf.merge(base_config, private_config)
+    merged = OmegaConf.merge(base_config, private_config)
+    assert isinstance(merged, Config)
+    c: Config = merged
     for nxt in overwrite_configs:
         c, nxt = _reconcile_stage_date_ranges(c, nxt)
-        c = OmegaConf.merge(c, nxt)
-    assert isinstance(c, Config)
+        merged = OmegaConf.merge(c, nxt)
+        assert isinstance(merged, Config)
+        c = merged
     c = _sanitize_time_keys(c)
 
     return c
