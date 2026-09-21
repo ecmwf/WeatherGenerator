@@ -306,21 +306,23 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
 
         # new network parts (e.g. for fine-tuning)
         if mkeys:
-            # Get the unique parent modules for the missing parameters
+            # Get the unique parent modules for the missing parameters. Each of these is, by
+            # construction, the direct parent of a real key in the model's own state_dict, so it
+            # is always reachable as a live attribute path.
             new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
 
-            # Find the highest-level "root" new modules to avoid redundant initializations
-            root_new_modules = set()
-            for path in sorted(list(new_modules_to_init)):
-                if not any(path.startswith(root + ".") for root in root_new_modules):
-                    root_new_modules.add(path)
-
-            # Get all modules for quick lookup and initialize the new ones
-            all_modules = dict(model.named_modules())
-            for path in root_new_modules:
+            # Look modules up via get_submodule() (live attribute traversal), not a
+            # dict(model.named_modules()) lookup. Some modules alias one of their own children
+            # under two attribute names for checkpoint backward-compatibility (e.g. MLP.lnorm is
+            # the exact same object as MLP.layers[0], see layers.py) -- state_dict() keeps both
+            # names, but named_modules() de-duplicates shared module objects and only reports one
+            # of the two, so a dict(model.named_modules())[path] lookup can KeyError on the name
+            # it dropped even though that path is perfectly valid. get_submodule() resolves the
+            # path via plain attribute access and isn't affected by that deduplication.
+            for path in new_modules_to_init:
                 if is_root():
                     logger.info(f"Initializing new module not found in checkpoint: {path}")
-                module_to_init = all_modules[path]
+                module_to_init = model.get_submodule(path)
                 module_to_init.to_empty(device="cuda")
                 module_to_init.reset_parameters()
 

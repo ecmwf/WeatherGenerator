@@ -492,6 +492,12 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
+        # Result stores written before the forecast-step-0 writer fix (see validation_io.py)
+        # never contain a "0" group at all, so example_key may point at the lowest step present
+        # instead of 0. In that case there is no fstep-0 item to inspect for a "target" dataset;
+        # the lowest step present *is* the forecast offset.
+        if self.example_key.forecast_step != 0:
+            return self.example_key.forecast_step
         fstep0_datasets = self._get_datasets(self.example_key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
@@ -500,7 +506,11 @@ class ZarrIO:
         try:
             sample, example_sample = next(self.data_root.groups())
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
+            # Prefer fstep 0 (present for offset=0 runs, and for offset=1 runs written after
+            # the writer fix); fall back to the lowest step present for older result stores
+            # that never wrote a step-0 placeholder (see validation_io.py's forecast_offset fix).
+            available_steps = [int(s) for s in example_stream.group_keys()]
+            fstep = 0 if 0 in available_steps else min(available_steps)
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
@@ -528,7 +538,10 @@ class ZarrIO:
 
         all_steps = sorted(list(example_stream.group_keys()))
 
-        if self.forecast_offset == 1:
+        # Result stores written before the forecast-step-0 writer fix (see validation_io.py)
+        # never contain a "0" group at all, so there is nothing to exclude here; only strip a
+        # leading "0" entry when one is actually present.
+        if self.forecast_offset == 1 and all_steps and all_steps[0] == "0":
             return all_steps[1:]  # exclude fstep with no targets/preds
         else:
             return all_steps
