@@ -136,6 +136,11 @@ class TrainerBase:
                     dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
                     cf.data_loader_rng_seed = l_seed.item()
 
+        if dist.is_initialized():
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("SLURM_LOCALID", "0")))
+
         cf.world_size = world_size
         cf.rank = rank
         cf.local_rank = local_rank
