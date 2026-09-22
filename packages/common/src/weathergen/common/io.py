@@ -492,6 +492,10 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
+        # Stores written with test_config.forecast.offset=1 and num_steps_input=1 have no
+        # step-0 source group and begin at forecast step 1; a missing step 0 implies offset=1.
+        if self.example_key.forecast_step != 0:
+            return 1
         fstep0_datasets = self._get_datasets(self.example_key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
@@ -500,7 +504,7 @@ class ZarrIO:
         try:
             sample, example_sample = next(self.data_root.groups())
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
+            fstep = min((int(s) for s in example_stream.group_keys()), default=0)
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
@@ -526,12 +530,13 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
 
-        all_steps = sorted(list(example_stream.group_keys()))
+        all_steps = sorted(example_stream.group_keys(), key=int)
 
-        if self.forecast_offset == 1:
-            return all_steps[1:]  # exclude fstep with no targets/preds
-        else:
-            return all_steps
+        # Drop the leading step only when it is the step-0 source slot; stores that already
+        # begin at step 1 (offset=1, num_steps_input=1) keep every step.
+        if self.forecast_offset == 1 and all_steps and int(all_steps[0]) == 0:
+            return all_steps[1:]
+        return all_steps
 
 
 class ZipZarrIO(ZarrIO):
@@ -596,6 +601,10 @@ class OutputBatchData:
     sample_start: int
     forecast_offset: int
     forecast_steps: list[int]
+
+    # if False, no target datasets are built/written (skip_target_values inference);
+    # self.targets then only provides row counts via targets_lens
+    write_targets: bool = True
 
     @functools.cached_property
     def samples(self):
@@ -686,20 +695,26 @@ class OutputBatchData:
                 datapoints
             ]
 
-        assert len(data_coords.channels) == target_data.shape[1], (
-            "Number of channel names does not align with target data."
-        )
         assert len(data_coords.channels) == preds_data.shape[1], (
             "Number of channel names does not align with prediction data."
         )
 
-        target_dataset = OutputDataset(
-            "target",
-            key,
-            source_interval,
-            target_data,
-            **dataclasses.asdict(data_coords),
-        )
+        if self.write_targets:
+            assert len(data_coords.channels) == target_data.shape[1], (
+                "Number of channel names does not align with target data."
+            )
+            target_dataset = OutputDataset(
+                "target",
+                key,
+                source_interval,
+                target_data,
+                **dataclasses.asdict(data_coords),
+            )
+        else:
+            # target values were never read (skip_target_values); coords/times are
+            # still written as part of the prediction dataset
+            target_dataset = None
+
         prediction_dataset = OutputDataset(
             "prediction",
             key,

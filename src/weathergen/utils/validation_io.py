@@ -60,6 +60,10 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
+    # skip_target_values: targets have zero width (values were never read) and no
+    # target datasets are written; the target arrays below only provide row counts
+    write_targets = not val_cfg.get("skip_target_values", False)
+
     # _get_output_length clamps to at least one output step, so this always holds
     assert len(batch.get_output_idxs()) > 0, "Batch carries no output steps."
     forecast_offset = batch.get_output_idxs()[0]
@@ -73,12 +77,18 @@ def write_output(
 
     n_samples = len(batch.get_source_samples().get_samples())
 
-    # Diffusion inference inflates the model output's fstep dimension to one entry per
+    # Trajectory-mode diffusion inflates the model output's fstep dimension to one entry per
     # ODE denoising step (the trajectory). The batch only has the original physical
     # forecast indices, so synthesize a contiguous run of indices starting at the
     # original first index to cover every entry in model_output / target_aux_out.
+    # A diffusion rollout keeps the ordinary fstep layout: there the extra entries are the
+    # chunk's leading padding slots, which timestep_idxs has already dropped, so leave it be.
+    # The same holds whenever the chunk starts at a non-zero forecast offset (e.g.
+    # forecast.offset=1): the surplus entries are that chunk's padding, not trajectory steps,
+    # and synthesizing indices would run the emitted steps past the end of the forecast.
+    is_trajectory = cf.get("fe_diffusion_model", False) and not cf.get("diffusion_rollout", False)
     n_pred_steps = len(model_output.physical)
-    if cf.get("fe_diffusion_model", False) and n_pred_steps > len(timestep_idxs):
+    if is_trajectory and chunk_forecast_offset == 0 and n_pred_steps > len(timestep_idxs):
         timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
 
     targets_lens = []
@@ -126,9 +136,10 @@ def write_output(
 
                 # handle forcing streams or if sample is empty
                 if preds is None:
-                    # preds are empty so create copy of target and add ensemble dimension
+                    # preds are empty so create empty preds with ensemble dimension
+                    # (explicit width: targets have zero width under skip_target_values)
                     assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
-                    preds = [target.clone().unsqueeze(0) for target in targets]
+                    preds = [target.new_zeros((1, 0, n_channels)) for target in targets]
 
                 for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
                     target_data = target_aux_out.physical[t_idx][sname]
@@ -144,7 +155,12 @@ def write_output(
 
                     # denormalize data if requested and map to storage format
                     preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-                    targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+                    if write_targets:
+                        targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+                    else:
+                        # zero-width targets cannot be denormalized (channel-count
+                        # mismatch); only their row counts are used, for targets_lens
+                        targets_s += [target.detach().cpu().numpy()]
 
                     # extract original target coords and times from target data
                     t_coords_s += [t_coords.cpu().numpy()]
@@ -213,7 +229,9 @@ def write_output(
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
-    latents_all = get_latent_output(batch, model_output) if write_latents else None
+    latents_all = (
+        get_latent_output(batch, model_output, timestep_idxs) if write_latents else None
+    )
 
     data = io.OutputBatchData(
         sources,
@@ -231,6 +249,7 @@ def write_output(
         sample_start=sample_start,
         forecast_offset=forecast_offset,
         forecast_steps=timestep_idxs,
+        write_targets=write_targets,
     )
 
     store_path = config.get_path_results(cf, mini_epoch)
@@ -240,15 +259,20 @@ def write_output(
             zio.write_zarr(subset)
 
 
-def get_latent_output(batch, model_output):
+def get_latent_output(batch, model_output, timestep_idxs=None):
     """
     Interface for getting latent states
+
+    timestep_idxs are the global forecast steps this model_output actually covers; they must
+    match the ones write_output emits, since a chunk's latents are indexed chunk-locally and
+    only span that chunk.
     """
 
     # collect latent outputs per forecast step and per sample
     fp32 = torch.float32
 
-    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+    if timestep_idxs is None:
+        timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
 
     sample_idxs = [
         list(sample.streams_data.values())[0].sample_idx
@@ -258,7 +282,7 @@ def get_latent_output(batch, model_output):
     latents_all: list[list[dict]] = []
     for t_idx in timestep_idxs:
         latents_all.append([])
-        latent_pred = model_output.get_latent_prediction(t_idx)
+        latent_pred = model_output.get_latent_prediction(model_output.chunk_idx(t_idx))
         n_samples = len(sample_idxs)
         for i_sample in range(n_samples):
             per_sample: dict = {}

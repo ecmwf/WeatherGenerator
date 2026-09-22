@@ -191,6 +191,33 @@ class ModelParams(torch.nn.Module):
         self.reset_parameters(cf)
         return self
 
+    def offload_encoder_params(self) -> None:
+        """Move encoder-only ModelParams tensors back to CPU after the encoder has run.
+
+        ``pe_global`` (shape: num_healpix_cells × ae_local_num_queries × ae_global_dim_embed)
+        is used exclusively by the encoder to build the global query tokens.  It is not
+        touched by the forecast engine or physical decoder, so it can be offloaded for the
+        entire multi-step rollout — saving ~1–2 GiB of HBM per GPU depending on config.
+
+        ``pe_embed`` (shape: max_tokens_local × ae_local_dim_embed) is similarly encoder-only
+        and offloaded here, though its contribution is negligible (~65 KiB).
+        """
+        if self.pe_global is not None:
+            self.pe_global.data = self.pe_global.data.cpu()
+        if self.pe_embed is not None:
+            self.pe_embed.data = self.pe_embed.data.cpu()
+
+    def load_encoder_params_to_device(self, device) -> None:
+        """Reload encoder-only ModelParams tensors onto *device* before the encoder forward.
+
+        Counterpart to offload_encoder_params().  Called immediately before chunk 0's
+        model forward so that the encoder finds ``pe_global`` on the correct device.
+        """
+        if self.pe_global is not None:
+            self.pe_global.data = self.pe_global.data.to(device, non_blocking=True)
+        if self.pe_embed is not None:
+            self.pe_embed.data = self.pe_embed.data.to(device, non_blocking=True)
+
     def reset_parameters(self, cf: Config) -> "ModelParams":
         """Creates positional embedding for each grid point for each stream used after stream
         embedding, positional embedding for all stream assimilated cell-level local embedding,
@@ -807,6 +834,11 @@ class Model(torch.nn.Module):
         Returns:
             A list containing all prediction results
         """
+        # Mirrors the branch taken inside _get_initial_conditions: with no latent carried over
+        # the source window is encoded, otherwise this is a continuation chunk resuming from
+        # the previous chunk's latent state.
+        from_encoder = len(getattr(samples_or_output, "latent", [])) == 0
+
         source_samples, tokens, posteriors, intermediates = self._get_initial_conditions(
             samples_or_output, model_params
         )
@@ -820,25 +852,58 @@ class Model(torch.nn.Module):
             self.cf.get("fe_diffusion_model", False)
             and self.cf.get("fe_diffusion_model_conditioning", None) == "forecast"
         ):
-            # tokens[:,0] = t (most recent), tokens[:,1] = t-1, ..., tokens[:,-1] = t-(T-1) (oldest)
-            if self.cf.stage == "inference":
-                print("Using most recent steps as conditioning tokens for inference.")
-                # conditioning_tokens = tokens[:, :-1].sum(axis=1)
-                conditioning_tokens = tokens[:, 1:].sum(axis=1)
-            else:
-                # Conditioning: all older context steps [t-1, ..., t-(T-1)];
-                # denoising target: t (newest)
-                conditioning_tokens = tokens[:, 1:].sum(axis=1)
-                conditioning_tokens = conditioning_tokens + torch.randn_like(
+            # A continuation chunk carries a single rolled-forward step, so there are no older
+            # context steps left to derive conditioning from — tokens[:, 1:] would be empty and
+            # sum to zero. meta_info already holds the state the previous chunk rolled to, so
+            # leave it untouched and only unwrap the step dimension.
+            if from_encoder:
+                # tokens[:,0] = t (most recent), tokens[:,1] = t-1, ..., tokens[:,-1] = t-(T-1)
+                if self.cf.stage == "inference" and tokens.shape[1] == 1 and forecast_offset == 1:
+                    # Single-input-step inference path: test_config.model_input.forecasting.
+                    # num_steps_input=1 paired with test_config.forecast.offset=1, so the
+                    # diffusion model's single forecast step lines up with a deterministic
+                    # offset=1 model's +1-step lead time. There is no older step to sum over —
+                    # the sole loaded step IS the conditioning.
+                    print(
+                        "Using the sole loaded step as conditioning token for inference "
+                        "(offset=1, num_steps_input=1)."
+                    )
+                    conditioning_tokens = tokens[:, 0]
+                elif self.cf.stage == "inference":
+                    assert tokens.shape[1] > 1, (
+                        "Diffusion inference with fe_diffusion_model_conditioning='forecast' got "
+                        f"only one loaded input step (tokens.shape[1]=1) but forecast.offset="
+                        f"{forecast_offset} != 1. The single-input-step inference path is only "
+                        "defined for offset=1, num_steps_input=1 (used to align the diffusion "
+                        "model's first forecast step with a deterministic offset=1 model's lead "
+                        "time). Check test_config.forecast.offset and "
+                        "test_config.model_input.forecasting.num_steps_input."
+                    )
+                    print("Using most recent steps as conditioning tokens for inference.")
+                    # conditioning_tokens = tokens[:, :-1].sum(axis=1)
+                    conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                else:
+                    assert tokens.shape[1] > 1, (
+                        "Diffusion training with fe_diffusion_model_conditioning='forecast' "
+                        "requires at least 2 loaded input steps (one denoising target + one "
+                        f"conditioning step); got tokens.shape[1]={tokens.shape[1]}. Check "
+                        "training_config.model_input.forecasting.num_steps_input."
+                    )
+                    # Conditioning: all older context steps [t-1, ..., t-(T-1)];
+                    # denoising target: t (newest)
+                    conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                    conditioning_tokens = conditioning_tokens + torch.randn_like(
+                        conditioning_tokens
+                    ) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
+                    if np.random.rand() < self.cf.get(
+                        "fe_diffusion_classifier_free_guidance_prob", 0.0
+                    ):  # occasionally dropout conditioning for classifier free guidance
+                        conditioning_tokens = torch.zeros_like(conditioning_tokens)
+                # X_t (tokens[:, 0], most recent) is the diffusion denoising target;
+                # older steps are conditioning.
+                source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = (
                     conditioning_tokens
-                ) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
-                if np.random.rand() < self.cf.get(
-                    "fe_diffusion_classifier_free_guidance_prob", 0.0
-                ):  # occasionally dropout conditioning for classifier free guidance
-                    conditioning_tokens = torch.zeros_like(conditioning_tokens)
-            # X_t (tokens[:, 0], most recent) is the diffusion denoising target;
-            # older steps are conditioning.
-            source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = conditioning_tokens
+                )
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
             tokens = tokens[:, 0]
         else:
@@ -898,6 +963,11 @@ class Model(torch.nn.Module):
                         "fe_diffusion_predict_residual", False
                     )
                     for i, toks in enumerate(tokens):
+                        # tokens may be CPU tensors (offloaded by _run_ode to avoid
+                        # accumulating num_steps × ~1 GiB of non-releasable GPU memory).
+                        # Reload each step individually just before use.
+                        if not toks.is_cuda:
+                            toks = toks.to(cond.device, non_blocking=True)
                         toks_abs = cond + toks if predict_residual else toks
                         output = self.predict_decoders(
                             model_params, step, toks_abs, source_samples, output, out_step=i
@@ -908,7 +978,11 @@ class Model(torch.nn.Module):
                     # Feed the final denoised state back as conditioning for the next step.
                     # Pass tokens[-1] forward so inference diagnostics have a reference point;
                     # inference_forward always starts from pure noise regardless.
-                    final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
+                    # tokens[-1] is CPU-offloaded; reload to GPU before storing as conditioning.
+                    _final = tokens[-1]
+                    if not _final.is_cuda:
+                        _final = _final.to(cond.device, non_blocking=True)
+                    final_abs = cond + _final if predict_residual else _final
                     source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = final_abs
                     # NOTE: This is precautionary, might need to be handled differently.
                     # It should not be the same as conditioning tokens.
@@ -923,30 +997,61 @@ class Model(torch.nn.Module):
                 ):
                     if isinstance(tokens, list):
                         # diffusion_rollout=True: discard intermediate steps, keep the final state.
+                        # _run_ode offloads trajectory steps to CPU; reload the final one.
                         tokens = tokens[-1]  # (1, healpix_cells, embed_dim)
+                        if not tokens.is_cuda:
+                            tokens = tokens.cuda()
                     cond = source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                     predict_residual = self.cf.get("fe_diffusion_predict_residual", False)
                     # Apply residual correction; broadcasts cond (1, H, D) over all N members.
                     member_final_tokens = cond + tokens if predict_residual else tokens
-                    # Decode all members (or the single rollout state) in one forward pass.
-                    # Use a single-slot ModelOutput for this temporary container.
-                    # forecast_offset != step ensures base=step so chunk_idx(step)==0.
-                    tmp_output = ModelOutput([step], step + 1, source_samples)
-                    tmp_output = self.predict_decoders(
-                        model_params,
-                        step,
-                        member_final_tokens,
-                        source_samples,
-                        tmp_output,
-                        out_step=0,
-                    )
-                    # pred_tuple has N entries (one per member / "batch" item).
+                    # Decode the members in groups of decode_members_per_pass. The decoder runs
+                    # over (members * n_target_points) query tokens, so decoding all members at
+                    # once makes its peak activation scale with the ensemble size — the dominant
+                    # allocation for large target sets (a full O(1e6)-point stream). Grouping
+                    # keeps that peak bounded while the results are concatenated to the same
+                    # (N, n_points, channels) layout as a single pass.
+                    n_members = member_final_tokens.shape[0]
+                    group = self.cf.get("decode_members_per_pass", 0) or n_members
+                    member_preds: dict[str, list[torch.Tensor]] = {}
+                    for m_start in range(0, n_members, group):
+                        # Use a single-slot ModelOutput for this temporary container.
+                        # forecast_offset != step ensures base=step so chunk_idx(step)==0.
+                        tmp_output = ModelOutput([step], step + 1, source_samples)
+                        tmp_output = self.predict_decoders(
+                            model_params,
+                            step,
+                            member_final_tokens[m_start : m_start + group],
+                            source_samples,
+                            tmp_output,
+                            out_step=0,
+                        )
+                        # pred_tuple has one entry per member in this group.
+                        for sname, pred_tuple in tmp_output.physical[0].items():
+                            member_preds.setdefault(sname, []).extend(pred_tuple)
                     # Concatenate along dim 0: (N, n_points, channels),
                     # wrap in 1-tuple (batch_size=1).
-                    for sname, pred_tuple in tmp_output.physical[0].items():
+                    # Optionally offload the decoded physical predictions to CPU. During a
+                    # rollout the per-step, per-member full-map predictions would otherwise
+                    # accumulate on the GPU across all forecast steps (they are only consumed
+                    # later by write_output/loss, both of which tolerate CPU tensors), so
+                    # offloading keeps peak GPU memory independent of num_steps / ensemble
+                    # size. The rolled-forward latent conditioning stays on the GPU below.
+                    offload_preds = self.cf.get("offload_predictions_to_cpu", True)
+                    for sname, preds_list in member_preds.items():
+                        member_pred = torch.cat(preds_list, dim=0)
+                        if offload_preds:
+                            member_pred = member_pred.to("cpu", non_blocking=True)
                         output.add_physical_prediction(
-                            step, sname, (torch.cat(list(pred_tuple), dim=0),)
+                            output.chunk_idx(step), sname, (member_pred,)
                         )
+                    # Carry the rolled-forward state so a following forecast chunk resumes from
+                    # here instead of re-encoding the source window and restarting the forecast.
+                    output.add_latent_prediction(
+                        output.chunk_idx(step),
+                        "latent_state",
+                        self.tokens_to_latent_state(None, member_final_tokens),
+                    )
                     # Store per-member conditioning for the next rollout step.
                     # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
                     # calls expand(N, ...) which is a no-op when the dim already matches.
@@ -1161,20 +1266,27 @@ class Model(torch.nn.Module):
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
+
+            # For the Linear decoder we need tc_tokens upfront; for the TTE decoder we
+            # embed per-group inside the loop to avoid materialising the full
+            # (n_target_points × D_embed) tensor (e.g. 3.25 M × D ≈ 734 MiB for ERA5).
+            if self.cf.decoder_type == "Linear":
+                tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
+            else:
+                tc_tokens = None  # embedded on-demand per group below
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
-            if torch.isnan(tc_tokens).any():
+            if tc_tokens is not None and torch.isnan(tc_tokens).any():
                 logger.warning(
                     (
                         f"Skipping prediction for {stream_name} because",
                         f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
                     )
                 )
-                pred = torch.tensor([], device=tc_tokens.device)
+                pred = torch.tensor([], device=t_coords.device)
 
             # skip empty lengths
-            elif tc_tokens.shape[0] == 0:
+            elif tc_tokens is not None and tc_tokens.shape[0] == 0:
                 pred = torch.tensor([], device=tc_tokens.device)
 
             else:
@@ -1194,16 +1306,52 @@ class Model(torch.nn.Module):
                         tcs_lens,
                     ).unsqueeze(0)  # add ensemble dim: shape is then [1, preds_per_coord, channels]
                 else:
-                    tc_tokens = self.target_token_engines[stream_name](
-                        latent=tokens_nbors,
-                        output=tc_tokens,
-                        latent_lens=tokens_nbors_lens,
-                        output_lens=tcs_lens,
-                        coordinates=t_coords,
-                    )
+                    # The decoder runs one varlen group per (member, healpix cell): group g
+                    # holds tcls[g] target points attending to the 9 latent tokens at
+                    # tokens_nbors[9g : 9g+9]. Every block modulates with a per-point
+                    # AdaLayerNorm, so a full-resolution stream (O(1e6) target points) makes a
+                    # single block hold several multi-GiB fp32 temporaries at once — the
+                    # dominant allocation of the whole forward pass. Groups are independent
+                    # under varlen attention, so decoding them in slices bounds that peak
+                    # without changing the result.
+                    n_groups = tcls.shape[0]
+                    nbors_per_group = tokens_nbors.shape[0] // n_groups
+                    group_size = self.cf.get("decode_cells_per_pass", 0) or n_groups
+                    # start offset of each group's target points; last entry is the total
+                    point_offsets = torch.cumsum(tcs_lens, 0).tolist()
+                    preds = []
+                    for g_start in range(0, n_groups, group_size):
+                        g_end = min(g_start + group_size, n_groups)
+                        p_start, p_end = point_offsets[g_start], point_offsets[g_end]
+                        # groups in this slice may all be empty; flash-attn needs >0 queries
+                        if p_end == p_start:
+                            continue
+                        zero = torch.zeros(1, dtype=tcls.dtype, device=tcls.device)
+                        group_lens = torch.cat([zero, tcls[g_start:g_end]])
+                        # Embed only this group's coordinates (cell-independent MLP →
+                        # chunked result is identical to full-batch embedding).
+                        # This avoids materialising the full (n_points × D_embed) tensor
+                        # for large streams such as ERA5.
+                        tc_tokens_group_input = (
+                            tc_tokens[p_start:p_end]  # Linear path: already embedded
+                            if tc_tokens is not None
+                            else checkpoint(tc_embed, t_coords[p_start:p_end], use_reentrant=False)
+                        )
+                        tc_tokens_group = self.target_token_engines[stream_name](
+                            latent=tokens_nbors[
+                                g_start * nbors_per_group : g_end * nbors_per_group
+                            ],
+                            output=tc_tokens_group_input,
+                            latent_lens=tokens_nbors_lens[: g_end - g_start + 1],
+                            output_lens=group_lens,
+                            coordinates=t_coords[p_start:p_end],
+                        )
+                        del tc_tokens_group_input
 
-                    # final prediction head to map back to physical space
-                    pred = self.pred_heads[stream_name](tc_tokens)
+                        # final prediction head to map back to physical space
+                        preds.append(self.pred_heads[stream_name](tc_tokens_group))
+                    # points are on dim 1: (ens_size, n_points, channels)
+                    pred = torch.cat(preds, dim=1)
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)

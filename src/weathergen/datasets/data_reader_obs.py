@@ -243,7 +243,7 @@ class DataReaderObs(DataReaderBase):
         self.properties["vars"] = self.data.attrs["vars"]
 
     @override
-    def _get(self, idx: int, channels_idx: list[int]) -> ReaderData:
+    def _get(self, idx: int, channels_idx: list[int], read_values: bool = True) -> ReaderData:
         """
         Get data for window
 
@@ -253,6 +253,8 @@ class DataReaderObs(DataReaderBase):
             Index of temporal window
         channels_idx : np.array
             Selection of channels
+        read_values : bool
+            If False, skip reading the data values; data has zero width.
 
         Returns
         -------
@@ -279,7 +281,11 @@ class DataReaderObs(DataReaderBase):
             else np.zeros((coords.shape[0], 0), np.float32)
         )
 
-        data = self.data.oindex[start_row:end_row, channels_idx]
+        data = (
+            self.data.oindex[start_row:end_row, channels_idx]
+            if read_values
+            else np.zeros((coords.shape[0], 0), np.float32)
+        )
         datetimes = self.dt[start_row:end_row][:, 0]
 
         # indices_start, indices_end above work with [t_start, t_end] and violate
@@ -297,5 +303,14 @@ class DataReaderObs(DataReaderBase):
 
         dtr = self.time_window_handler.window(idx)
         check_reader_data(rdata, dtr)
+
+        return rdata
+
+    @override
+    def _get_coords_geoinfos_only(self, idx: int, channels_idx: list[int]) -> ReaderData:
+        # skip the data-columns read entirely; coords/geoinfos/datetimes read as usual
+        rdata = self._get(idx, channels_idx, read_values=False)
+        # the empty-window early returns in _get yield (0, len(channels_idx)) data
+        rdata.data = rdata.data[:, :0]
 
         return rdata
