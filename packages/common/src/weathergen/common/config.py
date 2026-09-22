@@ -419,29 +419,65 @@ def merge_configs(base_config: Config, update_config: Config):
     return OmegaConf.merge(base_config, update_config)
 
 
-def reconcile_date_ranges(base_stage: Config, override_stage: Config) -> tuple[Config, Config]:
+# Registry of stage attributes that can be expressed via mutually exclusive alternate key
+# sets. Each entry is a tuple of alternative representations (a representation being itself a
+# tuple of keys); to register a new alternate representation, add another such tuple here.
+_ALTERNATE_STAGE_REPRESENTATIONS: tuple[tuple[tuple[str, ...], ...], ...] = (
+    (("start_date", "end_date"), ("date_ranges",)),
+)
+
+
+def _drop_keys(stage: Config, keys: tuple[str, ...]) -> Config:
+    """Delete any of `keys` present in `stage`, copying only if a deletion is needed."""
+    if not any(key in stage for key in keys):
+        return stage
+    stage = copy.deepcopy(stage)
+    for key in keys:
+        if key in stage:
+            del stage[key]
+    return stage
+
+
+def reconcile_alternate_representations(
+    base_stage: Config, override_stage: Config
+) -> tuple[Config, Config]:
     """
-    Resolve date_ranges vs. start_date/end_date precedence between two configs of the
-    same stage (e.g. two training_config blocks, or a training_config and a
+    Resolve mutually exclusive alternate representations of the same stage attribute (see
+    _ALTERNATE_STAGE_REPRESENTATIONS, e.g. date_ranges vs. start_date/end_date) between two
+    configs of the same stage (e.g. two training_config blocks, or a training_config and a
     validation_config) before they get merged with OmegaConf.merge.
+
+    Since alternate representations coexist as independent keys, a plain OmegaConf.merge
+    would leave a stale key from the base behind whenever the override switches
+    representation. So here, whichever representation the override specifies wins, and the
+    other representations are dropped from both stages before merging.
     """
-    if override_stage.get("start_date") is not None or override_stage.get("end_date") is not None:
-        if "date_ranges" in base_stage:
-            base_stage = copy.deepcopy(base_stage)
-            del base_stage["date_ranges"]
-        if "date_ranges" in override_stage:
-            override_stage = copy.deepcopy(override_stage)
-            del override_stage["date_ranges"]
+    for representations in _ALTERNATE_STAGE_REPRESENTATIONS:
+        selected = next(
+            (
+                keys
+                for keys in representations
+                if any(override_stage.get(key) is not None for key in keys)
+            ),
+            None,
+        )
+        if selected is None:
+            continue
+        for keys in representations:
+            if keys is selected:
+                continue
+            base_stage = _drop_keys(base_stage, keys)
+            override_stage = _drop_keys(override_stage, keys)
     return base_stage, override_stage
 
 
-def _reconcile_stage_date_ranges(
+def _reconcile_run_config_representations(
     base_run_config: Config, override_run_config: Config
 ) -> tuple[Config, Config]:
     """
-    Apply reconcile_date_ranges to each of training_config/validation_config/test_config
-    found in both configs. Both arguments are full run configs (not a single stage), since
-    e.g. training_config can appear in both base_config and an overwrite_config.
+    Apply reconcile_alternate_representations to each of training_config/validation_config/
+    test_config found in both configs. Both arguments are full run configs (not a single
+    stage), since e.g. training_config can appear in both base_config and an overwrite_config.
     """
     base_run_config = base_run_config.copy()
     override_run_config = override_run_config.copy()
@@ -450,7 +486,7 @@ def _reconcile_stage_date_ranges(
         override_stage = override_run_config.get(stage_key)
         if base_stage is None or override_stage is None:
             continue
-        base_stage, override_stage = reconcile_date_ranges(base_stage, override_stage)
+        base_stage, override_stage = reconcile_alternate_representations(base_stage, override_stage)
         base_run_config[stage_key] = base_stage
         override_run_config[stage_key] = override_stage
     return base_run_config, override_run_config
@@ -510,13 +546,13 @@ def load_merge_configs(
         # streams from an overwrite's streams_directory replace inherited streams
         if any(o.get("streams_directory") is not None for o in overwrite_configs):
             base_config.streams = None
-    # overwrite_configs are folded in one at a time so date_ranges vs. start_date/end_date
-    # precedence (see reconcile_date_ranges) is resolved at each step
+    # overwrite_configs are folded in one at a time so alternate stage representations
+    # (see reconcile_alternate_representations) are resolved at each step
     merged = OmegaConf.merge(base_config, private_config)
     assert isinstance(merged, Config)
     c: Config = merged
     for nxt in overwrite_configs:
-        c, nxt = _reconcile_stage_date_ranges(c, nxt)
+        c, nxt = _reconcile_run_config_representations(c, nxt)
         merged = OmegaConf.merge(c, nxt)
         assert isinstance(merged, Config)
         c = merged
