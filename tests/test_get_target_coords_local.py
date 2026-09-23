@@ -1,7 +1,7 @@
-"""Equivalence of vectorized get_target_coords_local vs the original split/cat path.
+"""Tests for vectorized get_target_coords_local.
 
-The original implementation is frozen here. Production always packs target points
-in healpix-cell order with ``masked_points_per_cell`` counts, matching TokenizerMasking.
+Equivalence cases compare against the frozen split/cat path. The standalone
+two-cell case asserts hand-checked columns and does not call the original.
 """
 
 import numpy as np
@@ -15,7 +15,30 @@ from weathergen.datasets.tokenizer_utils import (
     get_target_coords_local,
     theta_phi_to_standard_coords,
 )
-from weathergen.datasets.utils import locs_to_cell_coords_ctrs, locs_to_ctr_coords, s2tor3
+from weathergen.datasets.utils import s2tor3, vecs_to_rots
+
+
+def _locs_to_cell_coords_ctrs(healpix_centers_rots: torch.Tensor, locs: list[torch.Tensor]):
+    """Frozen pre-rewrite helper. Removed from dataset utils; only used here."""
+    all_points = torch.cat(locs, dim=0)
+    lengths = torch.tensor([len(s) for s in locs], device=all_points.device)
+    batch_indices = torch.repeat_interleave(
+        torch.arange(len(locs), device=all_points.device), lengths
+    )
+    rotations_selected = healpix_centers_rots[batch_indices]
+    return torch.bmm(rotations_selected, all_points.unsqueeze(-1)).squeeze(-1)
+
+
+def _locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list:
+    """Frozen pre-rewrite helper. Removed from dataset utils; only used here."""
+    ctrs_rots = vecs_to_rots(ctrs_r3).to(torch.float32)
+    all_points = torch.cat(locs, dim=0)
+    lengths = torch.tensor([len(s) for s in locs], device=all_points.device)
+    batch_indices = torch.repeat_interleave(
+        torch.arange(len(locs), device=all_points.device), lengths
+    )
+    rotated_points = torch.bmm(ctrs_rots[batch_indices], all_points.unsqueeze(-1)).squeeze(-1)
+    return list(torch.split(rotated_points, lengths.tolist()))
 
 
 def _get_target_coords_local_original(
@@ -68,7 +91,7 @@ def _get_target_coords_local_original(
     vls = vls.transpose(0, 1)
 
     zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _locs_to_cell_coords_ctrs(
         verts00_rots, tcs
     )
 
@@ -76,7 +99,7 @@ def _get_target_coords_local_original(
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
 
     zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _locs_to_cell_coords_ctrs(
         verts10_rots, tcs
     )
 
@@ -84,7 +107,7 @@ def _get_target_coords_local_original(
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
 
     zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _locs_to_cell_coords_ctrs(
         verts11_rots, tcs
     )
 
@@ -92,7 +115,7 @@ def _get_target_coords_local_original(
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
 
     zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _locs_to_cell_coords_ctrs(
         verts01_rots, tcs
     )
 
@@ -100,14 +123,14 @@ def _get_target_coords_local_original(
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
 
     zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - _locs_to_cell_coords_ctrs(
         vertsmm_rots, tcs
     )
 
     zi = 63
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
 
-    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
+    tcs_ctrs = torch.cat([ref - torch.cat(_locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
     zi = 75
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
 
@@ -189,20 +212,77 @@ def test_rotate_points_per_cell_toy_example():
     )
     assert torch.equal(got, expected)
 
-    tcs = torch.split(points, counts.tolist())
-    assert torch.equal(got, locs_to_cell_coords_ctrs(cell_rots, tcs))
 
+def test_get_target_coords_local_known_two_cells():
+    """Two packed points, identity vertex frames, north-pole neighbor centers.
 
-def test_rotate_points_per_cell_matches_locs_to_cell_coords_ctrs(target_geometry):
-    hl = target_geometry["hl"]
-    cell_rots = target_geometry["verts_rots"][0]
-    coords, counts = _pack_coords_by_cell(_random_latlon(200, seed=0), hl)
-    points = s2tor3(*theta_phi_to_standard_coords(coords)).to(torch.float32)
-    tcs = torch.split(points, counts.tolist())
+    Does not call the frozen original. Geometry is synthetic (2 cells), not Tokenizer.
 
-    got = _rotate_points_per_cell(cell_rots, points, counts)
-    old = locs_to_cell_coords_ctrs(cell_rots, tcs)
-    assert torch.equal(got, old)
+      row 0 / cell 0: lat=0, lon=-180  ->  p = (1, 0, 0)
+      row 1 / cell 1: lat=90, lon=0    ->  p = (0, 0, 1)
+
+    Vertex rotations are I, so each vertex offset is ``ref - p`` with ref=(1,0,0).
+    Neighbor centers are (0,0,1); ``vecs_to_rots`` then maps (x,y,z) -> (z,y,-x),
+    so the 8 neighbor offsets are ``ref - (z, y, -x)``.
+    ``verts_local`` is 0.1 in cell 0 and 0.2 in cell 1 (copied into each vertex block).
+    """
+    coords = torch.tensor([[0.0, -180.0], [90.0, 0.0]], dtype=torch.float32)
+    counts = torch.tensor([1, 1], dtype=torch.int32)
+    n_cells = 2
+    times = torch.tensor(
+        [[1.0, 2.0, 3.0, 4.0, 5.0], [6.0, 7.0, 8.0, 9.0, 10.0]],
+        dtype=torch.float32,
+    )
+    geo = torch.zeros((2, 0), dtype=torch.float32)
+    ident = torch.eye(3, dtype=torch.float32).unsqueeze(0).repeat(n_cells, 1, 1)
+    verts_rots = [ident.clone() for _ in range(5)]
+    verts_local = torch.zeros((n_cells, 5, 12), dtype=torch.float32)
+    verts_local[0] = 0.1
+    verts_local[1] = 0.2
+    nctrs = torch.tensor([0.0, 0.0, 1.0]).expand(8, n_cells, 3).contiguous()
+
+    got = get_target_coords_local(
+        stream_id=7.0,
+        hlc=0,
+        masked_points_per_cell=counts,
+        coords=coords,
+        target_geoinfos=geo,
+        target_times=times,
+        verts_rots=verts_rots,
+        verts_local=verts_local,
+        nctrs=nctrs,
+    )
+
+    p = s2tor3(*theta_phi_to_standard_coords(coords))
+    torch.testing.assert_close(p[0], torch.tensor([1.0, 0.0, 0.0]), atol=1e-5, rtol=0)
+    torch.testing.assert_close(p[1], torch.tensor([0.0, 0.0, 1.0]), atol=1e-5, rtol=0)
+
+    assert got.shape == (2, 105)
+    assert got[0, 0].item() == 7.0
+    assert got[1, 0].item() == 0.0
+    torch.testing.assert_close(got[:, 1:6], times)
+
+    ref = torch.tensor([1.0, 0.0, 0.0])
+    vertex_off = ref - p
+    neighbor_off = ref - torch.stack(
+        [torch.tensor([p[i, 2], p[i, 1], -p[i, 0]]) for i in range(2)]
+    )
+    for row, cell in ((0, 0), (1, 1)):
+        local = torch.full((12,), 0.1 if cell == 0 else 0.2)
+        for base in (6, 21, 36, 51, 66):
+            torch.testing.assert_close(got[row, base : base + 3], vertex_off[row], atol=1e-5, rtol=0)
+            torch.testing.assert_close(got[row, base + 3 : base + 15], local, atol=0, rtol=0)
+        # First four neighbor triples (81:93). Columns 95-98 are then overwritten
+        # with sin/cos of lat/lon (production layout).
+        for k in range(4):
+            col = 81 + 3 * k
+            torch.testing.assert_close(got[row, col : col + 3], neighbor_off[row], atol=1e-5, rtol=0)
+
+    # Production overwrites these four columns after the neighbor block.
+    torch.testing.assert_close(got[:, 98], torch.sin(coords[:, 0]))
+    torch.testing.assert_close(got[:, 97], torch.cos(coords[:, 0]))
+    torch.testing.assert_close(got[:, 96], torch.sin(coords[:, 1]))
+    torch.testing.assert_close(got[:, 95], torch.cos(coords[:, 1]))
 
 
 def test_get_target_coords_local_empty():
