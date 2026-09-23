@@ -528,8 +528,8 @@ class DataReaderBase(metaclass=ABCMeta):
     def _normalize(
         data: NDArray[DType],
         idx: list[int],
-        mean: dict[int, float],
-        stdev: dict[int, float],
+        mean: NDArray[np.floating],
+        stdev: NDArray[np.floating],
         name: str,
     ) -> NDArray[DType]:
         """
@@ -557,15 +557,11 @@ class DataReaderBase(metaclass=ABCMeta):
                 f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}"
             )
         # Equivalent to (data[..., i] - mean[ch]) / stdev[ch] per channel.
-        # Dict stats are Python floats (weak scalars → same dtype as data). Array stats keep
-        # their dtype so float32 data minus float64 mean still promotes, matching the loop.
-        if isinstance(mean, dict):
-            mean_vec = np.array([mean[ch] for ch in idx], dtype=data.dtype)
-            std_vec = np.array([stdev[ch] for ch in idx], dtype=data.dtype)
-        else:
-            idx_arr = np.asarray(idx, dtype=np.intp)
-            mean_vec = np.asarray(mean)[idx_arr]
-            std_vec = np.asarray(stdev)[idx_arr]
+        # Stats keep their dtype so float32 data minus float64 mean still promotes,
+        # matching the original loop.
+        idx_arr = np.asarray(idx, dtype=np.intp)
+        mean_vec = np.asarray(mean)[idx_arr]
+        std_vec = np.asarray(stdev)[idx_arr]
 
         if mean_vec.dtype == data.dtype and std_vec.dtype == data.dtype:
             data -= mean_vec
@@ -601,8 +597,8 @@ class DataReaderBase(metaclass=ABCMeta):
     def _denormalize(
         data: NDArray[DType],
         idx: list[int],
-        mean: dict[int, float],
-        stdev: dict[int, float],
+        mean: NDArray[np.floating],
+        stdev: NDArray[np.floating],
         name: str,
     ) -> NDArray[DType]:
         """
