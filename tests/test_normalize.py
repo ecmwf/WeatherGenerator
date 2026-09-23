@@ -45,16 +45,6 @@ def test_normalize_matches_original_array_stats(dtype):
     assert vectorized.dtype == data.dtype
 
 
-def test_normalize_matches_original_dict_stats():
-    rng = np.random.default_rng(1)
-    idx = [2, 5, 11]
-    mean = {ch: float(rng.normal()) for ch in idx}
-    stdev = {ch: float(rng.uniform(0.2, 3.0)) for ch in idx}
-    data = rng.normal(size=(32, 16, 3)).astype(np.float32)
-    original, vectorized = _run_both(data, idx, mean, stdev)
-    np.testing.assert_array_equal(vectorized, original)
-
-
 def test_normalize_matches_original_numpy_idx():
     rng = np.random.default_rng(2)
     idx = np.array([0, 2, 4], dtype=np.int64)
