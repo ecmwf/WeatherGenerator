@@ -18,8 +18,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import xarray as xr
+from matplotlib.colors import TwoSlopeNorm
+from matplotlib.lines import Line2D
+from numpy.typing import NDArray
+from PIL import Image
 
 from weathergen.evaluate.plotting.plot_utils import (
+    RASTER_ANIMATION_FORMATS,
     align_labels,
     channel_sort_key,
     clean_label,
@@ -49,6 +54,9 @@ class LinePlots:
                         - "std": plot mean +/- standard deviation
                         - "minmax": plot min-max range
                         - "members": plot individual ensemble members
+                - fps: frames per second for the PSD forecast-step animation (default 2)
+                - psd_show_ratio: if False, PSD plots are single-panel (spectra only)
+                - psd_animation: if False, no per-run PSD gif over forecast steps is written
         output_basedir:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
@@ -61,6 +69,9 @@ class LinePlots:
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
         self.baseline = plotter_cfg.get("baseline")
+        self.fps = plotter_cfg.get("fps", 2)
+        self.psd_show_ratio = plotter_cfg.get("psd_show_ratio", True)
+        self.psd_animate = plotter_cfg.get("psd_animation", True)
         self.out_plot_dir_lines = Path(output_basedir) / "line_plots"
         self.out_plot_dir_ratio = Path(output_basedir) / "ratio_plots"
         self.out_plot_dir_psd = Path(output_basedir) / "psd_plots"
@@ -707,6 +718,45 @@ class LinePlots:
     # PSD summary plot
     # ------------------------------------------------------------------
 
+    def _psd_axes(
+        self, default_size: tuple[float, float]
+    ) -> tuple[plt.Figure, plt.Axes, plt.Axes | None]:
+        """Create the PSD figure: spectra panel + pred/target ratio panel, or spectra only.
+
+        Returns ``(fig, ax_spec, ax_ratio)`` where ``ax_ratio`` is ``None`` when
+        ``self.psd_show_ratio`` is False.
+        """
+        size = self.fig_size or default_size
+        if self.psd_show_ratio:
+            fig, (ax_spec, ax_ratio) = plt.subplots(
+                2,
+                1,
+                figsize=size,
+                gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
+            )
+            return fig, ax_spec, ax_ratio
+        # Single panel: drop the space the ratio panel used to occupy.
+        fig, ax_spec = plt.subplots(1, 1, figsize=(size[0], size[1] * 0.7))
+        return fig, ax_spec, None
+
+    def _finish_psd_axes(
+        self,
+        ax_spec: plt.Axes,
+        ax_ratio: plt.Axes | None,
+        ratio_ylabel: str = "Pred / Target",
+    ) -> None:
+        """Apply the shared x-label / ratio-panel styling, ratio panel permitting."""
+        xlabel = "Frequency (1/deg)"
+        if ax_ratio is None:
+            # x-label moves up onto the spectra panel when there is no ratio panel below it.
+            ax_spec.set_xlabel(xlabel)
+            return
+        ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
+        ax_ratio.set_ylabel(ratio_ylabel)
+        ax_ratio.set_xlabel(xlabel)
+        ax_ratio.set_ylim(0, 2)
+        ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+
     def psd_plot(
         self,
         psd_datasets: list[dict],
@@ -714,7 +764,7 @@ class LinePlots:
         tag: str = "",
         variable: str = "",
         forecast_step: str = "",
-    ) -> None:
+    ) -> Path:
         """Create a PSD summary plot overlaying multiple runs.
 
         Each entry in *psd_datasets* is a dict with keys
@@ -729,6 +779,11 @@ class LinePlots:
             Human-readable label for each run.
         tag : str
             Filename tag.
+
+        Returns
+        -------
+        Path
+            Path of the written figure (used to assemble forecast-step animations).
         """
         out_dir = Path(self.out_plot_dir_psd)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -737,12 +792,7 @@ class LinePlots:
         freq = np.asarray(psd_datasets[0]["frequencies"])
         tar_psd = np.asarray(psd_datasets[0]["psd_target"])
 
-        fig, (ax_spec, ax_ratio) = plt.subplots(
-            2,
-            1,
-            figsize=self.fig_size or (10, 8),
-            gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
-        )
+        fig, ax_spec, ax_ratio = self._psd_axes((10, 8))
 
         # Upper panel: log-log spectra
         ax_spec.loglog(freq, tar_psd, color="black", lw=1.5, label="Target")
@@ -767,21 +817,256 @@ class LinePlots:
         ax_spec.legend(frameon=False, fontsize=7)
         ax_spec.grid(True, which="both", ls="--", alpha=0.4)
 
-        # Lower panel: ratio (pred / target)
-        for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
-            c = colors[i % len(colors)]
-            pred = np.asarray(ds["psd_prediction"])
-            with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = np.where(tar_psd > 0, pred / tar_psd, np.nan)
-            ax_ratio.semilogx(freq, ratio, color=c, lw=1.2, label=label)
-        ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
-        ax_ratio.set_ylabel("Pred / Target")
-        ax_ratio.set_xlabel("Frequency (1/deg)")
-        ax_ratio.set_ylim(0, 2)
-        ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+        # Lower panel: ratio (pred / target) - only when enabled.
+        if ax_ratio is not None:
+            for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
+                c = colors[i % len(colors)]
+                pred = np.asarray(ds["psd_prediction"])
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    ratio = np.where(tar_psd > 0, pred / tar_psd, np.nan)
+                ax_ratio.semilogx(freq, ratio, color=c, lw=1.2, label=label)
+        self._finish_psd_axes(ax_spec, ax_ratio)
 
         name = tag or "psd"
         fname = out_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving PSD summary plot to {fname}")
         fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
         plt.close(fig)
+        return fname
+
+    def psd_evolution_plot(
+        self,
+        per_fstep_datasets: dict[int, dict],
+        tag: str = "",
+        variable: str = "",
+        label: str = "",
+    ) -> None:
+        """Overlay PSD spectra (and their pred/target ratio) across forecast lead-time steps in
+        one two-panel plot, colour-coded by step.
+
+        Mirrors the diffusion-diagnostics "evolution" plot style (viridis colormap + colorbar
+        keyed to the swept step), applied here to forecast lead-time steps instead of diffusion
+        denoising steps, and mirrors ``psd_plot``'s two-panel (spectra + ratio) layout. Solid,
+        colour-coded lines are the per-step predictions. Because the target spectrum is nearly
+        lead-time invariant, it is averaged over all forecast steps and drawn once in grey
+        rather than once per step; the ratio panel divides every step's prediction by that same
+        averaged target, so it matches what the upper panel shows. The ratio panel is omitted
+        when ``psd_show_ratio`` is False.
+
+        Parameters
+        ----------
+        per_fstep_datasets : dict[int, dict]
+            Maps forecast step -> dict with keys ``frequencies``, ``psd_target``,
+            ``psd_prediction``, ``psd_method`` (as produced by ``_extract_psd_attrs``).
+        tag : str
+            Filename tag.
+        variable : str
+            Channel name, used in the title.
+        label : str
+            Run label, used in the title.
+        """
+        out_dir = Path(self.out_plot_dir_psd)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        fsteps = sorted(per_fstep_datasets)
+        if len(fsteps) < 2:
+            return
+
+        fig, ax_spec, ax_ratio = self._psd_axes((7, 7))
+        cmap = plt.get_cmap("viridis")
+        n = max(len(fsteps) - 1, 1)
+
+        # The target spectrum barely changes with lead time: average it across forecast
+        # steps and draw it once, instead of one dashed per-step curve.
+        ref_freq = np.asarray(per_fstep_datasets[fsteps[0]]["frequencies"])
+        targets = [np.asarray(per_fstep_datasets[f]["psd_target"]) for f in fsteps]
+        if all(t.shape == targets[0].shape for t in targets):
+            tar_mean = np.nanmean(np.vstack(targets), axis=0)
+        else:
+            _logger.warning(
+                f"PSD evolution ({label} / {variable}): target spectra differ in length across "
+                "forecast steps; falling back to the first step's target as reference."
+            )
+            tar_mean = targets[0]
+
+        for i, fstep in enumerate(fsteps):
+            ds = per_fstep_datasets[fstep]
+            freq = np.asarray(ds["frequencies"])
+            pred = np.asarray(ds["psd_prediction"])
+            c = cmap(i / n)
+
+            ax_spec.loglog(freq, pred, color=c, lw=1.0)
+
+            if ax_ratio is not None and pred.shape == tar_mean.shape:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    ratio = np.where(tar_mean > 0, pred / tar_mean, np.nan)
+                ax_ratio.semilogx(freq, ratio, color=c, lw=1.0)
+
+        # Single, step-independent grey target on top of the prediction bundle.
+        ax_spec.loglog(ref_freq, tar_mean, color="0.45", lw=1.8, ls="--", zorder=5)
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(fsteps[0], fsteps[-1]))
+        fig.colorbar(
+            sm, ax=[ax_spec] if ax_ratio is None else [ax_spec, ax_ratio], label="Forecast step"
+        )
+
+        ax_spec.legend(
+            handles=[
+                Line2D([], [], color=cmap(0.5), lw=1.0, ls="-", label="Prediction (per step)"),
+                Line2D([], [], color="0.45", lw=1.8, ls="--", label="Target (mean over steps)"),
+            ],
+            frameon=False,
+            fontsize=8,
+        )
+        psd_method = next(iter(per_fstep_datasets.values())).get("psd_method", "sht")
+        title_parts = [f"PSD evolution ({psd_method})"]
+        if variable:
+            title_parts.append(variable)
+        if label:
+            title_parts.append(label)
+        ax_spec.set_title(" – ".join(title_parts))
+        ax_spec.set_ylabel("Power")
+        ax_spec.grid(True, which="both", ls="--", alpha=0.4)
+
+        self._finish_psd_axes(ax_spec, ax_ratio, ratio_ylabel="Pred / Target (mean)")
+
+        fname = out_dir / f"{tag or 'psd_evolution'}.{self.image_format}"
+        _logger.debug(f"Saving PSD evolution plot to {fname}")
+        fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
+        plt.close(fig)
+
+    def psd_gif(self, frame_paths: list[str | Path], tag: str = "") -> Path | None:
+        """Assemble already-written per-forecast-step PSD frames into an animated gif.
+
+        Frames are used in the order given (no filename globbing), with the same Pillow
+        ``save_all``/``append_images`` pattern used for the map/histogram animations in
+        ``plot_orchestration.py``.
+
+        Parameters
+        ----------
+        frame_paths : list[str | Path]
+            Ordered frame paths, as returned by :meth:`psd_plot`.
+        tag : str
+            Filename tag (extension ``.gif`` is appended).
+
+        Returns
+        -------
+        Path | None
+            Path of the gif, or None when fewer than two frames were available.
+        """
+        paths = [Path(p) for p in frame_paths if p is not None and Path(p).exists()]
+        if len(paths) < 2:
+            _logger.debug(f"PSD animation '{tag}' skipped: fewer than two frames.")
+            return None
+
+        if self.image_format.lower() not in RASTER_ANIMATION_FORMATS:
+            _logger.warning(
+                f"PSD animation '{tag}' skipped: image_format={self.image_format!r} is not a "
+                f"raster format Pillow can read as frames (supported: "
+                f"{sorted(RASTER_ANIMATION_FORMATS)})."
+            )
+            return None
+
+        out_dir = Path(self.out_plot_dir_psd)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{tag or 'psd_animation'}.gif"
+        duration_ms = int(1000 / self.fps) if self.fps and self.fps > 0 else 400
+
+        images = [Image.open(p) for p in paths]
+        try:
+            # savefig(bbox_inches="tight") can produce slightly different canvas sizes per
+            # frame (e.g. "step 1" vs "step 10" label width); normalize so Pillow doesn't
+            # paste subsequent frames onto the first frame's canvas misaligned.
+            base_size = images[0].size
+            frames = [im if im.size == base_size else im.resize(base_size) for im in images]
+            frames[0].save(
+                out_path,
+                save_all=True,
+                append_images=frames[1:],
+                duration=duration_ms,
+                loop=0,
+            )
+        finally:
+            for im in images:
+                im.close()
+        _logger.debug(f"Saved PSD animation to {out_path}")
+        return out_path
+
+    def psd_gap_heatmap(
+        self,
+        freq: NDArray,
+        fsteps: list[int],
+        grid: NDArray,
+        vmin: float,
+        vmax: float,
+        tag: str = "",
+        variable: str = "",
+        label: str = "",
+        psd_method: str = "sht",
+    ) -> Path:
+        """Render a precomputed frequency x forecast-step gap grid as a heatmap.
+
+        Same quantity as the ratio panels (log(prediction/target) = log(Pred/Target)), but as
+        one dense grid instead of overlaid per-step curves, so frequency-band-specific drift
+        over lead time is visible directly. Positive = over-prediction, negative =
+        under-prediction, matching this codebase's ``calc_bias`` convention (``p - gt``,
+        score.py) and the ratio panels' ``pred / target`` (ratio > 1 = over-prediction).
+        ``vmin``/``vmax`` are supplied by the caller (``psd_plot_metric_region`` computes them
+        once across every run being compared, so all runs for a given stream/channel share one
+        colour scale) rather than fixed here, since a fixed bound can badly over- or under-shoot
+        the data depending on the run. The colormap is centred on 0 (perfect prediction) via
+        ``TwoSlopeNorm`` even when ``vmin``/``vmax`` aren't symmetric around it.
+
+        The frequency axis for the SHT method (the only one actually exercised by this eval
+        config) is an integer spherical-harmonic wavenumber starting at 0, not a continuous
+        FFT-style frequency — plotted on a **linear** axis. A log axis previously mishandled the
+        zero wavenumber and produced wildly wrong, data-independent limits.
+
+        Parameters
+        ----------
+        freq : np.ndarray
+            Frequency/wavenumber axis, shape ``(n_freq,)``.
+        fsteps : list[int]
+            Forecast steps included in ``grid``'s rows, same order.
+        grid : np.ndarray
+            ``log(prediction) - log(target)``, shape ``(len(fsteps), len(freq))``.
+        vmin, vmax : float
+            Colour scale bounds (already extended to include 0 by the caller).
+        tag : str
+            Filename tag.
+        variable : str
+            Channel name, used in the title.
+        label : str
+            Run label, used in the title.
+        psd_method : str
+            Used in the title only.
+
+        Returns
+        -------
+        Path
+            Path of the written figure.
+        """
+        out_dir = Path(self.out_plot_dir_psd)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        fig, ax = plt.subplots(figsize=self.fig_size or (8, 6))
+        norm = TwoSlopeNorm(vcenter=0.0, vmin=vmin, vmax=vmax)
+        mesh = ax.pcolormesh(freq, fsteps, grid, cmap="coolwarm", norm=norm, shading="nearest")
+        ax.set_xlabel("Frequency (1/deg)")
+        ax.set_ylabel("Forecast step")
+
+        title_parts = [f"PSD gap: log(pred) - log(target) ({psd_method})"]
+        if variable:
+            title_parts.append(variable)
+        if label:
+            title_parts.append(label)
+        ax.set_title(" - ".join(title_parts))
+
+        cbar = fig.colorbar(mesh, ax=ax)
+        cbar.set_label("log(prediction) - log(target)")
+
+        fname = out_dir / f"{tag or 'psd_gap_heatmap'}.{self.image_format}"
+        _logger.debug(f"Saving PSD gap heatmap to {fname}")
+        fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
+        plt.close(fig)
+        return fname

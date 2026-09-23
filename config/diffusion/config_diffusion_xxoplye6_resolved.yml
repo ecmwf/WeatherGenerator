@@ -1,0 +1,248 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+# Reconstructed from the resolved runtime config in
+# /e/scratch/weatherai/shared_work/models/xxoplye6/model_xxoplye6.json
+# (snapshot at general.istep=2980), not from the base-config file on disk.
+
+embed_orientation: "channels"
+embed_unembed_mode: "block"
+embed_dropout_rate: 0.1
+
+ae_local_dim_embed: 2048
+ae_local_num_blocks: 2
+ae_local_num_heads: 16
+ae_local_dropout_rate: 0.1
+ae_local_with_qk_lnorm: True
+
+ae_local_num_queries: 1
+ae_local_queries_per_cell: False
+ae_adapter_num_heads: 16
+ae_adapter_embed: 128
+ae_adapter_with_qk_lnorm: True
+ae_adapter_with_residual: True
+ae_adapter_dropout_rate: 0.1
+ae_local_max_tokens_per_cell: 128
+
+ae_global_dim_embed: 2048
+ae_global_num_blocks: 4
+ae_global_num_heads: 32
+ae_global_dropout_rate: 0.1
+ae_global_with_qk_lnorm: True
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: False
+
+ae_aggregation_num_blocks: 0
+ae_aggregation_num_heads: 32
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: True
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
+decoder_type: PerceiverIOCoordConditioning
+pred_adapter_kv: False
+pred_self_attention: True
+pred_dyadic_dims: False
+pred_mlp_adaln: True
+num_class_tokens: 0
+num_register_tokens: 0
+
+diffusion: {noise_stream: ERA5}
+fe_num_blocks: 12
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+fe_diffusion_latent_dim: 2560
+fe_diffusion_model: True
+fe_diffusion_predict_residual: False
+fe_diffusion_classifier_free_guidance_prob: 0.0
+fe_diffusion_model_conditioning: "forecast"
+fe_diffusion_model_conditioning_type: "concatenate"
+fe_layer_norm_after_blocks: [11]
+fe_impute_latent_noise_std: 0.0
+fe_impute_latent_diffusion_noise_std: 1e-3
+forecast_att_dense_rate: 1.0
+with_step_conditioning: True
+frequency_embedding_dim: 256
+embedding_dim: 512
+noise_distribution: &noise_distribution "log_uniform"
+sigma_min: &sigma_min 0.4
+sigma_max: &sigma_max 50
+sigma_data: 1.0
+rho: 7
+p_mean: 3.5
+p_std: 1.2
+
+healpix_level: 5
+
+rope_2D: True
+mlp_type: mlp
+use_xsa: False
+
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: True
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1e-05
+norm_eps: 1e-04
+
+latent_noise_kl_weight: 0.0
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True
+
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+
+load_chkpt: {'run_id': 'skkbxfya', 'epoch': -1}
+
+norm_type: "LayerNorm"
+
+#####################################
+
+streams_directory: "/e/project1/e-ext-2025e01-128/karlbauer1/repos/weathergen-configs/diffusion/streams/era5_georing_avhrr_synop_lowres_linear/"
+streams: ???
+
+zarr_store: "zip"
+
+general:
+  istep: 2980
+  rank: ???
+  world_size: ???
+
+  multiprocessing_method: "fork"
+
+  desc: ""
+  run_id: xxoplye6
+  run_history: [[xxoplye6, 2400], [xxoplye6, 2980]]
+
+train_logging:
+  terminal: 10
+  metrics: 20
+  checkpoint: 50
+  log_grad_norms: False
+
+data_loading:
+  num_workers: 10
+  num_workers_validation: 6
+  rng_seed: 1786564175
+  repeat_data_in_mini_epoch: False
+
+training_config:
+  training_mode: ["masking", "student_teacher"]
+
+  num_mini_epochs: 64
+  samples_per_mini_epoch: 16384
+  shuffle: True
+
+  start_date: 1979-01-01T00:00
+  end_date: 2022-12-31T00:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 2e-4
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 64
+    num_steps_cooldown: 32768
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "constant"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw :
+      beta1 : 0.99
+      beta2 : 0.999
+      eps : 2e-08
+
+  losses : {
+    "latent_diff": {
+        type: LossLatentDiffusion,
+        weight: 1.0,
+        target_and_aux_calc: DiffusionLatentTargetEncoder,
+        loss_fcts: { "mse": { }, },
+        }
+  }
+
+  model_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      masking_strategy_config: {
+        diffusion_rn: True,
+        noise_distribution: *noise_distribution,
+        sigma_min: *sigma_min,
+        sigma_max: *sigma_max,
+        },
+      num_steps_input: 2,
+      num_samples: 1,
+      }
+    }
+
+  target_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      masking_strategy_config: {
+        diffusion_rn: True,
+        noise_distribution: *noise_distribution,
+        sigma_min: *sigma_min,
+        sigma_max: *sigma_max,
+        },
+      num_steps_input: 1,
+      num_samples: 1,
+      }
+    }
+
+  forecast :
+      time_step: 06:00:00
+      num_steps: 1
+      offset: 0
+      policy: "fixed"
+
+
+validation_config:
+
+  validation_noise_levels: [1.0, 2.0, 3.0, 4.0]
+
+  samples_per_mini_epoch: 256
+  shuffle: True
+
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T18:00
+
+  validate_with_ema:
+    enabled : True
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 1e-3
+
+  output : {
+    num_samples: 0,
+    normalized_samples: False,
+    streams: null,
+    }
+
+  validate_before_training: False
+
+
+wgtags:
+  org: null
+  issue: null
+  exp: null
+  grid: null

@@ -18,6 +18,11 @@ from numpy.typing import NDArray
 
 _logger = logging.getLogger(__name__)
 
+# Animations (gif/mp4) are stitched from per-frame static plots with Pillow or imageio, both of
+# which require raster frames. Vector/document formats like "pdf"/"svg"/"eps" are valid choices
+# for the static plots themselves (via image_format) but can't be decoded as animation frames.
+RASTER_ANIMATION_FORMATS = {"png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp"}
+
 
 # Shared helpers
 def calculate_average_over_dim(
@@ -75,7 +80,7 @@ def compute_offsets(n, spacing=0.11):
 
     Returns
     -------
-    np.ndarray
+    NDArray
         Array of length *n* with offsets centred at zero.
     """
     idx = np.arange(n)
@@ -205,7 +210,7 @@ class DefaultMarkerSize:
 
         Returns
         -------
-        float or np.ndarray
+        float or NDArray
             Scalar when *scale* is ``False``; array matching *lat* otherwise.
         """
         if not scale:
@@ -260,7 +265,7 @@ class DefaultMarkerSize:
 
         Returns
         -------
-        float or np.ndarray
+        float or NDArray
             Marker size(s) ready to pass to ``ax.scatter(s=...)``.
         """
         if n_points >= density_threshold:
@@ -277,12 +282,12 @@ def _flatten_or_average(arr: NDArray) -> NDArray:
 
     Parameters
     ----------
-    arr : np.ndarray
+    arr : NDArray
         Input array, possibly multi-dimensional.
 
     Returns
     -------
-    np.ndarray
+    NDArray
         Flattened 1D array, averaged across extra dimensions if needed.
     """
     if arr.ndim > 1:
@@ -789,6 +794,50 @@ def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict]
     return None
 
 
+def _compute_psd_gap_grid(
+    per_fstep_datasets: dict[int, dict], label: str = "", variable: str = ""
+) -> tuple[NDArray, list[int], NDArray] | None:
+    """Build a (n_fsteps, n_freq) grid of log(prediction) - log(target) for one run.
+
+    Positive = over-prediction, negative = under-prediction — matching this codebase's existing
+    ``calc_bias`` convention (``p - gt``, score.py) and the PSD ratio panels' ``pred / target``
+    (ratio > 1 = over-prediction), rather than the mathematically-arbitrary opposite sign.
+
+    Forecast steps whose frequency array doesn't match the first usable step's shape are
+    dropped (with a warning) rather than raising, since PSD's frequency grid can in principle
+    differ across steps depending on NaN-masking.
+
+    Returns
+    -------
+    tuple[NDArray, list[int], NDArray] | None
+        ``(freq, used_fsteps, grid)``, or None if fewer than two forecast steps were usable.
+    """
+    fsteps = sorted(per_fstep_datasets)
+    ref_freq = np.asarray(per_fstep_datasets[fsteps[0]]["frequencies"])
+    rows, used_fsteps = [], []
+    for fstep in fsteps:
+        ds = per_fstep_datasets[fstep]
+        freq = np.asarray(ds["frequencies"])
+        if freq.shape != ref_freq.shape:
+            _logger.warning(
+                f"PSD gap heatmap ({label} / {variable}): fstep {fstep} has a differently "
+                "shaped frequency grid; excluding it from the heatmap."
+            )
+            continue
+        tar = np.asarray(ds["psd_target"])
+        pred = np.asarray(ds["psd_prediction"])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            gap = np.log(np.where(pred > 0, pred, np.nan)) - np.log(
+                np.where(tar > 0, tar, np.nan)
+            )
+        rows.append(gap)
+        used_fsteps.append(fstep)
+
+    if len(rows) < 2:
+        return None
+    return ref_freq, used_fsteps, np.vstack(rows)
+
+
 def psd_plot_metric_region(
     metric: str,
     region: str,
@@ -800,12 +849,20 @@ def psd_plot_metric_region(
 
     PSD curves (frequencies, target PSD, prediction PSD) are stored in
     ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+
+    For a given forecast step, all runs are overlaid on one plot. Evolution plots (across
+    forecast steps) remain one-per-run, accompanied by a per-run frequency x forecast-step
+    gap heatmap and a per-run, per-forecast-step animated gif (unless disabled via
+    ``plotter.psd_animate``).
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
 
     for stream in streams_set:
         for ch in channels_set:
+            # First pass: gather each run's per-fstep PSD data for this stream/channel.
+            run_fstep_datasets: dict[str, dict] = {}
+            run_labels: dict[str, str] = {}
             for run_id, data in scores_dict[metric][region].get(stream, {}).items():
                 if ch not in np.atleast_1d(data.channel.values):
                     continue
@@ -819,26 +876,135 @@ def psd_plot_metric_region(
                     _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
                     continue
 
-                label = runs[run_id].get("label", run_id)
-
+                per_fstep_datasets = {}
                 for fstep in attr_fsteps:
                     psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
                     if psd_datasets is None:
                         continue
+                    per_fstep_datasets[fstep] = psd_datasets[0]
 
-                    method_tag = psd_datasets[0].get("psd_method", "sht")
-                    name = create_filename(
+                if not per_fstep_datasets:
+                    continue
+
+                run_fstep_datasets[run_id] = per_fstep_datasets
+                run_labels[run_id] = runs[run_id].get("label", run_id)
+
+            if not run_fstep_datasets:
+                continue
+
+            # Second pass: one combined plot per forecast step, overlaying every run
+            # that has data for it.
+            all_fsteps = sorted({fstep for d in run_fstep_datasets.values() for fstep in d})
+            for fstep in all_fsteps:
+                run_ids = [rid for rid, d in run_fstep_datasets.items() if fstep in d]
+                psd_datasets = [run_fstep_datasets[rid][fstep] for rid in run_ids]
+                labels = [run_labels[rid] for rid in run_ids]
+
+                method_tag = psd_datasets[0].get("psd_method", "sht")
+                name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=run_ids,
+                    suffix=[stream, ch, f"fstep{fstep}"],
+                )
+                plotter.psd_plot(
+                    psd_datasets,
+                    labels,
+                    tag=name,
+                    variable=ch,
+                    forecast_step=str(fstep),
+                )
+
+            # Third pass: per-run evolution plot, per-run gap heatmap (colour scale shared
+            # across every run being compared for this stream/channel, computed up front),
+            # plus (if enabled) per-run per-fstep frames assembled into an animated gif.
+            run_gap_grids: dict[str, tuple[NDArray, list[int], NDArray]] = {}
+            for run_id, per_fstep_datasets in run_fstep_datasets.items():
+                result = _compute_psd_gap_grid(
+                    per_fstep_datasets, label=run_labels[run_id], variable=ch
+                )
+                if result is not None:
+                    run_gap_grids[run_id] = result
+
+            if run_gap_grids:
+                all_gap_vals = np.concatenate(
+                    [grid.ravel() for _, _, grid in run_gap_grids.values()]
+                )
+                gap_min = float(np.nanmin(all_gap_vals))
+                gap_max = float(np.nanmax(all_gap_vals))
+                # Extend to include 0 (perfect prediction) so TwoSlopeNorm's centre is always
+                # valid, even if every run happens to be biased the same direction. TwoSlopeNorm
+                # requires vmin < vcenter(=0) < vmax strictly, so nudge either bound off zero
+                # with an epsilon scaled to the data when it would otherwise land exactly (or
+                # only) on one side.
+                eps = max(abs(gap_min), abs(gap_max), 1e-9) * 1e-3
+                gap_vmin = min(gap_min, -eps)
+                gap_vmax = max(gap_max, eps)
+
+            for run_id, per_fstep_datasets in run_fstep_datasets.items():
+                if len(per_fstep_datasets) < 2:
+                    continue
+
+                method_tag = next(iter(per_fstep_datasets.values())).get("psd_method", "sht")
+                evo_name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=[run_id],
+                    suffix=[stream, ch, "evolution"],
+                )
+                plotter.psd_evolution_plot(
+                    per_fstep_datasets,
+                    tag=evo_name,
+                    variable=ch,
+                    label=run_labels[run_id],
+                )
+
+                if run_id in run_gap_grids:
+                    freq, used_fsteps, grid = run_gap_grids[run_id]
+                    heatmap_name = create_filename(
                         prefix=[metric, method_tag, region],
                         middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
+                        suffix=[stream, ch, "gap_heatmap"],
                     )
-                    plotter.psd_plot(
-                        psd_datasets,
-                        [label],
-                        tag=name,
+                    plotter.psd_gap_heatmap(
+                        freq,
+                        used_fsteps,
+                        grid,
+                        vmin=gap_vmin,
+                        vmax=gap_vmax,
+                        tag=heatmap_name,
                         variable=ch,
-                        forecast_step=str(fstep),
+                        label=run_labels[run_id],
+                        psd_method=method_tag,
                     )
+
+                if not getattr(plotter, "psd_animate", True):
+                    continue
+
+                # Single-run frames (one per forecast step) -> animated gif. The literal
+                # "frame" token keeps these filenames distinct from pass 2's combined-run
+                # per-fstep plots, which degenerate to the same middle=[run_id] when only
+                # one run is being compared.
+                frame_paths = []
+                for fstep in sorted(per_fstep_datasets):
+                    frame_name = create_filename(
+                        prefix=[metric, method_tag, region],
+                        middle=[run_id],
+                        suffix=[stream, ch, "frame", f"fstep{int(fstep):03d}"],
+                    )
+                    frame_paths.append(
+                        plotter.psd_plot(
+                            [per_fstep_datasets[fstep]],
+                            [run_labels[run_id]],
+                            tag=frame_name,
+                            variable=ch,
+                            forecast_step=str(fstep),
+                        )
+                    )
+                anim_name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=[run_id],
+                    suffix=[stream, ch, "animation"],
+                )
+                plotter.psd_gif(frame_paths, tag=anim_name)
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 
