@@ -26,6 +26,26 @@ from weathergen.train.utils import Stage
 _logger = logging.getLogger(__name__)
 
 
+def _columns_from_block(
+    block: np.ndarray,
+    coords_idx: list[int] | np.ndarray,
+    geoinfo_idx: list[int] | np.ndarray,
+    channels_idx: list[int] | np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Split a dense (rows, cols) obs block into coords / geoinfos / data.
+
+    Matches three ``oindex[rows, cols]`` calls. Obs zarrs store every column in
+    one chunk, so those three calls decompress the same rows three times.
+    """
+    coords = block[:, coords_idx]
+    if len(geoinfo_idx) > 0:
+        geoinfos = block[:, geoinfo_idx]
+    else:
+        geoinfos = np.zeros((block.shape[0], 0), dtype=np.float32)
+    data = block[:, channels_idx]
+    return coords, geoinfos, data
+
+
 class DataReaderObs(DataReaderBase):
     def __init__(
         self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict, stage: Stage
@@ -272,14 +292,12 @@ class DataReaderObs(DataReaderBase):
         start_row = self.indices_start[idx]
         end_row = self.indices_end[idx]
 
-        coords = self.data.oindex[start_row:end_row, self.coords_idx]
-        geoinfos = (
-            self.data.oindex[start_row:end_row, self.geoinfo_idx]
-            if len(self.geoinfo_idx) > 0
-            else np.zeros((coords.shape[0], 0), np.float32)
+        # One row slice: chunks are (nrows, all_columns), so three oindex calls
+        # would decompress the same chunks three times. Values match oindex.
+        block = np.asarray(self.data[start_row:end_row])
+        coords, geoinfos, data = _columns_from_block(
+            block, self.coords_idx, self.geoinfo_idx, channels_idx
         )
-
-        data = self.data.oindex[start_row:end_row, channels_idx]
         datetimes = self.dt[start_row:end_row][:, 0]
 
         # indices_start, indices_end above work with [t_start, t_end] and violate
@@ -294,8 +312,6 @@ class DataReaderObs(DataReaderBase):
             data=data[t_mask],
             datetimes=datetimes[t_mask],
         )
-
-        dtr = self.time_window_handler.window(idx)
-        check_reader_data(rdata, dtr)
+        check_reader_data(rdata, t_win)
 
         return rdata
