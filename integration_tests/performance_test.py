@@ -5,8 +5,47 @@ Runs a short training of the default config (shortened by
 integration_tests/performance.yaml) and asserts that the global training
 throughput is above a threshold.
 
-The test must run on a GPU node, with one task per GPU, e.g. via:
-    sbatch integration_tests/performance_slurm.sh
+Running
+-------
+The test needs a GPU node with one task per GPU. It is the ``-performance``
+stage of the CSCS CI job (ci/cscs.yaml), and can be run by hand inside an
+allocation with the same command the CI uses::
+
+    srun --ntasks=4 --ntasks-per-node=4 --export=ALL --label \\
+        ./scripts/actions.sh integration-test-performance
+
+Run ``uv sync`` once before the multi-rank ``srun``: concurrent syncs race to
+recreate the venv. One run takes about 8 minutes on one Santis node (4x GH200).
+
+Metric and threshold
+--------------------
+The test asserts on ``performance.throughput.global.samples_per_sec``
+(src/weathergen/utils/performance.py):
+
+- *global* (summed over ranks) catches scaling regressions that device-level
+  metrics would miss;
+- *samples/sec* is more interpretable than batches/sec and more model-agnostic
+  than MB/sec.
+
+The last logged value is used: the tracker reports cumulative throughput since
+warmup, so the last value averages over the longest window.
+
+Observed baselines on one Santis node (4x GH200): 2.46-2.97 global samples/sec.
+The threshold (2.0) must be recalibrated when the config or the node type changes.
+
+Notes
+-----
+- Only rank 0 asserts on the metrics (identified via ``SLURM_PROCID``, which is
+  reliable even if DDP crashed); the other ranks always report "passed". The
+  job exit code reflects rank 0.
+- A missing metrics file fails the test explicitly: ``run_train.main`` swallows
+  exceptions in multi-rank runs, so a crashed training would otherwise pass
+  silently.
+- The run id includes the SLURM job id so concurrent jobs from the same commit
+  cannot delete each other's results.
+- Output directories are resolved through the config helpers (results and model
+  paths from the private config), so no ``results/`` or ``models/`` symlinks
+  are needed in the checkout.
 """
 
 import logging
@@ -16,6 +55,7 @@ from pathlib import Path
 
 import pytest
 
+from weathergen.common import config
 from weathergen.run_train import main
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
@@ -52,12 +92,24 @@ def is_rank_zero() -> bool:
     return os.environ.get("SLURM_PROCID", "0") == "0"
 
 
+def output_paths(run_id: str) -> tuple[Path, Path]:
+    """Resolve the (results, model) directories of ``run_id``.
+
+    Mirrors how the trainer resolves them (default + private config, run id
+    assigned), so private-config overrides of the output directories are
+    honoured. Does not require the run to exist, so it can be used both for
+    cleanup before training and for locating the metrics after a crash.
+    """
+    cf = config.set_run_id(config.load_merge_configs(), run_id, reuse_run_id=False)
+    return config.get_path_results(cf), config.get_path_model(cf)
+
+
 @pytest.fixture()
 def setup(test_run_id):
     logger.info(f"setup fixture with {test_run_id}")
     if is_rank_zero():
-        shutil.rmtree(WEATHERGEN_HOME / "results" / test_run_id, ignore_errors=True)
-        shutil.rmtree(WEATHERGEN_HOME / "models" / test_run_id, ignore_errors=True)
+        for path in output_paths(test_run_id):
+            shutil.rmtree(path, ignore_errors=True)
     yield
     logger.info("end fixture")
 
@@ -102,12 +154,9 @@ def load_final_throughput(run_id) -> float:
     The tracker reports cumulative throughput since warmup, so the last value
     averages over the longest window and is the most stable.
     """
-    # Mirrors how train_logger resolves the path: the writer passes the run
-    # directory (get_path_run) as base_path. WEATHERGEN_HOME/results must be a
-    # symlink to the shared working directory (scripts/actions.sh create-links).
-    metrics_path = get_train_metrics_path(
-        base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id
-    )
+    # Same resolution as the writer (TrainLogger gets config.get_path_results).
+    results_dir, _ = output_paths(run_id)
+    metrics_path = get_train_metrics_path(base_path=results_dir, run_id=run_id)
     # run_train.main swallows exceptions when world_size > 1, so a missing
     # metrics file is the signal that training crashed.
     assert metrics_path.exists(), (
