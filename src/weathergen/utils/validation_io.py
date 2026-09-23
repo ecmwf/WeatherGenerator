@@ -22,13 +22,73 @@ _logger = logging.getLogger(__name__)
 
 
 def _empty_step(n_samples: int, n_ens: int, n_channels: int):
-    """Zero-sized target/prediction entries for a step that carries no data."""
+    """
+    Zero-sized target/prediction entries for a step that carries no data.
+    """
     return (
         [np.zeros((n_ens, 0, n_channels), dtype=np.float32) for _ in range(n_samples)],
         [np.zeros((0, n_channels), dtype=np.float32) for _ in range(n_samples)],
         [np.zeros((0, 2), dtype=np.float32) for _ in range(n_samples)],
         [np.array([]).astype("datetime64[ns]") for _ in range(n_samples)],
     )
+
+
+def _extract_one_tstep(
+    forecast_offset: int,
+    t_idx: int,
+    chunk_idx: int,
+    n_samples: int,
+    sname: str,
+    streams,
+    model_output,
+    target_aux_out,
+    dn_data,
+):
+    """
+    Extract data for one time step
+    """
+
+    fp32 = torch.float32
+
+    n_channels = len(streams[sname].val_target_channels)
+    preds = model_output.get_physical_prediction(chunk_idx, sname)
+
+    # handle spoof data: do not write since it might corrupt validation (spoofing invisible
+    # there), also handle non-output streams
+    not_reconstructed = not is_stream_reconstructed(streams[sname])
+    is_spoof = target_aux_out.physical[t_idx][sname]["is_spoof"][0]
+
+    # empty, no predition or spoofed step
+    if t_idx < forecast_offset or not_reconstructed or preds is None or is_spoof:
+        n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
+        preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, n_ens, n_channels)
+
+    else:
+        targets = target_aux_out.physical[t_idx][sname]["target"]
+        preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
+        # extract prediction and targets for different samples in batch
+        for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
+            target_data = target_aux_out.physical[t_idx][sname]
+            t_coords = target_data["target_coords"][i_batch]
+            t_times = target_data["target_times"][i_batch]
+
+            # invert random reordering of
+            idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
+            if idxs_inv is not None:
+                pred = pred[:, idxs_inv]
+                target = target[idxs_inv] if len(target) > 0 else target
+                t_coords = t_coords[idxs_inv]
+                t_times = t_times[idxs_inv]
+
+            # denormalize data if requested and map to storage format
+            preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+            targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+
+            # extract original target coords and times from target data
+            t_coords_s += [t_coords.cpu().numpy()]
+            t_times_s += [t_times.astype("datetime64[ns]")]
+
+    return preds_s, targets_s, t_coords_s, t_times_s
 
 
 def write_output(
@@ -56,7 +116,6 @@ def write_output(
     target_aux_out = target_aux_out[outputs_physical[0]]
 
     # collect all target / prediction-related information
-    fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
     targets_lens = []
 
@@ -64,17 +123,16 @@ def write_output(
     assert len(batch.get_output_idxs()) > 0, "Batch carries no output steps."
     forecast_offset = batch.get_output_idxs()[0]
 
-    # The chunk's ModelOutput includes a leading padding range [0..forecast_offset) so
-    # that slot indices equal global forecast step numbers.  When writing to zarr we must
-    # only emit the steps that this chunk actually computed, i.e. steps >= the chunk's own
-    # forecast_offset (stored on the ModelOutput), not the batch's global offset.
+    # chunk's ModelOutput includes a leading padding range [0..forecast_offset) so
+    # that slot indices equal global forecast step numbers. zarr writing must
+    # only emit the steps that this chunk actually computed
     chunk_forecast_offset = model_output.forecast_offset
-    timestep_idxs = [s for s in model_output.forecast_steps if s >= chunk_forecast_offset]
+    timestep_idxs_chunk = [s for s in model_output.forecast_steps if s >= chunk_forecast_offset]
 
     n_samples = len(batch.get_source_samples().get_samples())
 
-    # TODO Maybe stopping at forecast_steps explained #1657
-    for t_idx in timestep_idxs:
+    # process all time steps in current chunk
+    for t_idx in timestep_idxs_chunk:
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
@@ -88,59 +146,20 @@ def write_output(
                 f"{model_output.forecast_steps[chunk_idx]}, but the target is valid for {t_idx}."
             )
 
-            n_channels = len(cf.streams[sname].val_target_channels)
-
-            # handle spoof data: do not write since it might corrupt validation (spoofing invisible
-            # there), also handle non-output streams
-            not_reconstructed = not is_stream_reconstructed(cf.streams[sname])
-            # leading empty steps of the first chunk carry a source but no target/prediction
-            if t_idx < forecast_offset:
-                preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
-
-            elif not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                preds = model_output.get_physical_prediction(chunk_idx, sname)
-                n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
-                preds_s, targets_s, t_coords_s, t_times_s = _empty_step(
-                    n_samples, n_ens, n_channels
-                )
-
-            else:
-                preds = model_output.get_physical_prediction(chunk_idx, sname)
-                targets = target_aux_out.physical[t_idx][sname]["target"]
-
-                preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
-
-                # handle forcing streams or if sample is empty
-                if preds is None:
-                    # preds are empty so create copy of target and add ensemble dimension
-                    # preds are empty so create empty preds with ensemble dimension
-                    # (explicit width: targets have zero width under skip_target_values)
-                    assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
-                    preds = [target.clone().unsqueeze(0) for target in targets]
-                    preds = [target.new_zeros((1, 0, n_channels)) for target in targets]
-
-                for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
-                    target_data = target_aux_out.physical[t_idx][sname]
-                    t_coords = target_data["target_coords"][i_batch]
-                    t_times = target_data["target_times"][i_batch]
-
-                    idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
-                    if idxs_inv is not None:
-                        pred = pred[:, idxs_inv]
-                        target = target[idxs_inv]
-                        t_coords = t_coords[idxs_inv]
-                        t_times = t_times[idxs_inv]
-
-                    # denormalize data if requested and map to storage format
-                    preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-                    targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
-
-                    # extract original target coords and times from target data
-                    t_coords_s += [t_coords.cpu().numpy()]
-                    t_times_s += [t_times.astype("datetime64[ns]")]
+            preds_s, targets_s, t_coords_s, t_times_s = _extract_one_tstep(
+                forecast_offset,
+                t_idx,
+                chunk_idx,
+                n_samples,
+                sname,
+                cf.streams,
+                model_output,
+                target_aux_out,
+                dn_data,
+            )
 
             targets_lens[-1] += [[]]
-            targets_lens[-1][-1] += [t.shape[0] for t in preds_s]
+            targets_lens[-1][-1] += [t.shape[1] for t in preds_s]
 
             preds_all[-1] += [np.concatenate(preds_s, axis=1)]
             targets_all[-1] += [np.concatenate(targets_s)]
@@ -213,7 +232,7 @@ def write_output(
         geoinfo_channels,
         sample_start,
         forecast_offset,
-        forecast_steps_override=timestep_idxs,
+        forecast_steps_override=timestep_idxs_chunk,
     )
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():
