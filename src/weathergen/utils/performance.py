@@ -20,6 +20,8 @@ from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
 
+_GIB = 1024**3
+
 
 class ThroughputTracker:
     """Tracks training throughput metrics.
@@ -156,6 +158,76 @@ class ThroughputTracker:
         )
 
         return metrics
+
+
+class MemoryTracker:
+    """Tracks the global (max across all ranks) peak GPU memory per window.
+
+    Reads the CUDA caching allocator's high-water marks (``max_memory_allocated``
+    and ``max_memory_reserved``) at each ``collect()`` call, reduces them across
+    all ranks with MAX, and resets the peak stats so every call reports the peak
+    since the previous one.
+
+    ``max_memory_allocated`` is the peak of memory occupied by live tensors
+    (parameters, gradients, optimizer states, activations) — the model's actual
+    demand, comparable to analytic memory estimates. ``max_memory_reserved`` is
+    the peak of memory the caching allocator has claimed from the device via
+    cudaMalloc; it also counts cached blocks that are currently free but not
+    returned to CUDA, so reserved >= allocated and the gap measures
+    fragmentation / caching slack. An OOM is raised when a new cudaMalloc
+    fails, so reserved (plus non-PyTorch usage such as NCCL buffers and cuBLAS
+    workspaces, which neither counter sees) is what determines headroom against
+    the device's capacity.
+    """
+
+    def __init__(self, device: torch.device) -> None:
+        self._device = device
+        # start with a clean window so the first step reports its own peak
+        torch.cuda.reset_peak_memory_stats(device)
+
+    def collect(self, window: str = "step") -> dict[str, float]:
+        """Return peak-memory metrics for the window since the last call.
+
+        Collective: must be called on every rank at the same point in the
+        training loop (the cross-rank MAX reduction and the peak-stat reset run
+        on every rank). The returned dict is identical on all ranks; callers
+        merge it into whatever metrics record they log on the root rank.
+
+        Args:
+            window: Label naming what the window since the last call covers
+                    (e.g. ``"train"``, ``"save_model"``, ``"validation"``); becomes
+                    part of the metric key.
+
+        Returns:
+            Dict of ``"performance.memory.<window>.max_{allocated,reserved}_gib"``
+            pairs.
+        """
+        max_allocated = torch.cuda.max_memory_allocated(self._device)
+        max_reserved = torch.cuda.max_memory_reserved(self._device)
+        torch.cuda.reset_peak_memory_stats(self._device)
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            peaks = torch.tensor(
+                [max_allocated, max_reserved], dtype=torch.int64, device=self._device
+            )
+            torch.distributed.all_reduce(peaks, op=torch.distributed.ReduceOp.MAX)
+            max_allocated, max_reserved = peaks.tolist()
+
+        return {
+            f"performance.memory.{window}.max_allocated_gib": max_allocated / _GIB,
+            f"performance.memory.{window}.max_reserved_gib": max_reserved / _GIB,
+        }
+
+
+class NullMemoryTracker:
+    """No-op memory tracker used when memory tracking is disabled.
+
+    Implements the same interface as ``MemoryTracker`` so call sites in the
+    training loop need no ``if`` guards.
+    """
+
+    def collect(self, window: str = "step") -> dict[str, float]:
+        return {}
 
 
 class NullThroughputTracker:
