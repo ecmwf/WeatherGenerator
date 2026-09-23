@@ -44,3 +44,36 @@ def test_take_var_axis_numpy_idx():
     arr = rng.standard_normal((3, 10, 20)).astype(np.float32)
     idx = np.array([9, 0, 4], dtype=np.int64)
     np.testing.assert_array_equal(_take_var_axis(arr, idx), _take_var_axis_original(arr, idx))
+
+
+def test_take_var_axis_known_two_times():
+    """Hand-checked (time, var, grid) gather. Does not use the frozen original.
+
+    Cube is 2 times × 3 vars × 2 grid points; ``arr[t, v, g] = 100*t + 10*v + g``.
+    ``var_idx = [2, 0]`` keeps vars 2 then 0. Rows are time-major, then grid:
+
+      t0 g0 -> [20, 0]
+      t0 g1 -> [21, 1]
+      t1 g0 -> [120, 100]
+      t1 g1 -> [121, 101]
+    """
+    arr = np.array(
+        [
+            [[0.0, 1.0], [10.0, 11.0], [20.0, 21.0]],
+            [[100.0, 101.0], [110.0, 111.0], [120.0, 121.0]],
+        ],
+        dtype=np.float32,
+    )
+    out = _take_var_axis(arr, [2, 0])
+    expected = np.array(
+        [
+            [20.0, 0.0],
+            [21.0, 1.0],
+            [120.0, 100.0],
+            [121.0, 101.0],
+        ],
+        dtype=np.float32,
+    )
+    np.testing.assert_array_equal(out, expected)
+    assert out.dtype == np.float32
+    assert out.flags.c_contiguous
