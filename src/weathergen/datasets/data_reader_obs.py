@@ -48,10 +48,9 @@ class DataReaderObs(DataReaderBase):
         # To read idx convert to a string, format e.g.: 197001010000
         base_date_str = dt_obj.strftime("%Y%m%d%H%M")
         self.hrly_index = self.z[f"idx_{base_date_str}_1"]
-        self.colnames = self.data.attrs["colnames"]
+        self.colnames = list(self.data.attrs["colnames"])
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
-        data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
 
         # determine source / target channels and corresponding idx using include and exclude lists
 
@@ -74,22 +73,35 @@ class DataReaderObs(DataReaderBase):
         self.target_idx = np.array(self.target_idx, dtype=np.int64)
 
         # determine idx for coords and geoinfos
-        self.coords_idx = [self.colnames.index("lat"), self.colnames.index("lon")]
+        coords_channels = stream_info.get("coords_channels", ["lat", "lon"])
+        assert len(coords_channels) == 2, (
+            f"{stream_info['name']}: 'coords_channels' must be a list of exactly two "
+            f"names [lat, lon], got {coords_channels!r}."
+        )
+        lat_name, lon_name = coords_channels
+        for name in (lat_name, lon_name):
+            n = self.colnames.count(name)
+            assert n == 1, (
+                f"{stream_info['name']}: coordinate column not found in {self.filename}. "
+                f"Looked for '{lat_name}'/'{lon_name}'; available colnames: {self.colnames}. "
+                f"Set 'coords_channels' in the stream config to match data."
+            )
+        self.coords_idx = [self.colnames.index(lat_name), self.colnames.index(lon_name)]
 
         # geoinfo channels
         sname = stream_info["name"]
-        if stream_info.get("geoinfo_channels") is not None:
-            self.geoinfo_idx, self.geoinfo_channels = [], []
-            for c in stream_info.get("geoinfo_channels"):
-                if c not in self.colnames:
-                    _logger.warning(f"{sname} : geoinfo {c} specified in config but not present.")
-                else:
-                    self.geoinfo_idx.append(self.colnames.index(c))
-                    self.geoinfo_channels.append(c)
-        else:
-            self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
-            self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
-        _logger.info(f"{stream_info['name']} geoinfos : {self.geoinfo_channels}")
+        geoinfo_channels = stream_info.get("geoinfo_channels")
+        assert geoinfo_channels is not None, (
+            f"{sname}: 'geoinfo_channels' must be specified in the stream config."
+        )
+        self.geoinfo_idx, self.geoinfo_channels = [], []
+        for c in geoinfo_channels:
+            if c not in self.colnames:
+                _logger.warning(f"{sname} : geoinfo {c} specified in config but not present.")
+            else:
+                self.geoinfo_idx.append(self.colnames.index(c))
+                self.geoinfo_channels.append(c)
+        _logger.info(f"{sname} geoinfos : {self.geoinfo_channels}")
 
         # load additional properties (mean, var)
         self._load_properties()
@@ -200,7 +212,7 @@ class DataReaderObs(DataReaderBase):
                 self.indices_start = np.append(
                     self.indices_start,
                     np.ones(
-                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs, dtype=int
+                        (diff_in_hours_end - (self.hrly_index.shape[0] - 1)) // step_hrs, dtype=int
                     )
                     * self.indices_start[-1],
                 )
@@ -209,7 +221,8 @@ class DataReaderObs(DataReaderBase):
                     self.indices_end,
                     np.ones(
                         # add (len_hrs + 1) since above we also have diff_in_hours_start + len_hrs
-                        (diff_in_hours_end - self.hrly_index.shape[0] + (len_hrs + 1)) // step_hrs,
+                        (diff_in_hours_end - (self.hrly_index.shape[0] - 1) + (len_hrs + 1))
+                        // step_hrs,
                         dtype=int,
                     )
                     * self.indices_end[-1],

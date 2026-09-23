@@ -13,10 +13,12 @@ from dataclasses import dataclass
 import dask.array as da
 import numpy as np
 import pandas as pd
+import scores
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.scores.score_utils import to_list
+from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
+from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_list
 
 # from common.io import MockIO
 
@@ -27,9 +29,18 @@ try:
     from xhistogram.xarray import histogram
 except Exception:
     _logger.warning(
-        "Could not import xskillscore and xhistogram. Thus, CRPS and "
-        "rank histogram-calculations are not supported."
+        "Could not import xskillscore and xhistogram. "
+        "Thus, rank histogram calculations are not supported."
     )
+
+try:
+    from scores.probability import (
+        crps_for_ensemble,
+        interval_tw_crps_for_ensemble,
+        tail_tw_crps_for_ensemble,
+    )
+except Exception:
+    _logger.warning("Could not import scores. Thus, CRPS calculations are not supported.")
 
 
 # helper function to calculate skill score
@@ -76,11 +87,14 @@ class VerifiedData:
     prediction_next: xr.DataArray | None
     ground_truth_next: xr.DataArray | None
     climatology: xr.DataArray | None
+    latitude_weights: xr.DataArray | None = None
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
+        if self.latitude_weights is None:
+            object.__setattr__(self, "latitude_weights", self._compute_latitude_weights())
 
     # TODO: add checks for prediction_next, ground_truth_next, climatology
     def _validate_dimensions(self):
@@ -98,6 +112,12 @@ class VerifiedData:
             xr.broadcast(self.prediction, self.ground_truth)
         except ValueError as e:
             raise ValueError(f"Forecast and truth are not broadcastable: {e}") from e
+
+    def _compute_latitude_weights(self) -> xr.DataArray | None:
+        found = [c for c in ("lat", "latitude", "rlat", "clat") if c in self.prediction.coords]
+        if not found:
+            return None
+        return calc_latitude_weights(self.prediction, lat_coord_name=found[0])
 
 
 def get_score(
@@ -198,6 +218,7 @@ class Scores:
             "seeps": self.calc_seeps,
             "qq_analysis": self.calc_quantiles,
             "nse": self.calc_nse,
+            "psd": self.calc_psd,
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
@@ -256,12 +277,15 @@ class Scores:
             f = self.det_metrics_dict[score_name]
             _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
-            assert self.ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
-                "not found in prediction data. Skipping score calculation."
-            )
-            return None
+            if self._ens_dim not in data.prediction.dims:
+                _logger.warning(
+                    f"Probabilistic score '{score_name}' chosen, but ensemble dimension "
+                    f"'{self._ens_dim}' not found in prediction data dims "
+                    f"{data.prediction.dims}. Skipping score calculation."
+                )
+                return None
             f = self.prob_metrics_dict[score_name]
+            _logger.debug(f"Using probabilistic metric: {score_name}")
         else:
             raise ValueError(
                 f"Unknown score chosen. Supported scores: {
@@ -293,6 +317,7 @@ class Scores:
             "rpss": ["p", "gt", "c"],
             "fact": ["p", "c"],
             "tact": ["gt", "c"],
+            "seeps": ["p", "gt", "c"],
         }
 
         available = {
@@ -310,6 +335,22 @@ class Scores:
         for an in arg_names:
             if an in kwargs:
                 args[an] = kwargs[an]
+
+        # Inject latitude weights if requested via parameters.
+        # Config example: {rmse: {latitude_weighting: true}}
+        # Weights are pre-computed on VerifiedData construction; None if no lat coord found.
+        if "latitude_weighting" in parameters:
+            parameters = dict(parameters)  # don't mutate caller's dict
+            use_lat_weights = parameters.pop("latitude_weighting")
+            if use_lat_weights and "latitude_weights" in inspect.getfullargspec(f).args:
+                if data.latitude_weights is not None:
+                    parameters["latitude_weights"] = data.latitude_weights
+                else:
+                    _logger.warning(
+                        "Latitude weighting was requested for score '%s', but no latitude "
+                        "coordinate was found. Proceeding without weighting.",
+                        score_name,
+                    )
 
         if group_by_coord is not None and self._validate_groupby_coord(data, group_by_coord):
             # Apply groupby to all DataArrays in args
@@ -429,6 +470,10 @@ class Scores:
             Averaged data
         """
         return data.mean(dim=self._agg_dims)
+
+    def _weighted_mean(self, data: xr.DataArray, weights: xr.DataArray) -> xr.DataArray:
+        _, w = xr.broadcast(data, weights)
+        return (data * w).mean(dim=self._agg_dims) / w.mean(dim=self._agg_dims)
 
     def get_2x2_event_counts(
         self,
@@ -650,7 +695,12 @@ class Scores:
 
         return l2
 
-    def calc_mae(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+    def calc_mae(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate mean absolute error (MAE) of forecast data w.r.t. reference data.
 
@@ -660,6 +710,9 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If None, unweighted mean is used.
         """
         if self._agg_dims is None:
             raise ValueError(
@@ -667,9 +720,17 @@ class Scores:
                 "(agg_dims=None)."
             )
 
-        return self._mean(np.abs(p - gt))
+        mae = np.abs(p - gt)
+        if latitude_weights is not None:
+            return self._weighted_mean(mae, latitude_weights)
+        return self._mean(mae)
 
-    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+    def calc_mse(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
 
@@ -679,6 +740,9 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If provided, the MSE will be weighted by these values.
         Returns
         -------
         xr.DataArray
@@ -690,17 +754,30 @@ class Scores:
                 "(agg_dims=None)."
             )
 
-        return self._mean(np.square(p - gt))
+        mse = np.square(p - gt)
 
-    def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+        if latitude_weights is not None:
+            return self._weighted_mean(mse, latitude_weights)
+        return self._mean(mse)
+
+    def calc_rmse(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate root mean squared error (RMSE) of forecast data w.r.t. reference data
+
         Parameters
         ----------
         p: xr.DataArray
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If provided, the RMSE will be weighted by these values.
         Returns
         -------
         xr.DataArray
@@ -713,7 +790,7 @@ class Scores:
                 "(agg_dims=None)."
             )
 
-        rmse = np.sqrt(self.calc_mse(p, gt))
+        rmse = np.sqrt(self.calc_mse(p, gt, latitude_weights=latitude_weights))
 
         return rmse
 
@@ -982,6 +1059,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         c: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
     ) -> xr.DataArray:
         """
         Calculate anomaly correlation coefficient (ACC).
@@ -998,6 +1076,9 @@ class Scores:
             Ground truth data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted summation.
+            If None, unweighted sums are used.
 
         Returns
         -------
@@ -1014,10 +1095,15 @@ class Scores:
         # Calculate anomalies
         fcst_ano, obs_ano = p - c, gt - c
 
-        # Calculate ACC over spatial dimensions (no grouping)
-        acc = (fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
-            (fcst_ano**2).sum(self._agg_dims) * (obs_ano**2).sum(self._agg_dims)
-        )
+        if latitude_weights is not None:
+            _, w = xr.broadcast(fcst_ano, latitude_weights)
+            acc = (w * fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
+                (w * fcst_ano**2).sum(self._agg_dims) * (w * obs_ano**2).sum(self._agg_dims)
+            )
+        else:
+            acc = (fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
+                (fcst_ano**2).sum(self._agg_dims) * (obs_ano**2).sum(self._agg_dims)
+            )
 
         return acc
 
@@ -1155,7 +1241,12 @@ class Scores:
 
         return (1.0 - rps_fcst / rps_clim).where(rps_clim != 0, np.nan)
 
-    def calc_bias(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+    def calc_bias(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate mean bias of forecast data w.r.t. reference data
 
@@ -1165,14 +1256,18 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If None, unweighted mean is used.
         Returns
         -------
         xr.DataArray
             Mean bias
         """
-        bias = self._mean(p - gt)
-
-        return bias
+        bias = p - gt
+        if latitude_weights is not None:
+            return self._weighted_mean(bias, latitude_weights)
+        return self._mean(bias)
 
     def calc_psnr(
         self,
@@ -1252,108 +1347,50 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        seeps_weights: xr.DataArray,
-        t1: xr.DataArray,
-        t3: xr.DataArray,
-        spatial_dims: list,
+        c: xr.Dataset,
+        minimum_dry_prob: float = 0.1,
+        maximum_dry_prob: float = 0.85,
     ) -> xr.DataArray:
         """
-        Calculates stable equitable error in probabiliyt space (SEEPS), see Rodwell et al., 2011
+        Calculate SEEPS skill (Rodwell et al. 2010) of precipitation forecast vs. reference.
 
-        NOTE:
-        Threshold arrays t1 and t3 (derived from space-time dependant climatology)
-        must fit to the forecast and ground truth data.
+        ``scores.categorical.seeps`` returns the negatively-oriented SEEPS *error*
+        (0 = perfect). This method returns ``1 - SEEPS_error`` instead, the
+        positively-oriented convention used for ECMWF/AIFS reporting and consistent
+        with ``lower_is_better`` treating ``seeps`` as higher-is-better.
 
         Parameters
         ----------
-        p: xr.DataArray
-            Forecast data array
-        gt: xr.DataArray
-            Ground truth data array
-        seeps_weights: xr.DataArray
-            SEEPS-parameter matrix to weight contingency table elements
-        t1: xr.DataArray
-            Threshold for light precipitation events
-        t3: xr.DataArray
-            Threshold for strong precipitation events
-        spatial_dims: List[str]
-            List of spatial dimensions of the data, e.g. ["lat", "lon"]
+        p, gt: xr.DataArray
+            Forecast / ground truth precipitation (metres; converted to mm internally).
+        c: xr.Dataset
+            Climatology with a ``statistic`` dim providing ``prob_dry`` and
+            ``light_heavy_threshold``.
+        minimum_dry_prob, maximum_dry_prob: float
+            Bounds on climatological dry probability outside which points are masked.
+
         Returns
         -------
         xr.DataArray
-            SEEPS skill score (i.e. 1-SEEPS)
+            ``1 - SEEPS_error`` (higher is better): 1 = perfect, ~0 = no-skill,
+            negative = worse than reference. Masked climatological extremes are NaN.
         """
+        if c is None:
+            return xr.full_like(p.mean(self._agg_dims), np.nan)
 
-        def seeps(ground_truth, prediction, thr_light, thr_heavy, seeps_weights):
-            ob_ind = (ground_truth > thr_light).astype(int) + (ground_truth >= thr_heavy).astype(
-                int
-            )
-            fc_ind = (prediction > thr_light).astype(int) + (prediction >= thr_heavy).astype(int)
-            indices = fc_ind * 3 + ob_ind  # index of each data point in their local 3x3 matrices
-            seeps_val = seeps_weights[
-                indices, np.arange(len(indices))
-            ]  # pick the right weight for each data point
-
-            return 1.0 - seeps_val
-
-        if p.ndim == 3:
-            assert len(spatial_dims) == 2, (
-                "Provide two spatial dimensions for three-dimensional data."
-            )
-            prediction, ground_truth = (
-                p.stack({"xy": spatial_dims}),
-                gt.stack({"xy": spatial_dims}),
-            )
-            seeps_weights = seeps_weights.stack({"xy": spatial_dims})
-            t3 = t3.stack({"xy": spatial_dims})
-            lstack = True
-        elif p.ndim == 2:
-            prediction, ground_truth = p, gt
-            lstack = False
-        else:
-            raise ValueError("Data must be a two-or-three-dimensional array.")
-
-        # check dimensioning of data
-        assert prediction.ndim <= 2, (
-            f"Data must be one- or two-dimensional, but has {prediction.ndim} dimensions. "
-            "Check if stacking with spatial_dims may help."
+        seeps_error = scores.categorical.seeps(
+            fcst=p * 1000,  # converted to mm
+            obs=gt * 1000,
+            prob_dry=c.sel(statistic="prob_dry"),
+            light_heavy_threshold=c.sel(statistic="light_heavy_threshold"),
+            dry_light_threshold=0.2,
+            mask_clim_extremes=True,
+            lower_masked_value=minimum_dry_prob,
+            upper_masked_value=maximum_dry_prob,
+            reduce_dims=self._agg_dims,
         )
-
-        if prediction.ndim == 1:
-            seeps_values_all = seeps(ground_truth, prediction, t1.values, t3, seeps_weights)
-        else:
-            prediction, ground_truth = (
-                prediction.transpose(..., "xy"),
-                ground_truth.transpose(..., "xy"),
-            )
-            seeps_values_all = xr.full_like(prediction, np.nan)
-            seeps_values_all.name = "seeps"
-            for it in range(ground_truth.shape[0]):
-                prediction_now, ground_truth_now = (
-                    prediction[it, ...],
-                    ground_truth[it, ...],
-                )
-                # in case of missing data, skip computation
-                if np.all(np.isnan(prediction_now)) or np.all(np.isnan(ground_truth_now)):
-                    continue
-
-                seeps_values_all[it, ...] = seeps(
-                    ground_truth_now,
-                    prediction_now,
-                    t1.values,
-                    t3,
-                    seeps_weights.values,
-                )
-
-        if lstack:
-            seeps_values_all = seeps_values_all.unstack()
-
-        if self._agg_dims is not None:
-            seeps_values = self._mean(seeps_values_all)
-        else:
-            seeps_values = seeps_values_all
-
-        return seeps_values
+        # Positively-oriented SEEPS (1 - error); NaNs propagate unchanged.
+        return 1.0 - seeps_error
 
     def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
@@ -1385,26 +1422,53 @@ class Scores:
 
     ### Probablistic scores
 
-    def calc_spread(self, p: xr.DataArray, **kwargs) -> xr.DataArray:
+    def calc_spread(
+        self,
+        p: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+        adjusted: bool = True,
+        **kwargs,
+    ) -> xr.DataArray:
         """
-        Calculate the spread of the forecast ensemble
+        Calculate the spread of the forecast ensemble.
+
         Parameters
         ----------
         p: xr.DataArray
             Forecast data array with ensemble dimension
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+        adjusted: bool
+            If True (default), use the unbiased (``ddof=1``) ensemble variance following
+            the GenCast convention (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.6).
+            The finite-ensemble inflation factor ``sqrt((M + 1) / M)`` is applied in the
+            spread-skill ratio (see ``calc_ssr``), not here.
+            If False, use the biased (``ddof=0``) variance.
 
         Returns
         -------
         xr.DataArray
             Spread of the forecast ensemble
         """
-        ens_std = p.std(dim=self._ens_dim)
+        ddof = 1 if adjusted else 0
+        ens_var = p.var(dim=self._ens_dim, ddof=ddof)
 
-        return self._mean(np.sqrt(ens_std**2))
+        if latitude_weights is not None:
+            var_mean = self._weighted_mean(ens_var, latitude_weights)
+        else:
+            var_mean = self._mean(ens_var)
 
-    def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+        return np.sqrt(var_mean)
+
+    def calc_ssr(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+        adjusted: bool = True,
+    ) -> xr.DataArray:
         """
-        Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
+        Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data.
 
         Parameters
         ----------
@@ -1412,70 +1476,93 @@ class Scores:
             Forecast data array with ensemble dimension
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging, applied to both spread and RMSE
+            components. Can be computed via ``calc_latitude_weights`` or by passing
+            ``latitude_weighting=True`` in the ``parameters`` dict of ``get_score``.
+            Default is None.
+        adjusted: bool
+            If True (default), apply the ensemble-size correction ``sqrt((M + 1) / M)`` following
+            GenCast (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.9) and use the unbiased
+            (``ddof=1``) spread. A perfectly calibrated ensemble of size M then yields SSR = 1.
+            If False, use the biased spread with no correction.
+
         Returns
         -------
         xr.DataArray
             Spread-Skill Ratio (SSR)
         """
-        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)  # spread/rmse
-
-        return ssr
+        ens_mean = p.mean(dim=self._ens_dim)
+        spread = self.calc_spread(p, latitude_weights=latitude_weights, adjusted=adjusted)
+        rmse = self.calc_rmse(ens_mean, gt, latitude_weights=latitude_weights)
+        if adjusted:
+            ens_size = p.sizes[self._ens_dim]
+            return np.sqrt((ens_size + 1) / ens_size) * spread / rmse
+        return spread / rmse
 
     def calc_crps(
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        method: str = "ensemble",
+        method: str = "ecdf",
+        fair: bool = False,
         **kwargs,
     ) -> xr.DataArray:
         """
-        Wrapper around CRPS-methods provided by xskillscore-package.
-        See https://xskillscore.readthedocs.io/en/stable/api
+        Calculate CRPS using scores package.
 
         Parameters
         ----------
-        p: xr.DataArray
-            Forecast data array with ensemble dimension
-        gt: xr.DataArray
-            Ground truth data array
-        method: str
-            Method to calculate CRPS. Supported methods: ["ensemble", "gaussian"]
-        kwargs: dict
-            Other keyword parameters supported by respective CRPS-method from
-            the xskillscore package
+        p : xr.DataArray
+            Forecast with ensemble dimension
+        gt : xr.DataArray
+            Ground truth
+        method : str
+            "ecdf" (standard), "fair", "tw_tail", "tw_interval"
+        fair : bool
+            Use fair CRPS (overrides method if set)
+        kwargs : dict
+            For tw_tail: threshold, tail ("upper"/"lower")
+            For tw_interval: lower_threshold, upper_threshold
 
         Returns
         -------
         xr.DataArray
-            CRPS score data array averaged over the provided dimensions
+            CRPS score averaged over agg_dims
         """
-        crps_methods = ["ensemble", "gaussian"]
 
-        if method == "ensemble":
-            func_kwargs = {
-                "forecasts": p,
-                "member_dim": self._ens_dim,
-                "dim": self._agg_dims,
-                **kwargs,
-            }
-            crps_func = xskillscore.crps_ensemble
-        elif method == "gaussian":
-            func_kwargs = {
-                "mu": p.mean(dim=self._ens_dim),
-                "sig": p.std(dim=self._ens_dim),
-                "dim": self._agg_dims,
-                **kwargs,
-            }
-            crps_func = xskillscore.crps_gaussian
-        else:
-            raise ValueError(
-                f"Unsupported CRPS-calculation method {method} chosen."
-                + f"Supported methods: {', '.join(crps_methods)}"
+        if self._agg_dims is None:
+            raise ValueError("agg_dims required for CRPS")
+
+        # Threshold-weighted CRPS
+        if method == "tw_tail":
+            return tail_tw_crps_for_ensemble(
+                p,
+                gt,
+                self._ens_dim,
+                threshold=kwargs["threshold"],
+                tail=kwargs.get("tail", "upper"),
+                reduce_dims=self._agg_dims,
             )
 
-        crps = crps_func(gt, **func_kwargs)
+        if method == "tw_interval":
+            return interval_tw_crps_for_ensemble(
+                p,
+                gt,
+                self._ens_dim,
+                lower_threshold=kwargs["lower_threshold"],
+                upper_threshold=kwargs["upper_threshold"],
+                reduce_dims=self._agg_dims,
+            )
 
-        return crps
+        # Standard or Fair CRPS
+        return crps_for_ensemble(
+            p,
+            gt,
+            self._ens_dim,
+            method="fair" if fair else method,
+            reduce_dims=self._agg_dims,
+        )
 
     def calc_rank_histogram(
         self,
@@ -1807,3 +1894,187 @@ class Scores:
         _logger.info(f"Q-Q analysis completed with {len(overall_qq_score.attrs)} attributes")
 
         return overall_qq_score
+
+    def calc_psd(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        psd_method: str = "sht",
+        psd_regrid_resolution: float = 1.0,
+        psd_sht_truncation: int | None = None,
+        lat_range: tuple[float, float] = (-60.0, 60.0),
+    ) -> xr.DataArray:
+        """Compute power spectral density for prediction and ground truth.
+
+        Returns a scalar summary score (log-spectral MSE) and stores the full
+        PSD curves in ``.attrs`` for plotting downstream.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        psd_method: str
+            Method to compute the PSD. Options: 'sht' (spherical harmonic transform),
+            'fft' (2D Fourier transform)
+        psd_regrid_resolution: float
+            Resolution in degrees to regrid data for PSD calculation. Default is 1.0 degree
+        psd_sht_truncation: int | None
+            Maximum spherical harmonic degree for truncation. If None, no truncation is applied.
+        lat_range: tuple[float, float]
+            Latitude range (min, max) to include in PSD calculation. Default is (-60,
+            60) degrees.
+
+        Returns
+        -------
+        xr.DataArray
+            Power spectral density score (log-spectral MSE) averaged over aggregation dimensions.
+
+        """
+        if self._agg_dims is None:
+            raise ValueError("Cannot calculate PSD without aggregation dimensions.")
+        if len(self._agg_dims) != 1:
+            raise ValueError(
+                f"PSD expects exactly one spatial aggregation dimension, "
+                f"got agg_dims={self._agg_dims}."
+            )
+        spatial_dim = self._agg_dims[0]
+        if spatial_dim not in gt.dims:
+            raise ValueError(
+                f"Spatial dimension '{spatial_dim}' not found in dims {list(gt.dims)}."
+            )
+
+        # PSD requires a spatial dimension with lat/lon coords (e.g. "ipoint").
+        # If the aggregation dim is "sample" or "ens" (e.g. from score map pipeline),
+        # PSD is not applicable — return NaN gracefully.
+        if spatial_dim in ("sample", "ens"):
+            _logger.debug(f"PSD: aggregation dim is '{spatial_dim}' (not spatial). Skipping.")
+            return xr.DataArray(np.nan)
+
+        n_points = gt.sizes[spatial_dim]
+        nlat, lats, lons = self._get_psd_grid_info(gt, spatial_dim)
+
+        if psd_method == "fft" and (lats is None or lons is None):
+            raise ValueError(f"PSD method 'fft' requires lat/lon coords on '{spatial_dim}'.")
+
+        # Detect grid type once for the entire stream (avoid repeated detection per channel)
+        grid_type = None
+        if psd_method == "sht" and lats is not None and lons is not None:
+            grid_type = detect_grid_type(lats, lons, n_points)
+
+        psd_kwargs = dict(
+            lats=lats,
+            lons=lons,
+            nlat=nlat,
+            n_points=n_points,
+            psd_method=psd_method,
+            psd_regrid_resolution=psd_regrid_resolution,
+            psd_sht_truncation=psd_sht_truncation,
+            lat_range=lat_range,
+            grid_type=grid_type,
+        )
+
+        # Dims to preserve (e.g. channel) vs batch dims (sample, ens)
+        other_dims = [d for d in gt.dims if d != spatial_dim]
+        preserve_dims = [d for d in other_dims if d not in ("sample", "ens")]
+
+        if not preserve_dims:
+            gt_np, p_np = self._stack_for_psd(gt, p, spatial_dim, n_points)
+            slice_score, slice_attrs = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
+            score = xr.DataArray(slice_score)
+            score.attrs.update(slice_attrs)
+            score.attrs["psd_method"] = psd_method
+            return score
+
+        # Iterate over preserved dims (typically per channel)
+        shape = tuple(gt.sizes[d] for d in preserve_dims)
+        score_values = np.empty(shape)
+        all_attrs: dict = {}
+
+        for idx in np.ndindex(*shape):
+            sel = dict(zip(preserve_dims, idx, strict=False))
+            gt_slice = gt.isel(**sel)
+            p_slice = p.isel(**sel)
+            gt_np, p_np = self._stack_for_psd(gt_slice, p_slice, spatial_dim, n_points)
+
+            slice_score, slice_attrs = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
+            score_values[idx] = slice_score
+
+            key = "_".join(
+                str(gt.coords[d].values[i]) if d in gt.coords else str(i) for d, i in sel.items()
+            )
+            for k, v in slice_attrs.items():
+                all_attrs[f"{key}/{k}"] = v
+
+        coords = {d: gt.coords[d] for d in preserve_dims if d in gt.coords}
+        score = xr.DataArray(score_values, dims=preserve_dims, coords=coords)
+        all_attrs["psd_method"] = psd_method
+        all_attrs["preserve_dims"] = preserve_dims
+        score.attrs.update(all_attrs)
+        return score
+
+    @staticmethod
+    def _get_psd_grid_info(
+        gt: xr.DataArray, spatial_dim: str
+    ) -> tuple[int | None, np.typing.NDArray | None, np.typing.NDArray | None]:
+        """
+        Extract nlat, lats, lons from ground-truth coords.
+
+        Parameters
+        ----------
+        gt: xr.DataArray
+            Ground truth data array with lat/lon coordinates.
+        spatial_dim: str
+            Name of the spatial dimension along which to compute the PSD.
+        Returns
+        -------
+        nlat: int | None
+            Number of latitude points, or None if lat/lon coords are not found.
+        lats: np.typing.NDArray | None
+            Latitude values, or None if lat/lon coords are not found.
+        lons: np.typing.NDArray | None
+            Longitude values, or None if lat/lon coords are not found.
+
+        """
+        if "lat" in gt.coords and "lon" in gt.coords:
+            if gt.coords["lat"].dims == (spatial_dim,) and gt.coords["lon"].dims == (spatial_dim,):
+                lats = gt.coords["lat"].values
+                lons = gt.coords["lon"].values
+                return len(np.unique(lats)), lats, lons
+        raise ValueError(f"PSD requires lat/lon coords on spatial dimension '{spatial_dim}'.")
+
+    @staticmethod
+    def _stack_for_psd(
+        gt: xr.DataArray, p: xr.DataArray, spatial_dim: str, n_points: int
+    ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
+        """
+        Reshape data to (n_batch, n_points) for PSD computation.
+
+        Parameters
+        ----------
+        gt: xr.DataArray
+            Ground truth data array.
+        p: xr.DataArray
+            Forecast data array.
+        spatial_dim: str
+            Name of the spatial dimension along which to compute the PSD.
+        n_points: int
+            Number of points along the spatial dimension.
+        Returns
+        -------
+        gt_np: np.typing.NDArray
+            Reshaped ground truth data of shape (n_batch, n_points).
+        p_np: np.typing.NDArray
+            Reshaped forecast data of shape (n_batch, n_points).
+        """
+        non_spatial = [d for d in gt.dims if d != spatial_dim]
+        if non_spatial:
+            gt_np = gt.transpose(*non_spatial, spatial_dim).values.reshape(-1, n_points)
+            p_np = p.transpose(
+                *[d for d in p.dims if d != spatial_dim], spatial_dim
+            ).values.reshape(-1, n_points)
+        else:
+            gt_np = gt.values.reshape(1, -1)
+            p_np = p.values.reshape(1, -1)
+        return gt_np, p_np

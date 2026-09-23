@@ -22,7 +22,7 @@ from weathergen.evaluate.utils.derived_channels import DeriveChannels
 _logger = logging.getLogger(__name__)
 
 
-def _select_channels(
+def select_channels(
     da_tar: xr.DataArray, da_pred: xr.DataArray, stream, channels, stream_cfg
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
@@ -85,7 +85,7 @@ def _select_channels(
     return da_tar, da_pred
 
 
-def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
+def add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     """
     Add lead_time coordinate computed as:
     valid_time - init_times
