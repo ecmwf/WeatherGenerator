@@ -45,16 +45,6 @@ def _take_var_axis(arr: NDArray[np.float32], var_idx: list[int] | NDArray) -> ND
     return np.ascontiguousarray(selected.transpose(0, 2, 1)).reshape(n_time * n_grid, n_sel)
 
 
-def _repeat_latlon(
-    latitudes: NDArray[np.float32], longitudes: NDArray[np.float32], n_times: int
-) -> NDArray[np.float32]:
-    """Repeat (lat, lon) once per timestep. Same values as concatenate + vstack."""
-    latlon = np.column_stack((latitudes, longitudes))
-    if n_times == 1:
-        return latlon
-    return np.tile(latlon, (n_times, 1))
-
-
 class DataReaderAnemoi(DataReaderTimestep):
     "Wrapper for Anemoi datasets"
 
