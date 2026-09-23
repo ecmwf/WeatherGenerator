@@ -13,5 +13,5 @@ training_config:
   samples_per_mini_epoch: 800
 
 validation_config:
-  # The test only measures training throughput, so validation should be nigligible.
+  # The test only measures training throughput, so validation should be negligible.
   samples_per_mini_epoch: 5
