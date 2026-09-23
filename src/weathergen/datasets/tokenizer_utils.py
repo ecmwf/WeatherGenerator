@@ -118,7 +118,12 @@ def encode_times_target(times, time_win) -> torch.tensor:
 
 
 def hpy_cell_splits(coords: torch.tensor, hl: int):
-    """Compute healpix cell id for each coordinate on given level hl
+    """Compute nest HEALPix cell ids and a packed point order for level ``hl``.
+
+    One ``np.lexsort((theta, cell_id))`` groups points by cell and orders them
+    by theta within each cell. That matches a stable sort by cell and then a
+    stable sort by theta per cell, because ``lexsort`` is stable and uses the
+    last key as the primary one.
 
     Returns
       idxs_ord : indices into thetas,phis,posr3, grouped by ascending healpix cell and
@@ -127,12 +132,8 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
         np.split(idxs_ord, np.cumsum(counts)) recovers the per cell indices
     """
     thetas, phis = theta_phi_to_standard_coords(coords)
-    # healpix cells for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
 
-    # One lexicographic sort yields the cell grouping and the by-theta order within every cell
-    # at once. Sorting stably by cell and then stably by theta per cell gives the same
-    # permutation, since lexsort is stable and applies the last key as the primary one.
     thetas_np = thetas.numpy() if isinstance(thetas, torch.Tensor) else np.asarray(thetas)
     idxs_ord = np.lexsort((thetas_np, hpy_idxs))
     counts = np.bincount(hpy_idxs, minlength=12 * 4**hl)
@@ -142,33 +143,34 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
 
 def hpy_splits(
     coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
-) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
-    """Compute healpix cell for each data point and splitting information per cell;
-       when the token_size is exceeded then splitting based on lat is used;
-       tokens can be padded
+) -> tuple[list[list[torch.Tensor]], list[list[int]]]:
+    """Group points into nest HEALPix cells and split each cell into tokens.
 
-    Return :
-        idxs_ord : flat list of indices (to data points) per healpix cell
-        idxs_ord_lens : lens of lists per cell
-        (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
+    Cells are the ``12 * 4**hl`` nest cells at level ``hl``. Points in a cell
+    are ordered by increasing theta (north first). Occupied cells are cut into
+    chunks of ``token_size``; empty cells stay ``[]``.
+
+    If ``pad_tokens``, stored indices are ``index + 1 + offset_step`` (``0`` is
+    the padding row the caller prepends) and every token has length
+    ``token_size``. Otherwise indices are ``index + offset_step`` and the last
+    token of a cell may be shorter. ``offset_step`` shifts later time steps onto
+    the full stream.
+
+    Returns:
+        idxs_ord: per cell, a list of index tensors (one per token)
+        idxs_ord_lens: per cell, the length of each token
     """
 
-    # data points per healpix cell, already ordered by theta within each cell
-    # (if token_size is exceeded the cell is split based on latitude)
     # TODO: split by hierarchically traversing healpix scheme
     idxs_ord_flat, counts = hpy_cell_splits(coords, hl)
 
     num_cells = len(counts)
     if len(idxs_ord_flat) == 0:
-        empty = [[] for _ in range(num_cells)]
-        return empty, [[] for _ in range(num_cells)]
+        return [[] for _ in range(num_cells)], [[] for _ in range(num_cells)]
 
-    # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
     offset = (1 if pad_tokens else 0) + offset_step
 
     tokens_per_cell = -(-counts // token_size)
-    # padding the tail of a cell to a whole number of tokens leaves gaps between cells, which
-    # stay zero and so index the padding row that the caller prepends to the data
     slots_per_cell = tokens_per_cell * token_size if pad_tokens else counts
 
     # Scatter the sorted indices into one flat buffer instead of concatenating and splitting
