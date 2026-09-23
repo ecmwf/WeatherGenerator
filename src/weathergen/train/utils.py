@@ -13,6 +13,7 @@ from typing import Literal
 
 import torch
 from omegaconf import OmegaConf
+
 from weathergen.common import config
 from weathergen.common.config import Config, merge_configs
 
@@ -169,7 +170,8 @@ def get_active_stage_config(
     final config that is used
     """
 
-    # resolve mutually exclusive alternate representations (e.g. date_ranges vs. start_date/end_date)
+    # resolve mutually exclusive alternate representations
+    # (e.g. date_ranges vs. start_date/end_date)
     base_config, merge_config = config.reconcile_alternate_representations(
         base_config, merge_config
     )
