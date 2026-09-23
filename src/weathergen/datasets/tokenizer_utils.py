@@ -117,75 +117,89 @@ def encode_times_target(times, time_win) -> torch.tensor:
 
 
 def hpy_cell_splits(coords: torch.tensor, hl: int):
-    """Compute healpix cell id for each coordinate on given level hl
+    """Compute nest HEALPix cell ids and a packed point order for level ``hl``.
+
+    One ``np.lexsort((theta, cell_id))`` groups points by cell and orders them
+    by theta within each cell. That matches a stable sort by cell and then a
+    stable sort by theta per cell, because ``lexsort`` is stable and uses the
+    last key as the primary one.
 
     Returns
-      hpy_idxs_ord_split : list of per cell indices into thetas,phis,posr3
-      thetas : thetas in rad
-      phis : phis in rad
+      idxs_ord : indices into thetas,phis,posr3, grouped by ascending healpix cell and
+        ordered by theta within each cell
+      counts : number of points in each of the 12 * 4**hl cells, so that
+        np.split(idxs_ord, np.cumsum(counts)) recovers the per cell indices
     """
     thetas, phis = theta_phi_to_standard_coords(coords)
-    # healpix cells for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
 
-    # extract information to split according to cells by first sorting and then finding split idxs
-    hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
-    splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
+    thetas_np = thetas.numpy() if isinstance(thetas, torch.Tensor) else np.asarray(thetas)
+    idxs_ord = np.lexsort((thetas_np, hpy_idxs))
+    counts = np.bincount(hpy_idxs, minlength=12 * 4**hl)
 
-    # extract per cell data
-    hpy_idxs_ord_temp = np.split(hpy_idxs_ord, splits + 1)
-    hpy_idxs_ord_split = [np.array([], dtype=np.int64) for _ in range(12 * 4**hl)]
-    # TODO: split smarter (with a augmented splits list?) so that this loop is not needed
-    for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
-        hpy_idxs_ord_split[b] = x
-
-    return (hpy_idxs_ord_split, thetas, phis)
+    return idxs_ord, counts
 
 
 def hpy_splits(
     coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
-) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
-    """Compute healpix cell for each data point and splitting information per cell;
-       when the token_size is exceeded then splitting based on lat is used;
-       tokens can be padded
+) -> tuple[list[list[torch.Tensor]], list[list[int]]]:
+    """Group points into nest HEALPix cells and split each cell into tokens.
 
-    Return :
-        idxs_ord : flat list of indices (to data points) per healpix cell
-        idxs_ord_lens : lens of lists per cell
-        (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
+    Cells are the ``12 * 4**hl`` nest cells at level ``hl``. Points in a cell
+    are ordered by increasing theta (north first). Occupied cells are cut into
+    chunks of ``token_size``; empty cells stay ``[]``.
+
+    If ``pad_tokens``, stored indices are ``index + 1 + offset_step`` (``0`` is
+    the padding row the caller prepends) and every token has length
+    ``token_size``. Otherwise indices are ``index + offset_step`` and the last
+    token of a cell may be shorter. ``offset_step`` shifts later time steps onto
+    the full stream.
+
+    Returns:
+        idxs_ord: per cell, a list of index tensors (one per token)
+        idxs_ord_lens: per cell, the length of each token
     """
 
-    # list of data points per healpix cell
-    (hpy_idxs_ord_split, thetas, phis) = hpy_cell_splits(coords, hl)
-
-    # if token_size is exceeed split based on latitude
     # TODO: split by hierarchically traversing healpix scheme
-    thetas_sorted = [torch.argsort(thetas[idxs], stable=True) for idxs in hpy_idxs_ord_split]
-    # remainder for padding to token size
-    if pad_tokens:
-        rem = [
-            token_size - (len(idxs) % token_size if len(idxs) % token_size != 0 else token_size)
-            for idxs in hpy_idxs_ord_split
-        ]
-    else:
-        rem = np.zeros(len(hpy_idxs_ord_split), dtype=np.int32)
+    idxs_ord_flat, counts = hpy_cell_splits(coords, hl)
 
-    # helper variables to split according to cells
-    # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
+    num_cells = len(counts)
+    if len(idxs_ord_flat) == 0:
+        return [[] for _ in range(num_cells)], [[] for _ in range(num_cells)]
+
     offset = (1 if pad_tokens else 0) + offset_step
-    int32 = torch.int32
+
+    tokens_per_cell = -(-counts // token_size)
+    slots_per_cell = tokens_per_cell * token_size if pad_tokens else counts
+
+    # Scatter the sorted indices into one flat buffer instead of concatenating and splitting
+    # each cell separately: the destination of every point is its cell's slot offset plus its
+    # rank within the cell.
+    point_starts = np.cumsum(counts) - counts
+    slot_starts = np.cumsum(slots_per_cell) - slots_per_cell
+    dest = (
+        np.arange(len(idxs_ord_flat))
+        - np.repeat(point_starts, counts)
+        + np.repeat(slot_starts, counts)
+    )
+    flat = np.zeros(int(slots_per_cell.sum()), dtype=np.int64)
+    flat[dest] = idxs_ord_flat + offset
+
+    # One split covers every token of every cell; the tokens of a cell are then a contiguous run
+    if pad_tokens:
+        tokens = torch.split(torch.from_numpy(flat), token_size)
+    else:
+        token_lens = np.full(int(tokens_per_cell.sum()), token_size, dtype=np.int64)
+        filled = counts > 0
+        token_starts_filled = (np.cumsum(tokens_per_cell) - tokens_per_cell)[filled]
+        last = token_starts_filled + tokens_per_cell[filled] - 1
+        token_lens[last] = counts[filled] - (tokens_per_cell[filled] - 1) * token_size
+        tokens = torch.split(torch.from_numpy(flat), token_lens.tolist())
+
+    token_starts = (np.cumsum(tokens_per_cell) - tokens_per_cell).tolist()
     idxs_ord = [
-        list(
-            torch.split(
-                torch.cat(
-                    (torch.from_numpy(np.take(idxs, ts) + offset), torch.zeros(r, dtype=int32))
-                ),
-                token_size,
-            )
-        )
-        if len(idxs) > 0
-        else []
-        for idxs, ts, r in zip(hpy_idxs_ord_split, thetas_sorted, rem, strict=True)
+        list(tokens[start : start + num]) if num > 0 else []
+        for start, num in zip(token_starts, tokens_per_cell.tolist(), strict=True)
     ]
 
     # extract length and flatten nested list
