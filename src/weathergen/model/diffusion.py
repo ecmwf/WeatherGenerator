@@ -81,8 +81,14 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.preconditioner = Preconditioner()
         self.frequency_embedding_dim = self.cf.frequency_embedding_dim
         self.embedding_dim = self.cf.embedding_dim
+        noise_emb_cfg = self.cf.get("noise_embedding", None) or {}
         self.noise_embedder = NoiseEmbedder(
-            embedding_dim=self.embedding_dim, frequency_embedding_dim=self.frequency_embedding_dim
+            embedding_dim=self.embedding_dim,
+            frequency_embedding_dim=self.frequency_embedding_dim,
+            embedding_type=noise_emb_cfg.get("type", "dit_legacy"),
+            f_min=noise_emb_cfg.get("f_min", 0.5),
+            f_max=noise_emb_cfg.get("f_max", 2 * math.pi * 4),
+            include_raw=noise_emb_cfg.get("include_raw", True),
         )
         self.conditioning = self.cf.get("fe_diffusion_model_conditioning", None)
         self.conditioning_type = self.cf.get("fe_diffusion_model_conditioning_type", None)
@@ -748,18 +754,70 @@ class Preconditioner:
 # NOTE: Adapted from DiT codebase:
 class NoiseEmbedder(torch.nn.Module):
     """
-    Embeds scalar timesteps into vector representations.
+    Embeds the scalar noise level c_noise = ln(sigma) / 4 into a vector representation.
+
+    embedding_type:
+      - "dit_legacy": DiT timestep embedding, frequencies 10000^(-k/half) in [1e-4, 1]. These were
+        designed for integer timesteps in [0, 1000]; over the ~1-3 unit range of c_noise almost all
+        channels are constant, so the noise level reaches the MLP only as a small, near-linear
+        signal.
+      - "log_fourier": log-spaced frequencies in [f_min, f_max] (rad per unit c_noise), fitted to
+        the c_noise range: f_min gives a slow monotone-ish channel (period >> range), f_max sets
+        the resolution (period 2*pi/f_max in c_noise, i.e. a sigma factor of exp(8*pi/f_max)).
+        Optionally the raw c_noise is appended as an extra, directly monotone channel.
     """
 
-    def __init__(self, embedding_dim: int, frequency_embedding_dim: int, dtype=torch.bfloat16):
+    def __init__(
+        self,
+        embedding_dim: int,
+        frequency_embedding_dim: int,
+        dtype=torch.bfloat16,
+        embedding_type: str = "dit_legacy",
+        f_min: float = 0.5,
+        f_max: float = 2 * math.pi * 4,
+        include_raw: bool = True,
+    ):
         super().__init__()
+        assert embedding_type in ("dit_legacy", "log_fourier"), (
+            f"Unsupported noise embedding type: {embedding_type}"
+        )
+        assert 0 < f_min < f_max, f"Need 0 < f_min < f_max (got {f_min}, {f_max})"
         self.dtype = dtype
+        self.embedding_type = embedding_type
+        self.f_min = float(f_min)
+        self.f_max = float(f_max)
+        self.include_raw = embedding_type == "log_fourier" and include_raw
+        in_dim = frequency_embedding_dim + (1 if self.include_raw else 0)
         self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(frequency_embedding_dim, embedding_dim, bias=True),
+            torch.nn.Linear(in_dim, embedding_dim, bias=True),
             torch.nn.SiLU(),
             torch.nn.Linear(embedding_dim, embedding_dim, bias=True),
         )
         self.frequency_embedding_dim = frequency_embedding_dim
+
+    def log_fourier_embedding(self, t: torch.Tensor):
+        """
+        Sinusoidal features of c_noise at log-spaced frequencies in [f_min, f_max].
+        Frequencies are computed on the fly in fp32 (not a buffer: the model is built on the meta
+        device and to_empty()'d, which would leave a buffer uninitialised).
+        :return: (N, frequency_embedding_dim [+1]) Tensor.
+        """
+        t = t.reshape(-1, 1).float()
+        half = self.frequency_embedding_dim // 2
+        freqs = torch.logspace(
+            math.log10(self.f_min),
+            math.log10(self.f_max),
+            half,
+            dtype=torch.float32,
+            device=t.device,
+        )
+        args = t * freqs[None]
+        parts = [torch.cos(args), torch.sin(args)]
+        if self.frequency_embedding_dim % 2:
+            parts.append(torch.zeros_like(t))
+        if self.include_raw:
+            parts.append(t)
+        return torch.cat(parts, dim=-1)
 
     def timestep_embedding(self, t: float, max_period: int = 10000):
         """
@@ -785,7 +843,10 @@ class NoiseEmbedder(torch.nn.Module):
         return embedding
 
     def forward(self, t: float):
-        t_freq = self.timestep_embedding(t)
+        if self.embedding_type == "log_fourier":
+            t_freq = self.log_fourier_embedding(t)
+        else:
+            t_freq = self.timestep_embedding(t)
         t_emb = self.mlp(t_freq)
         return t_emb
 
