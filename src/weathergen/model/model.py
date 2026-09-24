@@ -25,7 +25,6 @@ from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.diffusion import DiffusionForecastEngine
-from weathergen.model.flow_matching import FlowMatchingForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -40,6 +39,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
+from weathergen.model.flow_matching import FlowMatchingForecastEngine
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root

@@ -305,7 +305,7 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         z = tokens  # clean latent target
 
         c = None
-        #TODO: add date/time conditioning
+        # TODO: add date/time conditioning
         if self.conditioning == self._FORECAST:
             c = meta_info["ERA5"].params["conditioning_tokens"]
 
@@ -435,7 +435,7 @@ class FlowMatchingForecastEngine(torch.nn.Module):
             # EDM's c_noise = log(sigma)/4, times an opt-in scale (default 1.0 = spec-faithful;
             # see edm_noise_time_scale and the diffusion-branch noise-embedding A/B).
             return (s.reshape(1).log() / 4.0) * self.edm_noise_time_scale
-            #TODO: Check why we are taking log/deviding by 4
+            # TODO: Check why we are taking log/deviding by 4
         # condot: t in (0,1) scaled up into the frequency band the ladder was calibrated for.
         return s.reshape(1) * self.time_scale
 
@@ -648,7 +648,7 @@ class FlowMatchingForecastEngine(torch.nn.Module):
                 track["rmse_x_t"].append((x_next - self.cur_token).norm().item() / _rn)
                 track["rmse_x0_hat"].append(float("nan"))
 
-        #TODO: Make this optinal with log_diganostics flag
+        # TODO: Make this optinal with log_diganostics flag
         self._plot_sampling_diagnostics(track, num_steps)
         return x_next, trajectory
 
@@ -691,10 +691,22 @@ class FlowMatchingForecastEngine(torch.nn.Module):
 
         # 1) RMSE to target: noisy state vs denoised estimate
         if has_target:
-            axes[i].semilogy(steps, track["rmse_x_t"][sl], "o-", ms=3, color="tab:blue",
-                             label=r"rmse($x_t$, $z$)  (noisy state)")
-            axes[i].semilogy(steps, track["rmse_x0_hat"][sl], "s-", ms=3, color="tab:red",
-                             label=r"rmse($\hat{x}_0(x_t)$, $z$)  (denoised estimate)")
+            axes[i].semilogy(
+                steps,
+                track["rmse_x_t"][sl],
+                "o-",
+                ms=3,
+                color="tab:blue",
+                label=r"rmse($x_t$, $z$)  (noisy state)",
+            )
+            axes[i].semilogy(
+                steps,
+                track["rmse_x0_hat"][sl],
+                "s-",
+                ms=3,
+                color="tab:red",
+                label=r"rmse($\hat{x}_0(x_t)$, $z$)  (denoised estimate)",
+            )
             axes[i].set_ylabel("RMSE to target")
             axes[i].set_title(
                 f"Flow-matching sampling  |  path={self.path.kind}, "
@@ -705,13 +717,19 @@ class FlowMatchingForecastEngine(torch.nn.Module):
             i += 1
 
         # 2) std: noisy state vs denoised estimate
-        axes[i].plot(steps, track["x_t_std"][sl], "o-", ms=3, color="tab:blue",
-                     label=r"std($x_t$)")
-        axes[i].plot(steps, track["x0_hat_std"][sl], "s-", ms=3, color="tab:red",
-                     label=r"std($\hat{x}_0(x_t)$)")
+        axes[i].plot(steps, track["x_t_std"][sl], "o-", ms=3, color="tab:blue", label=r"std($x_t$)")
+        axes[i].plot(
+            steps,
+            track["x0_hat_std"][sl],
+            "s-",
+            ms=3,
+            color="tab:red",
+            label=r"std($\hat{x}_0(x_t)$)",
+        )
         if self.cur_token is not None:
-            axes[i].axhline(self.cur_token.std().item(), color="grey", ls="--", lw=0.8,
-                            label="target std")
+            axes[i].axhline(
+                self.cur_token.std().item(), color="grey", ls="--", lw=0.8, label="target std"
+            )
         axes[i].set_ylabel("std")
         axes[i].set_yscale("log")
         axes[i].legend(fontsize=8)
