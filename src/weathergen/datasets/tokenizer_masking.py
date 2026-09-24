@@ -166,7 +166,7 @@ class TokenizerMasking(Tokenizer):
         )
 
         # TODO: split up
-        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+        _, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
             stream_info["stream_id"],
             self.hl_target,
             idxs_cells,
@@ -181,7 +181,7 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        return (coords_local, coords_per_cell)
+        return (datetimes, coords, coords_local, coords_per_cell)
 
     def get_target_values(
         self,

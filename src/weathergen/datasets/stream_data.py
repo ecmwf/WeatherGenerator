@@ -314,6 +314,8 @@ class StreamData:
     def add_target_coords(
         self,
         fstep: int,
+        target_coords_raw: torch.Tensor,
+        times_raw: torch.Tensor,
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
         is_spoof: bool,
@@ -343,6 +345,9 @@ class StreamData:
         -------
         None
         """
+
+        self.target_times_raw[fstep] = times_raw
+        self.target_coords_raw[fstep] = target_coords_raw
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
