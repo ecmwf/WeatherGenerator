@@ -26,10 +26,10 @@ from numpy.typing import NDArray
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
-zarr.config.set({'async.concurrency': 64})
+zarr.config.set({"async.concurrency": 64})
 SHARDING_ENABLED = True
 CHUNK_N_SAMPLES = 542080
-SHARD_N_SAMPLES = 6*542080
+SHARD_N_SAMPLES = 6 * 542080
 SCALE_FACTOR = 1  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
