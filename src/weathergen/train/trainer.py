@@ -156,10 +156,10 @@ class Trainer(TrainerBase):
 
         # create output directory
         if is_root():
-            config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_results(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
-        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
+        self.train_logger = TrainLogger(cf, config.get_path_results(self.cf))
 
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
@@ -320,6 +320,11 @@ class Trainer(TrainerBase):
         # inference validation set
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
+
+        # Without this, NCCL's heartbeat monitor keeps polling a TCPStore whose server has
+        # already gone away, and the ranks never exit.
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
@@ -485,6 +490,11 @@ class Trainer(TrainerBase):
 
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
+
+        # Without this, NCCL's heartbeat monitor keeps polling a TCPStore whose server has
+        # already gone away, and the ranks never exit.
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
 
     def validate_before_training(self):
         """

@@ -1375,6 +1375,9 @@ class Scores:
             ``1 - SEEPS_error`` (higher is better): 1 = perfect, ~0 = no-skill,
             negative = worse than reference. Masked climatological extremes are NaN.
         """
+        if c is None:
+            return xr.full_like(p.mean(self._agg_dims), np.nan)
+
         seeps_error = scores.categorical.seeps(
             fcst=p * 1000,  # converted to mm
             obs=gt * 1000,
