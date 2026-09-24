@@ -179,8 +179,8 @@ class DataReaderAnemoi(DataReaderTimestep):
         _logger.info(f"{ds_name}: target channels: {self.target_channels}")
         _logger.info(f"{ds_name}: geoinfo channels: {self.geoinfo_channels}")
 
-        self.mean = ds.statistics["mean"]
-        self.stdev = ds.statistics["stdev"]
+        self.mean = np.asarray(ds.statistics["mean"], dtype=np.float32)
+        self.stdev = np.asarray(ds.statistics["stdev"], dtype=np.float32)
 
     @override
     def init_empty(self) -> None:
