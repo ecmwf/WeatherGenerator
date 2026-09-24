@@ -52,6 +52,7 @@ def _extract_one_tstep(
 
     n_channels = len(streams[sname].val_target_channels)
     preds = model_output.get_physical_prediction(chunk_idx, sname)
+    n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
 
     # handle spoof data: do not write since it might corrupt validation (spoofing invisible
     # there), also handle non-output streams
@@ -60,37 +61,36 @@ def _extract_one_tstep(
 
     # empty, no predition or spoofed step
     if t_idx < forecast_offset or not_reconstructed or preds is None or is_spoof:
-        n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
         preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, n_ens, n_channels)
 
     else:
         targets = target_aux_out.physical[t_idx][sname]["target"]
         preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
         # extract prediction and targets for different samples in batch
-        for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
+        for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=False)):
             target_data = target_aux_out.physical[t_idx][sname]
-            t_coords = target_data["target_coords"][i_batch]
+            t_coords = torch.as_tensor(target_data["target_coords"][i_batch], dtype=torch.float32)
             t_times = target_data["target_times"][i_batch]
 
             # invert random reordering of
             idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
-            if idxs_inv is not None:
-                pred = pred[:, idxs_inv]
-                target = target[idxs_inv] if len(target) > 0 else target
-                t_coords = (
-                    t_coords[idxs_inv]
-                    if len(t_coords) > 0
-                    else torch.as_tensor(t_coords, dtype=torch.float32)
-                )
-                t_times = t_times[idxs_inv] if len(t_times) > 0 else t_times
+            if len(target) == 0:
+                preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+                _, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, n_ens, n_channels)
+            else:
+                if idxs_inv is not None and len(idxs_inv > 0):
+                    # pred = pred[:, idxs_inv]
+                    target = target[idxs_inv] if len(target) > 0 else target
+                    t_coords = t_coords[idxs_inv] if len(t_coords) > 0 else t_coords
+                    t_times = t_times[idxs_inv] if len(t_times) > 0 else t_times
 
-            # denormalize data if requested and map to storage format
-            preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-            targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+                # denormalize data if requested and map to storage format
+                preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+                targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
 
-            # extract original target coords and times from target data
-            t_coords_s += [t_coords.cpu().numpy()]
-            t_times_s += [t_times.astype("datetime64[ns]")]
+                # extract original target coords and times from target data
+                t_coords_s += [t_coords.cpu().numpy()]
+                t_times_s += [t_times.astype("datetime64[ns]")]
 
     return preds_s, targets_s, t_coords_s, t_times_s
 

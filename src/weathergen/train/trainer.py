@@ -221,6 +221,7 @@ class Trainer(TrainerBase):
 
         # inital data for forecast stepping
         forecast_chunk = batch.get_source_samples()
+        source_samples = batch.get_source_samples()
 
         batch.to_device_for_chunked_inference(self.device, chunks[-1])
 
@@ -243,6 +244,18 @@ class Trainer(TrainerBase):
                     chunk,
                 )
             logger.info(f"Chunked inference: processed chunk: {chunk}")
+
+            # for i, preds in enumerate(forecast_chunk.physical) :
+            for fstep in chunk:
+                preds = forecast_chunk.physical[fstep]
+                for stream_name, data in preds.items():
+                    idxs_inv = (
+                        source_samples.samples[0]
+                        .streams_data[stream_name]
+                        .idxs_inv[fstep]
+                        .to("cuda")
+                    )
+                    data = [d[:, idxs_inv] for d in data]
 
             if bidx < num_samples_write:
                 # write output incrementally

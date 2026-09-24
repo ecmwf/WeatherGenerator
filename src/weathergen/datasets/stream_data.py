@@ -271,7 +271,6 @@ class StreamData:
         targets: list,
         target_coords_raw: torch.Tensor,
         times_raw: torch.Tensor,
-        idxs_inv: torch.Tensor,
         is_spoof: bool,
     ) -> None:
         """
@@ -292,22 +291,15 @@ class StreamData:
         target_times : list( number of healpix cells)
             [ torch.tensor( points per cell) ]
               absolute target times
-        idxs_inv:
-            Indices to reorder targets back to order in input
 
         Returns
         -------
         None
         """
 
-        if self.stage == TRAIN:
-            del idxs_inv
-            idxs_inv = None
-
         self.target_tokens[fstep] = targets
         self.target_times_raw[fstep] = times_raw
         self.target_coords_raw[fstep] = target_coords_raw
-        self.idxs_inv[fstep] = idxs_inv
 
         self.target_is_spoof[fstep] = is_spoof
 
@@ -318,6 +310,7 @@ class StreamData:
         times_raw: torch.Tensor,
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
+        idxs_inv: torch.Tensor,
         is_spoof: bool,
     ) -> None:
         """
@@ -351,6 +344,9 @@ class StreamData:
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
+
+        if self.stage != TRAIN:
+            self.idxs_inv[fstep] = idxs_inv
 
         self.target_is_spoof[fstep] = is_spoof
 

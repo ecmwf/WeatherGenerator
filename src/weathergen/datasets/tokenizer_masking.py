@@ -181,7 +181,14 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        return (datetimes, coords, coords_local, coords_per_cell)
+        idxs_ord_inv = None
+        if coords.numel() > 0:
+            # flatten per-token indices into one flat list
+            idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
+            # compute indices for inversion
+            _, idxs_ord_inv = torch.sort(idxs_flat)
+
+        return (datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
 
     def get_target_values(
         self,
@@ -213,11 +220,4 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        idxs_ord_inv = None
-        if coords.numel() > 0:
-            # flatten per-token indices into one flat list
-            idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
-            # compute indices for inversion
-            _, idxs_ord_inv = torch.sort(idxs_flat)
-
-        return (data, datetimes, coords, idxs_ord_inv)
+        return (data, datetimes, coords)
