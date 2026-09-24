@@ -105,10 +105,12 @@ class DataReaderObs(DataReaderBase):
 
         # load additional properties (mean, var)
         self._load_properties()
-        self.mean = np.array(self.properties["means"])  # [data_idx]
-        self.stdev = np.sqrt(np.array(self.properties["vars"]))  # [data_idx])
-        self.mean_geoinfo = np.array(self.properties["means"])[self.geoinfo_idx]
-        self.stdev_geoinfo = np.sqrt(np.array(self.properties["vars"])[self.geoinfo_idx])
+        self.mean = np.asarray(self.properties["means"], np.float32)
+        self.stdev = np.sqrt(np.asarray(self.properties["vars"], np.float32))
+        self.mean_geoinfo = np.array(self.properties["means"], np.float32)[self.geoinfo_idx]
+        self.stdev_geoinfo = np.sqrt(
+            np.array(self.properties["vars"], np.float32)[self.geoinfo_idx]
+        )
 
         # Create index for samples
         self._setup_sample_index()
