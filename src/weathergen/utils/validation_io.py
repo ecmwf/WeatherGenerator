@@ -77,8 +77,12 @@ def _extract_one_tstep(
             if idxs_inv is not None:
                 pred = pred[:, idxs_inv]
                 target = target[idxs_inv] if len(target) > 0 else target
-                t_coords = t_coords[idxs_inv]
-                t_times = t_times[idxs_inv]
+                t_coords = (
+                    t_coords[idxs_inv]
+                    if len(t_coords) > 0
+                    else torch.as_tensor(t_coords, dtype=torch.float32)
+                )
+                t_times = t_times[idxs_inv] if len(t_times) > 0 else t_times
 
             # denormalize data if requested and map to storage format
             preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
