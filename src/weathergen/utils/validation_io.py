@@ -170,9 +170,9 @@ def write_output(
             targets_coords_all[-1] += [np.concatenate(t_coords_s)]
             targets_times_all[-1] += [np.concatenate(t_times_s)]
 
-    if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
-        _logger.warning("Writing no data since predictions are empty.")
-        return
+    # if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
+    #     _logger.warning("Writing no data since predictions are empty.")
+    #     return
 
     # collect source information
     sources = []
