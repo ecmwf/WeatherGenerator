@@ -109,6 +109,7 @@ class LearningRateScheduler:
                 pct_start=pct_start,
                 div_factor=self.lr_max_scaled / lr_cfg.lr_start,
                 final_div_factor=lr_final_decay_scaled / lr_cfg.lr_start,
+                cycle_momentum=False,
             )
         else:
             if self.n_steps_warmup > 0:
