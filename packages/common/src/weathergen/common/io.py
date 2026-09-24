@@ -26,11 +26,11 @@ from numpy.typing import NDArray
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
-# experimental value, should be inferred more intelligently
+zarr.config.set({'async.concurrency': 64})
 SHARDING_ENABLED = True
-SHARD_N_SAMPLES = 40320
-CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
-SCALE_FACTOR = 4  # scaling for the other dimensions
+CHUNK_N_SAMPLES = 542080
+SHARD_N_SAMPLES = 6*542080
+SCALE_FACTOR = 1  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
