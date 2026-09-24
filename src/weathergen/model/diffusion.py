@@ -213,6 +213,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         Raises:
             ValueError: If required arguments are missing for current mode
         """
+        self.cur_token = tokens.detach() if tokens is not None else None
         # called during training in training mode
         # called during training in training mode
         if self.training:
@@ -636,7 +637,9 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["residual_std"].append((x_hat - denoised).std().item())
                 track["x"].append(x_next.cpu())
                 if self.cur_token is not None:
-                    track["l2_to_target"].append((x_next - self.cur_token).norm().item())
+                    track["l2_to_target"].append(
+                        ((x_next - self.cur_token) ** 2).mean().item()
+                    )
                     track["x"].append(self.cur_token.cpu())
 
             if return_trajectory:
@@ -686,9 +689,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         axes[1].grid(True, alpha=0.3)
 
         if has_target:
-            # 3) L2 error to target
-            axes[2].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
-            axes[2].set_ylabel("L2 error to target")
+            # 3) MSE to target (log scale, comparable to sample_and_plot_latent_mse's sigma-vs-MSE plot)
+            axes[2].semilogy(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
+            axes[2].set_ylabel("MSE to target (log scale)")
             axes[2].grid(True, alpha=0.3)
 
         # 4) d_cur norm and step norm
@@ -883,3 +886,51 @@ class DateTimeEncoder(torch.nn.Module):
         out = torch.from_numpy(out).float()
 
         return out.reshape(*orig_shape, self.num_frequencies * 4)
+
+
+def sample_and_plot_latent_mse(tokens, step, meta_info, rope_coords, cf, forecast_engine):
+    """Sample diffusion latent MSE across sigma values and save a scatter plot.
+
+    Iterates over randomly sampled noise levels, runs the forecasting engine's
+    training forward pass, records the MSE between input and predicted tokens,
+    then writes a sigma-vs-MSE scatter plot to disk. Resets the sampling counter
+    in ``cf`` afterwards so the diagnostic only runs once.
+    """
+    import matplotlib.pyplot as plt
+    from tqdm import tqdm
+
+    num_samples = cf.get("fe_diffusion_latent_mse_samples", 0)
+    sigmas = []
+    mses = []
+    for _ in tqdm(range(num_samples), desc="Diffusion latent MSE sampling"):
+        lower = np.log(cf.get("sigma_min"))
+        upper = np.log(cf.get("sigma_max"))
+        noise_level_rn = (np.random.rand() * (upper - lower) + lower).astype(np.float32)
+        noise_stream = cf.get("diffusion", {}).get("noise_stream", "ERA5")
+        meta_info[noise_stream].params["noise_level_rn"] = noise_level_rn
+        tokens_pred = forecast_engine.training_forward(
+            tokens,
+            step,
+            meta_info=meta_info,
+            coords=rope_coords,
+        )
+        mse = ((tokens - tokens_pred) ** 2).mean().item()
+        sigmas.append(np.exp(noise_level_rn))
+        mses.append(mse)
+
+    run_id = cf.general.get("run_id")
+    plt.scatter(sigmas, mses)
+    plt.xlabel("Sigma")
+    plt.ylabel("MSE")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.title(f"{run_id}: sigma vs MSE")
+    plt.grid()
+    plt.tight_layout()
+    out_dir = get_path_run(cf)
+    out_dir.mkdir(exist_ok=True, parents=True)
+    out_path_base = out_dir / "plots" / "validation"
+    out_path_base.mkdir(exist_ok=True, parents=True)
+    plt.savefig(out_path_base / "sigma_vs_mse.png")
+    plt.close()
+    cf["fe_diffusion_latent_mse_samples"] = 0  # reset to avoid repeated sampling

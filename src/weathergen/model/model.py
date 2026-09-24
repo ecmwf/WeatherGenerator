@@ -24,7 +24,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.model.diffusion import DiffusionForecastEngine, sample_and_plot_latent_mse
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -888,6 +888,18 @@ class Model(torch.nn.Module):
                 continue
 
             if self.forecast_engine:
+                if self.cf.get("fe_diffusion_latent_mse_samples", 0) > 0:
+                    self.forecast_engine.training = True
+                    sample_and_plot_latent_mse(
+                        tokens,
+                        step,
+                        meta_info=source_samples.samples[0].meta_info,
+                        rope_coords=model_params.rope_coords,
+                        cf=self.cf,
+                        forecast_engine=self.forecast_engine,
+                    )
+                    self.forecast_engine.training = self.training
+
                 # apply forecasting engine
                 tokens = self.forecast_engine(
                     tokens,
@@ -1005,7 +1017,7 @@ class Model(torch.nn.Module):
         Resize a ModelOutput to hold ``n_steps`` forecast steps, preserving any latent entries
         that were already attached to fstep 0 (e.g. encoder posteriors).
         """
-        new_output = ModelOutput(n_steps)
+        new_output = ModelOutput(list(range(n_steps)), output.forecast_offset, output.batch_samples)
         if len(output.latent) > 0:
             for k, v in output.latent[0].items():
                 new_output.add_latent_prediction(0, k, v)
