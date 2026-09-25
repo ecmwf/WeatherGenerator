@@ -271,6 +271,45 @@ class StreamData:
         targets: list,
         target_coords_raw: torch.Tensor,
         times_raw: torch.Tensor,
+        is_spoof: bool,
+    ) -> None:
+        """
+        Add data for target for one input.
+
+        Parameters
+        ----------
+        fstep : int
+            forecast step
+        targets : torch.tensor( number of healpix cells )
+            [ torch.tensor( num tokens, channels) ]
+              Target data for loss computation
+        targets_lens : torch.tensor( number of healpix cells)
+            length of targets per cell
+        target_coords : list( number of healpix cells)
+            [ torch.tensor( points per cell, 105) ]
+              target coordinates
+        target_times : list( number of healpix cells)
+            [ torch.tensor( points per cell) ]
+              absolute target times
+
+        Returns
+        -------
+        None
+        """
+
+        self.target_tokens[fstep] = targets
+        self.target_times_raw[fstep] = times_raw
+        self.target_coords_raw[fstep] = target_coords_raw
+
+        self.target_is_spoof[fstep] = is_spoof
+
+    def add_target_coords(
+        self,
+        fstep: int,
+        times_raw: torch.Tensor,
+        target_coords_raw: torch.Tensor,
+        target_coords: torch.Tensor,
+        target_coords_per_cell: torch.Tensor,
         idxs_inv: torch.Tensor,
         is_spoof: bool,
     ) -> None:
@@ -300,52 +339,14 @@ class StreamData:
         None
         """
 
-        if self.stage == TRAIN:
-            del idxs_inv
-            idxs_inv = None
-
-        self.target_tokens[fstep] = targets
         self.target_times_raw[fstep] = times_raw
         self.target_coords_raw[fstep] = target_coords_raw
-        self.idxs_inv[fstep] = idxs_inv
-
-        self.target_is_spoof[fstep] = is_spoof
-
-    def add_target_coords(
-        self,
-        fstep: int,
-        target_coords: torch.Tensor,
-        target_coords_per_cell: torch.Tensor,
-        is_spoof: bool,
-    ) -> None:
-        """
-        Add data for target for one input.
-
-        Parameters
-        ----------
-        fstep : int
-            forecast step
-        targets : torch.tensor( number of healpix cells )
-            [ torch.tensor( num tokens, channels) ]
-              Target data for loss computation
-        targets_lens : torch.tensor( number of healpix cells)
-            length of targets per cell
-        target_coords : list( number of healpix cells)
-            [ torch.tensor( points per cell, 105) ]
-              target coordinates
-        target_times : list( number of healpix cells)
-            [ torch.tensor( points per cell) ]
-              absolute target times
-        idxs_inv:
-            Indices to reorder targets back to order in input
-
-        Returns
-        -------
-        None
-        """
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
+
+        if self.stage != TRAIN:
+            self.idxs_inv[fstep] = idxs_inv
 
         self.target_is_spoof[fstep] = is_spoof
 

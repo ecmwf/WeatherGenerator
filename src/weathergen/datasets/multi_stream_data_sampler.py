@@ -471,28 +471,26 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 continue
 
             if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+                (dts, cc, tc, tc_l, idxs_inv) = self.tokenizer.get_target_coords(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-
-                stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(
+                    timestep_idx, dts, cc, tc, tc_l, idxs_inv, rdata.is_spoof
+                )
 
             if "target_values" in mode:
-                (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
+                (tt_cells, tt_t, tt_c) = self.tokenizer.get_target_values(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-
-                stream_data.add_target_values(
-                    timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
-                )
+                stream_data.add_target_values(timestep_idx, tt_cells, tt_c, tt_t, rdata.is_spoof)
 
         return stream_data
 
@@ -672,12 +670,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
             target_select += ["target_values"]
+            if self.mode_cfg.get("forecast", {}).get("chunk_size") is not None:
+                target_select = []
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
         # remove duplicates
         source_select, target_select = list(set(source_select)), list(set(target_select))
-        if len(source_select) == 0 or len(target_select) == 0:
+        if len(source_select) == 0:
             raise NotImplementedError(f"Unsupported training mode {mode}.")
 
         num_output_steps = self._get_output_length(num_forecast_steps)
@@ -731,7 +731,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
-            # for t_idx, mask in enumerate(source_masks):
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
