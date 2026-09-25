@@ -33,8 +33,9 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import Stage, get_batch_size_from_config
+from weathergen.train.utils import TRAIN, Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
+from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -408,7 +409,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             StreamData with source and targets masked according to view_meta
         """
 
-        if "network_input" in mode:
+        if "network_input" in mode and not is_stream_diagnostic(stream_info):
             # iterate overall input steps
             for step, idx in enumerate(range(base_idx, base_idx - num_steps_input, -1)):
                 # TODO: check that we are not out of bounds when we go back in time
@@ -432,9 +433,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     mask,
                 )
 
-                stream_data.add_source(
-                    self._stage, step, rdata, source_cells_lens, source_cells, rdata.is_spoof
-                )
+                stream_data.add_source(step, rdata, source_cells_lens, source_cells, rdata.is_spoof)
 
         return stream_data
 
@@ -454,6 +453,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         """
 
+        # nothing to do for forcing streams
+        if not output_data:
+            return stream_data
+
         # collect for all forecast steps
         num_output_steps = self._get_output_length(num_forecast_steps)
         for step, timestep_idx in enumerate(range(self.output_offset, num_output_steps)):
@@ -468,27 +471,26 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 continue
 
             if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+                (dts, cc, tc, tc_l, idxs_inv) = self.tokenizer.get_target_coords(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(
+                    timestep_idx, dts, cc, tc, tc_l, idxs_inv, rdata.is_spoof
+                )
 
             if "target_values" in mode:
-                (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
+                (tt_cells, tt_t, tt_c) = self.tokenizer.get_target_values(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-
-                stream_data.add_target_values(
-                    self._stage, timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
-                )
+                stream_data.add_target_values(timestep_idx, tt_cells, tt_c, tt_t, rdata.is_spoof)
 
         return stream_data
 
@@ -528,6 +530,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         num_output_steps = self._get_output_length(num_forecast_steps)
         stream_data = StreamData(
+            self._stage,
             base_idx,
             num_steps_input,
             num_output_steps,
@@ -567,46 +570,48 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         # source data: iterate overall input steps
         input_data = []
-        for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
-            # TODO: check that we are not out of bounds when we go back in time
+        if not is_stream_diagnostic(stream_ds[0].stream_info):
+            for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
+                # TODO: check that we are not out of bounds when we go back in time
 
-            rdata = collect_datasources(stream_ds, idx, "source", self.rng)
+                rdata = collect_datasources(stream_ds, idx, "source", self.rng)
 
-            if rdata.is_empty():
-                # work around for https://github.com/pytorch/pytorch/issues/158719
-                # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(idx)
-                rdata = spoof(
-                    self.healpix_level,
-                    time_win.start,
-                    stream_ds[0].get_geoinfo_size(),
-                    len(stream_ds[0].mean[stream_ds[0].source_idx]),
-                )
-                rdata.is_spoof = True
+                if rdata.is_empty():
+                    # work around for https://github.com/pytorch/pytorch/issues/158719
+                    # create non-empty mean data instead of empty tensor
+                    time_win = self.time_window_handler.window(idx)
+                    rdata = spoof(
+                        self.healpix_level,
+                        time_win.start,
+                        stream_ds[0].get_geoinfo_size(),
+                        len(stream_ds[0].mean[stream_ds[0].source_idx]),
+                    )
+                    rdata.is_spoof = True
 
-            input_data += [rdata]
+                input_data += [rdata]
 
         # target data: collect for all forecast steps
         output_data = []
-        num_output_steps = self._get_output_length(num_forecast_steps)
-        for timestep_idx in range(self.output_offset, num_output_steps):
-            step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
+        if not is_stream_forcing(stream_ds[0].stream_info, self._stage):
+            num_output_steps = self._get_output_length(num_forecast_steps)
+            for timestep_idx in range(self.output_offset, num_output_steps):
+                step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-            rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+                rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
-            if rdata.is_empty():
-                # work around for https://github.com/pytorch/pytorch/issues/158719
-                # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(step_forecast_dt)
-                rdata = spoof(
-                    self.healpix_level,
-                    time_win.start,
-                    stream_ds[0].get_geoinfo_size(),
-                    len(stream_ds[0].mean[stream_ds[0].target_idx]),
-                )
-                rdata.is_spoof = True
+                if rdata.is_empty():
+                    # work around for https://github.com/pytorch/pytorch/issues/158719
+                    # create non-empty mean data instead of empty tensor
+                    time_win = self.time_window_handler.window(step_forecast_dt)
+                    rdata = spoof(
+                        self.healpix_level,
+                        time_win.start,
+                        stream_ds[0].get_geoinfo_size(),
+                        len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                    )
+                    rdata.is_spoof = True
 
-            output_data += [rdata]
+                output_data += [rdata]
 
         return (input_data, output_data)
 
@@ -665,12 +670,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
             target_select += ["target_values"]
+            if self.mode_cfg.get("forecast", {}).get("chunk_size") is not None:
+                target_select = []
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
         # remove duplicates
         source_select, target_select = list(set(source_select)), list(set(target_select))
-        if len(source_select) == 0 or len(target_select) == 0:
+        if len(source_select) == 0:
             raise NotImplementedError(f"Unsupported training mode {mode}.")
 
         num_output_steps = self._get_output_length(num_forecast_steps)
@@ -722,10 +729,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     output_mask=target_masks.masks[tidx],
                     input_mask=source_mask,
                 )
-
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
-            # for t_idx, mask in enumerate(source_masks):
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
@@ -792,7 +797,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
                 not_valid = batch.sources_empty() or batch.is_nan()
-                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
+                if self._stage == TRAIN:
+                    not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
 
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not_valid:
@@ -811,7 +817,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            assert self.world_size == 1, self.world_size
             iter_start = 0
             iter_end = len(self)
 

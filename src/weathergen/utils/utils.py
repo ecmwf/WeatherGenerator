@@ -29,6 +29,16 @@ def get_dtype(value: str) -> torch.dtype:
         )
 
 
+def is_stream_reconstructed(stream_cfg: dict, stage: Stage | None = None) -> bool:
+    """
+    Determine if a stream is physically reconstructed, i.e. has a decoder and contributes
+    to the physical (decoder) reconstruction loss.
+    """
+    if is_stream_forcing(stream_cfg, stage):
+        return False
+    return stream_cfg.get("reconstruct", True)
+
+
 def is_stream_forcing(stream_cfg: dict, stage: Stage | None = None) -> bool:
     """
     Determine if stream is forcing, i.e. does not produce (physical) predictions
