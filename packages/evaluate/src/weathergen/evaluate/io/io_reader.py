@@ -13,6 +13,8 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import omegaconf as oc
+
 # Third-party
 import xarray as xr
 
@@ -87,6 +89,52 @@ class Reader(ABC):
         # Default paths if not provided
         self.model_base_dir = eval_cfg.get("model_base_dir")
         self.results_base_dir = eval_cfg.get("results_base_dir")
+
+    def get_eval_settings(self, stream: str) -> dict:
+        """Extract evaluation settings that affect score computation for a stream.
+
+        These settings are saved into JSON score files so that cached scores can
+        be invalidated when settings change (e.g. regridding, ensemble selection,
+        rank files, aggregation dimensions).
+
+        Parameters
+        ----------
+        stream : str
+            The stream name.
+
+        Returns
+        -------
+        dict
+            A dictionary of plain Python types (JSON-serializable).  Only
+            non-default / non-empty values are included to keep the JSON compact
+            and avoid spurious mismatches.
+        """
+        stream_cfg = self.get_stream(stream)
+
+        # Collect raw config values; skip falsy / default entries
+        entries = {
+            "regrid": stream_cfg.get("regrid"),
+            "ensemble": stream_cfg.get("evaluation", {}).get("ensemble"),
+            "rank": self.eval_cfg.get("rank"),
+            "agg_dims": self.eval_cfg.get("agg_dims"),
+            "derived_channels": stream_cfg.get("derived_channels"),
+        }
+        # Defaults that should not trigger cache invalidation
+        defaults = {"ensemble": "all", "rank": "all", "agg_dims": "ipoint"}
+
+        settings: dict = {}
+        for key, val in entries.items():
+            if not val or val == defaults.get(key):
+                continue
+            settings[key] = (
+                oc.OmegaConf.to_container(val, resolve=True) if oc.OmegaConf.is_config(val) else val
+            )
+
+        # Store the source (zarr) forecast steps so the cache is invalidated
+        # when the underlying data changes (e.g. new rollout length).
+        settings["forecast_steps"] = sorted(int(f) for f in self.get_forecast_steps())
+
+        return settings
 
     def get_stream(self, stream: str):
         """
@@ -225,23 +273,27 @@ class Reader(ABC):
 
         for name in ["channel", "fstep", "sample", "ensemble"]:
             if requested[name] is None:
-                # Default to all in Zarr
-                requested[name] = reader_data[name]
-                # If file with metrics exists, must exactly match
-                if available_data is not None and reader_data[name] != available[name]:
-                    _logger.info(
-                        f"Requested all {name}s for {mode}, but previous config "
-                        "was a strict subset. Recomputation required."
-                    )
-                    check_score = False
+                # Default to all in Zarr (or to cached score coords if available)
+                if available_data is not None and available[name]:
+                    # Trust the cached score's coordinates (may include expanded
+                    # sub-steps beyond zarr base fsteps).  Validity is guaranteed
+                    # by the eval_settings check in load_single_score.
+                    requested[name] = available[name]
+                else:
+                    requested[name] = reader_data[name]
 
-            # Must be subset of Zarr
-            if not requested[name] <= reader_data[name]:
+            # Must be subset of source data (skip when validating a cached score,
+            # since scores may contain expanded sub-steps beyond zarr base fsteps)
+            if available_data is not None:
+                pass
+            elif not requested[name] <= reader_data[name]:
                 missing = requested[name] - reader_data[name]
 
-                # Special handling for ensemble mean
+                # Special handling for ensemble mean and std
                 if name == "ensemble" and "mean" in missing:
                     missing.remove("mean")
+                if name == "ensemble" and "std" in missing:
+                    missing.remove("std")
 
                 # Derivable channels (e.g. 10ff) will be computed later by
                 # DeriveChannels — keep them in the requested set.
@@ -353,6 +405,8 @@ class Reader(ABC):
 
         if ensemble == "mean":
             ensemble = ["mean"]
+        elif ensemble == "std":
+            ensemble = ["std"]
 
         fsteps = _parse_range_list(fsteps, "forecast_step")
         samples = _parse_range_list(samples, "sample")

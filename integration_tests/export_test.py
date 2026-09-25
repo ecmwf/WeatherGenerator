@@ -81,7 +81,7 @@ def infer(run_id):
 
 def find_inference(run_id):
     try:
-        return get_model_results(run_id, mini_epoch=0, rank=0)
+        return get_model_results(run_id, mini_epoch_list=[0], rank_list=[0])[0]
     except FileNotFoundError as e:
         return False
 
@@ -98,7 +98,7 @@ def export_inference(run_id):
     )
 
 def check_export(run_id):
-    fname_zarr = get_model_results(run_id, mini_epoch = 0, rank = 0)
+    fname_zarr = get_model_results(run_id, mini_epoch_list=[0], rank_list=[0])[0]
     nc_folder = Path(WEATHERGEN_HOME / "results" / run_id)
 
     with zarrio_reader(fname_zarr) as zio:

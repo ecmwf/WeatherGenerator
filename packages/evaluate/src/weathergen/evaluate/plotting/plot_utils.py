@@ -11,8 +11,8 @@ import datetime
 import logging
 import re
 from collections.abc import Iterable, Sequence
+from enum import Enum
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
@@ -20,25 +20,21 @@ from numpy.typing import NDArray
 _logger = logging.getLogger(__name__)
 
 
-def resolve_run_colors(run_ids: Sequence[str], runs: dict) -> dict[str, str]:
-    """Assign one fixed colour per run.
+class PlotSubdir(str, Enum):
+    """Known plot subdirectory names produced by the plotting pipeline.
 
-    A run's configured ``color`` wins; otherwise the run takes the next entry of
-    matplotlib's default property cycle, which reproduces the colours matplotlib would
-    have picked anyway. Pinning them explicitly lets every curve belonging to the same
-    run (members, per-member mean, overlaid ensemble scores) share a single colour.
+    Being a ``str`` subclass, members compare and format exactly like plain
+    strings (e.g. ``PlotSubdir.line_plots == "line_plots"``), so they can be
+    used as drop-in replacements wherever the raw directory name is expected
+    (e.g. ``Path(base) / PlotSubdir.line_plots``).
     """
-    cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
 
-    run_colors: dict[str, str] = {}
-    for i, run_id in enumerate(run_ids):
-        configured = runs.get(run_id, {}).get("color")
-        if configured:
-            run_colors[run_id] = configured
-        elif cycle:
-            run_colors[run_id] = cycle[i % len(cycle)]
-
-    return run_colors
+    line_plots = "line_plots"
+    ratio_plots = "ratio_plots"
+    psd_plots = "psd_plots"
+    score_cards = "score_cards"
+    bar_plots = "bar_plots"
+    qq_plots = "qq_plots"
 
 
 # Shared helpers
@@ -82,18 +78,7 @@ def calculate_average_over_dim(
 
 def lower_is_better(metric: str) -> bool:
     """Determine whether lower or higher is better."""
-    return metric in {
-        "l1",
-        "l2",
-        "mae",
-        "mse",
-        "rmse",
-        "rmse_ens_mean",
-        "vrmse",
-        "bias",
-        "crps",
-        "spread",
-    }
+    return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
 
 
 def compute_offsets(n, spacing=0.11):
@@ -376,7 +361,6 @@ def plot_metric_region(
     scores_dict: dict,
     plotter: object,
     print_summary: bool,
-    overlay_metrics: list[str] | None = None,
 ) -> None:
     """Plot data for all streams and channels for a given metric and region.
 
@@ -394,15 +378,10 @@ def plot_metric_region(
         Plotter object to handle the plotting part
     print_summary: bool
         Option to print plot values to screen
-    overlay_metrics: list[str] | None
-        Additional metrics to draw into the same figure as ``metric``, e.g. overlaying
-        ``rmse_ens_mean`` onto the ``rmse`` plot to compare the ensemble-mean skill with
-        the individual members. Each overlay is drawn as its own labelled curve.
 
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
-    run_colors = resolve_run_colors(list(runs), runs)
 
     for stream in streams_set:
         for ch in channels_set:
@@ -416,44 +395,18 @@ def plot_metric_region(
                 selected_data.append(data.sel(channel=ch))
                 labels.append(runs[run_id].get("label", run_id))
                 run_ids.append(run_id)
-                colors.append(run_colors.get(run_id))
-
-            for ov_metric in overlay_metrics or []:
-                ov_scores = scores_dict.get(ov_metric, {}).get(region, {}).get(stream, {})
-                if not ov_scores:
-                    _logger.warning(
-                        f"Overlay metric '{ov_metric}' requested for '{metric}' but no scores "
-                        f"are available for {region} - {stream}. It is skipped; make sure it "
-                        "is listed under evaluation.metrics."
-                    )
-                    continue
-                for run_id, data in ov_scores.items():
-                    if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
-                        continue
-
-                    selected_data.append(data.sel(channel=ch))
-                    # Overlays belong to the same model as the base curve, so they share its
-                    # colour and are kept out of the legend (matplotlib skips "_"-prefixed
-                    # labels); the line style alone distinguishes them.
-                    run_label = runs[run_id].get("label", run_id)
-                    labels.append(f"_{run_label} - {ov_metric}")
-                    run_ids.append(run_id)
-                    colors.append(run_colors.get(run_id))
+                colors.append(runs[run_id].get("color", None))
 
             if selected_data:
                 _logger.info(f"Creating line plot for {metric} - {region} - {stream} - {ch}.")
 
-                plotted_metrics = [metric, *(overlay_metrics or [])]
-
                 name = create_filename(
-                    prefix=[*plotted_metrics, region],
-                    middle=sorted(set(run_ids)),
-                    suffix=[stream, ch],
+                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
                 )
 
                 selected_data, time_dim = _assign_time_coord(selected_data)
 
-                title = f"{' + '.join(m.upper() for m in plotted_metrics)} | {stream} | {ch}"
+                title = f"{metric.upper()} | {stream} | {ch}"
 
                 ref_line_dict = {"ssr_adj": 1.0}
                 line = ref_line_dict.get(metric)
@@ -468,7 +421,6 @@ def plot_metric_region(
                     title=title,
                     colors=colors,
                     line=line,
-                    overlay_names=list(overlay_metrics or []),
                 )
 
 
@@ -859,6 +811,51 @@ def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict]
     return None
 
 
+def _average_target_psd(
+    psd_datasets: Sequence[dict], context: str = ""
+) -> tuple[NDArray, NDArray, int]:
+    """Average the target power spectra across runs.
+
+    The target is a property of the verification data, not of any single model, so when
+    several runs are overlaid on one axes the reference curve drawn against them is the
+    arithmetic mean of their targets (mean of *power*, not of log-power) rather than
+    whichever run happens to come first in the list.
+
+    ``_extract_psd_attrs`` does not guarantee a common frequency axis across runs, so runs
+    whose axis length differs from the first one's are dropped from the mean with a warning.
+
+    Parameters
+    ----------
+    psd_datasets : Sequence[dict]
+        One dict per run, each with ``frequencies`` and ``psd_target``.
+    context : str
+        Free-text identifier (stream/channel/step) used in the warning message.
+
+    Returns
+    -------
+    tuple[NDArray, NDArray, int]
+        The frequency axis, the averaged target spectrum, and the number of runs that
+        actually contributed to the mean.
+    """
+    freq = np.asarray(psd_datasets[0]["frequencies"])
+    targets = [np.asarray(ds["psd_target"]) for ds in psd_datasets]
+    usable = [t for t in targets if t.shape == targets[0].shape]
+
+    if len(usable) < len(targets):
+        _logger.warning(
+            f"PSD target averaging{f' ({context})' if context else ''}: "
+            f"{len(targets) - len(usable)} of {len(targets)} runs have a target spectrum of "
+            "a different length; they are excluded from the average."
+        )
+
+    return freq, np.nanmean(np.vstack(usable), axis=0), len(usable)
+
+
+def _target_legend_label(n_runs: int) -> str:
+    """Legend text for a target curve, stating explicitly when it is a cross-run average."""
+    return "Target" if n_runs < 2 else f"Target (mean of {n_runs} runs)"
+
+
 def psd_plot_metric_region(
     metric: str,
     region: str,
@@ -870,12 +867,19 @@ def psd_plot_metric_region(
 
     PSD curves (frequencies, target PSD, prediction PSD) are stored in
     ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+
+    For a given forecast step, every run is overlaid on a single plot, against one target
+    curve averaged over all the runs contributing to that plot. Evolution plots (spectra
+    across forecast steps) remain one per run.
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
 
     for stream in streams_set:
         for ch in channels_set:
+            # First pass: gather each run's per-fstep PSD data for this stream/channel.
+            run_fstep_datasets: dict[str, dict] = {}
+            run_labels: dict[str, str] = {}
             for run_id, data in scores_dict[metric][region].get(stream, {}).items():
                 if ch not in np.atleast_1d(data.channel.values):
                     continue
@@ -889,26 +893,59 @@ def psd_plot_metric_region(
                     _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
                     continue
 
-                label = runs[run_id].get("label", run_id)
-
+                per_fstep_datasets = {}
                 for fstep in attr_fsteps:
                     psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
                     if psd_datasets is None:
                         continue
+                    per_fstep_datasets[fstep] = psd_datasets[0]
 
-                    method_tag = psd_datasets[0].get("psd_method", "sht")
-                    name = create_filename(
-                        prefix=[metric, method_tag, region],
-                        middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
-                    )
-                    plotter.psd_plot(
-                        psd_datasets,
-                        [label],
-                        tag=name,
-                        variable=ch,
-                        forecast_step=str(fstep),
-                    )
+                if not per_fstep_datasets:
+                    continue
+
+                run_fstep_datasets[run_id] = per_fstep_datasets
+                run_labels[run_id] = runs[run_id].get("label", run_id)
+
+            if not run_fstep_datasets:
+                continue
+
+            # Second pass: one combined plot per forecast step, overlaying every run that
+            # has data for it.
+            all_fsteps = sorted({fstep for d in run_fstep_datasets.values() for fstep in d})
+            for fstep in all_fsteps:
+                run_ids = [rid for rid, d in run_fstep_datasets.items() if fstep in d]
+                psd_datasets = [run_fstep_datasets[rid][fstep] for rid in run_ids]
+                labels = [run_labels[rid] for rid in run_ids]
+
+                method_tag = psd_datasets[0].get("psd_method", "sht")
+                name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=run_ids,
+                    suffix=[stream, ch, f"fstep{fstep}"],
+                )
+                plotter.psd_plot(
+                    psd_datasets,
+                    labels,
+                    tag=name,
+                    variable=ch,
+                    forecast_step=str(fstep),
+                )
+
+            # Third pass: per-run evolution across forecast steps.
+            for run_id, per_fstep_datasets in run_fstep_datasets.items():
+                method_tag = next(iter(per_fstep_datasets.values())).get("psd_method", "sht")
+                ev_name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=[run_id],
+                    suffix=[stream, ch, "evolution"],
+                )
+                plotter.psd_evolution_plot(
+                    per_fstep_datasets,
+                    tag=ev_name,
+                    variable=ch,
+                    label=run_labels[run_id],
+                )
+
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 
