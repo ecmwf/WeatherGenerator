@@ -256,12 +256,25 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
             group_path = f"{sample}/{stream}/0/source"
             source_group = zio.data_root.get(group_path)
 
-            if source_group is None:
-                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
-
-            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
-            source_start = np.min(times_arr)
-            source_end = np.max(times_arr)
+            if source_group is not None:
+                times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
+                source_start = np.min(times_arr)
+                source_end = np.max(times_arr)
+            else:
+                # Stores written with forecast_offset 0 (e.g. the ssl-diffusion
+                # branch) have no step-0 source group. Every output item records
+                # its source_interval, so take it from the first step instead.
+                stream_group = zio.data_root.get(f"{sample}/{stream}")
+                if stream_group is None:
+                    raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
+                first = min(int(k) for k in stream_group.group_keys())
+                interval = stream_group[f"{first}/prediction"].attrs["source_interval"]
+                source_start = np.datetime64(interval["start"], "ns")
+                # Reference these forecasts to the ANALYSIS time, the start of
+                # the input window: sdnbfpve's "00Z forecast" starts from the 00Z
+                # analysis plus observations to 06Z, and is verified against IFS
+                # 00Z at the same valid times (leads 6h onwards).
+                source_end = source_start
 
             _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
             source_starts.append(source_start)
