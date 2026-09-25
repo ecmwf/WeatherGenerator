@@ -41,6 +41,7 @@ def _extract_one_tstep(
     sname: str,
     streams,
     model_output,
+    batch,
     target_aux_out,
     dn_data,
 ):
@@ -68,29 +69,28 @@ def _extract_one_tstep(
         preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
         # extract prediction and targets for different samples in batch
         for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=False)):
-            target_data = target_aux_out.physical[t_idx][sname]
-            t_coords = torch.as_tensor(target_data["target_coords"][i_batch], dtype=torch.float32)
-            t_times = target_data["target_times"][i_batch]
+            source_sample = batch.source_samples.samples[i_batch].streams_data[sname]
+            t_times = source_sample.target_times_raw[t_idx]
+            t_coords = source_sample.target_coords_raw[t_idx]
+            idxs_inv = source_sample.idxs_inv[t_idx]
 
-            # invert random reordering of
-            idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
             if len(target) == 0:
-                preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-                _, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, n_ens, n_channels)
-            else:
-                if idxs_inv is not None and len(idxs_inv > 0):
-                    # pred = pred[:, idxs_inv]
-                    target = target[idxs_inv] if len(target) > 0 else target
-                    t_coords = t_coords[idxs_inv] if len(t_coords) > 0 else t_coords
-                    t_times = t_times[idxs_inv] if len(t_times) > 0 else t_times
+                target = torch.zeros((0, n_channels), dtype=torch.float32)
 
-                # denormalize data if requested and map to storage format
-                preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-                targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+            # invert random reordering from healpix cell-based embedding
+            if idxs_inv is not None and len(idxs_inv > 0):
+                pred = pred[:, idxs_inv]
+                target = target[idxs_inv] if len(target) > 0 else target
+                t_coords = t_coords[idxs_inv] if len(t_coords) > 0 else t_coords
+                t_times = t_times[idxs_inv] if len(t_times) > 0 else t_times
 
-                # extract original target coords and times from target data
-                t_coords_s += [t_coords.cpu().numpy()]
-                t_times_s += [t_times.astype("datetime64[ns]")]
+            # denormalize data if requested and map to storage format
+            preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+            targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+
+            # extract original target coords and times from target data
+            t_coords_s += [t_coords.cpu().numpy()]
+            t_times_s += [t_times.astype("datetime64[ns]")]
 
     return preds_s, targets_s, t_coords_s, t_times_s
 
@@ -158,6 +158,7 @@ def write_output(
                 sname,
                 cf.streams,
                 model_output,
+                batch,
                 target_aux_out,
                 dn_data,
             )
@@ -170,9 +171,9 @@ def write_output(
             targets_coords_all[-1] += [np.concatenate(t_coords_s)]
             targets_times_all[-1] += [np.concatenate(t_times_s)]
 
-    # if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
-    #     _logger.warning("Writing no data since predictions are empty.")
-    #     return
+    if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
+        _logger.warning("Writing no data since predictions are empty.")
+        return
 
     # collect source information
     sources = []
