@@ -81,8 +81,8 @@ def _extract_one_tstep(
             if idxs_inv is not None and len(idxs_inv > 0):
                 pred = pred[:, idxs_inv]
                 target = target[idxs_inv] if len(target) > 0 else target
-                t_coords = t_coords[idxs_inv] if len(t_coords) > 0 else t_coords
-                t_times = t_times[idxs_inv] if len(t_times) > 0 else t_times
+                t_coords = t_coords[idxs_inv]
+                t_times = t_times[idxs_inv]
 
             # denormalize data if requested and map to storage format
             preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]

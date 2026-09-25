@@ -670,12 +670,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
             target_select += ["target_values"]
+            if self.mode_cfg.get("forecast", {}).get("chunk_size") is None:
+                target_select = []
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
         # remove duplicates
         source_select, target_select = list(set(source_select)), list(set(target_select))
-        if len(source_select) == 0 or len(target_select) == 0:
+        if len(source_select) == 0:
             raise NotImplementedError(f"Unsupported training mode {mode}.")
 
         num_output_steps = self._get_output_length(num_forecast_steps)
@@ -730,7 +732,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
-            target_select = []
+            # target_select = []
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
