@@ -500,7 +500,11 @@ class ZarrIO:
         try:
             sample, example_sample = next(self.data_root.groups())
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
+            # Use the lowest forecast step actually present, not a hard-coded 0.
+            # Stores written with forecast_offset 1 start at 0 (a source-only
+            # group); those written with offset 0 start at 1, and assuming 0
+            # made this assert instead of inferring the offset.
+            fstep = min(int(k) for k in example_stream.group_keys())
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
