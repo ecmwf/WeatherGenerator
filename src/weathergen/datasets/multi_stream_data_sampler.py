@@ -670,7 +670,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
             target_select += ["target_values"]
-            if self.mode_cfg.get("forecast", {}).get("chunk_size") is None:
+            if self.mode_cfg.get("forecast", {}).get("chunk_size") is not None:
                 target_select = []
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
@@ -731,8 +731,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
-            # for t_idx, mask in enumerate(source_masks):
-            # target_select = []
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
