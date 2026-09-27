@@ -71,7 +71,7 @@ class LinePlots:
         # heat_map uses self.out_plot_dir (alias for line_plots dir)
         self.out_plot_dir = self._base_dir_lines
 
-        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
+        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio):
             os.makedirs(d, exist_ok=True)
 
     def set_subdir(self, metric: str, region: str) -> None:
@@ -90,10 +90,12 @@ class LinePlots:
         subdir = Path(metric) / region
         self.out_plot_dir_lines = self._base_dir_lines / subdir
         self.out_plot_dir_ratio = self._base_dir_ratio / subdir
-        self.out_plot_dir_psd = self._base_dir_psd / subdir
+        # PSD plots use a flat <region> subdir (no metric prefix) since PSD
+        # is the only metric that writes here.
+        self.out_plot_dir_psd = self._base_dir_psd / region
         self.out_plot_dir = self.out_plot_dir_lines
 
-        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
+        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio):
             os.makedirs(d, exist_ok=True)
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
