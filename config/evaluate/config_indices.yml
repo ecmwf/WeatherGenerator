@@ -17,6 +17,11 @@
 default_streams:
   ERA5:
     channels: ["z_50", "z_500", "z_850"]
+    # required: check_availability(mode="evaluation") skips the stream without this.
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
     indices:
       - nam:
           min_lat: 20.0             # domain: polar cap, |lat| >= 20 (hemisphere
