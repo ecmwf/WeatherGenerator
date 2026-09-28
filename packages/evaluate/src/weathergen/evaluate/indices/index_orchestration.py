@@ -10,7 +10,7 @@
 """Index orchestration: per-sample index computation, stream aggregation, JSON output.
 
 Structurally parallel to ``scores/score_orchestration.py`` but parallelizes
-over *sample* rather than *forecast step*: an index (e.g. NAM) needs one
+over *sample* rather than *forecast step*: an index (e.g. NAM, SAM) needs one
 sample's full forecast-lead-time trajectory as a single population to fit its
 EOF, whereas scores are independent per (fstep, region).
 """
@@ -23,7 +23,7 @@ import numpy as np
 import xarray as xr
 from joblib import delayed
 
-from weathergen.evaluate.indices.nam import compute_nam_index
+from weathergen.evaluate.indices.annular_mode import compute_annular_mode_index
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.utils.clim_utils import get_climatology
@@ -33,7 +33,14 @@ _logger = logging.getLogger(__name__)
 
 # index name -> pure computation callable, analogous to Scores.det_metrics_dict
 # but scoped to this module (does not touch the scores registry).
-INDEX_REGISTRY = {"nam": compute_nam_index}
+INDEX_REGISTRY = {
+    "nam": compute_annular_mode_index,
+    "sam": compute_annular_mode_index,
+}
+
+# index name -> default hemisphere for its polar-cap domain, overridable via
+# the index's own "hemisphere" config param.
+_DEFAULT_HEMISPHERE = {"nam": "north", "sam": "south"}
 
 
 def _select_sample(da: xr.DataArray, sample: int) -> xr.DataArray:
@@ -41,6 +48,29 @@ def _select_sample(da: xr.DataArray, sample: int) -> xr.DataArray:
     if "sample" in da.dims:
         return da.sel(sample=sample)
     return da.sel(ipoint=da["sample"] == sample)
+
+
+def _build_polar_cap_bbox(index_name: str, parameters: dict) -> RegionBoundingBox:
+    """Build the polar-cap domain bbox for an annular-mode index.
+
+    ``min_lat`` is the poleward-distance threshold (always positive, e.g.
+    ``20.0`` means "cap starts at 20 degrees from the equator"); the
+    hemisphere (default per index name, overridable via ``hemisphere:
+    "north"|"south"``) picks its sign.
+    """
+    hemisphere = parameters.get("hemisphere", _DEFAULT_HEMISPHERE.get(index_name, "north"))
+    min_lat = abs(parameters.get("min_lat", 20.0))
+    if hemisphere == "south":
+        lat_min, lat_max = -90.0, -min_lat
+    else:
+        lat_min, lat_max = min_lat, 90.0
+    return RegionBoundingBox(
+        lat_min=lat_min,
+        lat_max=lat_max,
+        lon_min=-180.0,
+        lon_max=180.0,
+        projection=ccrs.PlateCarree(),
+    )
 
 
 def _index_single_sample(
@@ -175,13 +205,7 @@ def calc_indices_per_stream(
             _logger.warning(f"Unknown index '{index_name}', skipping.")
             continue
 
-        bbox = RegionBoundingBox(
-            lat_min=parameters.get("min_lat", 20.0),
-            lat_max=90.0,
-            lon_min=-180.0,
-            lon_max=180.0,
-            projection=ccrs.PlateCarree(),
-        )
+        bbox = _build_polar_cap_bbox(index_name, parameters)
 
         use_climatology = parameters.get("use_climatology", True)
         aligned_clim_data = get_climatology(reader, da_tars, stream) if use_climatology else None

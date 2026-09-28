@@ -32,7 +32,6 @@ from omegaconf import DictConfig, OmegaConf
 # Local application / package
 from weathergen.common.logger import init_loggers
 from weathergen.common.paths import _REPO_ROOT
-
 from weathergen.evaluate.indices.index_orchestration import (
     calc_indices_per_stream,
     index_list_to_json,

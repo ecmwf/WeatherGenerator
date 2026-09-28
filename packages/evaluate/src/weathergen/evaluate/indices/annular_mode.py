@@ -7,10 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""NAM (Northern Annular Mode) index computation.
+"""Annular-mode index computation (NAM, SAM).
 
 Fits a leading-EOF-based annular-mode index from a single sample's own
-forecast-lead-time trajectory.
+forecast-lead-time trajectory. The math is hemisphere-agnostic: callers pass
+an already hemisphere-masked (northern or southern polar-cap) domain.
 """
 # TODO: Implement different modes to fit leading EOF
 # (own trajectory, target-based and climatology-based)
@@ -28,22 +29,24 @@ _logger = logging.getLogger(__name__)
 _MIN_TIME_STEPS = 4
 
 
-def compute_nam_index(
+def compute_annular_mode_index(
     anomaly: np.typing.NDArray,
     lat: np.typing.NDArray,
     significance_level: float = 0.05,
 ) -> tuple[np.typing.NDArray, np.typing.NDArray, float] | None:
-    """Compute an annular-mode index from a (time, space) anomaly field.
+    """Compute an annular-mode index (NAM or SAM) from a (time, space) anomaly field.
 
     Parameters
     ----------
     anomaly : np.typing.NDArray
         Anomaly field, shape ``(n_time, n_points)``. ``n_time`` is typically
-        one sample's forecast steps; ``n_points`` the polar-cap domain points.
+        one sample's forecast steps; ``n_points`` the polar-cap domain points
+        (northern for NAM, southern for SAM).
         If computed against the sample's own trajectory mean rather than a
         climatology, the resulting index is not comparable across samples.
     lat : np.typing.NDArray
-        Latitude of each point, shape ``(n_points,)``.
+        Latitude of each point, shape ``(n_points,)``. Sign indicates
+        hemisphere; only ``cos(lat)`` is used, so it is hemisphere-agnostic.
     significance_level : float
         Two-tailed p-value threshold for masking the spatial pattern.
 
@@ -58,12 +61,12 @@ def compute_nam_index(
     """
     n_time, n_points = anomaly.shape
     if n_time < _MIN_TIME_STEPS:
-        _logger.debug(f"Too few time steps ({n_time}) to fit a NAM EOF, skipping.")
+        _logger.debug(f"Too few time steps ({n_time}) to fit an annular-mode EOF, skipping.")
         return None
 
     valid_points = ~np.any(np.isnan(anomaly), axis=0)
     if valid_points.sum() < 2:
-        _logger.debug("Too few valid (non-NaN) domain points to fit a NAM EOF, skipping.")
+        _logger.debug("Too few valid (non-NaN) domain points to fit an annular-mode EOF, skipping.")
         return None
 
     anomaly_valid = anomaly[:, valid_points]
@@ -77,7 +80,7 @@ def compute_nam_index(
     try:
         u, s, _vt = np.linalg.svd(weighted, full_matrices=False)
     except np.linalg.LinAlgError:
-        _logger.warning("SVD failed while fitting NAM EOF, skipping.")
+        _logger.warning("SVD failed while fitting annular-mode EOF, skipping.")
         return None
 
     pc1 = u[:, 0] * s[0]
@@ -92,8 +95,8 @@ def compute_nam_index(
 
     pattern_valid = _regress_pattern(anomaly_valid, index, significance_level)
 
-    # Sign convention: positive index must correspond to a negative
-    # (low pressure/height) pattern over the polar-cap domain.
+    # Sign convention (holds for both hemispheres): positive index must
+    # correspond to a negative (low pressure/height) pattern over the polar cap.
     if np.nanmean(pattern_valid) > 0:
         index = -index
         pattern_valid = -pattern_valid
