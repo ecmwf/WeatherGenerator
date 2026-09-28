@@ -17,8 +17,8 @@ from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 from omegaconf import OmegaConf
-from weathergen.common.config import timedelta_to_str
 
+from weathergen.common.config import timedelta_to_str
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     ReaderData,
