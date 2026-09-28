@@ -1657,7 +1657,7 @@ class Scores:
         # dims still remaining after pooling into "npoints" (typically just "channel")
         preserve_dims = [d for d in rank.dims if d != "npoints"]
 
-        def _counts_and_score(rank_slice: xr.DataArray) -> tuple[np.ndarray, float]:
+        def _counts_and_score(rank_slice: xr.DataArray) -> tuple[np.typing.NDArray, float]:
             counts = histogram(
                 rank_slice,
                 dim=["npoints"],
