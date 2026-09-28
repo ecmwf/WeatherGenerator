@@ -37,6 +37,7 @@ dev = [
 
 [project.scripts]
 evaluation = "weathergen.evaluate.run_evaluation:evaluate"
+evaluation-indices = "weathergen.evaluate.run_index_evaluation:evaluate_indices"
 export = "weathergen.evaluate.export.export_inference:export"
 
 # The linting configuration

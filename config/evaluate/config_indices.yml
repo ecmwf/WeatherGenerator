@@ -1,0 +1,35 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Configuration for climate-index evaluation (e.g. NAM), used by the
+# `evaluation-indices` entry point (run_index_evaluation.py). Structurally
+# mirrors config/evaluate/eval_config.yml's default_streams/run_ids shape,
+# but each stream declares an `indices:` list instead of `metrics:`.
+
+# max_workers: 36  # hard cap on parallel workers (index computation, I/O)
+
+default_streams:
+  ERA5:
+    channels: ["z_50", "z_500", "z_850"]
+    indices:
+      - nam:
+          min_lat: 20.0             # domain: polar cap, lat >= 20N
+          use_climatology: true     # anomaly vs climatology (day-of-year+hour
+                                     # matched); falls back to this sample's own
+                                     # forecast-lead-time mean if false or if no
+                                     # climatology file is found for the stream.
+                                     # Fallback values are NOT comparable across
+                                     # samples (each has its own baseline).
+          significance_level: 0.05  # p-value threshold for the spatial pattern
+
+run_ids:
+  XXXXXXXX:
+    label: "pretrained model XXXXXXXX"
+    results_base_dir: "./results/"
+    # if "streams" is not specified, the default_streams above are used
