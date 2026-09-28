@@ -247,6 +247,11 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
+        # Without this, NCCL's heartbeat monitor keeps polling a TCPStore whose server has
+        # already gone away, and the ranks never exit.
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
         self.init(cf, devices)
@@ -409,6 +414,11 @@ class Trainer(TrainerBase):
 
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
+
+        # Without this, NCCL's heartbeat monitor keeps polling a TCPStore whose server has
+        # already gone away, and the ranks never exit.
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
 
     def validate_before_training(self):
         """
