@@ -30,23 +30,51 @@ class FlashKernel:
     def __init__(self):
         pass
 
-    def __call__(self, q, k, v, x_q_lens=None, x_kv_lens=None, max_seqlen_q=None,
-                 max_seqlen_k=None, softcap=0.0, dropout_p=0.0):
+    def __call__(
+        self,
+        q,
+        k,
+        v,
+        x_q_lens=None,
+        x_kv_lens=None,
+        max_seqlen_q=None,
+        max_seqlen_k=None,
+        softcap=0.0,
+        dropout_p=0.0,
+    ):
         """Wrapper for FlashAttention (batched or varlen)."""
         if x_q_lens is not None:
             return flash_attn_varlen_func(
-                q, k, v, x_q_lens, x_kv_lens, max_seqlen_q, max_seqlen_k,
-                softcap=softcap, dropout_p=dropout_p
+                q,
+                k,
+                v,
+                x_q_lens,
+                x_kv_lens,
+                max_seqlen_q,
+                max_seqlen_k,
+                softcap=softcap,
+                dropout_p=dropout_p,
             )
 
         return flash_attn_func(q, k, v, softcap=softcap, dropout_p=dropout_p)
+
 
 class SDPAKernel:
     def __init__(self):
         self.att = torch.nn.functional.scaled_dot_product_attention
 
-    def __call__(self, qs, ks, vs, x_q_lens=None, x_kv_lens=None, max_seqlen_q=None,
-                 max_seqlen_k=None, softcap=0.0, dropout_p=0.0):
+    def __call__(
+        self,
+        qs,
+        ks,
+        vs,
+        x_q_lens=None,
+        x_kv_lens=None,
+        max_seqlen_q=None,
+        max_seqlen_k=None,
+        softcap=0.0,
+        dropout_p=0.0,
+    ):
         """Wrapper for scaled_dot_product_attention."""
         qs = qs.transpose(1, 2)
         ks = ks.transpose(1, 2)
@@ -128,13 +156,14 @@ class BaseAttention(torch.nn.Module):
         self.proj_out = torch.nn.Linear(self.num_heads * self.dim_head_proj, dim_embed, bias=False)
 
 
-# MultiSelfAttentionHeadVarlen, MultiCrossAttentionHeadVarlen, MultiSelfAttentionHead, MultiCrossAttentionHead
+# MultiSelfAttentionHeadVarlen, MultiCrossAttentionHeadVarlen,
+# MultiSelfAttentionHead, MultiCrossAttentionHead
 class Attention(BaseAttention):
     def __init__(
         self,
         dim_embed,
         num_heads,
-        dim_embed_kv = None,
+        dim_embed_kv=None,
         dim_head_proj=None,
         softcap=0.0,
         dim_aux=None,
@@ -142,9 +171,7 @@ class Attention(BaseAttention):
         kernel=None,
         **kwargs,
     ):
-        super(Attention, self).__init__(
-            num_heads=num_heads, dim_head_proj=dim_head_proj, **kwargs
-        )
+        super(Attention, self).__init__(num_heads=num_heads, dim_head_proj=dim_head_proj, **kwargs)
 
         self.softcap = softcap
         self.with_2d_rope = with_2d_rope
@@ -178,7 +205,11 @@ class Attention(BaseAttention):
             s_kv = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
         else:
             s_q = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
-            s_kv = [*([x_kv.shape[0], 1] if len(x_kv.shape) == 2 else x_kv.shape[:-1]), self.num_heads, -1]
+            s_kv = [
+                *([x_kv.shape[0], 1] if len(x_kv.shape) == 2 else x_kv.shape[:-1]),
+                self.num_heads,
+                -1,
+            ]
 
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s_q)).to(self.dtype)
         ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s_kv)).to(self.dtype)
@@ -195,9 +226,14 @@ class Attention(BaseAttention):
 
         if x_lens is not None:
             cum_x_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
-            cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32) if x_kv_lens is not None else cum_x_lens
+            cum_x_kv_lens = (
+                torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
+                if x_kv_lens is not None
+                else cum_x_lens
+            )
             x_kv_lens = x_kv_lens if x_kv_lens is not None else x_lens
-            # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
+            # ordering of tensors (seq, heads, embed)
+            # (which differs from torch's flash attention implt)
             outs = self.att(
                 qs,
                 ks,
@@ -338,6 +374,7 @@ class MultiSelfAttentionHeadLocal(BaseAttention):
             out += x_in
 
         return out
+
 
 class MultiCrossAttentionHeadVarlenSlicedQ(BaseAttention):
     def __init__(
