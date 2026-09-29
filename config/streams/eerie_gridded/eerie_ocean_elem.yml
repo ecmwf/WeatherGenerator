@@ -1,6 +1,7 @@
 EERIE_OCEAN_ELEM:
   type: mesh
   stream_id: 2137
+  healpix_level: 5
   loss_weight: 0.1
   filenames: # In case of gridded data there's no separate node and element files. Not every vertial level is used for training, so the 3D gridded file is used instead of the 3D element file.
   - /work/ab0995/a270225/data_transformation/eerie_ocean_gr025_3d_gridded_daily.parq

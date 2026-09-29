@@ -53,8 +53,6 @@ fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm 
 fe_impute_latent_noise_std: 0.0  # 1e-4
 forecast_att_dense_rate: 1.0
 
-healpix_level: 5
-
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False

@@ -9,6 +9,7 @@
 
 ICONESMAERmon :
   type : iconesm
+  healpix_level: 5
   filenames : ['historical_r1i1p1f1_AERmon.json']
   source_exclude: [] 
   target_exclude: [] 

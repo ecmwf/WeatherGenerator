@@ -9,6 +9,7 @@
 
 SEVIRI :
   type : obs
+  healpix_level: 5
   filenames : ['observations-file-2018-2019-seviri-h512-v1.zarr']
   loss_weight : 1.
   # masking_rate_none : 0.05
