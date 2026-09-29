@@ -97,9 +97,6 @@ qk_norm_type: null  # if null, defaults to norm_type
 streams_directory: "./config/streams/era5_1deg/"
 streams: ???
 
-# type of zarr_store
-zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
-
 general:
 
   # mutable parameters
@@ -222,6 +219,13 @@ validation_config:
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
+    # sample-axis chunk and shard sizes used when writing output Zarr arrays
+    zarr_chunk_size: 542080,
+    zarr_shard_size: 3252480,
+    # concurrent Zarr write operations per process
+    zarr_parallel_workers: 64,
+    # "zarr" for LocalStore, "zip" for ZipStore
+    zarr_store: "zip",
     }
 
   # run validation before training starts (mainly for model development)
@@ -230,6 +234,12 @@ validation_config:
 
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
+test_config:
+  output:
+    zarr_chunk_size: 542080
+    zarr_shard_size: 3252480
+    zarr_parallel_workers: 64
+    zarr_store: "zip"
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val

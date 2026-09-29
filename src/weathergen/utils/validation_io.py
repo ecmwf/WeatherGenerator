@@ -187,9 +187,16 @@ def write_output(
         forecast_offset=forecast_offset,
     )
 
-    store_path = config.get_path_results(cf, mini_epoch, batch_idx)
+    output_cfg = val_cfg.output
+    zarr_store = output_cfg.get("zarr_store", cf.get("zarr_store", "zip"))
+    store_path = config.get_path_results(cf, mini_epoch, batch_idx, zarr_store=zarr_store)
 
-    with zarrio_writer(store_path) as zio:
+    with zarrio_writer(
+        store_path,
+        chunk_size=output_cfg.get("zarr_chunk_size", io.CHUNK_N_SAMPLES),
+        shard_size=output_cfg.get("zarr_shard_size", io.SHARD_N_SAMPLES),
+        parallel_workers=output_cfg.get("zarr_parallel_workers", io.DEFAULT_PARALLEL_WORKERS),
+    ) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
         # Write latent data directly to zarr store without using OutputItem validation

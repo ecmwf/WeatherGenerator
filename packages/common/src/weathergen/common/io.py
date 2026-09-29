@@ -30,6 +30,7 @@ from zarr.storage import LocalStore, ZipStore
 SHARDING_ENABLED = True
 SHARD_N_SAMPLES = 40320
 CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
+DEFAULT_PARALLEL_WORKERS = 10
 SCALE_FACTOR = 4  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
@@ -372,11 +373,22 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path, read_only: bool):
+    def __init__(
+        self,
+        store_path: pathlib.Path,
+        read_only: bool,
+        chunk_size: int = CHUNK_N_SAMPLES,
+        shard_size: int = SHARD_N_SAMPLES,
+        parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
+    ):
         self._store: LocalStore | ZipStore | None = None
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
         self.read_only = read_only
+        self.chunk_size = chunk_size
+        self.shard_size = shard_size
+        self.parallel_workers = parallel_workers
+        self._zarr_config: typing.Any = None
 
     @property
     def _mode(self):
@@ -385,6 +397,7 @@ class ZarrIO:
         # mode = "a" required for fix that removes ZarrIO dependency in trainer.py
 
     def __enter__(self) -> typing.Self:
+        self._enter_zarr_config()
         # Capture warnings emitted during store creation/open
         with warnings.catch_warnings(record=True) as caught:
             self._store = LocalStore(self._store_path)
@@ -407,9 +420,23 @@ class ZarrIO:
 
         return self
 
+    def _enter_zarr_config(self) -> None:
+        """Apply this writer's concurrency settings for the context lifetime."""
+        self._zarr_config = zarr.config.set(
+            {
+                "async.concurrency": self.parallel_workers,
+                "threading.max_workers": self.parallel_workers,
+            }
+        )
+        self._zarr_config.__enter__()
+
     def __exit__(self, exc_type, exc_value, exc_tb):
-        if self._store is not None:
-            self._store.close()
+        try:
+            if self._store is not None:
+                self._store.close()
+        finally:
+            if self._zarr_config is not None:
+                self._zarr_config.__exit__(exc_type, exc_value, exc_tb)
 
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
@@ -471,14 +498,14 @@ class ZarrIO:
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = _get_chunks(CHUNK_N_SAMPLES, array.shape)
+            chunks = _get_chunks(self.chunk_size, array.shape)
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + f"into group: {group}."
         )
         start_time = timeit.default_timer()
         if SHARDING_ENABLED and chunks != "auto":
-            shards = _get_shards(SHARD_N_SAMPLES, chunks)
+            shards = _get_shards(self.shard_size, chunks)
             group.create_array(name, data=array, chunks=chunks, shards=shards)
             _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
@@ -533,6 +560,7 @@ class ZarrIO:
 
 class ZipZarrIO(ZarrIO):
     def __enter__(self) -> typing.Self:
+        self._enter_zarr_config()
         _logger.debug(f"Opening zipstore, read-only: {self.read_only}")
         self._store = ZipStore(self._store_path, mode=self._mode, read_only=self.read_only)
         if self.read_only:
@@ -842,21 +870,43 @@ def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:
     return _get_backend(store_path, read_only=True)
 
 
-def zarrio_writer(store_path: pathlib.Path) -> ZarrIO:
+def zarrio_writer(
+    store_path: pathlib.Path,
+    chunk_size: int = CHUNK_N_SAMPLES,
+    shard_size: int = SHARD_N_SAMPLES,
+    parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
+) -> ZarrIO:
     """
     Get the proper io-writer for a given store.
 
     Args:
         store_path: Full path to the storage location.
+        chunk_size: Chunk length along the first data axis.
+        shard_size: Shard length along the first data axis.
+        parallel_workers: Zarr async and thread worker limit for this writer.
     """
 
-    return _get_backend(store_path, read_only=False)
+    return _get_backend(
+        store_path,
+        read_only=False,
+        chunk_size=chunk_size,
+        shard_size=shard_size,
+        parallel_workers=parallel_workers,
+    )
 
 
 _IO_CLASSES: dict[StoreType, type] = {StoreType.ZIP: ZipZarrIO, StoreType.LOCAL: ZarrIO}
 
 
-def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
+def _get_backend(
+    store_path: pathlib.Path,
+    read_only: bool,
+    chunk_size: int = CHUNK_N_SAMPLES,
+    shard_size: int = SHARD_N_SAMPLES,
+    parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
+) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
-    return _IO_CLASSES[StoreType(ext)](store_path, read_only)
+    return _IO_CLASSES[StoreType(ext)](
+        store_path, read_only, chunk_size, shard_size, parallel_workers
+    )
