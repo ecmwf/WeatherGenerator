@@ -10,6 +10,7 @@
 FESOM_NODE :
   type : fesom
   stream_id : 2138
+  healpix_level: 5
   filenames : ['ocean_node']
   loss_weight : 1.
   source : null

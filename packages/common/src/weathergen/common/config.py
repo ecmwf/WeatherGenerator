@@ -40,6 +40,12 @@ _logger = logging.getLogger(__name__)
 Config = DictConfig
 
 
+def get_healpix_level(config: Config) -> int:
+    levels = {stream.healpix_level for stream in config.streams.values()}
+    assert len(levels) == 1, "All streams must use the same healpix_level."
+    return levels.pop()
+
+
 def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
     """
     Parse a value into a numpy timedelta64[ms].
