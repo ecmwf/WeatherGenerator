@@ -9,6 +9,7 @@
 
 ICONART :
   type : iconart
+  healpix_level: 5
   filenames : ['icon_art_3d_DOM01_subset.zarr']
   source : [
     'U_', 'V_', 'T_', 'QV_', 'P_', 'CH4_',
