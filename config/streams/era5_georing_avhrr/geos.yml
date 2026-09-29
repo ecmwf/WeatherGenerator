@@ -10,6 +10,7 @@
 METEOSAT_SEVIRI_IR :
   type : obs
   stream_id : 10
+  healpix_level: 5
   filenames : ['observations-file-2014-2024-seviri-o256-wegen-v3.zarr']
   # filenames : ['observations-file-2014-2024-seviri-h512-v5.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
@@ -42,6 +43,7 @@ METEOSAT_SEVIRI_IR :
 GOES_ABI_IR :
   type : obs
   stream_id : 11
+  healpix_level: 5
   filenames : ['observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr']
   # filenames : ['observations-file-2017-2024-abi-goes16-IR-h512-v2.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day','zenith', 'cos_sza']
@@ -74,6 +76,7 @@ GOES_ABI_IR :
 HIMAWARI_AHI_IR :
   type : obs
   stream_id : 12
+  healpix_level: 5
   filenames : ['observations-file-2015-2022-himawari8-IR-o256-v1.zarr', 'observations-file-2022-2024-himawari9-IR-o256-v1.zarr']
   # filenames : ['observations-file-2015-2022-himawari8-IR-h512-v1.zarr', observations-file-2022-2024-himawari9-IR-o256-v1.zarr]
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
@@ -106,6 +109,7 @@ HIMAWARI_AHI_IR :
 GOES_ABI_VIS :
   type : obs
   stream_id : 13
+  healpix_level: 5
   filenames : ['observations-file-2017-2024-abi-goes16-VIS-o256-v2.zarr']
   # filenames : ['observations-file-2017-2024-abi-goes16-RED-h512-v2.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
@@ -138,6 +142,7 @@ GOES_ABI_VIS :
 HIMAWARI_AHI_VIS :
   type : obs
   stream_id : 14
+  healpix_level: 5
   filenames : ['observations-file-2015-2022-himawari8-VIS-o256-v1.zarr', 'observations-file-2022-2024-himawari9-VIS-o256-v1.zarr']
   # filenames : ['observations-file-2015-2022-himawari8-IR-h512-v1.zarr', observations-file-2022-2024-himawari9-IR-o256-v1.zarr]
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']

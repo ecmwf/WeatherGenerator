@@ -6,6 +6,7 @@
 METOPBIASI :
   type : obs
   stream_id : 1
+  healpix_level: 5
   filenames : ['observations-ea-ofb-0001-2013-2023-metop-b-iasi-radiances-v1.zarr']
   loss_weight : 1.
   diagnostic : True
