@@ -17,6 +17,7 @@ ERA5 :
   loss_weight : 1.
   location_weight : cosine_latitude
   token_size : 8
+  healpix_level: 5
   tokenize_spacetime : True
   max_num_targets: -1 
   frequency : 06:00:00
