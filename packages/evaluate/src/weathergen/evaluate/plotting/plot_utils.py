@@ -951,10 +951,10 @@ def psd_plot_metric_region(
 
 
 def _extract_rank_histogram_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> dict | None:
-    """Extract rank histogram counts from DataArray attrs for a given fstep/channel.
+    """Extract raw rank histogram counts from DataArray attrs for a given fstep/channel.
 
-    Returns a dict with ``rank_counts``/``n_bins`` ready for the plotter, or None if
-    the keys are missing (e.g. metric skipped for this fstep/channel).
+    Returns a dict with ``rank_counts`` (unnormalized) / ``n_bins`` ready for pooling, or
+    None if the keys are missing (e.g. metric skipped for this fstep/channel).
     """
     attrs = data_ch.attrs
     fp = f"fstep_{fstep}/"
@@ -978,10 +978,8 @@ def rank_histogram_plot_metric_region(
 ) -> None:
     """Create rank histogram (Talagrand diagram) bar plots for all streams and channels.
 
-    Per-bin rank counts are stored in ``score.attrs`` by ``Scores.calc_rank_histogram``
-    and read back here; unlike deterministic score-vs-lead-time metrics, a rank histogram
-    is a distribution, so it is plotted as one bar chart per (stream, channel, forecast
-    step) rather than a line plot.
+    If the metric's ``pool_n_fsteps`` parameter is set, counts from that many consecutive
+    forecast steps are pooled into one bar chart instead of plotting each fstep separately.
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
@@ -996,7 +994,7 @@ def rank_histogram_plot_metric_region(
                 if data_ch.isnull().all():
                     continue
 
-                attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
+                attr_fsteps = sorted(data_ch.attrs.get("attr_fsteps", []))
                 if not attr_fsteps:
                     _logger.warning(
                         f"Rank histogram attrs missing for {run_id}/{stream}/{ch}. Skipping."
@@ -1004,18 +1002,32 @@ def rank_histogram_plot_metric_region(
                     continue
 
                 label = runs[run_id].get("label", run_id)
+                pool_n_fsteps = data_ch.attrs.get("pool_n_fsteps") or 1
 
-                for fstep in attr_fsteps:
-                    rank_hist_dataset = _extract_rank_histogram_attrs(data_ch, fstep, ch)
-                    if rank_hist_dataset is None:
+                for i in range(0, len(attr_fsteps), pool_n_fsteps):
+                    group = attr_fsteps[i : i + pool_n_fsteps]
+                    group_datasets = [
+                        d
+                        for fstep in group
+                        if (d := _extract_rank_histogram_attrs(data_ch, fstep, ch)) is not None
+                    ]
+                    if not group_datasets:
                         continue
 
+                    pooled_counts = np.sum([d["rank_counts"] for d in group_datasets], axis=0)
+                    total = pooled_counts.sum()
+                    rank_hist_dataset = {
+                        "rank_counts": pooled_counts / total if total > 0 else pooled_counts,
+                        "n_bins": group_datasets[0]["n_bins"],
+                    }
+
+                    fstep_tag = str(group[0]) if len(group) == 1 else f"{group[0]}-{group[-1]}"
                     name = create_filename(
                         prefix=[metric, region],
                         middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
+                        suffix=[stream, ch, f"fstep{fstep_tag}"],
                     )
-                    title = f"{metric.upper()} | {stream} | {ch} | fstep {fstep}"
+                    title = f"{metric.upper()} | {stream} | {ch} | fstep {fstep_tag}"
                     plotter.rank_histogram_plot(
                         [rank_hist_dataset],
                         [label],

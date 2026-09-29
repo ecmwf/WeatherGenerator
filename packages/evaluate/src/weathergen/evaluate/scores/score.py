@@ -224,6 +224,7 @@ class Scores:
             "ssr": self.calc_ssr,
             "crps": self.calc_crps,
             "rank_histogram": self.calc_rank_histogram,
+            "rank_histogram_flatness": self.calc_rank_histogram_flatness,
             "spread": self.calc_spread,
         }
 
@@ -1561,25 +1562,16 @@ class Scores:
             reduce_dims=self._agg_dims,
         )
 
-    def calc_rank_histogram(
+    def calc_rank_histogram_counts(
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        norm: bool = True,
         add_noise: bool = True,
-        noise_fac=1.0e-03,
+        noise_fac: float = 1.0e-03,
     ) -> xr.DataArray:
         """
-        Calculate the rank histogram (Talagrand diagram) of the forecast data w.r.t.
-        reference data.
-
-        A rank histogram is a distribution over rank bins, not a per-sample scalar, so
-        (like ``calc_psd``/``calc_quantiles``) this returns a scalar flatness score - the
-        RMS deviation of the (normalized) rank frequencies from a perfectly flat/uniform
-        histogram, 0 meaning perfectly calibrated - and stores the full per-bin counts in
-        ``.attrs`` (keyed per preserved dimension, e.g. channel) for plotting downstream.
-        Ranks are pooled across all spatial points *and* samples for this forecast step,
-        since individual samples rarely contain enough points for a meaningful histogram.
+        Calculate pooled rank-histogram bin counts (Talagrand diagram) of forecast data
+        w.r.t. reference data. Ranks are pooled across all spatial points and samples.
 
         Parameters
         ----------
@@ -1587,9 +1579,6 @@ class Scores:
             Forecast data array with ensemble dimension
         gt: xr.DataArray
             Ground truth data array
-        norm: bool
-            Flag if normalized counts should be returned. If True, the rank histogram will be
-            normalized by the number of verification points.
         add_noise: bool
             Flag if a small amount of random noise should be added to the data to avoid ties in the
             rank histogram.
@@ -1601,7 +1590,9 @@ class Scores:
         Returns
         -------
         xr.DataArray
-            Rank histogram flatness score, one value per preserved dimension (e.g. channel).
+            Raw (unnormalized) per-bin counts, dims ``[*preserve_dims, "rank_bin"]``
+            (``preserve_dims`` is typically just ``channel``). ``.attrs["n_bins"]`` holds
+            the number of bins (ensemble size + 1).
         """
 
         # unstack stacked time-dimension beforehand if required (time may be stacked for forecast
@@ -1654,50 +1645,178 @@ class Scores:
         # dims still remaining after pooling into "npoints" (typically just "channel")
         preserve_dims = [d for d in rank.dims if d != "npoints"]
 
-        def _counts_and_score(rank_slice: xr.DataArray) -> tuple[np.ndarray, float]:
-            counts = histogram(
+        def _counts(rank_slice: xr.DataArray) -> np.ndarray:
+            return histogram(
                 rank_slice,
                 dim=["npoints"],
                 bins=bins,
                 block_size=None if rank_slice.chunks is None else "auto",
             ).values.astype(np.float64)
-            npoints = counts.sum()
-            if norm and npoints > 0:
-                counts = counts / npoints
-            expected = 1.0 / n_bins if norm else npoints / n_bins
-            score_val = float(np.sqrt(np.mean((counts - expected) ** 2)))
-            return counts, score_val
 
         if not preserve_dims:
-            counts, score_val = _counts_and_score(rank)
-            score = xr.DataArray(score_val)
-            score.attrs["rank_counts"] = counts.tolist()
-            score.attrs["n_bins"] = n_bins
-            return score
+            counts_da = xr.DataArray(_counts(rank), dims=["rank_bin"])
+            counts_da.attrs["n_bins"] = n_bins
+            return counts_da
 
         shape = tuple(rank.sizes[d] for d in preserve_dims)
-        score_values = np.empty(shape)
-        all_attrs: dict = {}
+        counts_values = np.empty((*shape, n_bins))
 
         for idx in np.ndindex(*shape):
             sel = dict(zip(preserve_dims, idx, strict=False))
             rank_slice = rank.isel(**sel)
             rank_slice.name = "rank"
-            counts, score_val = _counts_and_score(rank_slice)
-            score_values[idx] = score_val
-
-            key = "_".join(
-                str(rank.coords[d].values[i]) if d in rank.coords else str(i)
-                for d, i in sel.items()
-            )
-            all_attrs[f"{key}/rank_counts"] = counts.tolist()
+            counts_values[idx] = _counts(rank_slice)
 
         coords = {d: rank.coords[d] for d in preserve_dims if d in rank.coords}
-        score = xr.DataArray(score_values, dims=preserve_dims, coords=coords)
-        all_attrs["n_bins"] = n_bins
-        all_attrs["preserve_dims"] = preserve_dims
-        score.attrs.update(all_attrs)
+        counts_da = xr.DataArray(counts_values, dims=[*preserve_dims, "rank_bin"], coords=coords)
+        counts_da.attrs["n_bins"] = n_bins
+        counts_da.attrs["preserve_dims"] = preserve_dims
+        return counts_da
+
+    @staticmethod
+    def _rank_histogram_attrs(counts: xr.DataArray, n_bins: int) -> dict:
+        """Build the ``.attrs`` dict for per-bin rank counts, keyed per preserved-dim
+        combination (e.g. per channel), or flat if there are no other preserved dims.
+        """
+        preserve_dims = [d for d in counts.dims if d != "rank_bin"]
+        if not preserve_dims:
+            return {"rank_counts": counts.values.tolist(), "n_bins": n_bins}
+
+        attrs: dict = {"n_bins": n_bins, "preserve_dims": preserve_dims}
+        for idx in np.ndindex(*tuple(counts.sizes[d] for d in preserve_dims)):
+            sel = dict(zip(preserve_dims, idx, strict=False))
+            key = "_".join(
+                str(counts.coords[d].values[i]) if d in counts.coords else str(i)
+                for d, i in sel.items()
+            )
+            attrs[f"{key}/rank_counts"] = counts.isel(**sel).values.tolist()
+        return attrs
+
+    @staticmethod
+    def calc_rank_histogram_flatness_score(
+        counts: xr.DataArray,
+        norm: bool = True,
+    ) -> xr.DataArray:
+        """
+        Calculate the rank-histogram flatness score from (pooled) bin counts, e.g. as
+        returned by ``calc_rank_histogram_counts``.
+
+        Parameters
+        ----------
+        counts: xr.DataArray
+            Per-bin counts along a ``rank_bin`` dimension. ``.attrs["n_bins"]`` must hold
+            the number of bins.
+        norm: bool
+            Flag if normalized counts should be used. If True, counts are normalized by the
+            number of verification points before computing the deviation from uniform.
+
+        Returns
+        -------
+        xr.DataArray
+            Rank histogram flatness score - the RMS deviation of the (normalized) rank
+            frequencies from a perfectly flat/uniform histogram, 0 meaning perfectly
+            calibrated - one value per preserved dimension (e.g. channel).
+        """
+        n_bins = counts.attrs["n_bins"]
+        npoints = counts.sum(dim="rank_bin")
+        normed = counts / npoints.where(npoints > 0, 1.0) if norm else counts
+        expected = 1.0 / n_bins if norm else npoints / n_bins
+        score = np.sqrt(((normed - expected) ** 2).mean(dim="rank_bin"))
+
+        attrs = Scores._rank_histogram_attrs(normed, n_bins)
+        if "preserve_dims" not in attrs:
+            score_da = xr.DataArray(float(score.values))
+            score_da.attrs.update(attrs)
+            return score_da
+
+        score.attrs.update(attrs)
         return score
+
+    def calc_rank_histogram(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        add_noise: bool = True,
+        noise_fac: float = 1.0e-03,
+        pool_n_fsteps: int | None = None,
+    ) -> xr.DataArray:
+        """
+        Calculate raw (unnormalized) rank-histogram bin counts (Talagrand diagram) for
+        one forecast step, stored in ``.attrs["rank_counts"]`` for plotting. Set
+        ``pool_n_fsteps`` to pool several consecutive forecast steps into one plot.
+        Use ``calc_rank_histogram_flatness`` for a scalar calibration score instead.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        add_noise: bool
+            Flag if a small amount of random noise should be added to the data to avoid ties in the
+            rank histogram.
+            This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
+        noise_fac: float
+            Magnitude of random noise to be added to the data if add_noise is True.
+            Default is 1.0e-03. This value is only relevant if add_noise is True
+        pool_n_fsteps: int | None
+            Number of consecutive forecast steps to pool into one histogram plot.
+
+        Returns
+        -------
+        xr.DataArray
+            Number of pooled verification points per preserved dimension (e.g. channel) -
+            a placeholder value; the actual per-bin counts are stored in ``.attrs``.
+        """
+        counts = self.calc_rank_histogram_counts(p, gt, add_noise=add_noise, noise_fac=noise_fac)
+        n_bins = counts.attrs["n_bins"]
+        npoints = counts.sum(dim="rank_bin")
+
+        attrs = self._rank_histogram_attrs(counts, n_bins)
+        if "preserve_dims" not in attrs:
+            result = xr.DataArray(float(npoints.values))
+            result.attrs.update(attrs)
+            return result
+
+        npoints.attrs.update(attrs)
+        return npoints
+
+    def calc_rank_histogram_flatness(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        norm: bool = True,
+        add_noise: bool = True,
+        noise_fac=1.0e-03,
+    ) -> xr.DataArray:
+        """
+        Calculate the rank histogram (Talagrand diagram) flatness score of forecast data
+        w.r.t. reference data for one forecast step, 0 meaning perfectly calibrated.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        norm: bool
+            Flag if normalized counts should be returned. If True, the rank histogram will be
+            normalized by the number of verification points.
+        add_noise: bool
+            Flag if a small amount of random noise should be added to the data to avoid ties in the
+            rank histogram.
+            This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
+        noise_fac: float
+            Magnitude of random noise to be added to the data if add_noise is True.
+            Default is 1.0e-03. This value is only relevant if add_noise is True
+
+        Returns
+        -------
+        xr.DataArray
+            Rank histogram flatness score, one value per preserved dimension (e.g. channel).
+        """
+        counts = self.calc_rank_histogram_counts(p, gt, add_noise=add_noise, noise_fac=noise_fac)
+        return self.calc_rank_histogram_flatness_score(counts, norm=norm)
 
     def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
