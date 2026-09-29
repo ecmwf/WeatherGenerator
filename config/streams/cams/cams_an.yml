@@ -9,6 +9,7 @@
 
 CAMSANALYSIS :
   type : cams
+  healpix_level: 5
   filenames : ['cams_analysis_2017_2022.zarr']
   source : [
       'tc_o3',

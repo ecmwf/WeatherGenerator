@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, get_healpix_level
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
@@ -104,11 +104,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        # initialise healpic
-        self.healpix_level = cf.healpix_level
+        self.healpix_level = get_healpix_level(cf)
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+        self.masker = Masker(self.healpix_level, stage, cf.streams, self.mode_cfg)
+        self.tokenizer = TokenizerMasking(self.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]

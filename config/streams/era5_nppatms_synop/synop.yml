@@ -6,6 +6,7 @@
 SurfaceCombined :
   type : obs
   stream_id : 2
+  healpix_level: 5
   filenames : ['observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr']
   loss_weight : 1.0
   masking_rate : 0.6

@@ -1,6 +1,7 @@
 EERIE_OCEAN_ELEM:
   type: mesh
   stream_id: 2137
+  healpix_level: 5
   loss_weight: 1.0
   filenames: # Gridded data is used as source and native high-res data is used as target.
   - /work/ab0995/a270225/data_transformation/eerie_ocean_gr025_3d_gridded_daily.parq 

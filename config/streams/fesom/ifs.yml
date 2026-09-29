@@ -10,6 +10,7 @@
 IFS_ATMO :
   type : fesom
   stream_id : 2139
+  healpix_level: 5
   filenames : ['atmos_all']
   loss_weight : 1.
   source : null

@@ -9,6 +9,7 @@
 
 ICONESMOmon :
   type : iconesm
+  healpix_level: 5
   filenames : ['historical_r1i1p1f1_Omon.json']
   source_exclude: ['sos', 'sossq', 'tos', 'tossq', 'mlotstmax'] # because duplicate from Oday + mlotstmax because std = 0
   target_exclude: ['sos', 'sossq', 'tos', 'tossq', 'mlotstmax'] # because duplicate from Oday + mlotstmax because std = 0

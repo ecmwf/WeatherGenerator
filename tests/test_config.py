@@ -18,11 +18,12 @@ DUMMY_PRIVATE_CONF = {
     },
 }
 
-DUMMY_OVERWRITES = [("num_mini_epochs", 42), ("healpix_level", 42)]
+DUMMY_OVERWRITES = [("num_mini_epochs", 42)]
 
 DUMMY_STREAM_CONF = {
     "ERA5": {
         "type": "anemoi",
+        "healpix_level": 5,
         "filenames": ["aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr"],
         "source": ["u_", "v_", "10u", "10v"],
         "target": ["10u", "10v"],

@@ -1,6 +1,7 @@
 EERIE_ATMO:  
   type: mesh
   stream_id: 2136
+  healpix_level: 5
   loss_weight: 1.0
   filenames:
   - /work/ab0995/a270225/data_transformation/eerie_vzarr_production/eerie_atmo_3d_native_daily_1971_2050.parq

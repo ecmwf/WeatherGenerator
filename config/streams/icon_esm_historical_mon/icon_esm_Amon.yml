@@ -9,6 +9,7 @@
 
 ICONESMAmon :
   type : iconesm
+  healpix_level: 5
   filenames : ['historical_r1i1p1f1_Amon.json']
   source_exclude: [
     "hur", # bcause it doesn't have data on all necessary levels
