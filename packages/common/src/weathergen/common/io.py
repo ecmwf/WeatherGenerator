@@ -30,7 +30,7 @@ from zarr.storage import LocalStore, ZipStore
 SHARDING_ENABLED = True
 SHARD_N_SAMPLES = 40320
 CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
-DEFAULT_PARALLEL_WORKERS = 10
+DEFAULT_ASYNC_CONCURRENCY = 10
 SCALE_FACTOR = 4  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
@@ -379,7 +379,7 @@ class ZarrIO:
         read_only: bool,
         chunk_size: int = CHUNK_N_SAMPLES,
         shard_size: int = SHARD_N_SAMPLES,
-        parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
+        async_concurrency: int = DEFAULT_ASYNC_CONCURRENCY,
     ):
         self._store: LocalStore | ZipStore | None = None
         self._store_path = store_path
@@ -387,7 +387,7 @@ class ZarrIO:
         self.read_only = read_only
         self.chunk_size = chunk_size
         self.shard_size = shard_size
-        self.parallel_workers = parallel_workers
+        self.async_concurrency = async_concurrency
         self._zarr_config: typing.Any = None
 
     @property
@@ -421,13 +421,12 @@ class ZarrIO:
         return self
 
     def _enter_zarr_config(self) -> None:
-        """Apply this writer's concurrency settings for the context lifetime."""
-        self._zarr_config = zarr.config.set(
-            {
-                "async.concurrency": self.parallel_workers,
-                "threading.max_workers": self.parallel_workers,
-            }
-        )
+        """Apply this store's async concurrency limit for the context lifetime.
+
+        threading.max_workers is left to zarr: its thread pool is a process-wide singleton
+        sized on first use, so a per-context value would not reliably take effect.
+        """
+        self._zarr_config = zarr.config.set({"async.concurrency": self.async_concurrency})
         self._zarr_config.__enter__()
 
     def __exit__(self, exc_type, exc_value, exc_tb):
@@ -874,7 +873,7 @@ def zarrio_writer(
     store_path: pathlib.Path,
     chunk_size: int = CHUNK_N_SAMPLES,
     shard_size: int = SHARD_N_SAMPLES,
-    parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
+    async_concurrency: int = DEFAULT_ASYNC_CONCURRENCY,
 ) -> ZarrIO:
     """
     Get the proper io-writer for a given store.
@@ -883,7 +882,7 @@ def zarrio_writer(
         store_path: Full path to the storage location.
         chunk_size: Chunk length along the first data axis.
         shard_size: Shard length along the first data axis.
-        parallel_workers: Zarr async and thread worker limit for this writer.
+        async_concurrency: Max in-flight zarr chunk operations (async.concurrency).
     """
 
     return _get_backend(
@@ -891,7 +890,7 @@ def zarrio_writer(
         read_only=False,
         chunk_size=chunk_size,
         shard_size=shard_size,
-        parallel_workers=parallel_workers,
+        async_concurrency=async_concurrency,
     )
 
 
@@ -903,10 +902,10 @@ def _get_backend(
     read_only: bool,
     chunk_size: int = CHUNK_N_SAMPLES,
     shard_size: int = SHARD_N_SAMPLES,
-    parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
+    async_concurrency: int = DEFAULT_ASYNC_CONCURRENCY,
 ) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
     return _IO_CLASSES[StoreType(ext)](
-        store_path, read_only, chunk_size, shard_size, parallel_workers
+        store_path, read_only, chunk_size, shard_size, async_concurrency
     )
