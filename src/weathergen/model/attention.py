@@ -10,9 +10,11 @@
 from functools import partial
 
 import torch
+import torch.nn.functional as F
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
 from weathergen.model.positional_encoding import rotary_pos_emb_2d
@@ -25,6 +27,31 @@ coordinates aligned with the token order (lat, lon in radians).
 """
 
 
+@dataclass
+class SeqLens:
+    """Packed-sequence metadata for varlen attention (computed once per forward)."""
+    cu_q: torch.Tensor
+    cu_kv: torch.Tensor
+    max_q: int
+    max_kv: int
+
+    @classmethod
+    def from_lens(cls, q_lens, kv_lens=None) -> "SeqLens":
+        kv_lens = kv_lens if kv_lens is not None else q_lens
+        
+        # flash_attn_varlen requires cu_seqlens to have a leading 0.
+        # F.pad adds a 0 at the beginning of the cumsum tensor.
+        cu_q = F.pad(torch.cumsum(q_lens, 0, dtype=torch.int32), (1, 0))
+        cu_kv = F.pad(torch.cumsum(kv_lens, 0, dtype=torch.int32), (1, 0))
+        
+        return cls(
+            cu_q=cu_q,
+            cu_kv=cu_kv,
+            max_q=q_lens.max().item(),
+            max_kv=kv_lens.max().item(),
+        )
+
+    
 class AttentionKernel(torch.nn.Module, ABC):
     """Abstract base class for attention kernels."""
     
@@ -53,23 +80,20 @@ class FlashKernel(AttentionKernel):
         q,
         k,
         v,
-        x_q_lens=None,
-        x_kv_lens=None,
-        max_seqlen_q=None,
-        max_seqlen_k=None,
+        seqlens: SeqLens | None = None,
         softcap=0.0,
         dropout_p=0.0,
     ):
         """Wrapper for FlashAttention (batched or varlen)."""
-        if x_q_lens is not None:
+        if seqlens is not None:
             return flash_attn_varlen_func(
                 q,
                 k,
                 v,
-                x_q_lens,
-                x_kv_lens,
-                max_seqlen_q,
-                max_seqlen_k,
+                seqlens.cu_q,
+                seqlens.cu_kv,
+                seqlens.max_q,
+                seqlens.max_kv,
                 softcap=softcap,
                 dropout_p=dropout_p,
             )
@@ -86,14 +110,17 @@ class SDPAKernel(AttentionKernel):
         qs,
         ks,
         vs,
-        x_q_lens=None,
-        x_kv_lens=None,
-        max_seqlen_q=None,
-        max_seqlen_k=None,
+        seqlens: SeqLens | None = None,
         softcap=0.0,
         dropout_p=0.0,
     ):
         """Wrapper for scaled_dot_product_attention."""
+        if seqlens is not None:
+            raise NotImplementedError("SDPA does not support packed sequences.")
+
+        if softcap != 0.0:
+            raise NotImplementedError("SDPA does not support softcap.")
+
         qs = qs.transpose(1, 2)
         ks = ks.transpose(1, 2)
         vs = vs.transpose(1, 2)
@@ -215,7 +242,7 @@ class Attention(BaseAttention):
 
         self.att = kernel if kernel is not None else FlashKernel()
 
-    def forward(self, x, x_lens=None, x_kv=None, x_kv_lens=None, ada_ln_aux=None, coords=None):
+    def forward(self, x, x_kv=None, seqlens: SeqLens | None = None, ada_ln_aux=None, coords=None):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
@@ -223,7 +250,7 @@ class Attention(BaseAttention):
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
-        if x_lens is not None:
+        if seqlens is not None:
             s_q = [x.shape[0], self.num_heads, self.dim_head_proj]
             s_kv = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
         else:
@@ -247,29 +274,7 @@ class Attention(BaseAttention):
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
 
-        if x_lens is not None:
-            cum_x_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
-            cum_x_kv_lens = (
-                torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
-                if x_kv_lens is not None
-                else cum_x_lens
-            )
-            x_kv_lens = x_kv_lens if x_kv_lens is not None else x_lens
-            # ordering of tensors (seq, heads, embed)
-            # (which differs from torch's flash attention implt)
-            outs = self.att(
-                qs,
-                ks,
-                vs,
-                cum_x_lens,
-                cum_x_kv_lens,
-                x_lens.max(),
-                x_kv_lens.max(),
-                softcap=self.softcap,
-                dropout_p=dropout_rate,
-            )
-        else:
-            outs = self.att(qs, ks, vs, softcap=self.softcap, dropout_p=dropout_rate)
+        outs = self.att(qs, ks, vs, seqlens=seqlens, softcap=self.softcap, dropout_p=dropout_rate)
 
         out = self.proj_out(outs.flatten(-2, -1))
 
