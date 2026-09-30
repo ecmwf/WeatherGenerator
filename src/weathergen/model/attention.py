@@ -273,7 +273,7 @@ class Attention(BaseAttention):
 
     def proj_dropout(self, x):
         # Applies output dropout only if the kernel doesn't support attention dropout natively
-        if getattr(self.att, "supports", None) and "attn_dropout" in self.att.supports:
+        if hasattr(self.att, "supports") and "attn_dropout" in self.att.supports:
             return x
         return self.dropout(x)
 
