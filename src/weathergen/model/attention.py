@@ -72,9 +72,6 @@ class AttentionKernel(torch.nn.Module, ABC):
 
 
 class FlashKernel(AttentionKernel):
-    def __init__(self):
-        pass
-
     def __call__(
         self,
         q,
@@ -102,8 +99,8 @@ class FlashKernel(AttentionKernel):
 
 
 class SDPAKernel(AttentionKernel):
-    def __init__(self):
-        pass
+    def __init__(self, backend=torch.nn.attention.SDPBackend.FLASH_ATTENTION):
+        self.backend = backend
 
     def __call__(
         self,
@@ -125,7 +122,7 @@ class SDPAKernel(AttentionKernel):
         ks = ks.transpose(1, 2)
         vs = vs.transpose(1, 2)
 
-        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
+        with torch.nn.attention.sdpa_kernel(self.backend):
             outs = torch.nn.functional.scaled_dot_product_attention(
                 qs,
                 ks,
@@ -289,13 +286,8 @@ class Attention(BaseAttention):
             q, k = rotary_pos_emb_2d(q, k, coords, unsqueeze_dim=unsqueeze_dim)
         return q, k
 
-    def proj_dropout(self, x):
-        # Applies output dropout only if the kernel doesn't support attention dropout natively
-        if getattr(self.att, "supports", None) and "attn_dropout" in self.att.supports:
-            return x
-        return self.dropout(x)
-
     def forward(self, x, *, x_kv=None, seqlens=None, coords=None, ada_ln_aux=None):
+        residual = x
         x, x_kv = self.norm_in(x, x_kv, ada_ln_aux)
         q, k, v = self.project_qkv(x, x_kv, seqlens)
         q, k = self.pos_enc(q, k, coords, seqlens)
@@ -307,9 +299,9 @@ class Attention(BaseAttention):
             softcap=self.softcap,
             dropout_p=self.dropout_rate if self.training else 0.0
         )
-        out = self.proj_dropout(self.proj_out(out.flatten(-2, -1)))
+        out = self.dropout(self.proj_out(out.flatten(-2, -1)))
 
-        return x + out if self.with_residual else out
+        return residual + out if self.with_residual else out
 
 
 class MultiSelfAttentionHeadVarlenFlex(BaseAttention):
@@ -319,10 +311,24 @@ class MultiSelfAttentionHeadVarlenFlex(BaseAttention):
         num_heads,
         dim_head_proj=None,
         softcap=0.0,
-        **kwargs,
+        dropout_rate=0.0,
+        with_residual=True,
+        with_qk_lnorm=True,
+        norm_type="LayerNorm",
+        qk_norm_type=None,
+        norm_eps=1e-5,
+        attention_dtype=torch.bfloat16,
     ):
-        super(MultiSelfAttentionHeadVarlenFlex, self).__init__(
-            num_heads=num_heads, dim_head_proj=dim_head_proj, **kwargs
+        super().__init__(
+            num_heads=num_heads,
+            dim_head_proj=dim_head_proj,
+            dropout_rate=dropout_rate,
+            with_residual=with_residual,
+            with_qk_lnorm=with_qk_lnorm,
+            norm_type=norm_type,
+            qk_norm_type=qk_norm_type,
+            norm_eps=norm_eps,
+            attention_dtype=attention_dtype,
         )
 
         self.softcap = softcap
@@ -360,7 +366,7 @@ class MultiSelfAttentionHeadVarlenFlex(BaseAttention):
 
         out = self.dropout(self.proj_out(outs.flatten(-2, -1)))
         if self.with_residual:
-            out += x_in
+            out = out + x_in
 
         return out
 
@@ -376,10 +382,24 @@ class MultiSelfAttentionHeadLocal(BaseAttention):
         softcap=0.0,
         dim_aux=None,
         with_2d_rope=False,
-        **kwargs,
+        dropout_rate=0.0,
+        with_residual=True,
+        with_qk_lnorm=True,
+        norm_type="LayerNorm",
+        qk_norm_type=None,
+        norm_eps=1e-5,
+        attention_dtype=torch.bfloat16,
     ):
-        super(MultiSelfAttentionHeadLocal, self).__init__(
-            num_heads=num_heads, dim_head_proj=dim_head_proj, **kwargs
+        super().__init__(
+            num_heads=num_heads,
+            dim_head_proj=dim_head_proj,
+            dropout_rate=dropout_rate,
+            with_residual=with_residual,
+            with_qk_lnorm=with_qk_lnorm,
+            norm_type=norm_type,
+            qk_norm_type=qk_norm_type,
+            norm_eps=norm_eps,
+            attention_dtype=attention_dtype,
         )
 
         self.softcap = softcap
@@ -427,7 +447,7 @@ class MultiSelfAttentionHeadLocal(BaseAttention):
 
         out = self.proj_out(self.dropout(outs.flatten(-2, -1)))
         if self.with_residual:
-            out += x_in
+            out = out + x_in
 
         return out
 
@@ -442,10 +462,24 @@ class MultiCrossAttentionHeadVarlenSlicedQ(BaseAttention):
         dim_head_proj=None,
         softcap=0.0,
         dim_aux=None,
-        **kwargs,
+        dropout_rate=0.0,
+        with_residual=True,
+        with_qk_lnorm=True,
+        norm_type="LayerNorm",
+        qk_norm_type=None,
+        norm_eps=1e-5,
+        attention_dtype=torch.bfloat16,
     ):
-        super(MultiCrossAttentionHeadVarlenSlicedQ, self).__init__(
-            num_heads=num_heads, dim_head_proj=dim_head_proj, **kwargs
+        super().__init__(
+            num_heads=num_heads,
+            dim_head_proj=dim_head_proj,
+            dropout_rate=dropout_rate,
+            with_residual=with_residual,
+            with_qk_lnorm=with_qk_lnorm,
+            norm_type=norm_type,
+            qk_norm_type=qk_norm_type,
+            norm_eps=norm_eps,
+            attention_dtype=attention_dtype,
         )
 
         self.num_slices_q = num_slices_q
