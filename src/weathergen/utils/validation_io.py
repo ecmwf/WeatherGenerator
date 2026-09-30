@@ -195,7 +195,7 @@ def write_output(
         store_path,
         chunk_size=output_cfg.get("zarr_chunk_size", io.CHUNK_N_SAMPLES),
         shard_size=output_cfg.get("zarr_shard_size", io.SHARD_N_SAMPLES),
-        async_concurrency=output_cfg.get("zarr_async_concurrency", io.DEFAULT_ASYNC_CONCURRENCY),
+        async_concurrency=output_cfg.get("zarr_async_concurrency"),
     ) as zio:
         for subset in data.items():
             zio.write_zarr(subset)

@@ -30,7 +30,6 @@ from zarr.storage import LocalStore, ZipStore
 SHARDING_ENABLED = True
 SHARD_N_SAMPLES = 40320
 CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
-DEFAULT_ASYNC_CONCURRENCY = 10
 SCALE_FACTOR = 4  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
@@ -379,7 +378,7 @@ class ZarrIO:
         read_only: bool,
         chunk_size: int = CHUNK_N_SAMPLES,
         shard_size: int = SHARD_N_SAMPLES,
-        async_concurrency: int = DEFAULT_ASYNC_CONCURRENCY,
+        async_concurrency: int | None = None,
     ):
         self._store: LocalStore | ZipStore | None = None
         self._store_path = store_path
@@ -421,11 +420,13 @@ class ZarrIO:
         return self
 
     def _enter_zarr_config(self) -> None:
-        """Apply this store's async concurrency limit for the context lifetime.
+        """Apply async_concurrency, if given, for the context lifetime; else keep zarr's config.
 
         threading.max_workers is left to zarr: its thread pool is a process-wide singleton
         sized on first use, so a per-context value would not reliably take effect.
         """
+        if self.async_concurrency is None:
+            return
         self._zarr_config = zarr.config.set({"async.concurrency": self.async_concurrency})
         self._zarr_config.__enter__()
 
@@ -873,7 +874,7 @@ def zarrio_writer(
     store_path: pathlib.Path,
     chunk_size: int = CHUNK_N_SAMPLES,
     shard_size: int = SHARD_N_SAMPLES,
-    async_concurrency: int = DEFAULT_ASYNC_CONCURRENCY,
+    async_concurrency: int | None = None,
 ) -> ZarrIO:
     """
     Get the proper io-writer for a given store.
@@ -882,7 +883,8 @@ def zarrio_writer(
         store_path: Full path to the storage location.
         chunk_size: Chunk length along the first data axis.
         shard_size: Shard length along the first data axis.
-        async_concurrency: Max in-flight zarr chunk operations (async.concurrency).
+        async_concurrency: Max in-flight zarr chunk operations (async.concurrency);
+            None keeps zarr's configured value.
     """
 
     return _get_backend(
@@ -902,7 +904,7 @@ def _get_backend(
     read_only: bool,
     chunk_size: int = CHUNK_N_SAMPLES,
     shard_size: int = SHARD_N_SAMPLES,
-    async_concurrency: int = DEFAULT_ASYNC_CONCURRENCY,
+    async_concurrency: int | None = None,
 ) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
