@@ -18,7 +18,7 @@ variables:
                MEPS:    kg kg**-1,
                ERA5:    kg kg**-1,
                DEFAULT: kg kg**-1}
-    std_unit: kg kg-1
+    std_unit: kg kg**-1
     level_type: pl
   t:
     var: t
@@ -40,7 +40,7 @@ variables:
                MEPS:    m/s,
                ERA5:    m/s,
                DEFAULT: m/s}
-    std_unit: m s-1
+    std_unit: m s**-1
     level_type: pl
   v:
     var: v
@@ -51,18 +51,18 @@ variables:
                MEPS:    m/s,
                ERA5:    m/s,
                DEFAULT: m/s}
-    std_unit: m s-1
+    std_unit: m s**-1
     level_type: pl
   z:
     var: z
     long: geopotential_at_pressure_levels
     std: geopotential
-    wg_unit: {CERRA:    m2/s2,
-               NORA3:   m2/s2,
-               MEPS:    m2/s2,
-               ERA5:    m2/s2,
-               DEFAULT: m2/s2}
-    std_unit: m2 s-2
+    wg_unit: {CERRA:    m^2/s^2,
+               NORA3:   m^2/s^2,
+               MEPS:    m^2/s^2,
+               ERA5:    m^2/s^2,
+               DEFAULT: m^2/s^2}
+    std_unit: m**2 s**-2
     level_type: pl
     scale_factor: 1.0 #0.10197 #1/9.80665 used for quaver
   10u:
@@ -74,7 +74,7 @@ variables:
                ERA5:    m/s,
                MEPS:    m/s,
                DEFAULT: m/s}
-    std_unit: m s-1
+    std_unit: m s**-1
     level_type: sfc
   10v:
     var: v10
@@ -85,7 +85,7 @@ variables:
                MEPS:    m/s,
                ERA5:    m/s,
                DEFAULT: m/s}
-    std_unit: m s-1
+    std_unit: m s**-1
     level_type: sfc
   2d:
     var: d2m
@@ -150,7 +150,7 @@ variables:
                MEPS:    kg/m^2,
                ERA5:    m,
                DEFAULT: kg/m^2}
-    std_unit: kg m-2
+    std_unit: kg m**-2
     level_type: sfc
   cp:
     var: cp
@@ -158,7 +158,7 @@ variables:
     std: convective_precipitation_amount
     wg_unit: {ERA5:    m,
                DEFAULT: kg/m^2}
-    std_unit: kg m-2
+    std_unit: kg m**-2
     level_type: sfc 
   tp_imerg_0:
     var: tp_imerg_0
@@ -227,7 +227,7 @@ variables:
                NORA3:   W/m^2,
                ERA5:    J m-2,
                DEFAULT: J m-2}
-    std_unit: J m-2
+    std_unit: J m**-2
     level_type: sfc
 
 coordinates:
