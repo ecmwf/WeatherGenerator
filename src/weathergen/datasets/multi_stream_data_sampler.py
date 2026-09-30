@@ -29,9 +29,7 @@ from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.utils import (
-    get_tokens_lens,
-)
+from weathergen.datasets.utils import get_tokens_lens, hplevel_to_num_cells
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
@@ -104,9 +102,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        healpix_level = get_healpix_level(cf)
-        self.masker = Masker(healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(healpix_level, self.masker)
+        # Batch assembly still requires a common HEALPix level.
+        get_healpix_level(cf)
+        self.masker = Masker(stage, cf.streams, self.mode_cfg)
+        self.tokenizer = TokenizerMasking(self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -354,7 +353,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             else ds.readers[0].get_source_num_channels()
             + ds.readers[0].get_geoinfo_size()
             + ds.readers[0].get_coords_size()
-            + self.tokenizer.get_size_time_embedding()
+            + self.tokenizer.get_tokenizer(ds.info["healpix_level"]).get_size_time_embedding()
             for ds in self.streams_datasets.values()
         ]
 
@@ -525,11 +524,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         num_output_steps = self._get_output_length(num_forecast_steps)
+        num_cells = hplevel_to_num_cells(stream_info["healpix_level"])
         stream_data = StreamData(
             base_idx,
             num_steps_input,
             num_output_steps,
-            12 * 4 ** stream_info["healpix_level"],
+            num_cells,
         )
 
         stream_data = self._build_stream_data_input(
@@ -556,10 +556,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
-    def _get_data_windows(
-        self, base_idx, num_forecast_steps, num_steps_input_max, stream_info, stream_ds
-    ):
-        """Collect data windows, using the stream's HEALPix level for empty-window spoofing."""
+    def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
+        """
+        Collect all data needed for current stream to potentially amortize costs by
+        generating multiple samples
+
+        Empty windows use the first reader's stream HEALPix level for spoofed data.
+        """
 
         # source data: iterate overall input steps
         input_data = []
@@ -567,7 +570,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
-
+            stream_info = stream_ds[0].stream_info
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
@@ -616,7 +619,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # Build source and target sample masks
             masks[stream_name] = self.tokenizer.build_samples_for_stream(
                 training_mode,
-                12 * 4 ** stream_info["healpix_level"],
                 stream_info,
             )
             # identical for all streams
@@ -694,7 +696,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_info, stream_ds
+                idx, num_forecast_steps, i_max, stream_ds
             )
 
             # tokenize windows
