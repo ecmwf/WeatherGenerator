@@ -12,6 +12,7 @@ from functools import partial
 import torch
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from abc import ABC, abstractmethod
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
 from weathergen.model.positional_encoding import rotary_pos_emb_2d
@@ -24,9 +25,26 @@ coordinates aligned with the token order (lat, lon in radians).
 """
 
 
-class FlashKernel:
-    """Wrapper for FlashAttention kernels."""
+class AttentionKernel(torch.nn.Module, ABC):
+    """Abstract base class for attention kernels."""
+    
+    @abstractmethod
+    def __call__(
+        self,
+        qs,
+        ks,
+        vs,
+        x_q_lens=None,
+        x_kv_lens=None,
+        max_seqlen_q=None,
+        max_seqlen_k=None,
+        softcap=0.0,
+        dropout_p=0.0
+    ):
+        raise NotImplementedError("Attention kernels must implement the __call__ method.")
 
+
+class FlashKernel(AttentionKernel):
     def __init__(self):
         pass
 
@@ -59,9 +77,9 @@ class FlashKernel:
         return flash_attn_func(q, k, v, softcap=softcap, dropout_p=dropout_p)
 
 
-class SDPAKernel:
+class SDPAKernel(AttentionKernel):
     def __init__(self):
-        self.att = torch.nn.functional.scaled_dot_product_attention
+        pass
 
     def __call__(
         self,
@@ -81,7 +99,12 @@ class SDPAKernel:
         vs = vs.transpose(1, 2)
 
         with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
-            outs = self.att(qs, ks, vs)
+            outs = torch.nn.functional.scaled_dot_product_attention(
+                qs,
+                ks,
+                vs,
+                dropout_p=dropout_p
+            )
 
         return outs.transpose(1, 2)
 
