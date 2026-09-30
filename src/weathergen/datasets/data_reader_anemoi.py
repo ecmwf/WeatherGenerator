@@ -71,7 +71,7 @@ class DataReaderAnemoi(DataReaderTimestep):
                 _logger.info("Ignoring filename and using anemoi_config option.")
 
         # open  dataset to peak that it is compatible with requested parameters
-        ds0: Dataset = anemoi_datasets.open_dataset(filename)
+        ds0: Dataset = anemoi_datasets.open_dataset(filename, area=stream_info.get("area", [90, 0, -90, 360]))
         # If there is no overlap with the time range, the dataset will be empty
         if tw_handler.t_start >= ds0.dates[-1] or tw_handler.t_end <= ds0.dates[0]:
             name = stream_info["name"]
@@ -115,6 +115,8 @@ class DataReaderAnemoi(DataReaderTimestep):
         else:
             self.ds = ds
             self.len = len(ds)
+
+        breakpoint()
 
         # caches lats and lons
         self.latitudes = _clip_lat(ds.latitudes)
