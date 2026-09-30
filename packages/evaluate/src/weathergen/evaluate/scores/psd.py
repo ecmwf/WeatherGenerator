@@ -330,7 +330,7 @@ def detect_grid_type(
     str | None
         ``"octahedral"``, ``"regular"``, or ``None`` if detection fails.
     """
-    unique_lats = np.unique(lats)
+    unique_lats = np.flip(np.sort(np.unique(lats)))
     nlat = len(unique_lats)
 
     # Check global extent
@@ -384,7 +384,7 @@ def detect_grid_type(
 
 def sht_psd(
     data: np.typing.NDArray,
-    nlat: int,
+    lats: np.typing.NDArray,
     grid_type: str,
     truncation: int | None = None,
 ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
@@ -415,21 +415,15 @@ def sht_psd(
         data = data[np.newaxis, :]
     n_samples, n_points = data.shape
 
+    unique_lats = np.flip(np.sort(np.unique(lats)))
+    nlat = len(unique_lats)
+
     # Build the SHT for the appropriate grid
     if grid_type == "octahedral":
         lons_per_lat = _octahedral_lons_per_lat(nlat)
     elif grid_type == "regular":
         lons_per_lat = _regular_lons_per_lat(nlat)
     elif grid_type == "reduced":
-        try:
-            from anemoi.transform.grids.named import lookup
-        except ImportError:
-            raise ImportError(
-                "anemoi.transform is required for grid_type='reduced'. "
-                "Install: pip install anemoi-transform"
-            ) from None
-        lats = lookup("N320")["latitudes"]
-        unique_lats = sorted(set(lats))
         lons_per_lat = [int((lats == lat).sum()) for lat in unique_lats]
     else:
         raise ValueError(f"Unknown grid_type: {grid_type!r}")
@@ -660,7 +654,7 @@ def compute_psd_for_field(
             raise ValueError("nlat is required for method='sht'")
         return sht_psd(
             data=data,
-            nlat=nlat,
+            lats=lats,
             grid_type=grid_type,
             truncation=sht_truncation,
         )
