@@ -271,6 +271,12 @@ class Attention(BaseAttention):
             q, k = rotary_pos_emb_2d(q, k, coords, unsqueeze_dim=unsqueeze_dim)
         return q, k
 
+    def proj_dropout(self, x):
+        # Applies output dropout only if the kernel doesn't support attention dropout natively
+        if getattr(self.att, "supports", None) and "attn_dropout" in self.att.supports:
+            return x
+        return self.dropout(x)
+
     def forward(self, x, *, x_kv=None, seqlens=None, coords=None, ada_ln_aux=None):
         residual = x
         x, x_kv = self.norm_in(x, x_kv, ada_ln_aux)
@@ -284,7 +290,7 @@ class Attention(BaseAttention):
             softcap=self.softcap,
             dropout_p=self.dropout_rate if self.training else 0.0,
         )
-        out = self.dropout(self.proj_out(out.flatten(-2, -1)))
+        out = self.proj_dropout(self.proj_out(out.flatten(-2, -1)))
 
         return residual + out if self.with_residual else out
 
