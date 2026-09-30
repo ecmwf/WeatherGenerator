@@ -303,7 +303,7 @@ def run_score_map_pipeline(
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
         "fig_size": cfg.get("fig_size", None),
-        "animation_format": cfg.get("animation_format", "gif"),
+        "animation_format": cfg.get("animation_format", "mp4"),
         "fps": cfg.get("fps", 2),
     }
     output_basedir = str(reader.runplot_dir)
@@ -529,21 +529,40 @@ def _build_single_animation(
     anim_parts.append(var)
     out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
 
-    if animation_format.lower() == "mp4":
-        frames = [imageio.imread(p) for p in image_paths]
-        fps = 1000 / duration_ms if duration_ms > 0 else 2
-        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
-    else:
-        images = [Image.open(p) for p in image_paths]
-        images[0].save(
+    if animation_format.lower() == "gif":
+        images = [Image.open(p).convert("RGB") for p in image_paths]
+        # GIF frames are palette-indexed (256 colors max) — this is a hard
+        # format limit, so gradients like colorbars can never be truly
+        # continuous here.
+        palette = images[0].quantize(colors=256, method=Image.Quantize.MAXCOVERAGE)
+        frames = [img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images]
+        frames[0].save(
             out_path,
             save_all=True,
-            append_images=images[1:],
+            append_images=frames[1:],
             duration=duration_ms,
             loop=0,
         )
         for img in images:
             img.close()
+    elif animation_format.lower() == "mp4":
+        frames = [imageio.imread(p) for p in image_paths]
+        fps = 1000 / duration_ms if duration_ms > 0 else 2
+        (
+            imageio.mimsave(
+                out_path,
+                frames,
+                fps=fps,
+                macro_block_size=8,
+                ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],
+                ffmpeg_log_level="error",
+            ),
+        )
+    else:
+        raise ValueError(
+            f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'."
+        )
+
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
 
@@ -879,7 +898,7 @@ def plot_data(
 
     plotter_cfg = {
         "image_format": global_plotting_opts.get("image_format", "png"),
-        "animation_format": global_plotting_opts.get("animation_format", "gif"),
+        "animation_format": global_plotting_opts.get("animation_format", "mp4"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size"),
         "fps": global_plotting_opts.get("fps", 2),
