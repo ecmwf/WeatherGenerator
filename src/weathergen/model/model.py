@@ -23,7 +23,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config, get_healpix_level
 from weathergen.datasets.batch import ModelBatch
-from weathergen.datasets.utils import healpix_verts_rots, r3tos2
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2, hplevel_to_num_cells
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -91,7 +91,7 @@ class ModelParams(torch.nn.Module):
         self.cf = cf
 
         self.healpix_level = get_healpix_level(cf)
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        self.num_healpix_cells = hplevel_to_num_cells(self.healpix_level)
         self.dtype = get_dtype(cf.attention_dtype)
 
         # Positional embeddings
@@ -314,7 +314,7 @@ class Model(torch.nn.Module):
         super(Model, self).__init__()
 
         self.healpix_level = get_healpix_level(cf)
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        self.num_healpix_cells = hplevel_to_num_cells(self.healpix_level)
 
         self.cf = cf
         self.dtype = get_dtype(self.cf.attention_dtype)
