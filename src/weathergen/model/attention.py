@@ -194,6 +194,7 @@ class BaseAttention(torch.nn.Module):
     def _make_proj_heads(self, dim_embed, dim_embed_kv=None):
         dim_embed_kv = dim_embed_kv if dim_embed_kv else dim_embed
 
+        # Q/K/V kept as separate Linears (not a fused matrix) so Muon orthogonalizes per projection
         self.proj_heads_q = torch.nn.Linear(
             dim_embed, self.num_heads * self.dim_head_proj, bias=False
         )
@@ -219,9 +220,25 @@ class Attention(BaseAttention):
         dim_aux=None,
         with_2d_rope=False,
         kernel=None,
-        **kwargs,
+        dropout_rate=0.0,
+        with_residual=True,
+        with_qk_lnorm=True,
+        norm_type="LayerNorm",
+        qk_norm_type=None,
+        norm_eps=1e-5,
+        attention_dtype=torch.bfloat16,
     ):
-        super(Attention, self).__init__(num_heads=num_heads, dim_head_proj=dim_head_proj, **kwargs)
+        super().__init__(
+            num_heads=num_heads,
+            dim_head_proj=dim_head_proj,
+            dropout_rate=dropout_rate,
+            with_residual=with_residual,
+            with_qk_lnorm=with_qk_lnorm,
+            norm_type=norm_type,
+            qk_norm_type=qk_norm_type,
+            norm_eps=norm_eps,
+            attention_dtype=attention_dtype,
+        )
 
         self.softcap = softcap
         self.with_2d_rope = with_2d_rope
@@ -242,14 +259,12 @@ class Attention(BaseAttention):
 
         self.att = kernel if kernel is not None else FlashKernel()
 
-    def forward(self, x, x_kv=None, seqlens: SeqLens | None = None, ada_ln_aux=None, coords=None):
-        if self.with_residual:
-            x_in = x
+    def norm_in(self, x, x_kv=None, ada_ln_aux=None):
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
         x_kv = self.lnorm_in_kv(x_kv) if x_kv is not None else x
+        return x, x_kv
 
-        # project onto heads and q,k,v and
-        # ensure these are 4D tensors as required for flash attention
+    def project_qkv(self, x, x_kv, seqlens=None):
         if seqlens is not None:
             s_q = [x.shape[0], self.num_heads, self.dim_head_proj]
             s_kv = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
@@ -264,24 +279,37 @@ class Attention(BaseAttention):
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s_q)).to(self.dtype)
         ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s_kv)).to(self.dtype)
         vs = self.proj_heads_v(x_kv).reshape(s_kv).to(self.dtype)
+        return qs, ks, vs
 
+    def pos_enc(self, q, k, coords=None, seqlens=None):
         if self.with_2d_rope:
             if coords is None:
                 raise ValueError("coords must be provided when with_2d_rope=True")
-            unsqueeze_dim = 1 if x_lens is not None else 2
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=unsqueeze_dim)
+            unsqueeze_dim = 1 if seqlens is not None else 2
+            q, k = rotary_pos_emb_2d(q, k, coords, unsqueeze_dim=unsqueeze_dim)
+        return q, k
 
-        # set dropout rate according to training/eval mode as required by flash_attn
-        dropout_rate = self.dropout_rate if self.training else 0.0
+    def proj_dropout(self, x):
+        # Applies output dropout only if the kernel doesn't support attention dropout natively
+        if getattr(self.att, "supports", None) and "attn_dropout" in self.att.supports:
+            return x
+        return self.dropout(x)
 
-        outs = self.att(qs, ks, vs, seqlens=seqlens, softcap=self.softcap, dropout_p=dropout_rate)
+    def forward(self, x, *, x_kv=None, seqlens=None, coords=None, ada_ln_aux=None):
+        x, x_kv = self.norm_in(x, x_kv, ada_ln_aux)
+        q, k, v = self.project_qkv(x, x_kv, seqlens)
+        q, k = self.pos_enc(q, k, coords, seqlens)
+        out = self.att(
+            q,
+            k,
+            v,
+            seqlens=seqlens,
+            softcap=self.softcap,
+            dropout_p=self.dropout_rate if self.training else 0.0
+        )
+        out = self.proj_dropout(self.proj_out(out.flatten(-2, -1)))
 
-        out = self.proj_out(outs.flatten(-2, -1))
-
-        if self.with_residual:
-            out += x_in
-
-        return out
+        return x + out if self.with_residual else out
 
 
 class MultiSelfAttentionHeadVarlenFlex(BaseAttention):
