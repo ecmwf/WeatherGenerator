@@ -52,7 +52,7 @@ class SeqLens:
         )
 
     
-class AttentionKernel(torch.nn.Module, ABC):
+class AttentionKernel(ABC):
     """Abstract base class for attention kernels."""
     
     @abstractmethod
@@ -61,10 +61,7 @@ class AttentionKernel(torch.nn.Module, ABC):
         qs,
         ks,
         vs,
-        x_q_lens=None,
-        x_kv_lens=None,
-        max_seqlen_q=None,
-        max_seqlen_k=None,
+        seqlens: SeqLens | None = None,
         softcap=0.0,
         dropout_p=0.0
     ):
@@ -342,7 +339,7 @@ class MultiSelfAttentionHeadVarlenFlex(BaseAttention):
 
         self._make_proj_heads(dim_embed)
 
-        def att(qs, ks, vs, x_mask):
+        def att(qs, ks, vs):
             def sparsity_mask(score, b, h, q_idx, kv_idx):
                 return (q_idx // 16) == (kv_idx % 16)
 
