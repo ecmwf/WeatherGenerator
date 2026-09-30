@@ -388,10 +388,7 @@ class NetcdfParser(CfParser):
                             ; using manual lookup"
                     )
                     if wg_unit in unit_conversion and std_unit in unit_conversion[wg_unit]:
-                        print(da.values[:,:3,:])
-                        print(unit_conversion[wg_unit][std_unit])
                         da = da* unit_conversion[wg_unit][std_unit]
-                        print(da.values[:,:3,:])
 
             attributes = {
                 "standard_name": mapped_info.get("std", var_name),
