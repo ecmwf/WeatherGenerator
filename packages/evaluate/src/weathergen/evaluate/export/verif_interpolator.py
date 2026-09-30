@@ -19,7 +19,6 @@ def convert_coordinates(coords: np.typing.NDArray) -> np.typing.NDArray:
     """
 
     xyz_coords = np.empty((coords.shape[0], 3), dtype="float32")
-
     xyz_coords[:, 0] = np.cos(np.pi * coords[:, 0] / 180.0) * np.cos(np.pi * coords[:, 1] / 180.0)
     xyz_coords[:, 1] = np.cos(np.pi * coords[:, 0] / 180.0) * np.sin(np.pi * coords[:, 1] / 180.0)
     xyz_coords[:, 2] = np.sin(np.pi * coords[:, 0] / 180.0)
