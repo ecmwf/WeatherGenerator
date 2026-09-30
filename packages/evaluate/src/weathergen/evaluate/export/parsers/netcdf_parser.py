@@ -356,7 +356,7 @@ class NetcdfParser(CfParser):
                 Dataset with CF-compliant variable attributes.
         """
         unit_conversion = {
-            "m": {"kg m**-2": 0.001}, # essentially converting m to mm as it is precip (water)
+            "m": {"kg m**-2": 0.001},  # essentially converting m to mm as it is precip (water)
             "W/m^2": {"J m**-2": 1 / (3600 * ds["forecast_step"])},
         }
         variables = {}
@@ -388,7 +388,7 @@ class NetcdfParser(CfParser):
                             ; using manual lookup"
                     )
                     if wg_unit in unit_conversion and std_unit in unit_conversion[wg_unit]:
-                        da = da* unit_conversion[wg_unit][std_unit]
+                        da = da * unit_conversion[wg_unit][std_unit]
 
             attributes = {
                 "standard_name": mapped_info.get("std", var_name),
