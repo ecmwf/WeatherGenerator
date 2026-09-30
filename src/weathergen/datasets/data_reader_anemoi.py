@@ -116,8 +116,6 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.ds = ds
             self.len = len(ds)
 
-        breakpoint()
-
         # caches lats and lons
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
