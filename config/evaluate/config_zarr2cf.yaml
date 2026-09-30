@@ -13,7 +13,7 @@ variables:
     var: q
     long: specific_humidity_at_pressure_levels
     std: specific_humidity
-    wg_unit: { CERRA:   percent , # kg kg**-1, #
+    wg_unit: { CERRA:   percent ,
                NORA3:   kg kg**-1,
                MEPS:    kg kg**-1,
                ERA5:    kg kg**-1,
