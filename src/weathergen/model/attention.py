@@ -7,14 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from functools import partial
 
 import torch
 import torch.nn.functional as F
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
 from weathergen.model.positional_encoding import rotary_pos_emb_2d
@@ -30,6 +30,7 @@ coordinates aligned with the token order (lat, lon in radians).
 @dataclass
 class SeqLens:
     """Packed-sequence metadata for varlen attention (computed once per forward)."""
+
     cu_q: torch.Tensor
     cu_kv: torch.Tensor
     max_q: int
@@ -38,12 +39,12 @@ class SeqLens:
     @classmethod
     def from_lens(cls, q_lens, kv_lens=None) -> "SeqLens":
         kv_lens = kv_lens if kv_lens is not None else q_lens
-        
+
         # flash_attn_varlen requires cu_seqlens to have a leading 0.
         # F.pad adds a 0 at the beginning of the cumsum tensor.
         cu_q = F.pad(torch.cumsum(q_lens, 0, dtype=torch.int32), (1, 0))
         cu_kv = F.pad(torch.cumsum(kv_lens, 0, dtype=torch.int32), (1, 0))
-        
+
         return cls(
             cu_q=cu_q,
             cu_kv=cu_kv,
@@ -51,20 +52,12 @@ class SeqLens:
             max_kv=kv_lens.max().item(),
         )
 
-    
+
 class AttentionKernel(ABC):
     """Abstract base class for attention kernels."""
-    
+
     @abstractmethod
-    def __call__(
-        self,
-        qs,
-        ks,
-        vs,
-        seqlens: SeqLens | None = None,
-        softcap=0.0,
-        dropout_p=0.0
-    ):
+    def __call__(self, qs, ks, vs, seqlens: SeqLens | None = None, softcap=0.0, dropout_p=0.0):
         raise NotImplementedError("Attention kernels must implement the __call__ method.")
 
 
@@ -120,12 +113,7 @@ class SDPAKernel(AttentionKernel):
         vs = vs.transpose(1, 2)
 
         with torch.nn.attention.sdpa_kernel(self.backend):
-            outs = torch.nn.functional.scaled_dot_product_attention(
-                qs,
-                ks,
-                vs,
-                dropout_p=dropout_p
-            )
+            outs = torch.nn.functional.scaled_dot_product_attention(qs, ks, vs, dropout_p=dropout_p)
 
         return outs.transpose(1, 2)
 
@@ -294,7 +282,7 @@ class Attention(BaseAttention):
             v,
             seqlens=seqlens,
             softcap=self.softcap,
-            dropout_p=self.dropout_rate if self.training else 0.0
+            dropout_p=self.dropout_rate if self.training else 0.0,
         )
         out = self.dropout(self.proj_out(out.flatten(-2, -1)))
 
