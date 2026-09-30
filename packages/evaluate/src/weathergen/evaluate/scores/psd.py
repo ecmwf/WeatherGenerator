@@ -346,6 +346,11 @@ def detect_grid_type(
         )
         return None
 
+    # Check N320 grid
+    if nlat == 640 and len(lats) == 542080:
+        _logger.debug("Detected N320.")
+        return "reduced"
+
     # Check octahedral reduced Gaussian
     expected_oct = sum(_octahedral_lons_per_lat(nlat))
     if n_points == expected_oct:
@@ -368,7 +373,6 @@ def detect_grid_type(
         f"Grid detection: {n_points} points with {nlat} latitudes does not match "
         f"octahedral ({expected_oct}) or regular ({expected_reg}) grids. "
         f"The dataset may be regional or use an unsupported grid type."
-        "PSD via SHT skipped."
     )
     return None
 
@@ -381,8 +385,8 @@ def detect_grid_type(
 def sht_psd(
     data: np.typing.NDArray,
     nlat: int,
+    grid_type: str,
     truncation: int | None = None,
-    grid_type: str = "octahedral",
 ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
     """Compute PSD via Spherical Harmonic Transform.
 
@@ -657,8 +661,8 @@ def compute_psd_for_field(
         return sht_psd(
             data=data,
             nlat=nlat,
-            truncation=sht_truncation,
             grid_type=grid_type,
+            truncation=sht_truncation,
         )
     elif method == "fft":
         if lats is None or lons is None:
@@ -741,6 +745,13 @@ def compute_psd_score(
             return np.nan, {}
         if grid_type is None:
             grid_type = detect_grid_type(lats_valid, lons_valid, gt.shape[-1])
+
+        if grid_type is None:
+            _logger.warning(
+                "Grid type detection for SHT failed. Try to specify manually."
+                "Skipping SHT computation."
+            )
+            return np.nan, {}
 
         if grid_type == "octahedral":
             expected_pts = sum(_octahedral_lons_per_lat(nlat_valid))
