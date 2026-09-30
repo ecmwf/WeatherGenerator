@@ -104,10 +104,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        self.healpix_level = get_healpix_level(cf)
-        self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(self.healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(self.healpix_level, self.masker)
+        healpix_level = get_healpix_level(cf)
+        self.masker = Masker(healpix_level, stage, cf.streams, self.mode_cfg)
+        self.tokenizer = TokenizerMasking(healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -530,7 +529,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             base_idx,
             num_steps_input,
             num_output_steps,
-            self.num_healpix_cells,
+            12 * 4 ** stream_info["healpix_level"],
         )
 
         stream_data = self._build_stream_data_input(
@@ -557,12 +556,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
-        """
-        Collect all data needed for current stream to potentially amortize costs by
-        generating multiple samples
-
-        """
+    def _get_data_windows(
+        self, base_idx, num_forecast_steps, num_steps_input_max, stream_info, stream_ds
+    ):
+        """Collect data windows, using the stream's HEALPix level for empty-window spoofing."""
 
         # source data: iterate overall input steps
         input_data = []
@@ -576,7 +573,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
-                    self.healpix_level,
+                    stream_info["healpix_level"],
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
@@ -598,7 +595,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
-                    self.healpix_level,
+                    stream_info["healpix_level"],
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),
@@ -619,7 +616,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # Build source and target sample masks
             masks[stream_name] = self.tokenizer.build_samples_for_stream(
                 training_mode,
-                self.num_healpix_cells,
+                12 * 4 ** stream_info["healpix_level"],
                 stream_info,
             )
             # identical for all streams
@@ -697,7 +694,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds
+                idx, num_forecast_steps, i_max, stream_info, stream_ds
             )
 
             # tokenize windows
