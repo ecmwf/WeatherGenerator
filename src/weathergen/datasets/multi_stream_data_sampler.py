@@ -29,7 +29,7 @@ from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.utils import get_tokens_lens, hplevel_to_num_cells
+from weathergen.datasets.utils import get_tokens_lens, hp_level_to_num_cells
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
@@ -525,7 +525,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         num_output_steps = self._get_output_length(num_forecast_steps)
-        num_cells = hplevel_to_num_cells(stream_info["healpix_level"])
+        num_cells = hp_level_to_num_cells(stream_info["healpix_level"])
         stream_data = StreamData(
             base_idx,
             num_steps_input,
