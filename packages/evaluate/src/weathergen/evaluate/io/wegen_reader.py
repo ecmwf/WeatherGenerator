@@ -688,6 +688,9 @@ class WeatherGenZarrReader(WeatherGenReader):
                 ens_select,
                 rank=rank_file.stem.split("rank")[-1],
                 sample_labels=rank_global_labels,
+                inference_cfg=self.inference_cfg
+                if self.eval_cfg.get("type") == "anemoi-target"
+                else None,
             )
             get_data_fn = get_data_zipstore if state.is_zip else get_data_dirstore
             result = get_data_fn(state)

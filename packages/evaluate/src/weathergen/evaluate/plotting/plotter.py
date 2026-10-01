@@ -147,6 +147,7 @@ class Plotter:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
+        self.log_colorbar = plotter_cfg.get("log_colorbar", False)
         self.regions = plotter_cfg.get("regions")
         self.log_x = plotter_cfg.get("log_x", False)
         self.log_y = plotter_cfg.get("log_y", False)
@@ -936,13 +937,18 @@ class Plotter:
             parts.append(str(self.sample))
 
         if "valid_time" in data.coords:
-            valid_time = data["valid_time"][0].values
-            if ~np.isnat(valid_time):
-                parts.append(
-                    valid_time.astype("datetime64[m]")
-                    .astype(datetime.datetime)
-                    .strftime("%Y-%m-%dT%H%M")
-                )
+            vt = data["valid_time"].values
+            valid_time = vt.flat[0] if vt.ndim > 0 else vt.item()
+            try:
+                valid_time = np.datetime64(valid_time, "ns")
+                if not np.isnat(valid_time):
+                    parts.append(
+                        valid_time.astype("datetime64[m]")
+                        .astype(datetime.datetime)
+                        .strftime("%Y-%m-%dT%H%M")
+                    )
+            except (ValueError, TypeError):
+                pass
 
         if self.stream:
             parts.append(self.stream)
@@ -1033,9 +1039,17 @@ class Plotter:
                 if opts["vmax"] is None:
                     opts["vmax"] = float(p_hi)
 
-        # resolve cmap and norm based on options and tag
-        opts["cmap"] = self._resolve_cmap(opts, tag)
-        opts["norm"] = self._resolve_norm(opts, tag)
+        if isinstance(opts["levels"], oc.listconfig.ListConfig):
+            opts["norm"] = mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
+        elif self.log_colorbar and opts["vmin"] is not None and opts["vmin"] > 0:
+            opts["norm"] = mpl.colors.LogNorm(vmin=opts["vmin"], vmax=opts["vmax"])
+        else:
+            if self.log_colorbar:
+                _logger.warning(
+                    "log_colorbar=True but vmin=%.3g <= 0; falling back to linear norm.",
+                    opts["vmin"],
+                )
+            opts["norm"] = mpl.colors.Normalize(vmin=opts["vmin"], vmax=opts["vmax"], clip=False)
 
         if regionname == "global":
             ax.set_global()
