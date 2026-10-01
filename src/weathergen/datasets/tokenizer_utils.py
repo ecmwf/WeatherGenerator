@@ -451,7 +451,7 @@ def get_target_coords_local(
             1 + target_geoinfos.shape[1] + target_times.shape[1] + 5 * (3 * 5) + 3 * 8,
         ]
     )
-    a[...,0] = stream_id
+    a[..., 0] = stream_id
     geoinfo_offset = 1
     a[..., geoinfo_offset : geoinfo_offset + target_times.shape[1]] = target_times
     geoinfo_offset += target_times.shape[1]
