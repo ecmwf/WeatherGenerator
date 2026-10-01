@@ -6,6 +6,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 import dataclasses
 import math
 
@@ -15,9 +16,7 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.attention import (
-    MultiCrossAttentionHead,
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
@@ -58,7 +57,6 @@ class EmbeddingEngine(torch.nn.Module):
 
             if si["embed"]["net"] == "transformer":
                 self.embeds[stream_name] = StreamEmbedTransformer(
-                    mode=self.cf.embed_orientation,
                     num_tokens=si["embed"]["num_tokens"],
                     token_size=si["token_size"],
                     num_channels=self.sources_size[i],
@@ -68,8 +66,6 @@ class EmbeddingEngine(torch.nn.Module):
                     num_heads=si["embed"]["num_heads"],
                     dropout_rate=self.cf.embed_dropout_rate,
                     norm_type=self.cf.norm_type,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
-                    use_xsa=self.cf.get("use_xsa", False),
                     unembed_mode=self.cf.embed_unembed_mode,
                     stream_name=stream_name,
                 )
@@ -83,21 +79,16 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, batch, pe_embed):
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
 
-        # zeros, not empty: if a stream's tokens are ever skipped below, the unwritten rows must
-        # not be uninitialized memory (sporadic NaNs); the assert further down catches the skip.
         num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
-        tokens_all = torch.zeros(
+        tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
         # iterate over all streams
         x_embeds = []
         for stream_name in self.streams.keys():
-            if type(self.embeds[stream_name]) is torch.nn.Identity:
-                continue
-
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -114,18 +105,6 @@ class EmbeddingEngine(torch.nn.Module):
 
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
-
-        num_tokens_embedded = sum(x.shape[0] for x in x_embeds)
-        assert num_tokens_embedded == num_tokens, (
-            f"Embedded tokens ({num_tokens_embedded}) do not cover the token buffer "
-            f"({num_tokens}): a stream counted in batch.tokens_lens was skipped during "
-            "embedding (e.g. Identity embed for a diagnostic stream). Its rows would be "
-            "zero-filled and the per-cell token counts misaligned."
-        )
-
-        if x_embeds == []:
-            # if all streams are empty, return empty tensor with correct shape and dtype
-            return tokens_all
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
@@ -201,16 +180,10 @@ class EmbeddingEngine(torch.nn.Module):
         Vectorized version
         """
 
-        streams_active = [
-            i
-            for i, stream_name in enumerate(self.streams.keys())
-            if type(self.embeds[stream_name]) is not torch.nn.Identity
-        ]
-
         dev = batch.get_device()
         # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
-        tok_counts = batch.tokens_lens[:, :, streams_active].permute([2, 0, 1, 3]).flatten(1, -1)
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
 
         # partial sums for per cell offsets
         pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)
@@ -248,7 +221,6 @@ class LocalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_local_dropout_rate,
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
-                    use_xsa=self.cf.get("use_xsa", False),
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
@@ -261,7 +233,6 @@ class LocalAssimilationEngine(torch.nn.Module):
                     self.cf.ae_local_dim_embed,
                     with_residual=True,
                     dropout_rate=self.cf.ae_local_dropout_rate,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -269,7 +240,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+            tokens_c = block(tokens_c, cell_lens_c)
         return tokens_c
 
 
@@ -312,7 +283,6 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     self.cf.ae_global_dim_embed,
                     with_residual=True,
                     dropout_rate=self.cf.ae_adapter_dropout_rate,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -337,8 +307,11 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
-            tokens_global_c = checkpoint(
-                block, tokens_global_c, tokens_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+            tokens_global_c = block(
+                tokens_global_c,
+                tokens_c,
+                q_cells_lens_c,
+                cell_lens_c,
             )
         return tokens_global_c
 
@@ -432,7 +405,6 @@ class QueryAggregationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -451,7 +423,6 @@ class QueryAggregationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -466,7 +437,6 @@ class QueryAggregationEngine(torch.nn.Module):
                     with_residual=True,
                     dropout_rate=self.cf.ae_aggregation_dropout_rate,
                     hidden_factor=self.cf.ae_aggregation_mlp_hidden_factor,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -476,34 +446,25 @@ class QueryAggregationEngine(torch.nn.Module):
         for block in self.ae_aggregation_blocks:
             aux_info = None
             if isinstance(block, MultiSelfAttentionHeadVarlen):
-                tokens = checkpoint(
-                    block, tokens, x_lens=batch_lens, coords=coords, use_reentrant=False
-                )
+                tokens = block(tokens, x_lens=batch_lens, coords=coords)
             else:
-                # MLP.forward accepts positional args only (def forward(self, *args)),
-                # so coords/aux_info must be passed positionally, not as keywords.
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+                tokens = block(tokens, coords, aux_info)
         return tokens
 
 
 class GlobalAssimilationEngine(torch.nn.Module):
     name: "GlobalAssimilationEngine"
 
-    def __init__(
-        self, cf: Config, num_healpix_cells: int, tap_global_layers: set[int] | None = None
-    ) -> None:
+    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
         """
         Initialize the GlobalAssimilationEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param num_healpix_cells: Number of healpix cells used for local queries.
-        :param tap_global_layers: Logical layer indices at which to collect intermediate
-            representations for deep self-supervision. None means disabled.
         """
         super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        self.tap_global_layers = tap_global_layers
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
@@ -520,7 +481,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_global_dropout_rate,
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -538,7 +498,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_global_dropout_rate,
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -554,7 +513,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
                     with_residual=True,
                     dropout_rate=self.cf.ae_global_dropout_rate,
                     hidden_factor=self.cf.ae_global_mlp_hidden_factor,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -566,20 +524,9 @@ class GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens, coords=None):
         aux_info = None
-        intermediates: list[torch.Tensor] = []
-        logical_layer = 0
         for block in self.ae_global_blocks:
-            # The optional trailing LayerNorm (ae_global_trailing_layer_norm) takes a single
-            # input, unlike the attention/MLP blocks which also receive coords/aux_info.
-            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
-                tokens = checkpoint(block, tokens, use_reentrant=False)
-            else:
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
-            if isinstance(block, MLP):
-                if self.tap_global_layers and logical_layer in self.tap_global_layers:
-                    intermediates.append(tokens)
-                logical_layer += 1
-        return tokens, intermediates
+            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+        return tokens
 
 
 class IdentityEngine(torch.nn.Module):
@@ -608,12 +555,6 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
-        _concat_hd = (
-            self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
-        )
-        _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
-        _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
-
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
@@ -621,83 +562,54 @@ class ForecastingEngine(torch.nn.Module):
                 if (i % global_rate == 0) or i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
                         MultiSelfAttentionHead(
-                            _inner_dim,
+                            self.cf.ae_global_dim_embed,
                             num_heads=self.cf.fe_num_heads,
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
-                            use_xsa=self.cf.get("use_xsa", False),
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                            == "ada_ln",
                         )
                     )
                 else:
                     self.fe_blocks.append(
                         MultiSelfAttentionHeadLocal(
-                            _inner_dim,
+                            self.cf.ae_global_dim_embed,
                             num_heads=self.cf.fe_num_heads,
                             qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
                             block_factor=self.cf.ae_global_block_factor,
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
-                            use_xsa=self.cf.get("use_xsa", False),
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                            == "ada_ln",
-                        )
-                    )
-                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
-                if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
-                    self.fe_blocks.append(
-                        MultiCrossAttentionHead(
-                            dim_embed_q=_diffusion_latent_dim,
-                            dim_embed_kv=_diffusion_latent_dim,
-                            num_heads=self.cf.fe_num_heads,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            with_residual=True,
-                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
-                            with_flash=self.cf.with_flash_attention,
-                            norm_type=self.cf.norm_type,
-                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
-                            norm_eps=self.cf.norm_eps,
-                            attention_dtype=get_dtype(self.cf.attention_dtype),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
                         )
                     )
                 # Add MLP block
                 self.fe_blocks.append(
                     MLP(
-                        _inner_dim,
-                        _inner_dim,
-                        num_layers=2,
+                        self.cf.ae_global_dim_embed,
+                        self.cf.ae_global_dim_embed,
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
-                        mlp_type=self.cf.get("mlp_type", "mlp"),
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
-                        is_dit=self.cf.get("fe_diffusion_model", False),
-                        dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "ada_ln",
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
                 if i in self.cf.get("fe_layer_norm_after_blocks", []):
-                    self.fe_blocks.append(torch.nn.LayerNorm(_inner_dim, elementwise_affine=False))
+                    self.fe_blocks.append(
+                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+                    )
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
@@ -708,108 +620,20 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-        # For concatenate_hiddendim: project 2D -> D after the full forward pass
-        self.out_proj = (
-            torch.nn.Linear(_inner_dim, _diffusion_latent_dim, bias=False) if _concat_hd else None
-        )
-
-    def forward(
-        self,
-        tokens: torch.Tensor,
-        fstep: int,
-        meta_info: SampleMetaData = None,
-        noise_emb: torch.Tensor = None,
-        conditioning: torch.Tensor = None,
-        coords: torch.Tensor = None,
-    ) -> torch.Tensor:
-        # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
-        # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+    def forward(self, tokens, fstep, coords=None):
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-        # predict residual to last time step if requested
-        forecast_residual = self.cf.get("forecast_residual", False)
-        if forecast_residual:
-            tokens_in = tokens
-
-        if self.cf.get("fe_diffusion_model", False):
-            assert noise_emb is not None, (
-                "noise_emb must be provided for diffusion model conditioning"
-            )
-            for block in self.fe_blocks:
-                if isinstance(block, torch.nn.LayerNorm):
-                    tokens = checkpoint(block, tokens, use_reentrant=False)
-                elif isinstance(block, MultiCrossAttentionHead):
-                    assert conditioning is not None, (
-                        "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
-                    )
-                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
-                        tokens = checkpoint(
-                            block, tokens, conditioning, noise_emb, use_reentrant=False
-                        )
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "cross_attn_rev"
-                    ):
-                        tokens = checkpoint(
-                            block, conditioning, tokens, noise_emb, use_reentrant=False
-                        )
-                else:
-                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
-                        assert conditioning is not None, (
-                            "conditioning must be provided for diffusion model conditioning"
-                        )
-                        tokens = checkpoint(
-                            block, tokens, coords, noise_emb, conditioning, use_reentrant=False
-                        )
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
-                        assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
-                        )
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "cross_attn_rev"
-                    ):
-                        assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) must be provided for cross_attn_rev conditioning"
-                        )
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "additive":
-                        assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) must be provided for additive conditioning"
-                        )
-                        tokens = tokens + conditioning
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate":
-                        # Conditioning already baked into tokens via sequence concat in DiffusionForecastEngine.denoise()
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "concatenate_hiddendim"
-                    ):
-                        # Conditioning already baked into tokens via hidden-dim concat in DiffusionForecastEngine.denoise()
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    else:
-                        assert conditioning is None, (
-                            "conditioning should not be provided when diffusion model conditioning is disabled"
-                        )
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-        else:
-            for block in self.fe_blocks:
-                if isinstance(block, torch.nn.LayerNorm):
-                    tokens = block(tokens)
-                else:
-                    tokens = checkpoint(block, tokens, coords, conditioning, use_reentrant=False)
-
-        if self.out_proj is not None:
-            # tokens = self.out_proj(tokens)  # (B, H, 2D) -> (B, H, D)
-            tokens = checkpoint(self.out_proj, tokens, use_reentrant=False)
-
-        return tokens if not forecast_residual else (tokens_in + tokens)
+        aux_info = None
+        for _b_idx, block in enumerate(self.fe_blocks):
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                tokens = checkpoint(block, tokens, use_reentrant=False)
+            else:
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+        return tokens
 
 
 class EnsPredictionHead(torch.nn.Module):
@@ -875,7 +699,6 @@ class TargetPredictionEngineClassic(nn.Module):
         dim_coord_in,
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
-        tr_mlp_type,
         softcap,
         stream_config: dict,
     ):
@@ -897,7 +720,6 @@ class TargetPredictionEngineClassic(nn.Module):
         self.dim_coord_in = dim_coord_in
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
-        self.tr_mlp_type = tr_mlp_type
         self.softcap = softcap
         self.tte = torch.nn.ModuleList()
 
@@ -931,7 +753,6 @@ class TargetPredictionEngineClassic(nn.Module):
                         dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         dim_aux=self.dim_coord_in,
@@ -948,7 +769,6 @@ class TargetPredictionEngineClassic(nn.Module):
                     with_residual=True,
                     hidden_factor=self.tr_mlp_hidden_factor,
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
-                    mlp_type=self.tr_mlp_type,
                     norm_type=self.cf.norm_type,
                     dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
                     norm_eps=self.cf.mlp_norm_eps,
@@ -986,9 +806,8 @@ class TargetPredictionEngine(nn.Module):
         dim_coord_in,
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
-        tr_mlp_type,
         softcap,
-        stream_config: dict,
+        stream_name: str,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -1011,14 +830,13 @@ class TargetPredictionEngine(nn.Module):
             LayerNorm that does not scale after the layer is applied
         """
         super(TargetPredictionEngine, self).__init__()
-        self.name = f"TargetPredictionEngine_{stream_config['name']}"
+        self.name = f"TargetPredictionEngine_{stream_name}"
 
         self.cf = cf
         self.dims_embed = dims_embed
         self.dim_coord_in = dim_coord_in
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
-        self.tr_mlp_type = tr_mlp_type
         self.softcap = softcap
 
         # For backwards compatibility
@@ -1059,7 +877,6 @@ class TargetPredictionEngine(nn.Module):
                         with_self_attn=False,
                         with_adanorm=False,
                         with_mlp=False,
-                        mlp_type=self.tr_mlp_type,
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -1072,8 +889,6 @@ class TargetPredictionEngine(nn.Module):
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
                         dropout_rate=0.1,
-                        mlp_type=self.tr_mlp_type,
-                        use_xsa=self.cf.get("use_xsa", False),
                     )
                 )
             elif self.cf.decoder_type == "CrossAttentionConditioning":
@@ -1087,8 +902,6 @@ class TargetPredictionEngine(nn.Module):
                         with_adanorm=False,
                         with_mlp=True,
                         dropout_rate=0.1,
-                        mlp_type=self.tr_mlp_type,
-                        use_xsa=self.cf.get("use_xsa", False),
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -1103,8 +916,6 @@ class TargetPredictionEngine(nn.Module):
                         with_adanorm=True,
                         with_mlp=True,
                         dropout_rate=0.1,
-                        mlp_type=self.tr_mlp_type,
-                        use_xsa=self.cf.get("use_xsa", False),
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -1120,7 +931,6 @@ class TargetPredictionEngine(nn.Module):
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,
-                        tr_mlp_type=tr_mlp_type,
                         mlp_norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
@@ -1170,30 +980,6 @@ class TargetPredictionEngine(nn.Module):
             else output
         )
         return output
-
-
-class DeepSSLFusion(nn.Module):
-    """Concatenate multi-level representations along channel dim, fuse with MLP.
-
-    Used by the student in deep self-supervision (V-JEPA 2.1 style): all intermediate
-    encoder levels are concatenated and projected back to the embedding dimension.
-    """
-
-    def __init__(self, num_levels: int, dim_embed: int, hidden_factor: int = 2):
-        super().__init__()
-        # Intermediate encoder levels are tapped before the encoder's final LayerNorm, so they
-        # arrive on very different (and much larger) scales than the final level. Normalize each
-        # level before concatenating so the fusion and the downstream SSL head see a common scale.
-        self.level_norms = nn.ModuleList([nn.LayerNorm(dim_embed) for _ in range(num_levels)])
-        self.proj = nn.Sequential(
-            nn.Linear(num_levels * dim_embed, hidden_factor * dim_embed, bias=False),
-            nn.GELU(),
-            nn.Linear(hidden_factor * dim_embed, dim_embed, bias=False),
-        )
-
-    def forward(self, levels: list[torch.Tensor]) -> torch.Tensor:
-        normed = [norm(level) for norm, level in zip(self.level_norms, levels, strict=True)]
-        return self.proj(torch.cat(normed, dim=-1))
 
 
 @dataclasses.dataclass
@@ -1248,7 +1034,6 @@ class LatentPredictionHeadTransformer(nn.Module):
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=with_qk_lnorm,
                     with_flash=self.global_cf.with_flash_attention,
-                    use_xsa=self.global_cf.get("use_xsa", False),
                     norm_type=self.global_cf.norm_type,
                     qk_norm_type=self.global_cf.qk_norm_type,
                     # dim_aux=dim_aux,
@@ -1264,7 +1049,6 @@ class LatentPredictionHeadTransformer(nn.Module):
                     hidden_factor=4,
                     with_residual=True,
                     dropout_rate=dropout_rate,
-                    mlp_type=loss_conf.get("mlp_type", self.global_cf.get("mlp_type", "mlp")),
                     norm_type=self.global_cf.norm_type,
                     # dim_aux=dim_aux,
                     norm_eps=self.global_cf.mlp_norm_eps,
@@ -1304,15 +1088,7 @@ class LatentPredictionHeadIdentity(nn.Module):
 
 
 class LatentPredictionHeadMLP(nn.Module):
-    def __init__(
-        self,
-        name,
-        in_dim: int,
-        loss_conf,
-        use_class_token: bool,
-        use_patch_token: bool,
-        default_mlp_type: str = "mlp",
-    ):
+    def __init__(self, name, in_dim: int, loss_conf, use_class_token: bool, use_patch_token: bool):
         super().__init__()
 
         self.name = name
@@ -1327,14 +1103,7 @@ class LatentPredictionHeadMLP(nn.Module):
         self.use_patch_token = use_patch_token
 
         # Create an MLP block
-        self.blocks = MLP(
-            in_dim,
-            out_dim,
-            num_layers,
-            hidden_factor,
-            pre_layer_norm=False,
-            mlp_type=loss_conf.get("mlp_type", default_mlp_type),
-        )
+        self.blocks = MLP(in_dim, out_dim, num_layers, hidden_factor)
 
     def forward(self, x: LatentState):
         outputs = []

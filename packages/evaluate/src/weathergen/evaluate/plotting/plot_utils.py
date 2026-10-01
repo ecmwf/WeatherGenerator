@@ -11,12 +11,30 @@ import datetime
 import logging
 import re
 from collections.abc import Iterable, Sequence
+from enum import Enum
 
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
 _logger = logging.getLogger(__name__)
+
+
+class PlotSubdir(str, Enum):
+    """Known plot subdirectory names produced by the plotting pipeline.
+
+    Being a ``str`` subclass, members compare and format exactly like plain
+    strings (e.g. ``PlotSubdir.line_plots == "line_plots"``), so they can be
+    used as drop-in replacements wherever the raw directory name is expected
+    (e.g. ``Path(base) / PlotSubdir.line_plots``).
+    """
+
+    line_plots = "line_plots"
+    ratio_plots = "ratio_plots"
+    psd_plots = "psd_plots"
+    score_cards = "score_cards"
+    bar_plots = "bar_plots"
+    qq_plots = "qq_plots"
 
 
 # Shared helpers
@@ -390,6 +408,9 @@ def plot_metric_region(
 
                 title = f"{metric.upper()} | {stream} | {ch}"
 
+                ref_line_dict = {"ssr_adj": 1.0}
+                line = ref_line_dict.get(metric)
+
                 plotter.plot(
                     selected_data,
                     labels,
@@ -399,6 +420,7 @@ def plot_metric_region(
                     print_summary=print_summary,
                     title=title,
                     colors=colors,
+                    line=line,
                 )
 
 

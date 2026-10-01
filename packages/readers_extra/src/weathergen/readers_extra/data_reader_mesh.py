@@ -17,6 +17,7 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
 )
+from weathergen.train.utils import Stage
 
 logging.getLogger("fsspec").setLevel(logging.WARNING)
 logging.getLogger("fsspec.implementations.reference").setLevel(logging.WARNING)
@@ -42,6 +43,7 @@ class DataReaderMesh(DataReaderTimestep):
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
+        stage: Stage | None = None,
     ) -> None:
         self.filename_source = Path(filename)
         if "target_file" in stream_info:
@@ -59,7 +61,9 @@ class DataReaderMesh(DataReaderTimestep):
         self._dask_arrays_trg = {}
 
         self.sampling_mode = stream_info.get("sampling_mode", "patch")
+        self.sampling_step = stream_info.get("sampling_step", 1)
         self.patch_stability_window = stream_info.get("patch_stability_window", 1)
+        self.filler_values = stream_info.get("filler_values", [])
 
         # Auto-enable staircase mode if window is defined and we are in patch mode
         auto_use_counter = self.sampling_mode == "patch" and "patch_stability_window" in stream_info
@@ -98,6 +102,7 @@ class DataReaderMesh(DataReaderTimestep):
         self.lons_src = meta_src["lons"]
         self.spatial_indices_src = meta_src["indices"]
         self.coords_src = meta_src["coords"]
+        self.grid_dims_src = meta_src["grid_dims"]
 
         # 2. Probe Target
         if self.filename_target != self.filename_source:
@@ -108,11 +113,13 @@ class DataReaderMesh(DataReaderTimestep):
             self.lons_trg = meta_trg["lons"]
             self.spatial_indices_trg = meta_trg["indices"]
             self.coords_trg = meta_trg["coords"]
+            self.grid_dims_trg = meta_trg["grid_dims"]
         else:
             self.lats_trg = self.lats_src
             self.lons_trg = self.lons_src
             self.spatial_indices_trg = self.spatial_indices_src
             self.coords_trg = self.coords_src
+            self.grid_dims_trg = self.grid_dims_src
 
         ds_time_values = meta_src["time"]
         self._len_cached = len(ds_time_values)
@@ -120,9 +127,18 @@ class DataReaderMesh(DataReaderTimestep):
 
         data_start_time = np.datetime64(ds_time_values[0], "ns")
         if len(ds_time_values) > 1:
-            period = np.datetime64(ds_time_values[1], "ns") - data_start_time
+            native_period = np.datetime64(ds_time_values[1], "ns") - data_start_time
         else:
-            period = np.timedelta64(24, "h")
+            native_period = np.timedelta64(24, "h")
+
+        self.native_period = native_period
+
+        if "frequency" in stream_info:
+            from weathergen.readers_extra.data_reader_grep import _str_to_timedelta
+
+            period = _str_to_timedelta(stream_info["frequency"])
+        else:
+            period = native_period
 
         data_end_time = np.datetime64(ds_time_values[-1], "ns")
 
@@ -209,6 +225,13 @@ class DataReaderMesh(DataReaderTimestep):
                 meta["indices"] = spatial_indices
                 meta["coords"] = np.stack([lats, lons], axis=1)
 
+                # Detect grid structure for 2D regular sampling
+                meta["grid_dims"] = None
+                lat_dims = [d for d in ds.sizes if d.lower() in ["lat", "latitude"]]
+                lon_dims = [d for d in ds.sizes if d.lower() in ["lon", "longitude"]]
+                if lat_dims and lon_dims:
+                    meta["grid_dims"] = (ds.sizes[lat_dims[0]], ds.sizes[lon_dims[0]])
+
                 return meta
         except Exception as e:
             _logger.error(f"Failed to probe {filepath}: {e}")
@@ -258,16 +281,25 @@ class DataReaderMesh(DataReaderTimestep):
         if dtr.end < self.data_start_time or dtr.start > self.data_end_time:
             return (np.array([], dtype=np.int64), dtr)
 
-        delta_start = dtr.start - self.data_start_time
-        start_idx = int(delta_start / self.period)
+        start_idx = np.searchsorted(self._time_values_cached, dtr.start, side="left")
+        end_idx = np.searchsorted(self._time_values_cached, dtr.end - t_epsilon, side="right") - 1
 
-        delta_end = dtr.end - self.data_start_time - t_epsilon
-        end_idx = int(delta_end / self.period)
+        stride = 1
+        if self.period > self.native_period:
+            stride = int(self.period / self.native_period)
 
-        start_idx = max(0, start_idx)
-        end_idx = min(len(self._time_values_cached) - 1, end_idx)
+        if start_idx > end_idx:
+            # Persistent: find last before window
+            last_before = start_idx - 1
+            if last_before >= 0:
+                return (np.array([last_before], dtype=np.int64), dtr)
+            else:
+                return (np.array([], dtype=np.int64), dtr)
 
-        return (np.arange(start_idx, end_idx + 1, dtype=np.int64), dtr)
+        # Generate indices and then subsample by stride
+        idxs = np.arange(start_idx, end_idx + 1, dtype=np.int64)[::stride]
+
+        return (idxs, dtr)
 
     @override
     def get_source(self, idx: TIndex) -> ReaderData:
@@ -287,6 +319,12 @@ class DataReaderMesh(DataReaderTimestep):
         channel_indices = [self.available_channels.index(c) for c in channels]
         start_t, end_t = t_idxs[0], t_idxs[-1] + 1
         n_steps = len(t_idxs)
+
+        stride = 1
+        if self.period > self.native_period:
+            stride = int(self.period / self.native_period)
+            # extend end_t to cover the final step when striding
+            end_t = t_idxs[-1] + stride
 
         spatial_indices_ref = self.spatial_indices_src if is_source else self.spatial_indices_trg
         coords_ref = self.coords_src if is_source else self.coords_trg
@@ -314,6 +352,23 @@ class DataReaderMesh(DataReaderTimestep):
             indices_local = patch_rng.choice(
                 total_points, size=min(target_n, total_points), replace=False
             )
+            patch_coords_base = coords_ref[indices_local]
+            final_disk_indices = spatial_indices_ref[indices_local]
+            use_contiguous_read = False
+
+        elif self.sampling_mode == "regular":
+            grid_dims = self.grid_dims_src if is_source else self.grid_dims_trg
+            if grid_dims:
+                h, w = grid_dims
+                n = self.sampling_step
+                rows = spatial_indices_ref // w
+                cols = spatial_indices_ref % w
+                mask = (rows % n == 0) & (cols % n == 0)
+                indices_local = np.where(mask)[0]
+            else:
+                total_points = len(spatial_indices_ref)
+                indices_local = np.arange(0, total_points, self.sampling_step)
+
             patch_coords_base = coords_ref[indices_local]
             final_disk_indices = spatial_indices_ref[indices_local]
             use_contiguous_read = False
@@ -374,6 +429,7 @@ class DataReaderMesh(DataReaderTimestep):
                 channel_indices,
                 start_t,
                 end_t,
+                stride,
                 n_steps,
                 slice(disk_start, disk_stop),
                 rel_indices,
@@ -385,6 +441,7 @@ class DataReaderMesh(DataReaderTimestep):
                 channel_indices,
                 start_t,
                 end_t,
+                stride,
                 n_steps,
                 final_disk_indices,
                 None,
@@ -396,8 +453,27 @@ class DataReaderMesh(DataReaderTimestep):
                 data_block[np.abs(data_block) > 1e10] = np.nan
 
         coords_flat = np.tile(patch_coords_base, (n_steps, 1))
-        dt_values = self._time_values_cached[start_t:end_t]
+        dt_values = self._time_values_cached[start_t:end_t:stride]
         dt_flat = np.repeat(dt_values, patch_coords_base.shape[0])
+
+        if data_block.size > 0:
+            # Check for NaNs across any channel
+            valid_mask = ~np.isnan(data_block).any(axis=1)
+
+            # Check for filler values across any channel
+            if self.filler_values:
+                valid_mask &= ~np.isin(data_block, self.filler_values).any(axis=1)
+
+            data_block = data_block[valid_mask]
+            coords_flat = coords_flat[valid_mask]
+            dt_flat = dt_flat[valid_mask]
+
+        if data_block.size == 0:
+            _logger.warning(
+                f"[Stream {self._stream_info.get('name')}] "
+                "All points were filtered out (NaNs or filler values). Skipping."
+            )
+            return ReaderData.empty(len(channels), n_steps)
 
         rdata = ReaderData(
             coords=coords_flat,
@@ -408,7 +484,7 @@ class DataReaderMesh(DataReaderTimestep):
         return rdata
 
     def _load_block_from_ds(
-        self, ds, arr_cache, indices, start_t, end_t, n_steps, disk_indices, rel_indices
+        self, ds, arr_cache, indices, start_t, end_t, stride, n_steps, disk_indices, rel_indices
     ) -> np.typing.NDArray:
         if rel_indices is not None:
             num_points = len(rel_indices)
@@ -444,7 +520,7 @@ class DataReaderMesh(DataReaderTimestep):
 
                 # 2. Slice Time (keeps memory small before we flatten)
                 if "time" in dims:
-                    sliced = sliced[start_t:end_t]
+                    sliced = sliced[start_t:end_t:stride]
 
                 # 3. Compute the block into memory
                 chunk = sliced.compute().astype(np.float32)
@@ -486,7 +562,7 @@ class DataReaderMesh(DataReaderTimestep):
                         chunk = np.repeat(np.expand_dims(chunk, 0), n_steps, axis=0)
 
                 # 6. Apply Land Masks
-                chunk[(chunk == 0.0) | (chunk <= -9000.0)] = np.nan
+                chunk[(chunk <= -9000.0)] = np.nan
                 chunk[~np.isfinite(chunk)] = np.nan
                 output_block[:, i] = chunk.reshape(-1)
 

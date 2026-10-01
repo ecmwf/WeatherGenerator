@@ -43,12 +43,7 @@ def _create_teacher_heads(
 
     if head_type == "mlp":
         return LatentPredictionHeadMLP(
-            f"{name}-head",
-            dim_embed,
-            loss_conf,
-            use_class_token,
-            use_patch_token,
-            default_mlp_type=(cf.get("mlp_type", "mlp") if cf is not None else "mlp"),
+            f"{name}-head", dim_embed, loss_conf, use_class_token, use_patch_token
         )
     elif head_type == "transformer":
         if cf is None:
@@ -77,10 +72,6 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
     model.target_token_engines = nn.ModuleDict()
     model.pred_heads = nn.ModuleDict()
 
-    # Strip deep SSL fusion (teacher uses independent per-level prediction, not fusion)
-    model.deep_ssl_fusion = None
-    model.deep_ssl_level_projections = None
-
     # Ensure latent_pre_norm exists (teacher may not have had SSL training)
     if model.latent_pre_norm is None:
         model.latent_pre_norm = nn.LayerNorm(teacher_dim_embed)
@@ -97,7 +88,7 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
             elif name in ("iBOT", "DINO"):
                 head_type = conf.get("head", "mlp").lower()
                 model.latent_heads[name] = _create_teacher_heads(
-                    name, head_type, teacher_dim_embed, conf, cf=override_cfg
+                    name, head_type, teacher_dim_embed, conf
                 )
             else:
                 logger.warning(f"Unknown SSL loss type {name!r} in teacher setup, skipping.")

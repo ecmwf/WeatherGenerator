@@ -378,7 +378,6 @@ def _read_sample(
     is_zip: bool,
     read_coords: bool = False,
     is_gridded: bool = True,
-    regrid_opts: dict | None = None,
     anemoi_target_cfg: dict | None = None,
 ) -> tuple[list[NDArray], list[NDArray], list[NDArray], dict]:
     """

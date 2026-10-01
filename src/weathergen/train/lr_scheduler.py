@@ -53,9 +53,9 @@ class LearningRateScheduler:
             logger.debug(f"steps_decay={self.n_steps_decay} lr_steps={lr_steps}")
         # ensure that steps_decay has a reasonable value
         if self.n_steps_decay < int(0.2 * lr_steps):
-            self.n_steps_warmup = int(0.1 * lr_steps)
-            self.n_steps_cooldown = int(0.05 * lr_steps)
-            self.n_steps_decay = lr_steps - self.n_steps_warmup - self.n_steps_cooldown
+            self.n_steps_warmup = max(2, int(0.1 * lr_steps))
+            self.n_steps_cooldown = max(1, int(0.05 * lr_steps))
+            self.n_steps_decay = max(1, lr_steps - self.n_steps_warmup - self.n_steps_cooldown)
             s = (
                 "cf.lr_steps_warmup and cf.lr_steps_cooldown",
                 f" were larger than cf.lr_steps={lr_steps}",
@@ -69,7 +69,7 @@ class LearningRateScheduler:
 
         assert lr_cfg.lr_final_decay >= lr_cfg.lr_final
 
-        if lr_cfg.parallel_scaling_policy == "constant":
+        if lr_cfg.parallel_scaling_policy == "const":
             kappa = 1
         elif lr_cfg.parallel_scaling_policy == "sqrt":
             kappa = np.sqrt(batch_size * self.world_size)

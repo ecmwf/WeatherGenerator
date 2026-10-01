@@ -185,9 +185,6 @@ class IOReaderData:
             assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
             assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
 
-            if n_datapoints == 0:
-                continue
-
             coords = np.concatenate([coords, other.coords])
             geoinfos = np.concatenate([geoinfos, other.geoinfos])
             data = np.concatenate([data, other.data])
@@ -442,14 +439,6 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
-    def _has_group(self, item: ItemKey) -> bool:
-        """Check if an output item exists in this store."""
-        assert self.data_root is not None, "ZarrIO must be opened before accessing data."
-        try:
-            return self.data_root.get(item.path) is not None
-        except KeyError:
-            return False
-
     def _get_group(self, item: ItemKey, create: bool) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
@@ -500,31 +489,18 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
-        key = self.example_key
-        if not self._has_group(key):
-            # No fstep 0 group at all => no targets at fstep 0 => offset 1.
-            _logger.debug(f"No group at {key.path}, inferring forecast_offset=1.")
-            return 1
-        fstep0_datasets = self._get_datasets(key)
+        fstep0_datasets = self._get_datasets(self.example_key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
     @functools.cached_property
     def example_key(self) -> ItemKey:
         try:
             sample, example_sample = next(self.data_root.groups())
-            # Find the first stream that has prediction/target data (not just source)
-            for stream, example_stream in example_sample.groups():
-                fstep_keys = sorted(example_stream.group_keys(), key=int)
-                for fk in fstep_keys:
-                    fstep_group = example_stream[fk]
-                    child_names = set(fstep_group.group_keys())
-                    if "prediction" in child_names or "target" in child_names:
-                        # Return fstep 0 of this stream for correct forecast_offset detection
-                        return ItemKey(sample, 0, stream)
-            # Fallback: use first stream / fstep 0
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
-        except (StopIteration, IndexError) as e:
+            fstep = list(example_stream.keys())[0]
+            if int(fstep) > 1:
+                _logger.warning("First fstep > 1. This is unexpected.")
+        except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
 
@@ -549,11 +525,10 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
 
-        all_steps = sorted(example_stream.group_keys(), key=int)
+        all_steps = sorted(list(example_stream.group_keys()))
 
         if self.forecast_offset == 1:
-            # exclude fstep with no targets/preds (may be absent from the store entirely)
-            return [step for step in all_steps if int(step) != 0]
+            return all_steps[1:]  # exclude fstep with no targets/preds
         else:
             return all_steps
 
@@ -617,9 +592,8 @@ class OutputBatchData:
     # each entry is a dict mapping latent_name -> ndarray
     latents: list[list[dict]]
 
-    sample_start: int
-    forecast_offset: int
-    forecast_steps: list[int]
+    sample_start: int = 0
+    forecast_offset: int = 0
 
     @functools.cached_property
     def samples(self):
@@ -627,6 +601,13 @@ class OutputBatchData:
 
         # TODO associate samples with the sampel idx used for the time window
         return np.arange(len(self.sources)) + self.sample_start
+
+    @functools.cached_property
+    def forecast_steps(self):
+        """Indices of all forecast steps adjusted by the forecast offset"""
+        # forecast offset should be either 1 for forecasting or 0 for MTM
+        assert self.forecast_offset in (0, 1)
+        return np.arange(len(self.targets) + self.forecast_offset)
 
     def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
@@ -689,12 +670,11 @@ class OutputBatchData:
         To be useable in extraction these have to be adjusted to bridge the differences
         compared to the semantics of the data.
             - `sample` is adjusted from a global continous index to a per batch index
-            - `forecast_step` is adjusted from a global step to an index into this chunk's data
+            - `forecast_step` is adjusted from including `forecast_offset` to indexing
+               the data (always starts at 0)
         """
         return ItemKey(
-            key.sample - self.sample_start,
-            key.forecast_step - self.forecast_steps[0],  # as in ModelOutput.chunk_idx()
-            key.stream,
+            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
         )
 
     def _extract_targets_predictions(self, stream_idx, offset_key, key, source_interval):

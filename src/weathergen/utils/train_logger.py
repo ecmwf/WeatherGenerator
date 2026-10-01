@@ -58,9 +58,9 @@ class Metrics:
 
 class TrainLogger:
     #######################################
-    def __init__(self, cf, path_run: Path) -> None:
+    def __init__(self, cf, path_results: Path) -> None:
         self.cf = cf
-        self.path_run = path_run
+        self.path_results = path_results
 
     def log_metrics(self, stage: Stage, metrics: dict[str, float], step: int | None = None) -> None:
         """
@@ -86,7 +86,7 @@ class TrainLogger:
         # but we can probably do better and rely for example on the logging module.
 
         metrics_path = get_train_metrics_path(
-            base_path=config.get_path_run(self.cf), run_id=self.cf.general.run_id
+            base_path=self.path_results, run_id=self.cf.general.run_id
         )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
@@ -101,9 +101,10 @@ class TrainLogger:
         stddev_all: dict,
         avg_loss: list[float] = None,
         lr: float = None,
+        elapsed_training_time_seconds: float | None = None,
     ) -> None:
         """
-        Log training or validation data
+        Log training or validation data.
         """
         metrics: dict[str, float] = dict(num_samples=samples)
 
@@ -112,6 +113,13 @@ class TrainLogger:
             metrics["loss_avg_mean"] = val
             metrics["learning_rate"] = lr
             metrics["num_samples"] = int(samples)
+            if elapsed_training_time_seconds is not None:
+                metrics["elapsed_training_time_seconds"] = elapsed_training_time_seconds
+                metrics["average_samples_per_second"] = (
+                    samples / elapsed_training_time_seconds
+                    if elapsed_training_time_seconds > 0
+                    else 0
+                )
 
         for key, value in losses_all.items():
             val = np.nan if np.isnan(value).all() else np.nanmean(value)
@@ -144,7 +152,7 @@ class TrainLogger:
             )
         run_id = cf.general.run_id
 
-        result_dir_base = config.get_path_run(cf)
+        result_dir_base = config.get_path_results(cf)
 
         # define cols for training
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]

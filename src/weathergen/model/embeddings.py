@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -22,7 +21,6 @@ from weathergen.model.positional_encoding import positional_encoding_harmonic
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
         self,
-        mode,
         num_tokens,
         token_size,
         num_channels,
@@ -32,8 +30,6 @@ class StreamEmbedTransformer(torch.nn.Module):
         num_heads,
         dropout_rate=0.0,
         norm_type="LayerNorm",
-        mlp_type="mlp",
-        use_xsa=False,
         unembed_mode="full",
         stream_name="stream_embed",
     ):
@@ -49,17 +45,14 @@ class StreamEmbedTransformer(torch.nn.Module):
         super(StreamEmbedTransformer, self).__init__()
 
         self.name = f"StreamEmbedder_{stream_name}"
-        self.mode = mode
         self.num_tokens = num_tokens
         self.token_size = token_size
         self.num_channels = num_channels
-        self.dim_in = token_size if mode == "channels" else num_channels
+        self.dim_in = token_size
         self.dim_embed = dim_embed
         self.dim_out = dim_out
         self.num_blocks = num_blocks
         self.num_heads = num_heads
-        self.mlp_type = mlp_type
-        self.use_xsa = use_xsa
         self.unembed_mode = unembed_mode
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
@@ -73,7 +66,6 @@ class StreamEmbedTransformer(torch.nn.Module):
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=True,
                     with_flash=True,
-                    use_xsa=self.use_xsa,
                 )
             )
             self.layers.append(
@@ -82,66 +74,33 @@ class StreamEmbedTransformer(torch.nn.Module):
                     self.dim_embed,
                     hidden_factor=2,
                     dropout_rate=dropout_rate,
-                    mlp_type=self.mlp_type,
                     with_residual=True,
                 )
             )
 
-        if mode == "channels":
-            self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
+        self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
 
-            if self.unembed_mode == "full":
-                self.ln_final = norm(num_channels * self.dim_embed, eps=1e-03)
-                self.unembed = torch.nn.Linear(
-                    num_channels * self.dim_embed,
-                    self.num_tokens * self.dim_out,
-                )
-
-            elif self.unembed_mode == "block":
-                dim_out = (self.num_tokens * self.dim_out) // num_channels
-                self.unembed = torch.nn.ModuleList(
-                    [torch.nn.Linear(dim_embed, dim_out) for _ in range(num_channels)]
-                    # [
-                    #     torch.nn.Sequential(
-                    #         torch.nn.Linear(dim_embed, max(dim_embed//2,4*dim_out)),
-                    #         torch.nn.GELU(),
-                    #         torch.nn.Linear(max(dim_embed//2,4*dim_out), dim_out)
-                    #     ) for _ in range(num_channels)
-                    # ]
-                )
-                self.ln_final = torch.nn.ModuleList(
-                    [norm(dim_embed, eps=1e-6) for _ in range(num_channels)]
-                )
-
-            else:
-                raise ValueError(f"Unknown unembed mode: {unembed_mode}")
-
-        elif mode == "columns":
-            self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
-
-            assert self.unembed_mode == "block"  # only supported mode at the moment
-            # padding needed if the unembedded columns cannot be concatenated to dim_out (e.g GPSRO)
-            self.pad = self.dim_out % token_size
-            self.out_pad = torch.nn.Parameter(torch.zeros(self.pad), requires_grad=False)
+        if self.unembed_mode == "full":
+            self.ln_final = norm(num_channels * self.dim_embed, eps=1e-03)
             self.unembed = torch.nn.Linear(
-                self.dim_embed,
-                self.num_tokens * (self.dim_out // token_size),
+                num_channels * self.dim_embed,
+                self.num_tokens * self.dim_out,
             )
-            self.ln_final = norm(dim_out, eps=1e-6)
 
-            # TODO: factorization when sqrt is not int
-            dim1 = int(np.sqrt(dim_out))
-            assert dim1 * dim1 == dim_out
-            self.unembed1 = torch.nn.Linear(self.dim_embed, dim1)
-            self.unembed_nonlin = torch.nn.GELU()
-            self.unembed2 = torch.nn.Linear(self.token_size, dim1)
-
+        elif self.unembed_mode == "block":
+            dim_out = (self.num_tokens * self.dim_out) // num_channels
+            self.unembed = torch.nn.ModuleList(
+                [torch.nn.Linear(dim_embed, dim_out) for _ in range(num_channels)]
+            )
+            self.ln_final = torch.nn.ModuleList(
+                [norm(dim_embed, eps=1e-6) for _ in range(num_channels)]
+            )
         else:
-            raise ValueError(f"Unknown mode: {mode}")
+            raise ValueError(f"Unknown unembed mode: {unembed_mode}")
 
         self.dropout_final = torch.nn.Dropout(0.1)
 
-    def forward_channels(self, x_in):
+    def forward(self, x_in):
         peh = positional_encoding_harmonic
 
         # embed provided input data
@@ -155,7 +114,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             out = self.unembed(self.ln_final(x.flatten(-2, -1)))
         elif self.unembed_mode == "block":
             out = [
-                checkpoint(ue, ln(x[:, i]), use_reentrant=False)
+                ue(ln(x[:, i]))
                 for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=True))
             ]
             out = torch.stack(out, dim=1).flatten(-2, -1)
@@ -168,31 +127,6 @@ class StreamEmbedTransformer(torch.nn.Module):
         out = self.dropout_final(out.reshape(-1, self.num_tokens, self.dim_out))
 
         return out
-
-    def forward_columns(self, x_in):
-        # embed provided input data
-        x = positional_encoding_harmonic(self.embed(x_in))
-
-        for layer in self.layers:
-            x = layer(x)
-
-        out = self.unembed1(x)
-        out = self.unembed_nonlin(out)
-        out = self.unembed2(out.transpose(-2, -1))
-        out = out.flatten(-2, -1).unsqueeze(1)
-
-        # final normalize and dropout
-        out = self.dropout_final(self.ln_final(out))
-
-        return out.to(torch.float16)
-
-    def forward(self, x_in):
-        if self.mode == "channels":
-            return self.forward_channels(x_in)
-        elif self.mode == "columns":
-            return self.forward_columns(x_in)
-        else:
-            raise ValueError(f"Unknown mode {self.mode}")
 
 
 class StreamEmbedLinear(torch.nn.Module):

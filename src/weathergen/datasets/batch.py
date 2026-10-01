@@ -7,7 +7,6 @@ Provides clean separation between:
 """
 
 import copy
-import typing
 from dataclasses import dataclass
 
 import numpy as np
@@ -25,16 +24,6 @@ class SampleMetaData:
     mask: torch.Tensor | None = None
 
     global_params: dict | None = None
-
-    def add_global_params(self, params: dict) -> None:
-        if self.global_params is None:
-            self.global_params = {}
-        self.global_params.update(params)
-
-    def add_params(self, params: dict) -> None:
-        if self.params is None:
-            self.params = {}
-        self.params.update(params)
 
 
 class Sample:
@@ -71,14 +60,7 @@ class Sample:
         for stream_name in stream_names:
             self.streams_data[stream_name] = None
 
-    def to_device(
-        self,
-        device,
-        target_steps: list[int] | None = None,
-        include_source: bool = True,
-        include_target_coords: bool = True,
-        include_target_tokens: bool = True,
-    ) -> None:
+    def to_device(self, device) -> None:
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
                 self.meta_info[key].mask.to(device, non_blocking=True)
@@ -88,18 +70,7 @@ class Sample:
 
         for key, val in self.streams_data.items():
             if val is not None:
-                self.streams_data[key] = val.to_device(
-                    device,
-                    target_steps,
-                    include_source,
-                    include_target_coords,
-                    include_target_tokens,
-                )
-
-    def clear_target_coordinates(self, target_steps: list[int]) -> None:
-        for stream_data in self.streams_data.values():
-            if stream_data is not None:
-                stream_data.clear_target_coordinates(target_steps)
+                self.streams_data[key] = val.to_device(device)
 
     def is_empty(self) -> bool:
         """
@@ -154,7 +125,6 @@ class Sample:
         """
         Add metadata for stream @stream_name to sample
         """
-
         self.meta_info[stream_name] = meta_info
 
     def get_stream_data(self, stream_name: str) -> StreamData:
@@ -163,6 +133,28 @@ class Sample:
         """
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         return self.streams_data[stream_name]
+
+    def get_num_source_steps(self) -> int:
+        """
+        Get number of source steps from smallest of all available streams
+        """
+        lens = [
+            stream.get_num_source_steps()
+            for _, stream in self.streams_data.items()
+            if stream is not None
+        ]
+        return min(lens) if len(lens) > 0 else 0
+
+    def get_num_target_steps(self) -> int:
+        """
+        Get number of target steps from smallest of all available streams
+        """
+        lens = [
+            stream.get_num_target_steps()
+            for _, stream in self.streams_data.items()
+            if stream is not None
+        ]
+        return min(lens) if len(lens) > 0 else 0
 
 
 class BatchSamples:
@@ -184,46 +176,21 @@ class BatchSamples:
         self.output_steps = output_steps
         self.output_idxs = output_idxs
         self.device = None
-        self.latent = []
-
-    @property
-    def batch_samples(self) -> typing.Self:
-        return self
 
     def __len__(self) -> int:
         return len(self.samples)
 
-    def to_device(
-        self,
-        device,
-        target_steps: list[int] | None = None,
-        include_source: bool = True,
-        include_target_coords: bool = True,
-        include_target_tokens: bool = True,
-    ):
+    def to_device(self, device):
         for sample in self.samples:
-            sample.to_device(
-                device,
-                target_steps,
-                include_source,
-                include_target_coords,
-                include_target_tokens,
-            )
+            sample.to_device(device)
 
-        if include_source:
-            self.tokens_lens = (
-                self.tokens_lens.to(device, non_blocking=True)
-                if self.tokens_lens is not None
-                else None
-            )
+        self.tokens_lens = (
+            self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
+        )
 
         self.device = device
 
         return self
-
-    def clear_target_coordinates(self, target_steps: list[int]) -> None:
-        for sample in self.samples:
-            sample.clear_target_coordinates(target_steps)
 
     def get_samples(self) -> list[Sample]:
         return self.samples
@@ -240,16 +207,17 @@ class BatchSamples:
             bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
-    def get_num_steps(self) -> int:
+    def get_num_source_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
         """
-        # TODO: define explicitly
-        lens = [
-            len(stream.source_tokens_cells) for _, stream in self.samples[0].streams_data.items()
-        ]
+        return self.samples[0].get_num_source_steps()
 
-        return min(lens)
+    def get_num_target_steps(self) -> int:
+        """
+        Get number of target steps from smallest of all available streams
+        """
+        return self.samples[0].get_num_target_steps()
 
     def get_output_idxs(self) -> int:
         """
@@ -378,39 +346,6 @@ class ModelBatch:
 
         return self
 
-    def to_device_for_chunked_inference(self, device, loss_steps: list[int]):
-        """Move source inputs and the targets required for the final chunk loss."""
-        self.source_samples.to_device(
-            device,
-            target_steps=[],
-            include_target_coords=False,
-            include_target_tokens=False,
-        )
-        self.target_samples.to_device(
-            device,
-            target_steps=loss_steps,
-            include_source=False,
-            include_target_coords=False,
-        )
-        self.device = device
-
-        return self
-
-    def to_device_for_output_chunk(self, device, target_steps: list[int]):
-        """Move decoder coordinates for the active forecast chunk."""
-        self.source_samples.to_device(
-            device,
-            target_steps=target_steps,
-            include_source=False,
-            include_target_tokens=False,
-        )
-
-        return self
-
-    def clear_output_chunk_coordinates(self, target_steps: list[int]) -> None:
-        """Release decoder coordinates after output for a forecast chunk was written."""
-        self.source_samples.clear_target_coordinates(target_steps)
-
     def add_source_stream(
         self,
         source_sample_idx: int,
@@ -422,7 +357,6 @@ class ModelBatch:
         """
         Add data for one stream to sample @source_sample_idx
         """
-
         self.source_samples.samples[source_sample_idx].add_stream_data(stream_name, stream_data)
 
         # add the meta_info
@@ -563,23 +497,10 @@ class ModelBatch:
         """
         Get number of input/source steps from smallest of all available streams
         """
-        # TODO: define explicitly
-        lens = [
-            len(stream.source_tokens_cells)
-            for _, stream in self.target_samples.samples[0].streams_data.items()
-        ]
-
-        return min(lens)
+        return self.source_samples.get_num_source_steps()
 
     def get_num_target_steps(self) -> int:
         """
-        Get number of input/source steps from smallest of all available streams
+        Get number of target steps from smallest of all available streams
         """
-        # TODO: define explicitly
-        # TODO: ensure that num_input_steps is constant across batch with different strategies
-        lens = [
-            len(stream.target_tokens)
-            for _, stream in self.target_samples.samples[0].streams_data.items()
-        ]
-
-        return min(lens)
+        return self.target_samples.get_num_target_steps()

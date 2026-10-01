@@ -35,7 +35,6 @@ from weathergen.datasets.utils import (
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import is_stream_diagnostic
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -103,10 +102,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         self.rank = cf.rank
         self.world_size = cf.world_size
-        self.diffusion_model_conditioning = cf.get("fe_diffusion_model_conditioning", None)
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        # initialise healpix
+        # initialise healpic
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
         self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
@@ -119,26 +117,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
         self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
 
-        # teacher_time_offset: number of time windows to shift the teacher's input
-        # relative to the student's. When > 0 the teacher sees a future time window.
-        # Only active when student_teacher mode is used; ignored in masking mode to
-        # prevent stale offsets from JEPA pretraining leaking into forecasting
-        # finetuning/inference (where it would shift all target times by one window).
-        training_mode = mode_cfg.get("training_mode", [])
-        if "student_teacher" in training_mode:
-            self.teacher_time_offset = mode_cfg.get("teacher_time_offset", 0)
-        else:
-            configured_offset = mode_cfg.get("teacher_time_offset", 0)
-            if configured_offset != 0:
-                logger.warning(
-                    f"teacher_time_offset={configured_offset} is set but training_mode="
-                    f"{training_mode} does not include 'student_teacher'. "
-                    "Ignoring teacher_time_offset (setting to 0)."
-                )
-            self.teacher_time_offset = 0
-
+        # initialise fsm, but can change for future mini_epochs
         self.batch_size = get_batch_size_from_config(mode_cfg)
-        self.num_workers = cf.data_loading.num_workers
         self.shuffle = mode_cfg.shuffle
 
         self.len_timedelta = mode_cfg.time_window_len
@@ -165,7 +145,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
         self.check_samples(self._get_fsm())
         self.streams_datasets = self._init_stream_datasets(cf)
-        self.streams = cf.streams
 
         # RNG seed setup
         rs = cf.data_loading.rng_seed
@@ -209,13 +188,22 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         # streamlined calculation of length
         epoch_len = self.samples_per_mini_epoch
-        # adjust len to split loading across all workers and ensure it is multiple of batch_size;
-        # also account for num_workers so per-worker slice is a multiple of batch_size,
-        # preventing the range-loop in __iter__ from yielding extra batches via ceiling division
-        effective_workers = max(1, self.num_workers)
-        self.len = ((epoch_len // self.world_size) // (self.batch_size * effective_workers)) * (
-            self.batch_size * effective_workers
-        )
+
+        # ensure epoch_len is large enough to produce at least one batch per rank
+        min_samples = self.world_size * self.batch_size
+        if epoch_len < min_samples:
+            logger.warning(
+                f"samples_per_mini_epoch={epoch_len} is too small for "
+                f"world_size={self.world_size} and batch_size={self.batch_size}. "
+                f"samples_per_mini_epoch has to be equal to or larger than"
+                f"world_size*batch_size to ensure that each rank can produce at least one sample. "
+                f"Automatically increasing to {min_samples}."
+            )
+            epoch_len = min_samples
+            self.samples_per_mini_epoch = min_samples
+
+        # adjust len to split loading across all workers and ensure it is multiple of batch_size
+        self.len = ((epoch_len // self.world_size) // self.batch_size) * self.batch_size
 
         n_duplicates = self.len * self.world_size - available_samples
         if not self.repeat_data:
@@ -233,9 +221,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """Load dataset readers for all streams from config."""
         streams_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
+            stream_info["data_paths"] = cf.get("data_paths", [])
             # list of sources for current stream
             streams_datasets[stream_name] = _Stream(stream_info, [])
-
             kwargs = {
                 "tw_handler": self.time_window_handler,
                 "stream_info": stream_info,
@@ -254,7 +242,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            for fname in stream_info["filenames"]:
+            for fname in stream_info.get("filenames", [pathlib.Path()]):
                 fname = pathlib.Path(fname)
                 # dont check if file exists since zarr stores might be directories
                 if fname.exists():
@@ -263,16 +251,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 else:
                     filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
-                    if not any(filename.exists() for filename in filenames):  # see above
+                    filename = next((f for f in filenames if f.exists()), None)
+                    if filename is None:
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
                             f"stream '{stream_name}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
-
-                    # The same dataset can exist on different locations in the filesystem,
-                    # so we need to choose here.
-                    filename = filenames[0]
 
                 ds_type = stream_info["type"]
                 if is_root():
@@ -282,7 +267,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                streams_datasets[stream_info["name"]].readers += [ds]
+                streams_datasets[stream_name].readers += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
@@ -424,14 +409,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         if "network_input" in mode:
-            # Diagnostic streams (Identity embed, no source channels) can never be encoded as
-            # network input. Tokenizing them anyway (e.g. for the teacher's target view, whose
-            # cell mask is non-empty) leaves rows in the embedding engine's token buffer that
-            # are never written, and shifts the per-cell token counts out of sync with the
-            # embedded tokens.
-            if is_stream_diagnostic(stream_info, self._stage):
-                return stream_data
-
             # iterate overall input steps
             for step, idx in enumerate(range(base_idx, base_idx - num_steps_input, -1)):
                 # TODO: check that we are not out of bounds when we go back in time
@@ -455,7 +432,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     mask,
                 )
 
-                # collect data for stream
                 stream_data.add_source(
                     self._stage, step, rdata, source_cells_lens, source_cells, rdata.is_spoof
                 )
@@ -544,6 +520,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             output_mask : mask for output/prediction/target
             input_mask : mask for network input (can be source or target)
+
 
         Returns:
             StreamData with source and targets masked according to view_meta
@@ -638,14 +615,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         Generate source and target masks for all streams.
         """
         masks = {}
-        for stream_name, stream_info in self.streams.items():
+        for stream_name, stream_data in self.streams_datasets.items():
+            stream_info = stream_data.info
             # Build source and target sample masks
             masks[stream_name] = self.tokenizer.build_samples_for_stream(
                 training_mode,
                 self.num_healpix_cells,
                 stream_info,
             )
-
             # identical for all streams
             num_target_samples = len(masks[stream_name][0])
             num_source_samples = len(masks[stream_name][1])
@@ -706,8 +683,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         )
 
         # for all streams
-        for stream_name, stream_ds in self.streams_datasets.items():
-            stream_info = self.streams[stream_name]
+        for stream_name, stream_data in self.streams_datasets.items():
+            stream_info, stream_ds = stream_data.info, stream_data.readers
             (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
 
             # max number of input steps
@@ -721,53 +698,24 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds.readers
+                idx, num_forecast_steps, i_max, stream_ds
             )
-
-            # When teacher_time_offset > 0, load a separate set of data windows
-            # shifted forward in time for the teacher (target) samples.
-            if self.teacher_time_offset > 0:
-                (input_data_target, output_data_target) = self._get_data_windows(
-                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds.readers
-                )
-            else:
-                input_data_target = input_data
-                output_data_target = output_data
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
             input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
-            if self.teacher_time_offset > 0:
-                input_tokens_target = self.tokenizer.get_tokens_windows(
-                    stream_info, input_data_target, True
-                )
-                output_tokens_target = self.tokenizer.get_tokens_windows(
-                    stream_info, output_data_target, False
-                )
-            else:
-                input_tokens_target = input_tokens
-                output_tokens_target = output_tokens
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
                 tidx = source_to_target[sidx].item()
-
-                # Apply self-flow noise to student data (handled by masker)
-                input_data_src = self.masker.apply_noise_to_data(
-                    input_data,
-                    source_masks.metadata[sidx],
-                    is_student=True,
-                    add_geoinfo_noise="noise_time" in stream_info.get("geoinfo_channels", []),
-                )
-
                 sdata = self._build_stream_data(
                     source_select,
                     idx,
                     num_forecast_steps,
                     stream_info,
                     source_masks.metadata[sidx].params.get("num_steps_input", 1),
-                    input_data_src,
+                    input_data,
                     output_data,
                     input_tokens,
                     output_tokens,
@@ -778,48 +726,23 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
-            input_data_target_orig = input_data_target
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
-                # Use time-offset data for teacher when teacher_time_offset > 0.
-                target_idx = idx + self.teacher_time_offset
-
-                # Apply self-flow noise to teacher data (handled by masker)
-                input_data_target = self.masker.apply_noise_to_data(
-                    input_data_target_orig,
-                    target_masks.metadata[tidx],
-                    is_student=False,
-                    add_geoinfo_noise="noise_time" in stream_info.get("geoinfo_channels", []),
-                )
-
                 sdata = self._build_stream_data(
                     target_select,
-                    target_idx,
+                    idx,
                     num_forecast_steps,
                     stream_info,
                     target_masks.metadata[tidx].params.get("num_steps_input", 1),
-                    input_data_target,
-                    output_data_target,
-                    input_tokens_target,
-                    output_tokens_target,
+                    input_data,
+                    output_data,
+                    input_tokens,
+                    output_tokens,
                     output_mask=target_mask,
                     input_mask=target_mask,
                 )
-
                 target_metadata = target_masks.metadata[tidx]
-
-                # Get first target step's times (using self.output_offset as the first output step index)
-                if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
-                    target_times_array = sdata.target_times_raw[self.output_offset]
-                    target_metadata.add_params(
-                        {
-                            "timestamp": (
-                                target_times_array[0] if len(target_times_array) > 0 else None
-                            )
-                        }
-                    )
-
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
                 # Map target to all source students
@@ -832,30 +755,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
-
-        # add target times in source for diffusion model date/time conditioning
-        if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
-            # TODO: Might need upgrading fro num_samples > 1
-
-            # Assert singular source and target samples
-            assert len(batch.source_samples.samples) == 1, (
-                "Only single source sample supported for diffusion model conditioning."
-            )
-            assert len(batch.target_samples.samples) == 1, (
-                "Only single target sample supported for diffusion model conditioning."
-            )
-
-            source_sample = batch.source_samples.samples[0]
-            target_sample = batch.target_samples.samples[0]
-
-            # Copy target timestamps to source metadata for all streams
-            for stream_name in [s["name"] for s in self.streams]:
-                if (
-                    stream_name in target_sample.meta_info
-                    and stream_name in source_sample.meta_info
-                ):
-                    target_timestamp = target_sample.meta_info[stream_name].params.get("timestamp")
-                    source_sample.meta_info[stream_name].add_params({"timestamp": target_timestamp})
 
         return batch
 
@@ -912,7 +811,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            # assert self.world_size == 1, self.world_size
+            assert self.world_size == 1, self.world_size
             iter_start = 0
             iter_end = len(self)
 

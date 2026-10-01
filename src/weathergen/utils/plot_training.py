@@ -322,8 +322,6 @@ def plot_loss_avg(
 
     _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
-    print(runs_data[0].train)
-
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
@@ -349,7 +347,7 @@ def plot_loss_avg(
         plt.xscale("log")
     plt.title("average loss")
     plt.ylabel("loss")
-    plt.xlabel("step")
+    plt.xlabel("samples")
     plt.tight_layout()
     _add_legend(
         legend_str,
@@ -450,12 +448,11 @@ def plot_loss_per_stream(
                         data_cols = []
                         for col in run_data_mode.columns:
                             col_split = col.split(".")
-                            if col == stream_name:
-                                data_cols += [col]
-                            elif len(col_split) < 4:
+                            if len(col_split) < 4:
                                 if stream_name in col:
                                     data_cols += [col]
-                            elif col_split[3] == "avg":
+                                    title_col = col if title_col is None else title_col
+                            elif len(col_split) == 4:
                                 if (
                                     col_split[1].lower() == stream_name.lower()
                                     and col_split[2].lower() == err.lower()
@@ -525,9 +522,7 @@ def plot_loss_per_stream(
 
                 # if len(title_col) == 0 :
                 # import code; code.interact( local=locals())
-                title_loss = (
-                    ".".join(title_col.split(".")[:-1]) if title_col is not None else stream_name
-                )
+                title_loss = ".".join(title_col.split(".")[:-1])
                 plt.title(title_loss + " (" + ", ".join(modes) + ")")
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
@@ -867,7 +862,7 @@ def plot_train(args=None):
     model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
-    x_types_valid = ["step", "reltime"]  # TODO: add "reltime" support when fix available
+    x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
     if args.x_type not in x_types_valid:
         raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
 

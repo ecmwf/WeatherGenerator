@@ -1,12 +1,13 @@
 SurfaceCombined :
   type : obs
   stream_id: 2
-  filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
+  filenames : ['observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   masking_rate : 0.6
   masking_rate_none : 0.05
-  token_size : 64
-  tokenize_spacetime : True
+  token_size : 512
+  tokenize_spacetime : False
   max_num_targets: -1
   embed : 
     net : transformer

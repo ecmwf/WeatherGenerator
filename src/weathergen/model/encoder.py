@@ -24,6 +24,7 @@ from weathergen.model.engines import (
 
 # from weathergen.model.model import ModelParams
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.model.positional_encoding import positional_encoding_harmonic
 
 
 class EncoderModule(torch.nn.Module):
@@ -64,7 +65,6 @@ class EncoderModule(torch.nn.Module):
         assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
         self.num_class_tokens = cf.num_class_tokens
-        self.num_aux_tokens = self.num_register_tokens + self.num_class_tokens
 
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
@@ -111,37 +111,11 @@ class EncoderModule(torch.nn.Module):
             q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
 
-        # Only create the auxiliary-token parameter when aux tokens are actually used.
-        if self.num_aux_tokens > 0:
-            s_aux = (1, self.num_aux_tokens, cf.ae_global_dim_embed)
-            q_aux = torch.rand(s_aux) / cf.ae_global_dim_embed
-            self.q_aux = torch.nn.Parameter(q_aux, requires_grad=True)
-        else:
-            self.q_aux = None
-
         # query aggregation engine
         self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
 
-        # deep SSL tap configuration
-        deep_ssl_cfg = cf.get("training_config", {}).get("deep_ssl", None)
-        self.tap_local2global = False
-        tap_global_layers: set[int] | None = None
-        if deep_ssl_cfg and deep_ssl_cfg.get("tap_after"):
-            for tap in deep_ssl_cfg.tap_after:
-                tap_str = str(tap)
-                if tap_str == "local2global":
-                    self.tap_local2global = True
-                elif tap_str.startswith("global:"):
-                    if tap_global_layers is None:
-                        tap_global_layers = set()
-                    tap_global_layers.add(int(tap_str.split(":")[1]))
-
         # global assimilation engine
-        self.ae_global_engine = GlobalAssimilationEngine(
-            cf, self.num_healpix_cells, tap_global_layers=tap_global_layers
-        )
-
-        self.ln = torch.nn.LayerNorm(cf.ae_global_dim_embed, elementwise_affine=False)
+        self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
     def forward(self, model_params, batch):
         """
@@ -156,21 +130,14 @@ class EncoderModule(torch.nn.Module):
             self.assimilate_local, model_params, stream_cell_tokens, batch, use_reentrant=False
         )
 
-        intermediates: list[torch.Tensor] = []
-        if self.tap_local2global:
-            intermediates.append(tokens_global.clone())
-
-        tokens_global, global_intermediates = checkpoint(
+        tokens_global = checkpoint(
             self.ae_global_engine,
             tokens_global,
             coords=model_params.rope_coords,
             use_reentrant=False,
         )
-        intermediates.extend(global_intermediates)
 
-        tokens_global = self.ln(tokens_global)
-
-        return tokens_global, posteriors, intermediates
+        return tokens_global, posteriors
 
     def interpolate_latents(self, tokens: torch.Tensor) -> (torch.Tensor, torch.Tensor):
         """ "
@@ -322,17 +289,13 @@ class EncoderModule(torch.nn.Module):
 
         cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
 
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
         rs = num_steps_input * len(batch)
 
-        # create dedicated auxiliary tokens and prepend them to the spatial tokens
-        if self.q_aux is not None:
-            tokens_global_register_class = self.q_aux.repeat(rs, 1, 1)
-        else:
-            # no aux tokens: use an empty (rs, 0, D) tensor matching q_cells dtype/device
-            tokens_global_register_class = self.q_cells.new_zeros(
-                (rs, 0, self.cf.ae_global_dim_embed)
-            )
+        # create register and latent tokens and prepend to latent spatial tokens
+        num_extra_tokens = self.num_register_tokens + self.num_class_tokens
+        pos_enc = positional_encoding_harmonic
+        tokens_global_register_class = pos_enc(self.q_cells.repeat(rs, num_extra_tokens, 1))
 
         # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:
@@ -368,7 +331,7 @@ class EncoderModule(torch.nn.Module):
         # create mask from cell lens
         mask_reg_class_tokens = (
             torch.ones(
-                self.num_aux_tokens,
+                self.num_register_tokens + self.num_class_tokens,
                 device=tokens_global.device,
             )
             .to(torch.bool)
@@ -382,7 +345,7 @@ class EncoderModule(torch.nn.Module):
         tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
 
         # recover batch dimension and build global token list
-        num_tokens_tot = self.num_healpix_cells + self.num_aux_tokens
+        num_tokens_tot = self.num_healpix_cells + self.num_register_tokens + self.num_class_tokens
         q_c_shape = self.q_cells.shape
         tokens_global = (
             tokens_global.reshape([rs, num_tokens_tot, q_c_shape[-2], q_c_shape[-1]])
@@ -390,6 +353,3 @@ class EncoderModule(torch.nn.Module):
         ).flatten(1, 2)
 
         return tokens_global, posteriors
-
-    def reset_parameters(self):
-        return
