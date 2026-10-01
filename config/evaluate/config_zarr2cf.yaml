@@ -152,6 +152,8 @@ variables:
                DEFAULT: kg/m^2}
     std_unit: kg m**-2
     level_type: sfc
+    accumulate: true
+    paramId: 228
   cp:
     var: cp
     long: convective_precipitation
@@ -168,6 +170,8 @@ variables:
                DEFAULT: m}
     std_unit: kg m-2
     level_type: sfc
+    accumulate: true
+    paramId: 228
   hcc:
     var: hcc
     long: high_cloud_cover
