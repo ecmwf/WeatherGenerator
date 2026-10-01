@@ -172,7 +172,7 @@ def locs_to_cell_coords_ctrs(
 
 
 ####################################################################################################
-def hplevel_to_num_cells(hp_level: int) -> int:
+def hp_level_to_num_cells(hp_level: int) -> int:
     nside = 2**hp_level
     return 12 * nside * nside
 
