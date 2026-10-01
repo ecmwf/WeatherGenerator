@@ -33,6 +33,7 @@ from weathergen.evaluate.io.data.io_orchestration import (
     get_data_zipstore,
     get_num_workers,
 )
+from weathergen.evaluate.io.data.target_sources import AnemoiTargetSource, TargetSource
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 
@@ -432,6 +433,26 @@ class WeatherGenZarrReader(WeatherGenReader):
         self._max_workers: int | None = eval_cfg.get("max_workers")
         self._num_io_workers: int = get_num_workers(max_workers=self._max_workers)
 
+        # External target sources, one per stream, shared by all rank files.
+        self._target_sources: dict[str, TargetSource | None] = {}
+
+    def _get_target_source(self, stream: str) -> TargetSource | None:
+        """Return the stream's external target source, or ``None`` to read zarr targets.
+
+        With ``type: "anemoi-target"`` the targets of anemoi streams are read from
+        the anemoi dataset the model was trained on.  Reader options can be set
+        per stream under ``target_source`` (see :class:`AnemoiTargetSource`).
+        """
+        if stream not in self._target_sources:
+            source = None
+            if self.eval_cfg.get("type") == "anemoi-target":
+                overrides = self.get_stream(stream).get("target_source") or {}
+                source = AnemoiTargetSource.from_inference_config(
+                    self.inference_cfg, stream, overrides=dict(overrides)
+                )
+            self._target_sources[stream] = source
+        return self._target_sources[stream]
+
     def _discover_rank_files(self) -> list[Path]:
         """Discover zarr rank files based on the ``rank`` config parameter.
 
@@ -688,9 +709,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 ens_select,
                 rank=rank_file.stem.split("rank")[-1],
                 sample_labels=rank_global_labels,
-                inference_cfg=self.inference_cfg
-                if self.eval_cfg.get("type") == "anemoi-target"
-                else None,
+                target_source=self._get_target_source(stream),
             )
             get_data_fn = get_data_zipstore if state.is_zip else get_data_dirstore
             result = get_data_fn(state)

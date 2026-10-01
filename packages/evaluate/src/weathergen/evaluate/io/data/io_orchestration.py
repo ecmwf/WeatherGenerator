@@ -44,6 +44,7 @@ from weathergen.evaluate.io.data.io_workers import (
     _read_coords_and_meta,
     _read_sample,
 )
+from weathergen.evaluate.io.data.target_sources import TargetRequest, TargetSource
 from weathergen.evaluate.io.io_reader import ReaderOutput
 from weathergen.evaluate.utils.derived_channels import scale_z_channels
 
@@ -84,7 +85,7 @@ class IOState:
     offset: np.timedelta64 | None = (
         None  # fallback offset in hours for init_time when source_interval is missing
     )
-    anemoi_target_cfg: dict | None = None  # if set, read targets from anemoi dataset
+    target_source: TargetSource | None = None  # if set, targets come from here, not zarr
     sample_labels: list[int] | None = None  # global sample indices for coordinate labeling
 
     def get_sample_labels(self) -> list[int]:
@@ -261,7 +262,7 @@ def build_io_state(
     n_io_workers: int,
     ens_select: EnsembleSelect,
     rank: str = "",
-    inference_cfg: dict | None = None,
+    target_source: TargetSource | None = None,
     sample_labels: list[int] | None = None,
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
@@ -289,19 +290,6 @@ def build_io_state(
 
     regridder = Regridder(regrid_opts) if regrid_opts else None
 
-    # ---- Resolve anemoi target config from inference config ----
-    anemoi_target_cfg = None
-    if inference_cfg:
-        stream_info = inference_cfg.get("streams", {}).get(stream, {})
-        if stream_info.get("type") in ("anemoi", "anemoi_operan", "anemoi_rt") and stream_info.get("filenames"):
-            data_path = inference_cfg.get("data_path_anemoi", "")
-            filename = str(Path(data_path) / stream_info["filenames"][0])
-            anemoi_target_cfg = {
-                "filename": filename,
-                "channels": stream_info.get("val_target_channels", []),
-            }
-            _logger.info(f"Anemoi target source: {filename}")
-
     return IOState(
         run_id=run_id,
         zarr_path=zarr_path,
@@ -319,11 +307,11 @@ def build_io_state(
         coords=coords,
         lat=lat,
         lon=lon,
-        n_workers=min(n_io_workers, 20) if anemoi_target_cfg is not None else n_io_workers,
+        n_workers=n_io_workers,
         rank=rank,
         offset=offset,
         regridder=regridder,
-        anemoi_target_cfg=anemoi_target_cfg,
+        target_source=target_source,
         sample_labels=sample_labels,
     )
 
@@ -340,7 +328,7 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
-    anemoi_target_cfg: dict | None = None,
+    read_target: bool = True,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -358,7 +346,7 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
-        anemoi_target_cfg=anemoi_target_cfg,
+        read_target=read_target,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -407,6 +395,43 @@ def _extract_init_times(
         else:
             si_list.append(np.datetime64("NaT", "ns"))
     return np.array(si_list)
+
+
+def _fill_external_targets(state: IOState, results: list) -> None:
+    """Fill the targets of worker *results* from ``state.target_source`` (in place).
+
+    The workers left every target as ``None``; this builds one request per
+    ``(sample, fstep, sub-step)`` and lets the source fill them all at once,
+    so each valid time is read only once for the whole batch.
+    """
+    requests: list[TargetRequest] = []
+    for ri, (preds_all, _targets, times_all, meta) in enumerate(results):
+        k = 0
+        for fi, n_sub in enumerate(meta["n_substeps"]):
+            fstep_times = times_all[fi]
+            for si in range(n_sub):
+                rows = meta["substep_rows"][k]
+                n_rows = preds_all[k].shape[0]
+                if state.is_gridded:
+                    # Gridded rows share the stream's coordinate layout.
+                    coords = state.coords
+                    if rows is not None and len(rows) and rows[-1] >= len(coords):
+                        raise ValueError(
+                            f"{state.stream}: prediction rows exceed the stream's coordinate "
+                            f"array ({rows[-1] + 1} > {len(coords)}); cannot match targets."
+                        )
+                    times = fstep_times[si] if len(fstep_times) else np.datetime64("NaT")
+                else:
+                    coords = meta["coords"][fi]
+                    if coords is None and n_rows:
+                        raise ValueError(f"{state.stream}: missing prediction coords for targets.")
+                    times = fstep_times
+                requests.append(TargetRequest(ri, k, n_rows, times, coords, rows))
+                k += 1
+
+    targets = state.target_source.fill_targets(requests, state.read_channels)
+    for req, target in zip(requests, targets, strict=True):
+        results[req.result_idx][1][req.target_idx] = target
 
 
 def _assemble_substep(
@@ -576,11 +601,14 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
-            anemoi_target_cfg=state.anemoi_target_cfg,
+            read_target=state.target_source is None,
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
             n_workers = 1
+
+        if state.target_source is not None:
+            _fill_external_targets(state, results)
 
         if init_times is None:
             init_times = _extract_init_times(results, state.samples, state.offset)
@@ -650,12 +678,12 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
-        anemoi_target_cfg=state.anemoi_target_cfg,
+        read_target=state.target_source is None,
     )
-    if state.anemoi_target_cfg is not None:
+    if state.target_source is not None:
         _logger.info(
             f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
-            f"Target data will be read from anemoi dataset (not zarr)."
+            f"Targets will be read from {type(state.target_source).__name__} (not zarr)."
         )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
@@ -674,6 +702,9 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
         f"dispatch_parallel returned {len(flat_results)} results. Assembling..."
     )
+
+    if state.target_source is not None:
+        _fill_external_targets(state, flat_results)
 
     # --- Re-group: flat_results[sample_idx * n_fsteps + fstep_idx] --------
     n_fsteps = len(state.fsteps)
