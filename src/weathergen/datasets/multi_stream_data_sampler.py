@@ -347,13 +347,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         self.mini_epoch += 1
 
     def get_sources_size(self):
+        stream_time_size = self.tokenizer.get_size_time_embedding()
         return [
             0
             if ds.readers[0].get_source_num_channels() == 0
             else ds.readers[0].get_source_num_channels()
             + ds.readers[0].get_geoinfo_size()
             + ds.readers[0].get_coords_size()
-            + self.tokenizer.get_tokenizer(ds.info["healpix_level"]).get_size_time_embedding()
+            + stream_time_size
             for ds in self.streams_datasets.values()
         ]
 
@@ -364,10 +365,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         return [ds.readers[0].get_target_num_channels() for ds in self.streams_datasets.values()]
 
     def get_targets_coords_size(self):
+        stream_time_size = self.tokenizer.get_size_time_embedding()
         # TODO: avoid hard coding magic values
-        # +6 at the end for stream_id and time encoding
         return [
-            (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + stream_time_size
             for ds in self.streams_datasets.values()
         ]
 

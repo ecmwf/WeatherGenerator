@@ -8,13 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 
+from functools import cache
+
 import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import SampleMetaData
+from weathergen.datasets.healpix_geometry import HealpixGeometry
 from weathergen.datasets.masking import Masker
-from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
     encode_times_target,
@@ -44,12 +46,16 @@ class TokenizerMasking:
         self.masker = masker
         self.rng = None
         self.token_size = None
-        self._tokenizers: dict[int, Tokenizer] = {}
+        self.size_time_embedding = 6
 
-    def get_tokenizer(self, healpix_level: int) -> Tokenizer:
-        if healpix_level not in self._tokenizers:
-            self._tokenizers[healpix_level] = Tokenizer(healpix_level)
-        return self._tokenizers[healpix_level]
+    def get_size_time_embedding(self) -> int:
+        return self.size_time_embedding
+
+    @staticmethod
+    @cache
+    def get_geometry(healpix_level: int) -> HealpixGeometry:
+        """Return shared, read-only geometry cached by level for this process."""
+        return HealpixGeometry(healpix_level)
 
     def reset_rng(self, rng) -> None:
         """
@@ -139,7 +145,7 @@ class TokenizerMasking:
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
             idxs_cells, idxs_cells_lens, cell_mask
         )
-        tokenizer = self.get_tokenizer(stream_info["healpix_level"])
+        geometry = self.get_geometry(stream_info["healpix_level"])
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
             idxs_cells,
@@ -149,7 +155,7 @@ class TokenizerMasking:
             stream_info["stream_id"],
             rdata,
             time_win,
-            tokenizer.hpy_verts_rots_source[-1],
+            geometry.hpy_verts_rots[-1],
             encode_times_source,
         )
 
@@ -170,7 +176,7 @@ class TokenizerMasking:
             idxs_cells, idxs_cells_lens, cell_mask
         )
         healpix_level = stream_info["healpix_level"]
-        tokenizer = self.get_tokenizer(healpix_level)
+        geometry = self.get_geometry(healpix_level)
 
         # TODO: split up
         _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
@@ -182,9 +188,9 @@ class TokenizerMasking:
             mask_channels,
             rdata,
             time_win,
-            tokenizer.hpy_verts_rots_target,
-            tokenizer.hpy_verts_local_target,
-            tokenizer.hpy_nctrs_target,
+            geometry.hpy_verts_rots,
+            geometry.hpy_verts_local,
+            geometry.hpy_nctrs,
             encode_times_target,
         )
 
@@ -205,7 +211,7 @@ class TokenizerMasking:
             idxs_cells, idxs_cells_lens, cell_mask
         )
         healpix_level = stream_info["healpix_level"]
-        tokenizer = self.get_tokenizer(healpix_level)
+        geometry = self.get_geometry(healpix_level)
 
         data, datetimes, coords, _, _ = tokenize_apply_mask_target(
             stream_info["stream_id"],
@@ -216,9 +222,9 @@ class TokenizerMasking:
             mask_channels,
             rdata,
             time_win,
-            tokenizer.hpy_verts_rots_target,
-            tokenizer.hpy_verts_local_target,
-            tokenizer.hpy_nctrs_target,
+            geometry.hpy_verts_rots,
+            geometry.hpy_verts_local,
+            geometry.hpy_nctrs,
             encode_times_target,
         )
 
