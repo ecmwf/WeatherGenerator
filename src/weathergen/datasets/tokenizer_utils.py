@@ -394,25 +394,6 @@ def tokenize_apply_mask_target(
     return data, datetimes, coords, coords_local, masked_points_per_cell
 
 
-def compute_source_centroids(
-    source_tokens_cells: list[torch.Tensor], cell_centers: torch.Tensor
-) -> tuple[torch.Tensor, ...]:
-    source_means = [
-        (cell_centers[i].unsqueeze(0).repeat(len(s), 1) if len(s) > 0 else torch.tensor([]))
-        for i, s in enumerate(source_tokens_cells)
-    ]
-    source_means_lens = [len(s) for s in source_means]
-    # merge and split to vectorize computations
-    source_means = torch.cat(source_means)
-    # TODO: precompute also source_means_r3 and then just cat
-    source_centroids = torch.cat(
-        [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
-    )
-    source_centroids = torch.split(source_centroids, source_means_lens)
-
-    return source_centroids
-
-
 def get_source_coords_local(
     coords: Tensor,
     hpy_verts_rots: Tensor,
