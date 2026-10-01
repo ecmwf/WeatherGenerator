@@ -7,7 +7,6 @@ from typing import Any
 import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
-from pint import DimensionalityError, UnitRegistry
 
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_points
@@ -15,8 +14,6 @@ from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_poin
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-ureg = UnitRegistry()
-Q_ = ureg.Quantity
 """
 Usage:
 
@@ -355,10 +352,6 @@ class NetcdfParser(CfParser):
             xr.Dataset
                 Dataset with CF-compliant variable attributes.
         """
-        unit_conversion = {
-            "m": {"kg m**-2": 0.001},  # essentially converting m to mm as it is precip (water)
-            "W/m^2": {"J m**-2": 1 / (3600 * ds["forecast_step"])},
-        }
         variables = {}
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
@@ -376,19 +369,7 @@ class NetcdfParser(CfParser):
 
             wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
             std_unit = mapped_info.get("std_unit", None)
-            if ureg(wg_unit) != ureg(std_unit):
-                try:
-                    _logger.info(
-                        f"Converting {var_name} from {wg_unit} to {std_unit} for CF compliance."
-                    )
-                    da.values = Q_(da.values, ureg(wg_unit)).to(ureg(std_unit)).magnitude
-                except DimensionalityError as e:
-                    _logger.error(
-                        f"Error converting {var_name} from {wg_unit} to {std_unit}: {e}\
-                            ; using manual lookup"
-                    )
-                    if wg_unit in unit_conversion and std_unit in unit_conversion[wg_unit]:
-                        da = da * unit_conversion[wg_unit][std_unit]
+            self.convert_units(ds, da, wg_unit, std_unit)
 
             attributes = {
                 "standard_name": mapped_info.get("std", var_name),
@@ -440,11 +421,7 @@ class NetcdfParser(CfParser):
 
             wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
             std_unit = mapped_info.get("std_unit", None)
-            if ureg(wg_unit) != ureg(std_unit):
-                _logger.info(
-                    f"Converting {var_name} from {wg_unit} to {std_unit} for CF compliance."
-                )
-                da.values = Q_(da.values, ureg(wg_unit)).to(ureg(std_unit)).magnitude
+            self.convert_units(ds, da, wg_unit, std_unit)
 
             attributes = {
                 "standard_name": mapped_info.get("std", var_name),
