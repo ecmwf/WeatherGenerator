@@ -357,6 +357,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     n_processes = kwargs.n_processes
     epoch = kwargs.epoch
     rank = kwargs.rank
+    # OmegaConf wraps lists in ListConfig, which is not a `list` instance.
+    if OmegaConf.is_list(rank):
+        rank = list(rank)
     init_time_reference = kwargs.get("init_time_reference", "source_start")
     if init_time_reference not in ("source_start", "source_end"):
         raise ValueError(

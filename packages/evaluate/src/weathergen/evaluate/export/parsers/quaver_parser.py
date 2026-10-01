@@ -55,7 +55,8 @@ class QuaverParser(CfParser):
 
         self.template = str(
             Path(self.quaver_template_folder)
-            / f"aifs_{{level_type}}_{self.quaver_template_grid_type}_data.grib"
+            # Template files are named in lowercase, e.g. aifs_pl_o96_data.grib.
+            / f"aifs_{{level_type}}_{self.quaver_template_grid_type.lower()}_data.grib"
         )
 
         self.pl_template = ekd.from_source("file", self.template.format(level_type="pl"))
