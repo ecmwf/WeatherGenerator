@@ -7,6 +7,7 @@ import earthkit.data as ekd
 import numpy as np
 import pandas as pd
 import xarray as xr
+from numpy.typing import NDArray
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
@@ -100,12 +101,12 @@ class QuaverParser(CfParser):
         accum_vars = {
             var
             for var in self.channels
-            if self.mapping.get(var, self.mapping.get(var.split("_")[0] if "_" in var else var, {})).get(
-                "accumulate", False
-            )
+            if self.mapping.get(
+                var, self.mapping.get(var.split("_")[0] if "_" in var else var, {})
+            ).get("accumulate", False)
         }
         # Running accumulator: {var_name: 1D numpy array}
-        accum_state: dict[str, np.ndarray] = {}
+        accum_state: dict[str, NDArray] = {}
 
         if accum_vars:
             _logger.info(f"Accumulating total precipitation for variables: {accum_vars}")
@@ -261,8 +262,7 @@ class QuaverParser(CfParser):
         # rank_label is the zero-padded rank of the source zarr file, e.g. "0000".
         rank_tag = f"_rank{rank_label}" if rank_label else ""
         return (
-            Path(self.output_dir)
-            / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}"
+            Path(self.output_dir) / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}"
             f"{rank_tag}.{self.file_extension}"
         )
 
@@ -315,7 +315,9 @@ class QuaverParser(CfParser):
 
         # Override paramId if specified in the variable config.
         if var is not None:
-            var_config = self.mapping.get(var, self.mapping.get(var.split("_")[0] if "_" in var else var, {}))
+            var_config = self.mapping.get(
+                var, self.mapping.get(var.split("_")[0] if "_" in var else var, {})
+            )
             param_id = var_config.get("paramId")
             if param_id is not None:
                 metadata["paramId"] = param_id
