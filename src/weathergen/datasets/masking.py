@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
+from weathergen.datasets.utils import hp_level_to_num_cells
 from weathergen.train.utils import Stage
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
@@ -337,7 +338,7 @@ class Masker:
         """
 
         healpix_level = stream_info["healpix_level"]
-        num_cells = 12 * 4**healpix_level
+        num_cells = hp_level_to_num_cells(healpix_level)
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
         # # target and source configs
@@ -535,7 +536,7 @@ class Masker:
         # params describing the masking
         masking_params = {}
 
-        num_cells = 12 * 4**healpix_level
+        num_cells = hp_level_to_num_cells(healpix_level)
 
         # generate cell mask
 
@@ -637,7 +638,7 @@ class Masker:
             crop1 = _select_spatially_contiguous_cells(0, 9, method="geodesic_disk")
         """
 
-        num_total_cells = 12 * (4**healpix_level)
+        num_total_cells = hp_level_to_num_cells(healpix_level)
         nside = 2**healpix_level
 
         assert num_cells_to_select <= num_total_cells
@@ -781,7 +782,7 @@ class Masker:
         assert hl_mask is not None and hl_mask <= healpix_level, (
             "For healpix keep mask generation, cfg['hl_mask'] must be set and <= data level."
         )
-        num_parent_cells = 12 * (4**hl_mask)
+        num_parent_cells = hp_level_to_num_cells(hl_mask)
         level_diff = healpix_level - hl_mask
         num_children_per_parent = 4**level_diff
         # number of parents to keep

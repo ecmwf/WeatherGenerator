@@ -13,6 +13,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config, get_healpix_level
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.utils import hp_level_to_num_cells
 from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
@@ -25,7 +26,6 @@ from weathergen.model.engines import (
 # from weathergen.model.model import ModelParams
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.positional_encoding import positional_encoding_harmonic
-from weathergen.datasets.utils import hp_level_to_num_cells
 
 
 class EncoderModule(torch.nn.Module):
