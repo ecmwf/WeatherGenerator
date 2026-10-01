@@ -178,7 +178,7 @@ class Regridder:
             # find type of Gaussian grid
             n_lats = len(set(lat_ds)) // 2  ## UNEXPECTED LOGIC
             num_cells = len(ds["ncells"])
-            if num_cells == 4 * n_lats* (n_lats + 9):
+            if num_cells == 4 * n_lats * (n_lats + 9):
                 return f"O{n_lats}"
             else:
                 return f"N{n_lats}"

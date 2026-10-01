@@ -535,10 +535,12 @@ class ZarrIO:
         else:
             return all_steps
 
-    def validate_stream(self, sample: str, stream:str, candidate: zarr.Group) -> bool:
+    def validate_stream(self, sample: str, stream: str, candidate: zarr.Group) -> bool:
         """Check if a stream exists and has non zero time data in fsteps"""
         if list(candidate.group_keys()):
-            item_path = ItemKey(sample, forecast_step=list(candidate.group_keys())[0], stream=stream).path
+            item_path = ItemKey(
+                sample, forecast_step=list(candidate.group_keys())[0], stream=stream
+            ).path
             fstep_data = self.data_root.get(item_path)
             available_arrays = next(fstep_data.group_keys())
             array_data = self.data_root.get(item_path + "/" + available_arrays)

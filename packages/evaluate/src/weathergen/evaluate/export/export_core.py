@@ -200,7 +200,11 @@ def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
         # if target doesn't exist, try prediction
-        all_channels = dummy_out.prediction.channels if dummy_out.prediction is not None else dummy_out.target.channels
+        all_channels = (
+            dummy_out.prediction.channels
+            if dummy_out.prediction is not None
+            else dummy_out.target.channels
+        )
         if channels is not None:
             channels = list(channels)
             # "10ff" (10m wind speed) is derived from its u/v components, so
