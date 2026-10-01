@@ -502,7 +502,9 @@ class ZarrIO:
             if candidate is None:
                 msg = f"No stream with forecast steps found in {self._store_path}"
                 raise FileNotFoundError(msg)
-            fstep = 1
+            fstep = list(example_stream.keys())[0]
+            if int(fstep) > 1:
+                _logger.warning("First fstep > 1. This is unexpected.")
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
@@ -528,7 +530,10 @@ class ZarrIO:
         _, example_stream = next(example_sample.groups())
 
         all_steps = sorted(list(example_stream.group_keys()))
-        return all_steps
+        if self.forecast_offset == 1:
+            return all_steps[1:]  # exclude fstep with no targets/preds
+        else:
+            return all_steps
 
     def validate_stream(self, sample: str, stream:str, candidate: zarr.Group) -> bool:
         """Check if a stream exists and has non zero time data in fsteps"""

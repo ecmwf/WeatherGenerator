@@ -14,8 +14,6 @@ from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_poin
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-FORECAST_STEP_WINDOW = 6  # Window size for each forecast step in hours
-
 """
 Usage:
 
@@ -106,8 +104,6 @@ class NetcdfParser(CfParser):
                     "Check that inference was not performed with masking"
                 )
             da_fs = self.concatenate(da_fs)
-            if ref_time is None:
-                ref_time = np.datetime64(da_fs.valid_time.values[0] - np.timedelta64((da_fs.forecast_step.values[0]) * FORECAST_STEP_WINDOW, "h"))
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
             da_fs = self.add_metadata(da_fs)
@@ -288,7 +284,8 @@ class NetcdfParser(CfParser):
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
 
-        ds["forecast_step"] = ds["valid_time"] - ds["forecast_reference_time"]
+        n_hours = self.fstep_hours.astype("int64")
+        ds["forecast_step"] = ds["forecast_step"] * n_hours
         return ds
 
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:
@@ -335,11 +332,10 @@ class NetcdfParser(CfParser):
         if "forecast_reference_time" in ds.coords:
             ds["forecast_reference_time"].encoding.update(time_encoding)
 
-        # if "forecast_period" in ds.coords:
-        #     ds["forecast_period"].attrs.update(
-        #         {"coordinates": "forecast_reference_time"}
-        #          #, "dtype": "timedelta64[ns]"}
-        #     )
+        if "forecast_period" in ds.coords:
+            ds["forecast_period"].attrs.update(
+                {"coordinates": "forecast_reference_time", "dtype": "timedelta64[ns]"}
+            )
 
         return ds
 
