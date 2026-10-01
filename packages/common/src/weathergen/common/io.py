@@ -502,7 +502,7 @@ class ZarrIO:
             if candidate is None:
                 msg = f"No stream with forecast steps found in {self._store_path}"
                 raise FileNotFoundError(msg)
-            fstep = list(example_stream.keys())[0]
+            fstep = list(candidate.keys())[0]
             if int(fstep) > 1:
                 _logger.warning("First fstep > 1. This is unexpected.")
         except StopIteration as e:
