@@ -459,22 +459,29 @@ class StreamData:
         return len(self.target_tokens)
 
 
-def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderData:
+def spoof(healpix_level: int, datetime, geoinfo_size, num_channels, domain=None) -> IOReaderData:
     """
     Spoof an instance from data_reader_base.ReaderData instance.
     other should be such an instance.
+
+    With a regional `domain`, the spoofed points are placed at centres of active cells:
+    they exist to keep tensors non-empty, and the tokenizer drops out-of-domain points.
     """
 
-    dx = 0.5
-    dy = 0.5
-    num_healpix_cells = 12 * 4**healpix_level
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
-    )
-
-    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+    if domain is not None and not domain.is_global:
+        lons_deg, lats_deg = domain.centres_lonlat()
+        coords = np.stack([lats_deg, lons_deg], axis=-1).astype(np.float32)
+    else:
+        dx = 0.5
+        dy = 0.5
+        num_healpix_cells = 12 * 4**healpix_level
+        lons, lats = hp.healpix_to_lonlat(
+            np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
+        )
+        coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
     # spoof two tokens to avoid unnecessary computational load
-    coords = coords[np.random.choice(coords.shape[0], size=2, replace=False)]
+    n_spoof = min(2, coords.shape[0])
+    coords = coords[np.random.choice(coords.shape[0], size=n_spoof, replace=False)]
 
     geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
     data = np.zeros((coords.shape[0], num_channels), dtype=np.float32)

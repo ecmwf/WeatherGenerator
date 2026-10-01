@@ -212,6 +212,26 @@ class ReaderData:
             self.datetimes[idx_valid],
         )
 
+    def crop_to_domain(self, domain) -> "ReaderData":
+        """
+        Remove all data points that do not fall into an active cell of `domain`.
+
+        No-op (returns self) if domain is None or global.
+        """
+        if domain is None or domain.is_global or len(self.coords) == 0:
+            return self
+
+        idx_valid = domain.point_mask(self.coords[:, 0], self.coords[:, 1])
+        if idx_valid.all():
+            return self
+
+        return ReaderData(
+            self.coords[idx_valid],
+            self.geoinfos[idx_valid],
+            self.data[idx_valid],
+            self.datetimes[idx_valid],
+        )
+
     def shuffle(self, rng, shuffle: bool, num_subset: int) -> "ReaderData":
         """
         Drop a random subset of points as specified by num_subset
