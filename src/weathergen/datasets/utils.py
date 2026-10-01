@@ -227,6 +227,7 @@ def coords_to_hpyidxs(hl, thetas, phis):
 
     return hpyidxs
 
+
 ####################################################################################################
 def hp_level_to_num_cells(hp_level: int) -> int:
     nside = 2**hp_level
@@ -260,6 +261,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     aa = aa.flatten(1, 2)
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + aa.shape[-1])] = aa
     return a
+
 
 def get_tokens_lens(
     streams_names: list[str], batch_data: BatchSamples, input_steps: int
