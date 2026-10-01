@@ -202,6 +202,14 @@ def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
         # if target doesn't exist, try prediction
         all_channels = dummy_out.prediction.channels if dummy_out.prediction is not None else dummy_out.target.channels
         if channels is not None:
+            channels = list(channels)
+            # "10ff" (10m wind speed) is derived from its u/v components, so
+            # make sure both are exported whenever "10ff" is requested.
+            if "10ff" in channels:
+                for component in ("10u", "10v"):
+                    if component not in channels:
+                        channels.append(component)
+
             existing_channels = set(all_channels) & set(channels)
             if existing_channels != set(channels):
                 missing_channels = set(channels) - set(existing_channels)
@@ -236,7 +244,9 @@ def get_grid_type(data_type, stream: str, fname_zarr: str) -> str:
 
 
 # TODO: this will change after restructuring the lead time.
-def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], list[np.datetime64]]:
+def get_source_info(
+    fname_zarr, stream, samples, fstep_hours: int = 6
+) -> tuple[list[np.datetime64], list[np.datetime64]]:
     """
     Retrieve source interval boundaries from the source group at forecast step 0.
 
@@ -248,6 +258,11 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
     The true forecast initialisation (reference) time is either ``source_start``
     or ``source_end``, selected via the ``init_time_reference`` option.
 
+    If the store has no ``source`` group (e.g. prediction-only stores with
+    ``forecast_offset=1``), the reference time is derived from the earliest
+    available ``prediction`` group instead: its valid time minus the lead
+    time (``fstep * fstep_hours``) gives the initialisation time.
+
     Parameters
     ----------
     fname_zarr : str
@@ -256,6 +271,10 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
         Stream name to retrieve data for (e.g., 'ERA5').
     samples : list
         List of samples to process.
+    fstep_hours : int
+        Number of hours between consecutive forecast steps. Used to convert
+        a prediction's valid time back to the initialisation time when no
+        source group is present.
 
     Returns
     -------
@@ -268,16 +287,35 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
     source_starts = []
     source_ends = []
     with zarrio_reader(fname_zarr) as zio:
+        available_fsteps = sorted(int(step) for step in zio.forecast_steps)
         for sample in tqdm(samples, desc="Getting source info"):
-            group_path = f"{sample}/{stream}/0/source"
-            source_group = zio.data_root.get(group_path)
+            source_group = zio.data_root.get(f"{sample}/{stream}/0/source")
 
-            if source_group is None:
-                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
-
-            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
-            source_start = np.min(times_arr)
-            source_end = np.max(times_arr)
+            if source_group is not None:
+                times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
+                source_start = np.min(times_arr)
+                source_end = np.max(times_arr)
+            else:
+                # Prediction-only store (forecast_offset=1): no source group.
+                # Derive the init time from the earliest available prediction
+                # group.
+                pred_group = None
+                for fstep in available_fsteps:
+                    candidate = zio.data_root.get(f"{sample}/{stream}/{fstep}/prediction")
+                    if candidate is not None:
+                        pred_group = candidate
+                        break
+                if pred_group is None:
+                    raise FileNotFoundError(
+                        f"No 'source' group and no 'prediction' group found for "
+                        f"sample {sample}, stream '{stream}' in {fname_zarr}"
+                    )
+                times_arr = np.asarray(pred_group["times"]).astype("datetime64[ns]")
+                # The init (reference) time is one forecast step before the
+                # earliest prediction valid time: init = min(times) - fstep_hours.
+                lead = np.timedelta64(fstep_hours, "h").astype("timedelta64[ns]")
+                source_start = np.min(times_arr) - lead
+                source_end = np.min(times_arr) - lead
 
             _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
             source_starts.append(source_start)
@@ -319,6 +357,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     n_processes = kwargs.n_processes
     epoch = kwargs.epoch
     rank = kwargs.rank
+    # OmegaConf wraps lists in ListConfig, which is not a `list` instance.
+    if OmegaConf.is_list(rank):
+        rank = list(rank)
     init_time_reference = kwargs.get("init_time_reference", "source_start")
     if init_time_reference not in ("source_start", "source_end"):
         raise ValueError(
@@ -357,7 +398,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             _logger.info(f"RUN {run_id}: Processing rank {rank_label} ({rank_file.name})")
 
             samples = get_samples(samples_cfg, rank_file)
-            source_starts, source_ends = get_source_info(rank_file, stream, samples)
+            source_starts, source_ends = get_source_info(
+                rank_file, stream, samples, fstep_hours=kwargs.get("fstep_hours", 6)
+            )
 
             kwargs["rank_label"] = rank_label
             parser = CfParserFactory.get_parser(config=config, **kwargs)
@@ -412,7 +455,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                     for global_s, _fstep, data in pool.imap_unordered(
                         get_data_worker, batch_tasks, chunksize=1
                     ):
-                        sample_results[global_s].append(data)
+                        sample_results[global_s].append((_fstep, data))
                         pbar.update(1)
 
                         # Check if this sample is complete (all fsteps received).
@@ -429,8 +472,10 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                                 if init_time_reference == "source_start"
                                 else source_end
                             )
+                            # Sort by forecast step so accumulation is in order.
+                            sample_results[global_s].sort(key=lambda x: x[0])
                             processed_sample = parser.process_sample(
-                                iter(sample_results[global_s]),
+                                iter([d for _, d in sample_results[global_s]]),
                                 ref_time=init_time,
                                 source_interval_start=source_start,
                                 source_interval_end=init_time,

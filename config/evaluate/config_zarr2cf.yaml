@@ -1,61 +1,98 @@
 # This file controls the conversion from Zarr format to CF-compliant NetCDF files in weathergen.evaluate.zarr_nc.zarr_to_netcdf.
 # It defines the mapping of variable and dimension names, their standard names, units, and level types.
+
+# unit information collated from:
+# NORA3; https://thredds.met.no/thredds/dodsC/nora3/2026/01/17/12/fc2026011712_003.nc.html
+# CERRA: https://confluence.ecmwf.int/spaces/CKB/pages/272323672/Copernicus+European+Regional+ReAnalysis+CERRA+product+user+guide#CopernicusEuropeanRegionalReAnalysis(CERRA):productuserguide-Parametersonsinglelevel
+# ERA5: https://confluence.ecmwf.int/spaces/CKB/pages/76414402/ERA5+data+documentation#ERA5:datadocumentation-Parameterlistings
+# MEPS: https://thredds.met.no/thredds/dodsC/nora3/2026/01/17/12/fc2026011712_003.nc
+
+# Unit conversions applied using https://confluence.ecmwf.int/spaces/CKB/pages/197702790/Conversion+table+for+accumulated+variables+total+precipitation+fluxes
 variables:
   q:
     var: q
     long: specific_humidity_at_pressure_levels
     std: specific_humidity
-    wg_unit: kg kg**-1
-    std_unit: kg kg-1
+    wg_unit: { CERRA:   percent ,
+               NORA3:   kg kg**-1,
+               MEPS:    kg kg**-1,
+               ERA5:    kg kg**-1,
+               DEFAULT: kg kg**-1}
+    std_unit: kg kg**-1
     level_type: pl
   t:
     var: t
     long: temperature_at_pressure_levels
     std: air_temperature
-    wg_unit: K
+    wg_unit: {CERRA:    K,
+               NORA3:   K,
+               MEPS:    K,
+               ERA5:    K,
+               DEFAULT: K}
     std_unit: K
     level_type: pl
   u:
     var: u
     long: u_wind_at_pressure_levels
     std: x_wind
-    wg_unit: m s**-1
-    std_unit: m s-1
+    wg_unit: {CERRA:    m/s,
+               NORA3:   m/s,
+               MEPS:    m/s,
+               ERA5:    m/s,
+               DEFAULT: m/s}
+    std_unit: m s**-1
     level_type: pl
   v:
     var: v
     long: v_wind_at_pressure_levels
     std: y_wind
-    wg_unit: m s**-1
-    std_unit: m s-1
+    wg_unit: {CERRA:    m/s,
+               NORA3:   m/s,
+               MEPS:    m/s,
+               ERA5:    m/s,
+               DEFAULT: m/s}
+    std_unit: m s**-1
     level_type: pl
   z:
     var: z
     long: geopotential_at_pressure_levels
     std: geopotential
-    wg_unit: m**2 s**-2
-    std_unit: m2 s-2
+    wg_unit: {CERRA:    m^2/s^2,
+               NORA3:   m^2/s^2,
+               MEPS:    m^2/s^2,
+               ERA5:    m^2/s^2,
+               DEFAULT: m^2/s^2}
+    std_unit: m**2 s**-2
     level_type: pl
-    scale_factor: 1.0 #0.10197 #1/9.80665
+    scale_factor: 1.0 #0.10197 #1/9.80665 used for quaver
   10u:
     var: u10
     long: u_wind_at_10m
     std: x_wind
-    wg_unit: m s**-1
-    std_unit: m s-1
+    wg_unit: {CERRA:    m/s,
+               NORA3:   m/s,
+               ERA5:    m/s,
+               MEPS:    m/s,
+               DEFAULT: m/s}
+    std_unit: m s**-1
     level_type: sfc
   10v:
     var: v10
     long: v_wind_at_10m
     std: y_wind
-    wg_unit: m s**-1
-    std_unit: m s-1
+    wg_unit: {CERRA:    m/s,
+               NORA3:   m/s,
+               MEPS:    m/s,
+               ERA5:    m/s,
+               DEFAULT: m/s}
+    std_unit: m s**-1
     level_type: sfc
   2d:
     var: d2m
     long: dew_point_temperature_at_screen_level
     std: dew_point_temperature
-    wg_unit: K
+    wg_unit: {ERA5:    K,
+               DEFAULT: K}
     std_unit: K
     level_type: sfc
   2t:
@@ -63,14 +100,22 @@ variables:
     long: temperature_at_screen_level
     std: air_temperature
     #near-surface (usually, 2 meter) : https://pcmdi.llnl.gov/mips/cmip3/variableList.html
-    wg_unit: K
+    wg_unit: {CERRA:   K,
+               MEPS:    K,
+               NORA3:   K,
+               ERA5:    K,
+               DEFAULT: K}
     std_unit: K
     level_type: sfc
   msl:
     var: msl
     long: mean_sea_level_pressure
     std: air_pressure_at_mean_sea_level
-    wg_unit: Pa
+    wg_unit: {CERRA:   Pa,
+               MEPS:    Pa,
+               NORA3:   Pa,
+               ERA5:    Pa,
+               DEFAULT: Pa}
     std_unit: Pa
     level_type: sfc
   skt:
@@ -79,78 +124,114 @@ variables:
   # It is strongly recommended that a variable with this standard name should have a units_metadata attribute, with one of the values "on-scale" or "difference", whichever is appropriate for the data, because it is essential to know whether the temperature is on-scale (meaning relative to the origin of the scale indicated by the units) or refers to temperature differences (implying that the origin of the temperature scale is irrevelant)
     long: skin_temperature
     std: sea_surface_skin_temperature
-    wg_unit: K
+    wg_unit: {CERRA:   K,
+               ERA5:    K,
+               DEFAULT: K}
     std_unit: K
     level_type: sfc
   sp:
     var: sp
     long: surface_pressure
     std: surface_air_pressure
-    wg_unit: Pa
+    wg_unit: {CERRA:   Pa,
+               MEPS:    Pa,
+               NORA3:   Pa,
+               ERA5:    Pa,
+               DEFAULT: Pa}
     std_unit: Pa
     level_type: sfc
+  #kg*m-2*s-1 is the same number as mm*s-1 
   tp:
     var: tp
     long: total_precipitation
     std: precipitation_amount
-    wg_unit: m
-    std_unit: m
+    wg_unit: {CERRA:   kg/m^2,
+               NORA3:   kg/m^2,
+               MEPS:    kg/m^2,
+               ERA5:    m,
+               DEFAULT: kg/m^2}
+    std_unit: kg m**-2
     level_type: sfc
+    accumulate: true
+    paramId: 228
   cp:
     var: cp
     long: convective_precipitation
     std: convective_precipitation_amount
-    wg_unit: m
-    std_unit: m
+    wg_unit: {ERA5:    m,
+               DEFAULT: kg/m^2}
+    std_unit: kg m**-2
     level_type: sfc 
   tp_imerg_0:
     var: tp_imerg_0
     long: imerg_total_precipitation
     std: precipitation_amount
-    wg_unit: m
-    std_unit: m
+    wg_unit: {IMERG:  m,
+               DEFAULT: m}
+    std_unit: kg m-2
     level_type: sfc
+    accumulate: true
+    paramId: 228
   hcc:
     var: hcc
     long: high_cloud_cover
     std: cloud_area_fraction_high
-    wg_unit: 1
+    wg_unit: {CERRA:   percent,
+               NORA3:   1,
+               ERA5:    1,
+               DEFAULT: 1}
     std_unit: 1
     level_type: sfc
   mcc:
     var: mcc
     long: medium_cloud_cover
     std: cloud_area_fraction_medium
-    wg_unit: 1
+    wg_unit: {CERRA:   percent,
+               NORA3:   1,
+               ERA5:    1,
+               DEFAULT: 1}
     std_unit: 1
     level_type: sfc
   lcc:
     var: lcc
     long: low_cloud_cover
     std: cloud_area_fraction_low
-    wg_unit: 1
+    wg_unit: {CERRA:   percent,
+               NORA3:   1,
+               ERA5:    1,
+               DEFAULT: 1}
     std_unit: 1
     level_type: sfc
   tcc:
     var: tcc
     long: total_cloud_cover
     std: cloud_area_fraction
-    wg_unit: 1
+    wg_unit: {CERRA:   percent,
+               MEPS:    1,
+               NORA3:   1,
+               ERA5:    1,
+               DEFAULT: 1}
     std_unit: 1
     level_type: sfc
   strd:
     var: strd
     long: surface_thermal_radiation_downwards
     std: surface_downwelling_longwave_flux_in_air
-    wg_unit: J m**-2
+    wg_unit: {CERRA:   J m-2,
+               NORA3:   W/m^2,
+               ERA5:    J m-2,
+               DEFAULT: J m-2}
     std_unit: J m-2
     level_type: sfc
   ssrd:
     var: ssrd
     long: surface_solar_radiation_downwards
     std: surface_downwelling_shortwave_flux_in_air
-    wg_unit: J m**-2
-    std_unit: J m-2
+    wg_unit: {CERRA:   J m-2,
+               NORA3:   W/m^2,
+               ERA5:    J m-2,
+               DEFAULT: J m-2}
+    std_unit: J m**-2
     level_type: sfc
 
 coordinates:
