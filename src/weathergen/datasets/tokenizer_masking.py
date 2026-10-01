@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from functools import cache
 
 import numpy as np
 import torch
@@ -47,15 +46,16 @@ class TokenizerMasking:
         self.rng = None
         self.token_size = None
         self.size_time_embedding = 6
+        self._geometries: dict[int, HealpixGeometry] = {}
 
     def get_size_time_embedding(self) -> int:
         return self.size_time_embedding
 
-    @staticmethod
-    @cache
-    def get_geometry(healpix_level: int) -> HealpixGeometry:
-        """Return shared, read-only geometry cached by level for this process."""
-        return HealpixGeometry(healpix_level)
+    def get_geometry(self, healpix_level: int) -> HealpixGeometry:
+        """Return read-only geometry cached by level for this tokenizer."""
+        if healpix_level not in self._geometries:
+            self._geometries[healpix_level] = HealpixGeometry(healpix_level)
+        return self._geometries[healpix_level]
 
     def reset_rng(self, rng) -> None:
         """

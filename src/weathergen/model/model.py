@@ -23,7 +23,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config, get_healpix_level
 from weathergen.datasets.batch import ModelBatch
-from weathergen.datasets.utils import healpix_verts_rots, r3tos2, hp_level_to_num_cells
+from weathergen.datasets.utils import healpix_verts_rots, hp_level_to_num_cells, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
