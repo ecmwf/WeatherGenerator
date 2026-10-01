@@ -15,7 +15,7 @@ import torch
 
 from weathergen.datasets.utils import (
     healpix_verts_rots,
-    hplevel_to_num_cells,
+    hp_level_to_num_cells,
     r3tos2,
 )
 
@@ -32,8 +32,8 @@ class Tokenizer:
         self.hl_source = healpix_level
         self.hl_target = healpix_level
 
-        self.num_healpix_cells_source = hplevel_to_num_cells(self.hl_source)
-        self.num_healpix_cells_target = hplevel_to_num_cells(self.hl_target)
+        self.num_healpix_cells_source = hp_level_to_num_cells(self.hl_source)
+        self.num_healpix_cells_target = hp_level_to_num_cells(self.hl_target)
 
         self.size_time_embedding = 6
 
@@ -102,7 +102,7 @@ class Tokenizer:
 
         # add local coords wrt to center of neighboring cells
         # (since the neighbors are used in the prediction)
-        num_healpix_cells = hplevel_to_num_cells(self.hl_target)
+        num_healpix_cells = hp_level_to_num_cells(self.hl_target)
         with warnings.catch_warnings(action="ignore"):
             temp = hp.neighbours(
                 np.arange(num_healpix_cells), 2**self.hl_target, order="nested"

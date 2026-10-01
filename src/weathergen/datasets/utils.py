@@ -228,7 +228,7 @@ def coords_to_hpyidxs(hl, thetas, phis):
     return hpyidxs
 
 ####################################################################################################
-def hplevel_to_num_cells(hp_level: int) -> int:
+def hp_level_to_num_cells(hp_level: int) -> int:
     nside = 2**hp_level
     return 12 * nside * nside
 
