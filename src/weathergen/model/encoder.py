@@ -25,6 +25,7 @@ from weathergen.model.engines import (
 # from weathergen.model.model import ModelParams
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.positional_encoding import positional_encoding_harmonic
+from weathergen.datasets.utils import hp_level_to_num_cells
 
 
 class EncoderModule(torch.nn.Module):
@@ -42,7 +43,7 @@ class EncoderModule(torch.nn.Module):
         self.cf = cf
 
         self.healpix_level = get_healpix_level(cf)
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        self.num_healpix_cells = hp_level_to_num_cells(self.healpix_level)
 
         self.cf = cf
         self.sources_size = sources_size
