@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -63,15 +62,6 @@ class DiagonalGaussianDistribution:
                     + other.logvar,
                     dim=self.sum_dims,
                 )
-
-    def nll(self, sample, dims=None):
-        if self.deterministic:
-            return torch.Tensor([0.0])
-        logtwopi = np.log(2.0 * np.pi)
-        return 0.5 * torch.sum(
-            logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
-            dim=dims or self.sum_dims,
-        )
 
     def mode(self):
         return self.mean

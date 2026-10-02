@@ -21,10 +21,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def lossfunc(t, s, temp):
-    return torch.sum(t * F.log_softmax(s / temp, dim=-1), dim=-1)
-
-
 class iBOTPatchTargetProcessing(nn.Module):
     """
     Code taken and adapted from the official DINOv2 implementation

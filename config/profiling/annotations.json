@@ -88,7 +88,7 @@
       "domain": "WeatherGen",
       "color": "5DE82E",
       "module": "weathergen.model.positional_encoding",
-      "functions": ["positional_encoding_harmonic","positional_encoding_harmonic_idx","positional_encoding_harmonic_global","positional_encoding_harmonic_coord","rotary_pos_emb_2d"]
+      "functions": ["positional_encoding_harmonic","rotary_pos_emb_2d"]
     },
     {
       "domain": "WeatherGen",

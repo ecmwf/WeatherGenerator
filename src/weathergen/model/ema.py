@@ -58,10 +58,6 @@ class EMAModel:
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
         self.ema_model.eval()
 
-    def requires_grad_(self, flag: bool):
-        for p in self.ema_model.parameters():
-            p.requires_grad = flag
-
     def get_current_beta(self, cur_step: int) -> float:
         """
         Get current EMA beta value for monitoring.

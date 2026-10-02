@@ -143,35 +143,6 @@ class EmbeddingEngine(torch.nn.Module):
 
         return pe_idxs
 
-    def get_scatter_idxs(self, batch):
-        """
-        Compute reordering index so that tokens from different streams but same cell are
-        continguous
-
-        Simple version (reference implementation)
-        """
-
-        dev = batch.get_device()
-        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
-        # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
-
-        scatter_idxs = []
-        for i in range(len(tok_counts)):
-            for j in range(tok_counts.shape[1]):
-                if tok_counts[i, j] == 0:
-                    continue
-                # offset from preceding cells
-                offset = tok_counts[:, :j].flatten().sum()
-                # offset from preceding streams in cells
-                offset += tok_counts[:i, j].sum()
-                # scatter idxs is offset and idxs for all tokens in cell for current stream
-                scatter_idxs += [offset[i, j] + torch.arange(tok_counts[i, j], device=dev)]
-
-        scatter_idxs = torch.cat(scatter_idxs).to(torch.int64)
-
-        return scatter_idxs
-
     def get_scatter_idxs_vectorized(self, batch):
         """
         Compute reordering index so that tokens from different streams but same cell are
