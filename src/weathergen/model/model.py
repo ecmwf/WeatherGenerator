@@ -327,7 +327,10 @@ class Model(torch.nn.Module):
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
-        self.streams: dict[str, typing.Any] = cf.streams
+        self.streams: dict[str, typing.Any] = {
+            k: v for k, v in cf.streams.items() if not v.get("timestep_conditioning")
+        }
+
         self.target_token_engines = None
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
