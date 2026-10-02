@@ -208,7 +208,7 @@ class ReaderData:
         return ReaderData(
             self.coords[idx_valid],
             self.geoinfos[idx_valid],
-            self.data[idx_valid],
+            self.data[idx_valid] if len(self.data) > 0 else self.data,
             self.datetimes[idx_valid],
         )
 
