@@ -18,7 +18,7 @@ def convert_coordinates(coords: np.typing.NDArray) -> np.typing.NDArray:
     Convert lat-lon coordinates to cartesian coordinates in a unit box
     """
 
-    xyz_coords = np.empty((coords.shape[0], 3), dtype="float32")
+    xyz_coords = np.empty((coords.shape[0], 3), dtype="float64")
 
     xyz_coords[:, 0] = np.cos(np.pi * coords[:, 0] / 180.0) * np.cos(np.pi * coords[:, 1] / 180.0)
     xyz_coords[:, 1] = np.cos(np.pi * coords[:, 0] / 180.0) * np.sin(np.pi * coords[:, 1] / 180.0)
@@ -54,7 +54,7 @@ class Verif2DInterpolator(VerifInterpolator):
         grid_xyz = convert_coordinates(grid_points)
         obs_xyz = convert_coordinates(obs_points)
 
-        self.indices = np.empty((obs_points.shape[0], 5), dtype="float32")
+        self.indices = np.empty((obs_points.shape[0], 5), dtype="int32")
         tree = KDTree(grid_xyz)
         _, self.indices = tree.query(obs_xyz, k=5)
 
