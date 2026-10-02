@@ -56,6 +56,13 @@ class WeatherGenMergeReader(Reader):
         self.run_ids = eval_cfg.get("merge_run_ids", [])
         self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir"))
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
+        # "mean": reduce each merged run to its ensemble mean before stacking over a new
+        # virtual 'ens' dim (one entry per merged run, e.g. per case/date) - the original
+        # behaviour. "all": keep each merged run's native ensemble members and stack the
+        # runs over a separate 'case' dim instead, so metrics average over both the real
+        # ensemble members and the merged runs (e.g. to get a member-averaged score across
+        # many independent per-case runs).
+        self.merge_ensemble = eval_cfg.get("merge_ensemble", "mean")
 
         assert self.run_ids, (
             f"'merge_run_ids' must be non-empty in eval_cfg, but got: {self.run_ids}"
@@ -134,7 +141,7 @@ class WeatherGenMergeReader(Reader):
                 samples,
                 fsteps,
                 channels,
-                ensemble="mean",
+                ensemble=self.merge_ensemble,
             )
 
             for fstep in out.target.keys():
@@ -173,9 +180,13 @@ class WeatherGenMergeReader(Reader):
         Returns
         -------
         dict[int, xr.DataArray]
-            DataArrays concatenated over new 'ens' dimension, keyed by fstep.
+            DataArrays concatenated over a new dimension, keyed by fstep. Stacked over 'ens'
+            when each merged run was reduced to its ensemble mean (merge_ensemble == "mean"),
+            or over 'case' when each merged run's native 'ens' dim was preserved, to avoid
+            colliding with it.
         """
         n_readers = len(da_merge)
+        concat_dim = "ens" if self.merge_ensemble == "mean" else "case"
 
         # use fsteps from first reader as reference
         fsteps = fsteps_merge[0]
@@ -183,7 +194,9 @@ class WeatherGenMergeReader(Reader):
         da_ens = {}
         for k, fstep in enumerate(fsteps):
             da_list = [da_merge[i][k] for i in range(n_readers)]
-            da_ens[fstep] = xr.concat(da_list, dim="ens").assign_coords(ens=range(n_readers))
+            da_ens[fstep] = xr.concat(da_list, dim=concat_dim).assign_coords(
+                {concat_dim: range(n_readers)}
+            )
 
         return da_ens
 
@@ -306,17 +319,29 @@ class WeatherGenMergeReader(Reader):
 
         Returns
         -------
-            A range of ensemble members equal to the number of merged readers.
+            If merge_ensemble == "mean": a range of ensemble members equal to the number of
+            merged readers (one virtual member per merged run).
+            Otherwise: the (shared) native ensemble member labels of the merged readers,
+            since each run's real 'ens' dim is preserved and merging happens over 'case'.
         """
         _logger.debug(f"Getting ensembles for stream {stream}...")
         all_ensembles = []
         for reader in self.readers:
             all_ensembles.append(reader.get_ensemble(stream))
 
-        assert all(e == ["0"] or e == [0] or e == {0} for e in all_ensembles), (
-            "Merging readers with multiple ensemble members is not supported yet."
+        if self.merge_ensemble == "mean":
+            assert all(e == ["0"] or e == [0] or e == {0} for e in all_ensembles), (
+                "Merging readers with multiple ensemble members into a synthetic 'ens' dim "
+                "requires merge_ensemble: 'mean' and each merged reader to have a single "
+                "ensemble member. Use merge_ensemble: 'all' to preserve native members."
+            )
+            return set(range(len(self.readers)))
+
+        assert all(e == all_ensembles[0] for e in all_ensembles), (
+            "Merging readers with merge_ensemble: 'all' requires all merged readers to share "
+            f"the same native ensemble members, got: {all_ensembles}"
         )
-        return set(range(len(self.readers)))
+        return all_ensembles[0]
 
     # TODO: improve this
     def is_gridded_data(self, stream: str) -> bool:

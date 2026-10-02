@@ -1,0 +1,253 @@
+
+#optional: if commented out all is taken care of by the default settings
+# NB. global options apply to all run_ids
+max_workers: 4  # limit parallel IO workers; prevents OOM when loading multiple zarr members
+
+global_plotting_options:
+#  regions: ["europe", "global"]
+  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+  dpi_val : 300
+  fps: 2
+  animation_format: "mp4"
+  # ERA5:
+  #   marker_size: 3
+  #   scale_marker_size: 1
+  #   marker: "o"
+  #   alpha: 0.5
+  #   add_healpix_grid: false
+  #   healpix_nside: 4
+  #   2t: 
+  #     vmin: 205
+  #     vmax: 315
+  #   10u:
+  #     vmin: -23
+  #     vmax: 23
+  #   10v:
+  #     vmin: -23
+  #     vmax: 23
+  #   z_500:
+  #     vmin: 4700
+  #     vmax: 6000
+  #   t_850:
+  #     vmin: 230
+  #     vmax: 310
+  #   u_850:
+  #     vmin: -40
+  #     vmax: 40
+  #   v_850:
+  #     vmin: -40
+  #     vmax: 40
+  #   q_850:
+  #     vmin: 0
+  #     vmax: 0.02
+  
+
+evaluation:
+  metrics: ["rmse"]
+  regions: ["global"]
+  summary_plots : true
+  ratio_plots : false
+  heat_maps : false
+  summary_dir: "./plots/"
+  plot_ensemble: false #single aggregate curve per model; no per-member/per-case traces
+  plot_score_maps: false #not needed for the lead-time comparison; slows down scoring a lot
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: true
+  score_cards: false
+  bar_plots: false
+
+
+default_streams:
+  ERA5:
+    climatology_path: "/e/scratch/weatherai/shared_work/assets/climatology/aifs-ea-an-oper-0001-mars-o96-1980-2020-6h-v6_climatology.zarr"
+    # channels: ["2t", "10u", "10v", "z_500", "t_850", "u_850", "v_850", "q_850"]
+    channels: ["2t", "t_850", "q_850"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
+    plotting:
+      sample: []
+      forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      plot_maps: false
+      plot_histograms: false
+      plot_animations: false
+
+# Each dj*/zz* id below is one independent single-case rollout (one init date/time,
+# confirmed from the zarr 'source_interval' attrs), not multiple samples. To get a
+# robust RMSE-vs-lead-time curve we merge many per-case runs into one virtual run.
+#
+# type: "jsonmerge" reads each case's cached per-run score JSON (computed once by
+# scripts/evaluate_diffusion_ens_percase_array.sbatch) instead of re-reading all the
+# raw zarr stores every time - required, since reading 44-49 multi-hundred-GB zarr
+# stores in one go blows through any reasonable Slurm time limit.
+#
+# The "mean of members" vs. "ensemble mean" distinction is decided by the ensemble
+# setting used when each case was cached (NOT by this config): deterministic_mean
+# and diffusion_member_mean read the standard per-case cache (evaluation.ensemble:
+# "all"). diffusion_ensemble_mean needs the dj* cases re-cached with
+# evaluation.ensemble: "mean" first (this overwrites the standard cache for those
+# run_ids, so run/merge diffusion_member_mean before re-caching for ensemble_mean).
+
+x-deterministic-run-ids: &deterministic_run_ids
+  - zz060500
+  - zz060506
+  - zz060512
+  - zz060518
+  - zz060600
+  - zz060606
+  - zz060612
+  - zz060618
+  - zz060700
+  - zz060706
+  - zz060712
+  - zz060718
+  - zz060800
+  - zz060806
+  - zz060812
+  - zz060818
+  - zz060900
+  - zz060906
+  - zz060912
+  - zz060918
+  - zz061000
+  - zz061006
+  - zz061012
+  - zz061018
+  - zz061100
+  - zz061106
+  - zz061112
+  - zz061118
+  - zz061200
+  - zz061206
+  - zz061212
+  - zz061218
+  - zz061300
+  - zz061306
+  - zz061312
+  - zz061318
+  - zz061400
+  - zz061406
+  - zz061412
+  - zz061418
+  - zz061500
+  - zz061506
+  - zz061512
+  - zz061518
+
+x-diffusion-run-ids: &diffusion_run_ids
+  - dj060318
+  - dj060400
+  - dj060406
+  - dj060412
+  - dj060418
+  - dj060500
+  - dj060506
+  - dj060512
+  - dj060518
+  - dj060600
+  - dj060606
+  - dj060612
+  - dj060618
+  - dj060700
+  - dj060706
+  - dj060712
+  - dj060718
+  - dj060800
+  - dj060806
+  - dj060812
+  - dj060818
+  - dj060900
+  - dj060906
+  - dj060912
+  - dj060918
+  - dj061000
+  - dj061006
+  - dj061012
+  - dj061018
+  - dj061100
+  - dj061106
+  - dj061112
+  - dj061118
+  - dj061200
+  - dj061206
+  - dj061212
+  - dj061218
+  - dj061300
+  - dj061306
+  - dj061312
+  - dj061318
+  - dj061400
+  - dj061406
+  - dj061412
+  - dj061418
+  - dj061500
+  - dj061506 # NB. fixed typo "d1061506" -> "dj061506"
+  - dj061512
+  - dj061518
+
+run_ids :
+
+  deterministic_mean:
+    type: "jsonmerge"
+    merge_run_ids: *deterministic_run_ids
+    merge_metrics_dir: "./results/merged_eval/deterministic_mean/"
+    label: "Deterministic"
+
+  diffusion_ensemble_mean:
+    type: "jsonmerge"
+    merge_run_ids: *diffusion_run_ids
+    merge_metrics_dir: "./results/merged_eval/diffusion_ensemble_mean/"
+    label: "Diffusion (ensemble mean)"
+
+  diffusion_member_mean:
+    type: "jsonmerge"
+    merge_run_ids: *diffusion_run_ids
+    merge_metrics_dir: "./results/merged_eval/diffusion_member_mean/"
+    label: "Diffusion (mean of members)"
+
+
+
+  # # tq60natw:
+  # #   type: "json"
+  # #   label: "atmofs03, deterministic"
+  # # sraa7zcl:
+  # #   type: "json"
+  # #   label: "Sophie's oqkez8qs deterministic"
+  # nhv60001:
+  #   # type: "anemoi-target"\
+  #   type: "json"
+  #   label: "Seb's cw6a4szu, deterministic"
+  
+  # # o7ohzklw-4:
+  # #   type: "json"
+  # #   label: "Christian's skkbxfya, p(cfg)=0.15"
+  # h9am64o5-4:
+  #   type: "json"
+  #   label: "Christian's skkbxfya, v2"
+  # hfbmpoge-4:
+  #   type: "json"
+  #   label: "Seb's cw6a4szu"
+  # # w0gc4qby-4:
+  # #   type: "json"
+  # #   label: "Seb's cw6a4szu, u[0.002,20]"
+  # # c2h9361i-4:
+  # #   type: "json"
+  # #   label: "Seb's cw6a4szu, EMA600"
+  # lgry3hbu-4:
+  #   type: "json"
+  #   label: "Sophie's oqkez8qs"
+
+  # # h9am64o5-4b:
+  # #   type: "json"
+  # #   label: "Christian's skkbxfya, v2, sigma_min 0.1"
+  # # hfbmpoge-4b:
+  # #   type: "json"
+  # #   label: "Seb's cw6a4szu, sigma_min 0.1"
+  # # w0gc4qby-4b:
+  # #   type: "json"
+  # #   label: "Seb's cw6a4szu, u[0.002,20]"
+  # # lgry3hbu-4b:
+  # #   type: "json"
+  # #   label: "Sophie's oqkez8qs, sigma_min 0.1"

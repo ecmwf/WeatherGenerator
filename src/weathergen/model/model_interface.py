@@ -232,8 +232,8 @@ def init_model_and_shard(
     # that has no trained decoder, reusing a pretrained decoder from another run).
     decoder_run_id = cf.get("load_decoder_chkpt", {}).get("run_id", None)
     if decoder_run_id:
-        # if run is a continuation, decoder should already be present from primary load
-        if run_id_contd is not None:
+        # skip only if the decoder would come from the same checkpoint as the primary load
+        if run_id_contd is not None and decoder_run_id == run_id_contd:
             if is_root():
                 logger.info(
                     "Run is a continuation, decoder not loaded separately; it is already "
@@ -254,7 +254,8 @@ def init_model_and_shard(
     # overlay above
     encoder_run_id = cf.get("load_encoder_chkpt", {}).get("run_id", None)
     if encoder_run_id:
-        if run_id_contd is not None:
+        # skip only if the encoder would come from the same checkpoint as the primary load
+        if run_id_contd is not None and encoder_run_id == run_id_contd:
             if is_root():
                 logger.info(
                     "Run is a continuation, encoder not loaded separately; it is already "
