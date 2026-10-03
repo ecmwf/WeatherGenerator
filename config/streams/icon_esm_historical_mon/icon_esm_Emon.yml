@@ -9,6 +9,7 @@
 
 ICONESMEmon :
   type : iconesm
+  healpix_level: 5
   filenames : ['historical_r1i1p1f1_Emon.json']
   source_exclude: ['mrsfl', 'mrsll', 'mrsol'] # because duplicate from Eday
   target_exclude: ['mrsfl', 'mrsll', 'mrsol'] # because duplicate from Eday

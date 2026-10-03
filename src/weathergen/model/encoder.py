@@ -11,8 +11,9 @@ import torch
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, get_healpix_level
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.utils import hp_level_to_num_cells
 from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
@@ -41,8 +42,8 @@ class EncoderModule(torch.nn.Module):
         super(EncoderModule, self).__init__()
         self.cf = cf
 
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        self.healpix_level = get_healpix_level(cf)
+        self.num_healpix_cells = hp_level_to_num_cells(self.healpix_level)
 
         self.cf = cf
         self.sources_size = sources_size
@@ -164,7 +165,7 @@ class EncoderModule(torch.nn.Module):
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
 
         # subdivision factor for required splitting
-        clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
+        clen = self.num_healpix_cells // (2 if self.healpix_level <= 5 else 8)
         tokens_global_unmasked = []
         posteriors = []
 

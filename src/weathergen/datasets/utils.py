@@ -229,6 +229,12 @@ def coords_to_hpyidxs(hl, thetas, phis):
 
 
 ####################################################################################################
+def hp_level_to_num_cells(hp_level: int) -> int:
+    nside = 2**hp_level
+    return 12 * nside * nside
+
+
+####################################################################################################
 def add_local_vert_coords(hl, a, verts, tcs, zi, dx, dy, geoinfo_offset):
     ref = torch.tensor([1.0, 0.0, 0.0])
     aa = locs_to_cell_coords(hl, verts.unsqueeze(1), dx, dy)
