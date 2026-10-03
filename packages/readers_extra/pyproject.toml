@@ -2,7 +2,6 @@
 name = "weathergen-readers-extra"
 version = "0.1.0"
 description = "The WeatherGenerator Machine Learning Earth System Model"
-readme = "../../README.md"
 requires-python = ">=3.12,<3.13"
 # TODO: incomplete: it also implicitly depends on the main project for the base classes
 # There is currently a circular dependency readers-extra => root => readers-extra
