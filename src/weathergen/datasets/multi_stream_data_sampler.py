@@ -370,7 +370,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # TODO: avoid hard coding magic values
         # +6 at the end for stream_id and time encoding
         return [
-            (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            # (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            (ds.readers[0].get_geoinfo_size() + 3) + 6
             for ds in self.streams_datasets.values()
         ]
 
