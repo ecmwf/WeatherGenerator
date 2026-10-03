@@ -39,6 +39,7 @@ from weathergen.evaluate.plotting.plot_utils import (
     plot_metric_region,
     psd_plot_metric_region,
     quantile_plot_metric_region,
+    rank_histogram_plot_metric_region,
     ratio_plot_metric_region,
     score_card_metric_region,
 )
@@ -1295,7 +1296,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     # Map each resolved plot option to the subdir(s) it produces, so PDF merging
     # can reuse the same flags without re-deriving them from eval_opt.
     plot_option_subdirs = {
-        "lead_time": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
+        "lead_time": [
+            PlotSubdir.line_plots,
+            PlotSubdir.psd_plots,
+            PlotSubdir.qq_plots,
+            PlotSubdir.rank_histogram_plots,
+        ],
         "ratio": [PlotSubdir.ratio_plots],
         "scorecard": [PlotSubdir.score_cards],
         "bar": [PlotSubdir.bar_plots],
@@ -1319,6 +1325,13 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             # they are intrinsic to the metric, not a separate plot option.
             if metric == "psd":
                 psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                continue
+
+            # Rank histograms are a per-lead-time distribution (Talagrand diagram), not a
+            # scalar score, so they are always plotted as bar charts rather than as a
+            # score-vs-lead-time line plot.
+            if metric == "rank_histogram":
+                rank_histogram_plot_metric_region(metric, region, runs, scores_dict, plotter)
                 continue
 
             if do_lead_time:
