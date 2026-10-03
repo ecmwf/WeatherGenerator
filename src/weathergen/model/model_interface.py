@@ -17,7 +17,7 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     fully_shard,
 )
-from torch.distributed.tensor import distribute_tensor
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 from weathergen.common.config import Config, get_path_model, merge_configs
 from weathergen.model.attention import (
@@ -168,7 +168,7 @@ def init_model_and_shard(
 
     # model params
     model_params = ModelParams(cf).create(cf)
-    model_params.reset_parameters(cf)
+    model_params.reset_parameters()
     model_params = model_params.to(f"cuda:{cf.local_rank}")
 
     return model, model_params
@@ -200,13 +200,15 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
             if sharded_meta_param is None:
                 logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
                 continue
-            sharded_tensor = distribute_tensor(
-                full_tensor,
-                sharded_meta_param.device_mesh,
-                sharded_meta_param.placements,
-            )
-            # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
-            maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+            if isinstance(sharded_meta_param, DTensor):
+                sharded_tensor = distribute_tensor(
+                    full_tensor,
+                    sharded_meta_param.device_mesh,
+                    sharded_meta_param.placements,
+                )
+                maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+            else:
+                maybe_sharded_sd[param_name] = full_tensor.to(device)
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
 
