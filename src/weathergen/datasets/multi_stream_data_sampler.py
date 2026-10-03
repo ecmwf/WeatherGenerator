@@ -26,6 +26,7 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
 )
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.domain import Domain
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -49,11 +50,15 @@ FORECAST_DEFAULTS = {
 }
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
+def collect_datasources(
+    stream_datasets: list, idx: int, type: str, rng, domain: Domain | None = None
+) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
 
-    rng and num_subset are used to drop data
+    rng and num_subset are used to drop data. If a regional `domain` is given, points
+    outside it are removed before any sub-sampling, so that `max_num_targets` counts
+    only points the model can actually see.
     """
 
     rdatas = []
@@ -76,7 +81,10 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
 
         # get source (of potentially multi-step length)
         rdata = (
-            get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
+            get_reader_data(idx)
+            .crop_to_domain(domain)
+            .shuffle(rng, shuffle, num_subset)
+            .remove_nan_coords_and_geoinfos()
         )
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
@@ -104,11 +112,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        # initialise healpic
+        # initialise healpix
         self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+        # the domain defines which healpix cells exist; for a global run (no `domain:` block
+        # in the config) it covers the whole sphere and all mappings are the identity
+        self.domain = Domain.from_config(cf)
+        self.num_healpix_cells = len(self.domain)
+        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg, domain=self.domain)
+        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker, domain=self.domain)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -235,6 +246,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     dataset = DataReaderObs
                 case "anemoi":
                     dataset = DataReaderAnemoi
+                    # static grid: pre-filter the grid points to the domain once, up front
+                    if not self.domain.is_global:
+                        kwargs["domain"] = self.domain
                 case type_name:
                     dataset = get_extra_reader(type_name)
                     if dataset is None:
@@ -570,7 +584,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
-            rdata = collect_datasources(stream_ds, idx, "source", self.rng)
+            rdata = collect_datasources(stream_ds, idx, "source", self.rng, self.domain)
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -581,6 +595,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
+                    domain=self.domain,
                 )
                 rdata.is_spoof = True
 
@@ -592,7 +607,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         for timestep_idx in range(self.output_offset, num_output_steps):
             step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-            rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+            rdata = collect_datasources(
+                stream_ds, step_forecast_dt, "target", self.rng, self.domain
+            )
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -603,6 +620,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                    domain=self.domain,
                 )
                 rdata.is_spoof = True
 
