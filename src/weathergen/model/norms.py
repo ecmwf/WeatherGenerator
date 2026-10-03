@@ -79,7 +79,7 @@ class AdaLayerNorm(torch.nn.Module):
 
         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
         self.reset_parameters()
-    
+
     def reset_parameters(self):
         # zero-init the final projection so conditioning starts as identity (scale=0, shift=0),
         # matching the DiT-style zero-init used in AdaLayerNormLayer
