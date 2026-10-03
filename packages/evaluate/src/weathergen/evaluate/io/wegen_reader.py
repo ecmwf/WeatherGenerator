@@ -413,7 +413,11 @@ class WeatherGenZarrReader(WeatherGenReader):
         """
         super().__init__(eval_cfg, run_id, private_paths)
 
-        zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
+        zarr_ext = (
+            self.inference_cfg.get("test_config", {})
+            .get("output", {})
+            .get("zarr_store", self.inference_cfg.get("zarr_store", "zip"))
+        )
         self.zarr_ext = zarr_ext
 
         # Discover rank files: support rank="all", rank=[0,1,2], or rank=0 (int)
