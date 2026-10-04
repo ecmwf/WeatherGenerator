@@ -21,7 +21,7 @@
 # Tune --time/--mem/--cpus-per-task below once you've seen actual resource usage.
 
 #SBATCH --account=e-ext-2025e01-128
-#SBATCH --time=04:00:00
+#SBATCH --time=00:15:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -29,8 +29,8 @@
 #SBATCH --chdir=.
 #SBATCH --partition=booster
 #SBATCH --array=0-2
-#SBATCH --output=logs/weathergen-eval-%x.%j.out
-#SBATCH --error=logs/weathergen-eval-%x.%j.err
+#SBATCH --output=logs/weathergen-eval-%x.%A_%a.out
+#SBATCH --error=logs/weathergen-eval-%x.%A_%a.err
 
 echo "shell $SHELL"
 if [ -f "$HOME/.local/bin/env" ]; then

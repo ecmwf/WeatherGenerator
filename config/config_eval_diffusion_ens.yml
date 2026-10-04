@@ -183,7 +183,7 @@ x-diffusion-run-ids: &diffusion_run_ids
   - dj061412
   - dj061418
   - dj061500
-  - dj061506 # NB. fixed typo "d1061506" -> "dj061506"
+  - d1061506 # NB. not a typo - this run_id really has a "d1" prefix, confirmed on disk
   - dj061512
   - dj061518
 

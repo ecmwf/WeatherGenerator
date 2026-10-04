@@ -109,6 +109,16 @@ class Reader(ABC):
             non-default / non-empty values are included to keep the JSON compact
             and avoid spurious mismatches.
         """
+        settings = self._base_eval_settings(stream)
+
+        # Store the source (zarr) forecast steps so the cache is invalidated
+        # when the underlying data changes (e.g. new rollout length).
+        settings["forecast_steps"] = sorted(int(f) for f in self.get_forecast_steps())
+
+        return settings
+
+    def _base_eval_settings(self, stream: str) -> dict:
+        """The config-derived part of get_eval_settings, without forecast_steps."""
         stream_cfg = self.get_stream(stream)
 
         # Collect raw config values; skip falsy / default entries
@@ -129,10 +139,6 @@ class Reader(ABC):
             settings[key] = (
                 oc.OmegaConf.to_container(val, resolve=True) if oc.OmegaConf.is_config(val) else val
             )
-
-        # Store the source (zarr) forecast steps so the cache is invalidated
-        # when the underlying data changes (e.g. new rollout length).
-        settings["forecast_steps"] = sorted(int(f) for f in self.get_forecast_steps())
 
         return settings
 

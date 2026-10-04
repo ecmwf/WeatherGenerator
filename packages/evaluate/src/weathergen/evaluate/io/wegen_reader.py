@@ -279,7 +279,14 @@ class WeatherGenReader(Reader):
             # Check eval_settings match current config
             stored_settings = data_dict.get("eval_settings", {})
             current_settings = self.get_eval_settings(stream)
-            if stored_settings != current_settings:
+            # Readers that can't independently recompute forecast_steps (e.g.
+            # WeatherGenJsonReader, see its get_eval_settings override) omit that
+            # key; don't let its mere presence in the stored settings count as a
+            # mismatch in that case.
+            compare_stored = stored_settings
+            if "forecast_steps" not in current_settings:
+                compare_stored = {k: v for k, v in stored_settings.items() if k != "forecast_steps"}
+            if compare_stored != current_settings:
                 _logger.info(
                     f"Eval settings changed for {score_path.name}: "
                     f"stored={stored_settings}, current={current_settings}. "
@@ -349,6 +356,14 @@ class WeatherGenJsonReader(WeatherGenReader):
     ):
         super().__init__(eval_cfg, run_id, private_paths)
         self.common_coords: dict = self._compute_common_coords(regions, metrics)
+
+    def get_eval_settings(self, stream: str) -> dict:
+        # Skip the base class's forecast_steps entry: it's derived by calling
+        # get_forecast_steps(), which reads self.common_coords - itself computed
+        # from the very scores being validated here during __init__, so it would
+        # be circular. Freshness of forecast steps is already enforced by
+        # whichever zarr-backed run produced the JSON cache being read.
+        return self._base_eval_settings(stream)
 
     def _compute_common_coords(self, regions: list[str], metrics: list[str]) -> dict:
         # Find common coordinates across streams, regions, metrics.
