@@ -759,10 +759,13 @@ def compute_psd_score(
         Log-spectral MSE scalar.
     attrs : dict
         Dict with keys ``"frequencies"``, ``"psd_target"``, ``"psd_prediction"``
-        (lists for JSON serialization).
+        (lists for JSON serialization). ``psd_target`` is omitted when ground
+        truth is unavailable (e.g. inference run with `skip_target_values`).
     """
-    # Handle NaN grid points (e.g. from regional masking).
-    valid_mask = ~np.isnan(gt).all(axis=0)
+    # No ground truth at all (e.g. skip_target_values=true at inference time) -
+    # mask by prediction validity instead, and skip the target PSD curve/score.
+    target_available = not np.isnan(gt).all()
+    valid_mask = ~np.isnan(gt if target_available else p).all(axis=0)
     gt = gt[:, valid_mask]
     p = p[:, valid_mask]
 
@@ -799,8 +802,8 @@ def compute_psd_score(
             return np.nan, {}
 
     try:
-        freq_gt, psd_gt = compute_psd_for_field(
-            data=gt,
+        freq_p, psd_p = compute_psd_for_field(
+            data=p,
             method=psd_method,
             nlat=nlat_valid,
             lats=lats_valid,
@@ -810,8 +813,13 @@ def compute_psd_score(
             sht_truncation=psd_sht_truncation,
             grid_type=grid_type,
         )
-        freq_p, psd_p = compute_psd_for_field(
-            data=p,
+        if not target_available:
+            return np.nan, {
+                "frequencies": freq_p.tolist(),
+                "psd_prediction": psd_p.tolist(),
+            }
+        freq_gt, psd_gt = compute_psd_for_field(
+            data=gt,
             method=psd_method,
             nlat=nlat_valid,
             lats=lats_valid,

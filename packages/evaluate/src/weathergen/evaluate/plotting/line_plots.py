@@ -221,8 +221,18 @@ class LinePlots:
             dim=[dim for dim in data.dims if dim not in [x_dim, "ens"]], skipna=True
         ).sortby(x_dim)
 
+        # Spread is computed per case/sample first (across "ens"), then averaged -
+        # not the other way around. Averaging over many cases/samples before taking
+        # the spread would wash out genuine member-to-member differences (each
+        # member's case-to-case noise cancels out under averaging, so the spread of
+        # the already-averaged per-member means shrinks towards zero regardless of
+        # the real per-case ensemble spread).
+        non_ens_dims = [dim for dim in data.dims if dim not in [x_dim, "ens"]]
+
         if self.plot_ensemble == "std":
-            std_dev = ens.std(dim="ens", skipna=True).sortby(x_dim)
+            std_dev = data.std(dim="ens", skipna=True).mean(dim=non_ens_dims, skipna=True).sortby(
+                x_dim
+            )
             plt.fill_between(
                 averaged[x_dim],
                 (averaged - std_dev).values,
@@ -233,8 +243,12 @@ class LinePlots:
             )
 
         elif self.plot_ensemble == "minmax":
-            ens_min = ens.min(dim="ens", skipna=True).sortby(x_dim)
-            ens_max = ens.max(dim="ens", skipna=True).sortby(x_dim)
+            ens_min = (
+                data.min(dim="ens", skipna=True).mean(dim=non_ens_dims, skipna=True).sortby(x_dim)
+            )
+            ens_max = (
+                data.max(dim="ens", skipna=True).mean(dim=non_ens_dims, skipna=True).sortby(x_dim)
+            )
 
             plt.fill_between(
                 averaged[x_dim],
@@ -770,16 +784,24 @@ class LinePlots:
         freq, tar_psd, n_tgt_runs = _average_target_psd(
             psd_datasets, context=f"{variable} step {forecast_step}"
         )
+        has_target = tar_psd is not None
 
-        fig, (ax_spec, ax_ratio) = plt.subplots(
-            2,
-            1,
-            figsize=self.fig_size or (10, 8),
-            gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
-        )
+        if has_target:
+            fig, (ax_spec, ax_ratio) = plt.subplots(
+                2,
+                1,
+                figsize=self.fig_size or (10, 8),
+                gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
+            )
+        else:
+            fig, ax_spec = plt.subplots(1, 1, figsize=self.fig_size or (10, 5.5))
+            ax_ratio = None
 
         # Upper panel: log-log spectra
-        ax_spec.loglog(freq, tar_psd, color="black", lw=1.5, label=_target_legend_label(n_tgt_runs))
+        if has_target:
+            ax_spec.loglog(
+                freq, tar_psd, color="black", lw=1.5, label=_target_legend_label(n_tgt_runs)
+            )
         colors = plt.cm.tab10.colors
         for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
             c = colors[i % len(colors)]
@@ -797,25 +819,30 @@ class LinePlots:
             title_parts.append(variable)
         if forecast_step:
             title_parts.append(f"step {forecast_step}")
+        if not has_target:
+            title_parts.append("no target available")
         ax_spec.set_title(" – ".join(title_parts))
         ax_spec.legend(frameon=False, fontsize=7)
         ax_spec.grid(True, which="both", ls="--", alpha=0.4)
 
-        # Lower panel: ratio against each run's OWN target, so every curve is an honest
-        # pred/target for that run (unlike the averaged reference drawn above).
-        for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
-            c = colors[i % len(colors)]
-            pred = np.asarray(ds["psd_prediction"])
-            own_freq = np.asarray(ds["frequencies"])
-            own_tar = np.asarray(ds["psd_target"])
-            with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = np.where(own_tar > 0, pred / own_tar, np.nan)
-            ax_ratio.semilogx(own_freq, ratio, color=c, lw=1.2, label=label)
-        ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
-        ax_ratio.set_ylabel("Pred / Target (own run)")
-        ax_ratio.set_xlabel("Frequency (1/deg)")
-        ax_ratio.set_ylim(0, 2)
-        ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+        if has_target:
+            # Lower panel: ratio against each run's OWN target, so every curve is an honest
+            # pred/target for that run (unlike the averaged reference drawn above).
+            for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
+                c = colors[i % len(colors)]
+                pred = np.asarray(ds["psd_prediction"])
+                own_freq = np.asarray(ds["frequencies"])
+                own_tar = np.asarray(ds["psd_target"])
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    ratio = np.where(own_tar > 0, pred / own_tar, np.nan)
+                ax_ratio.semilogx(own_freq, ratio, color=c, lw=1.2, label=label)
+            ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
+            ax_ratio.set_ylabel("Pred / Target (own run)")
+            ax_ratio.set_xlabel("Frequency (1/deg)")
+            ax_ratio.set_ylim(0, 2)
+            ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+        else:
+            ax_spec.set_xlabel("Frequency (1/deg)")
 
         name = tag or "psd"
         fname = out_dir / f"{name}.{self.image_format}"
@@ -860,25 +887,34 @@ class LinePlots:
         if len(fsteps) < 2:
             return
 
-        fig, (ax_spec, ax_ratio) = plt.subplots(
-            2,
-            1,
-            figsize=(7, 7),
-            gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
-        )
+        targets = [per_fstep_datasets[f]["psd_target"] for f in fsteps]
+        has_target = all(t is not None for t in targets)
+
+        if has_target:
+            fig, (ax_spec, ax_ratio) = plt.subplots(
+                2,
+                1,
+                figsize=(7, 7),
+                gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
+            )
+        else:
+            fig, ax_spec = plt.subplots(1, 1, figsize=(7, 5))
+            ax_ratio = None
         cmap = plt.get_cmap("viridis")
         n = max(len(fsteps) - 1, 1)
 
-        ref_freq = np.asarray(per_fstep_datasets[fsteps[0]]["frequencies"])
-        targets = [np.asarray(per_fstep_datasets[f]["psd_target"]) for f in fsteps]
-        if all(t.shape == targets[0].shape for t in targets):
-            tar_mean = np.nanmean(np.vstack(targets), axis=0)
-        else:
-            _logger.warning(
-                f"PSD evolution ({label} / {variable}): target spectra differ in length across "
-                "forecast steps; falling back to the first step's target as reference."
-            )
-            tar_mean = targets[0]
+        if has_target:
+            ref_freq = np.asarray(per_fstep_datasets[fsteps[0]]["frequencies"])
+            targets_arr = [np.asarray(t) for t in targets]
+            if all(t.shape == targets_arr[0].shape for t in targets_arr):
+                tar_mean = np.nanmean(np.vstack(targets_arr), axis=0)
+            else:
+                _logger.warning(
+                    f"PSD evolution ({label} / {variable}): target spectra differ in length "
+                    "across forecast steps; falling back to the first step's target as "
+                    "reference."
+                )
+                tar_mean = targets_arr[0]
 
         for i, fstep in enumerate(fsteps):
             ds = per_fstep_datasets[fstep]
@@ -888,20 +924,18 @@ class LinePlots:
 
             ax_spec.loglog(freq, pred, color=c, lw=1.0)
 
-            if pred.shape == tar_mean.shape:
+            if has_target and pred.shape == tar_mean.shape:
                 with np.errstate(divide="ignore", invalid="ignore"):
                     ratio = np.where(tar_mean > 0, pred / tar_mean, np.nan)
                 ax_ratio.semilogx(freq, ratio, color=c, lw=1.0)
 
-        # Single, step-independent grey target on top of the prediction bundle.
-        ax_spec.loglog(ref_freq, tar_mean, color="0.45", lw=1.8, ls="-", alpha=0.85, zorder=5)
-
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(fsteps[0], fsteps[-1]))
-        fig.colorbar(sm, ax=[ax_spec, ax_ratio], label="Forecast step")
-
-        ax_spec.legend(
-            handles=[
-                Line2D([], [], color=cmap(0.5), lw=1.0, ls="-", label="Prediction (per step)"),
+        legend_handles = [
+            Line2D([], [], color=cmap(0.5), lw=1.0, ls="-", label="Prediction (per step)"),
+        ]
+        if has_target:
+            # Single, step-independent grey target on top of the prediction bundle.
+            ax_spec.loglog(ref_freq, tar_mean, color="0.45", lw=1.8, ls="-", alpha=0.85, zorder=5)
+            legend_handles.append(
                 Line2D(
                     [],
                     [],
@@ -910,11 +944,13 @@ class LinePlots:
                     ls="-",
                     alpha=0.85,
                     label="Target (mean over steps)",
-                ),
-            ],
-            frameon=False,
-            fontsize=8,
-        )
+                )
+            )
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(fsteps[0], fsteps[-1]))
+        fig.colorbar(sm, ax=[ax_spec, ax_ratio] if has_target else ax_spec, label="Forecast step")
+
+        ax_spec.legend(handles=legend_handles, frameon=False, fontsize=8)
         psd_method = next(iter(per_fstep_datasets.values())).get("psd_method", "sht")
         title_parts = [f"PSD evolution ({psd_method})"]
         if variable:
@@ -925,11 +961,14 @@ class LinePlots:
         ax_spec.set_ylabel("Power")
         ax_spec.grid(True, which="both", ls="--", alpha=0.4)
 
-        ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
-        ax_ratio.set_ylabel("Pred / Target (mean over steps)")
-        ax_ratio.set_xlabel("Frequency (1/deg)")
-        ax_ratio.set_ylim(0, 2)
-        ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+        if has_target:
+            ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
+            ax_ratio.set_ylabel("Pred / Target (mean over steps)")
+            ax_ratio.set_xlabel("Frequency (1/deg)")
+            ax_ratio.set_ylim(0, 2)
+            ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+        else:
+            ax_spec.set_xlabel("Frequency (1/deg)")
 
         fname = out_dir / f"{tag or 'psd_evolution'}.{self.image_format}"
         _logger.debug(f"Saving PSD evolution plot to {fname}")

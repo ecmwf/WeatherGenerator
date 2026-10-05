@@ -7,11 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import csv
 import datetime
 import logging
 import re
 from collections.abc import Iterable, Sequence
 from enum import Enum
+from pathlib import Path
 
 import numpy as np
 import xarray as xr
@@ -352,6 +354,120 @@ def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> list[
             values = run_data[run_id]["channel"].values
             channels.update([str(x) for x in np.atleast_1d(values)])
     return list(channels)
+
+
+def export_metric_region_csv(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    output_dir: Path,
+) -> None:
+    """Write lead-time summary data to CSV instead of plotting it.
+
+    Uses the same run/channel selection as ``plot_metric_region`` and the same
+    mean-over-non-x-dims convention. When a run's data still has a real,
+    size > 1 'ens' dimension, also writes 'std'/'min'/'max' columns computed
+    per case/sample first and then averaged (matching the shaded-band logic
+    in ``LinePlots._plot_ensemble``), rather than from the already-averaged
+    curve, plus one extra row per individual member (with a 'member' column
+    set) for spaghetti-style plots of the individual members. Runs configured
+    with ``spread_from`` are recentred (see ``_apply_spread_from``): their
+    'ens' values only encode borrowed spread, not genuine per-member RMSE, so
+    member rows are skipped for those runs to avoid misleadingly low member
+    values.
+
+    Parameters
+    ----------
+    metric: str
+        String specifying the metric to export
+    region: str
+        String specifying the region to export
+    runs: dict
+        Dictionary containing the config for all runs
+    scores_dict : dict
+        The dictionary containing all computed metrics.
+    output_dir: Path
+        Directory to write the CSV file to.
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+    x_dim = "forecast_step"
+
+    rows = []
+    for stream in streams_set:
+        for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+            label = runs[run_id].get("label", run_id)
+            for ch in channels_set:
+                if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
+                    continue
+                da = data.sel(channel=ch)
+                non_x_dims = [dim for dim in da.dims if dim != x_dim]
+                mean_curve = da.mean(dim=non_x_dims, skipna=True)
+
+                std_curve = min_curve = max_curve = None
+                member_curves = None
+                if "ens" in da.dims and da.sizes["ens"] > 1:
+                    non_ens_dims = [dim for dim in da.dims if dim not in [x_dim, "ens"]]
+                    std_curve = da.std(dim="ens", skipna=True).mean(dim=non_ens_dims, skipna=True)
+                    min_curve = da.min(dim="ens", skipna=True).mean(dim=non_ens_dims, skipna=True)
+                    max_curve = da.max(dim="ens", skipna=True).mean(dim=non_ens_dims, skipna=True)
+                    # Per-member curves (case/sample averaged, 'ens' kept), for
+                    # spaghetti-style plots of the individual members. Not
+                    # meaningful for recentered (spread_from) runs - see above.
+                    if not runs[run_id].get("spread_from"):
+                        member_curves = da.mean(dim=non_ens_dims, skipna=True)
+
+                for fstep in sorted(mean_curve[x_dim].values.tolist()):
+                    row = {
+                        "metric": metric,
+                        "region": region,
+                        "stream": stream,
+                        "channel": ch,
+                        "run_id": run_id,
+                        "label": label,
+                        x_dim: fstep,
+                        "mean": float(mean_curve.sel({x_dim: fstep})),
+                    }
+                    if std_curve is not None:
+                        row["std"] = float(std_curve.sel({x_dim: fstep}))
+                        row["min"] = float(min_curve.sel({x_dim: fstep}))
+                        row["max"] = float(max_curve.sel({x_dim: fstep}))
+                    rows.append(row)
+
+                if member_curves is not None:
+                    for member in member_curves["ens"].values.tolist():
+                        for fstep in sorted(member_curves[x_dim].values.tolist()):
+                            rows.append({
+                                "metric": metric,
+                                "region": region,
+                                "stream": stream,
+                                "channel": ch,
+                                "run_id": run_id,
+                                "label": label,
+                                x_dim: fstep,
+                                "member": int(member),
+                                "mean": float(member_curves.sel({x_dim: fstep, "ens": member})),
+                            })
+
+    if not rows:
+        _logger.warning(f"No data to export to CSV for {metric} - {region}.")
+        return
+
+    fieldnames = list(rows[0].keys())
+    for row in rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{metric}_{region}.csv"
+    with open(out_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    _logger.info(f"Wrote CSV summary for {metric} - {region} to {out_path}")
 
 
 def plot_metric_region(
@@ -794,16 +910,19 @@ def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict]
     """Extract PSD curve data from DataArray attrs for a given fstep/channel.
 
     Returns a single-element list of dicts ready for the plotter, or None if keys are missing.
+    ``psd_target`` is ``None`` when ground truth was unavailable at scoring time (e.g.
+    inference run with `skip_target_values`) - only `psd_prediction` is guaranteed.
     """
     attrs = data_ch.attrs
     fp = f"fstep_{fstep}/"
 
     for prefix in (f"{fp}{ch}/", fp):
-        if f"{prefix}frequencies" in attrs and f"{prefix}psd_target" in attrs:
+        if f"{prefix}frequencies" in attrs and f"{prefix}psd_prediction" in attrs:
+            psd_target = attrs.get(f"{prefix}psd_target")
             return [
                 {
                     "frequencies": np.array(attrs[f"{prefix}frequencies"]),
-                    "psd_target": np.array(attrs[f"{prefix}psd_target"]),
+                    "psd_target": np.array(psd_target) if psd_target is not None else None,
                     "psd_prediction": np.array(attrs[f"{prefix}psd_prediction"]),
                     "psd_method": attrs.get(f"{fp}psd_method", attrs.get("psd_method", "sht")),
                 }
@@ -813,7 +932,7 @@ def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict]
 
 def _average_target_psd(
     psd_datasets: Sequence[dict], context: str = ""
-) -> tuple[NDArray, NDArray, int]:
+) -> tuple[NDArray, NDArray | None, int]:
     """Average the target power spectra across runs.
 
     The target is a property of the verification data, not of any single model, so when
@@ -827,18 +946,23 @@ def _average_target_psd(
     Parameters
     ----------
     psd_datasets : Sequence[dict]
-        One dict per run, each with ``frequencies`` and ``psd_target``.
+        One dict per run, each with ``frequencies`` and ``psd_target`` (the latter may be
+        ``None`` for runs with no ground truth available).
     context : str
         Free-text identifier (stream/channel/step) used in the warning message.
 
     Returns
     -------
-    tuple[NDArray, NDArray, int]
-        The frequency axis, the averaged target spectrum, and the number of runs that
-        actually contributed to the mean.
+    tuple[NDArray, NDArray | None, int]
+        The frequency axis, the averaged target spectrum (``None`` if no run has one), and
+        the number of runs that actually contributed to the mean.
     """
     freq = np.asarray(psd_datasets[0]["frequencies"])
-    targets = [np.asarray(ds["psd_target"]) for ds in psd_datasets]
+    targets = [np.asarray(ds["psd_target"]) for ds in psd_datasets if ds["psd_target"] is not None]
+
+    if not targets:
+        return freq, None, 0
+
     usable = [t for t in targets if t.shape == targets[0].shape]
 
     if len(usable) < len(targets):

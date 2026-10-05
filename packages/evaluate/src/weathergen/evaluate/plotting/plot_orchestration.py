@@ -35,6 +35,7 @@ from weathergen.evaluate.plotting.plot_orchestration_utils import (
 from weathergen.evaluate.plotting.plot_utils import (
     PlotSubdir,
     bar_plot_metric_region,
+    export_metric_region_csv,
     heat_maps_metric_region,
     plot_metric_region,
     psd_plot_metric_region,
@@ -1237,6 +1238,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     # different evaluation configs can coexist in the same base directory.
     run_ids_str = "_".join(sorted(runs.keys()))
     output_basedir = summary_dir / run_ids_str
+    csv_output = eval_opt.get("csv_output", False)
 
     plotter = LinePlots(plot_cfg, output_basedir)
     sc_plotter = ScoreCards(plot_cfg, output_basedir)
@@ -1283,7 +1285,11 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 continue
 
             if do_lead_time:
-                if metric == "qq_analysis":
+                if csv_output:
+                    export_metric_region_csv(
+                        metric, region, runs, scores_dict, output_basedir / "csv"
+                    )
+                elif metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:
                     plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)

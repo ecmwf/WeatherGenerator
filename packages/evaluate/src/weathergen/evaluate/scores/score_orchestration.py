@@ -470,9 +470,8 @@ def metric_list_to_json(
     for metric, metric_stream in metrics_dict.items():
         for region in regions:
             for run_id, metric_data in metric_stream[region][stream].items():
-                save_path = (
-                    reader.metrics_dir
-                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
+                save_path = reader.metrics_dir / reader.score_filename(
+                    run_id, stream, region, metric
                 )
                 metric_data_dict = metric_data.to_dict()
 

@@ -309,6 +309,53 @@ def _process_stream(
     return run_id, stream, scores_dict, ts_scores
 
 
+def _apply_spread_from(scores_dict: dict, runs: dict) -> None:
+    """Let a run borrow another run's per-member ensemble spread.
+
+    If ``run["spread_from"] = other_run_id`` is set, ``other_run_id``'s score
+    (which must still have a real, size>1 'ens' dim, e.g. computed with
+    ``ensemble: "all"``) is recentred onto ``run_id``'s own score values: the
+    recentred array's mean over 'ens' equals ``run_id``'s original score, while
+    its per-case spread across 'ens' is preserved unchanged. This lets e.g. an
+    ensemble-mean score (which has no members of its own left to spread) be
+    plotted with a shaded band showing how much the individual members varied.
+    """
+    for run_id, run in runs.items():
+        spread_from = run.get("spread_from")
+        if not spread_from:
+            continue
+        for regions_dict in scores_dict.values():
+            for streams_dict in regions_dict.values():
+                for runs_scores in streams_dict.values():
+                    target = runs_scores.get(run_id)
+                    source = runs_scores.get(spread_from)
+                    if target is None or source is None or "ens" not in source.dims:
+                        _logger.warning(
+                            f"spread_from: cannot borrow spread for '{run_id}' from "
+                            f"'{spread_from}': missing data or no 'ens' dim with "
+                            "multiple members."
+                        )
+                        continue
+                    # The merged case axis is named 'ens' when a run has no real
+                    # ensemble dim of its own (so merging stacks cases there
+                    # directly); rename it to 'case' to align with the source's
+                    # dedicated 'case' axis before recentring.
+                    # An "ensemble: mean" score still carries a size-1 'ens' dim
+                    # (the collapsed single mean "member") rather than dropping it
+                    # entirely - squeeze that away first. If instead the target's
+                    # own case-stacking axis ended up named 'ens' (no real ens dim
+                    # of its own ever existed), rename it to align with the
+                    # source's dedicated 'case' axis.
+                    target_aligned = target
+                    if "ens" in target_aligned.dims:
+                        if target_aligned.sizes["ens"] == 1:
+                            target_aligned = target_aligned.squeeze("ens", drop=True)
+                        elif "case" not in target_aligned.dims:
+                            target_aligned = target_aligned.rename({"ens": "case"})
+                    member_mean = source.mean(dim="ens")
+                    runs_scores[run_id] = source - member_mean + target_aligned
+
+
 def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     """
     Main function that controls evaluation plotting and scoring.
@@ -385,6 +432,8 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
         for metric, region_dict in ts_scores.items():
             for region, fstep_dict in region_dict.items():
                 timeseries_scores[metric][region][stream][run_id].update(fstep_dict)
+
+    _apply_spread_from(scores_dict, runs)
 
     # MLFlow logging
     if mlflow_client:

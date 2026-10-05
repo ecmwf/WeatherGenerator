@@ -238,6 +238,18 @@ class WeatherGenReader(Reader):
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
 
+    def score_filename(self, run_id: str, stream: str, region: str, metric: str) -> str:
+        """Build the cache filename for a score.
+
+        Includes an "_ens-<value>" suffix when the stream's configured ensemble
+        setting is a non-default string (e.g. "mean"), so that caches computed
+        with different ensemble reductions (e.g. "all" vs "mean") don't overwrite
+        each other under the same filename.
+        """
+        ensemble = self.get_stream(stream).get("evaluation", {}).get("ensemble", "all")
+        suffix = f"_ens-{ensemble}" if isinstance(ensemble, str) and ensemble != "all" else ""
+        return f"{run_id}_{stream}_{region}_{metric}{suffix}_chkpt{self.mini_epoch:05d}.json"
+
     def load_single_score(
         self, stream: str, region: str, metric: str, parameters: dict | None = None
     ) -> xr.DataArray | None:
@@ -255,10 +267,7 @@ class WeatherGenReader(Reader):
         """
         if parameters is None:
             parameters = {}
-        score_path = (
-            Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
-        )
+        score_path = Path(self.metrics_dir) / self.score_filename(self.run_id, stream, region, metric)
         _logger.debug(f"Looking for: {score_path}")
 
         score = None

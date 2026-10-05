@@ -300,9 +300,20 @@ def _read_sample(
                 anemoi_ds, target_idx, ds_dates, times_data, channel_idxs
             )
         else:
-            target_data = np.asarray(ds[f"{base}/target/data"])
+            try:
+                target_data = np.asarray(ds[f"{base}/target/data"])
+            except KeyError:
+                # No target written for this run (e.g. inference was run with
+                # test_config.skip_target_values=true). Fill with NaN so
+                # target-dependent scores/plots can skip gracefully instead of
+                # crashing; prediction-only outputs (e.g. PSD) still work.
+                target_data = np.full_like(pred_data, np.nan)
             if channel_idxs is not None:
-                target_data = target_data[:, channel_idxs]
+                target_data = (
+                    target_data[:, channel_idxs]
+                    if target_data.ndim == 2
+                    else target_data[:, channel_idxs, :]
+                )
 
         # Select channels by index for prediction
         if channel_idxs is not None:

@@ -379,13 +379,21 @@ class WeatherGenMergeReader(Reader):
                         f"scores for metric: {metric}, region: {region}, stream: {stream}"
                     )
 
-                    scores = (
+                    scores = list(
                         local_scores[metric][region][stream].pop(run_id) for run_id in self.run_ids
                     )
 
+                    # If the individual cached scores already carry a real 'ens' dim
+                    # (e.g. computed with ensemble: "all", preserving native members),
+                    # stack the merged runs over a separate 'case' dim instead, to avoid
+                    # extending the existing 'ens' dim rather than adding a new axis.
+                    concat_dim = "case" if "ens" in scores[0].dims else "ens"
+
                     local_scores[metric][region][stream].setdefault(
                         self.run_id,
-                        xr.concat(scores, dim="ens").assign_coords(ens=range(len(self.readers))),
+                        xr.concat(scores, dim=concat_dim).assign_coords(
+                            {concat_dim: range(len(self.readers))}
+                        ),
                     )
 
         return local_scores, missing_metrics
