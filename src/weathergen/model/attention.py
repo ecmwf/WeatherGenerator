@@ -22,13 +22,18 @@ from weathergen.model.positional_encoding import rotary_pos_emb_2d
 """
 Attention blocks used by WeatherGenerator.
 
-Some blocks optionally apply 2D RoPE. When enabled, the caller must provide per-token 2D
-coordinates aligned with the token order (lat, lon in radians).
+This module relies on three primary building blocks:
+1. `SeqLen` classes, which are used for variable-length (VarLen) attention.
+2. Kernel classes, which can be plugged into the `Attention` block as parameters.
+3. A core `Attention` class, which supports multiple attention mechanisms depending on the 
+   parameters provided when calling it.
+
+Note: Some legacy attention classes still remain.
 """
 
 
 @dataclass
-class SeqLens:
+class SeqLensFlash:
     """Packed-sequence metadata for varlen attention (computed once per forward)."""
 
     cu_q: torch.Tensor
@@ -37,7 +42,7 @@ class SeqLens:
     max_kv: int
 
     @classmethod
-    def from_lens(cls, q_lens, kv_lens=None) -> "SeqLens":
+    def from_lens(cls, q_lens, kv_lens=None) -> "SeqLensFlash":
         kv_lens = kv_lens if kv_lens is not None else q_lens
 
         # flash_attn_varlen requires cu_seqlens to have a leading 0.
@@ -53,11 +58,17 @@ class SeqLens:
         )
 
 
+# all SeqLens classes in or connection
+SeqLens = SeqLensFlash
+
+
 class AttentionKernel(ABC):
     """Abstract base class for attention kernels."""
 
     @abstractmethod
-    def __call__(self, qs, ks, vs, seqlens: SeqLens | None = None, softcap=0.0, dropout_p=0.0):
+    def __call__(
+        self, qs, ks, vs, seqlens: SeqLens | None = None, softcap=0.0, dropout_p=0.0
+    ):
         raise NotImplementedError("Attention kernels must implement the __call__ method.")
 
 
@@ -67,13 +78,16 @@ class FlashKernel(AttentionKernel):
         q,
         k,
         v,
-        seqlens: SeqLens | None = None,
+        seqlens: SeqLensFlash | None = None,
         softcap=0.0,
         dropout_p=0.0,
     ):
         """Wrapper for FlashAttention (batched or varlen)."""
         if seqlens is not None:
-            return flash_attn_varlen_func(
+            if not isinstance(seqlens, SeqLensFlash):
+                raise TypeError(f"FlashKernel requires SeqLensFlash, got {type(seqlens).__name__}")
+
+            result = flash_attn_varlen_func(
                 q,
                 k,
                 v,
@@ -84,8 +98,10 @@ class FlashKernel(AttentionKernel):
                 softcap=softcap,
                 dropout_p=dropout_p,
             )
+        else:
+            result = flash_attn_func(q, k, v, softcap=softcap, dropout_p=dropout_p)
 
-        return flash_attn_func(q, k, v, softcap=softcap, dropout_p=dropout_p)
+        return result
 
 
 class SDPAKernel(AttentionKernel):
@@ -246,7 +262,7 @@ class Attention(BaseAttention):
         x_kv = self.lnorm_in_kv(x_kv) if x_kv is not None else x
         return x, x_kv
 
-    def project_qkv(self, x, x_kv, seqlens=None):
+    def project_qkv(self, x, x_kv, seqlens: SeqLens | None = None):
         if seqlens is not None:
             s_q = [x.shape[0], self.num_heads, self.dim_head_proj]
             s_kv = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
@@ -263,7 +279,7 @@ class Attention(BaseAttention):
         vs = self.proj_heads_v(x_kv).reshape(s_kv).to(self.dtype)
         return qs, ks, vs
 
-    def pos_enc(self, q, k, coords=None, seqlens=None):
+    def pos_enc(self, q, k, coords=None, seqlens: SeqLens | None = None):
         if self.with_2d_rope:
             if coords is None:
                 raise ValueError("coords must be provided when with_2d_rope=True")
@@ -277,7 +293,9 @@ class Attention(BaseAttention):
             return x
         return self.dropout(x)
 
-    def forward(self, x, *, x_kv=None, seqlens=None, coords=None, ada_ln_aux=None):
+    def forward(
+        self, x, *, x_kv=None, seqlens: SeqLens | None = None, coords=None, ada_ln_aux=None
+    ):
         residual = x
         x, x_kv = self.norm_in(x, x_kv, ada_ln_aux)
         q, k, v = self.project_qkv(x, x_kv, seqlens)
