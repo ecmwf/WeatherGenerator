@@ -828,7 +828,11 @@ class LinePlots:
         if has_target:
             # Lower panel: ratio against each run's OWN target, so every curve is an honest
             # pred/target for that run (unlike the averaged reference drawn above).
+            # Runs with no target of their own (e.g. skip_target_values) have nothing
+            # to form a ratio against, so they are omitted from this panel.
             for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
+                if ds["psd_target"] is None:
+                    continue
                 c = colors[i % len(colors)]
                 pred = np.asarray(ds["psd_prediction"])
                 own_freq = np.asarray(ds["frequencies"])

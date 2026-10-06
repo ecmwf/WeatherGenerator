@@ -998,6 +998,7 @@ def psd_plot_metric_region(
     """
     streams_set = collect_streams(runs)
     channels_set = collect_channels(scores_dict, metric, region, runs)
+    n_plots = 0
 
     for stream in streams_set:
         for ch in channels_set:
@@ -1009,8 +1010,6 @@ def psd_plot_metric_region(
                     continue
 
                 data_ch = data.sel(channel=ch) if "channel" in data.dims else data
-                if data_ch.isnull().all():
-                    continue
 
                 attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
                 if not attr_fsteps:
@@ -1054,6 +1053,7 @@ def psd_plot_metric_region(
                     variable=ch,
                     forecast_step=str(fstep),
                 )
+                n_plots += 1
 
             # Third pass: per-run evolution across forecast steps.
             for run_id, per_fstep_datasets in run_fstep_datasets.items():
@@ -1070,7 +1070,13 @@ def psd_plot_metric_region(
                     label=run_labels[run_id],
                 )
 
-    _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
+    if n_plots:
+        _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
+    else:
+        _logger.warning(
+            f"No PSD plots were produced for metric={metric!r} region={region!r}: "
+            "no run had usable PSD attrs (frequencies/psd_prediction) for any channel."
+        )
 
 
 def create_filename(
