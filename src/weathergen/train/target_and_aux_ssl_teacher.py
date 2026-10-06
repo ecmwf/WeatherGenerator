@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any
 
@@ -158,6 +159,12 @@ class FrozenTeacher(EncoderTeacher):
         return cls(teacher_model, cf.training_config, teacher_model_params)
 
     def forward_teacher(self, model_params, batch):
+        if self.teacher_model.encoder_configs:
+            batch = copy.copy(batch)
+            batch.encoder_streams = {
+                name: list(encoder_cf.streams)
+                for name, encoder_cf in self.teacher_model.encoder_configs.items()
+            }
         params = (
             self.teacher_model_params if self.teacher_model_params is not None else model_params
         )
