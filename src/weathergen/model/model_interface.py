@@ -226,10 +226,7 @@ def init_model_and_shard(
     if is_root():
         log_trainable_summary(model)
 
-    # Optionally overlay the physical decoder from a separate checkpoint. This runs after the
-    # primary load so it takes precedence for decoder weights while keeping the encoder /
-    # forecast engine from the primary checkpoint (e.g. inference with a latent-diffusion run
-    # that has no trained decoder, reusing a pretrained decoder from another run).
+    # Optionally overlay the physical decoder from a separate checkpoint.
     decoder_run_id = cf.get("load_decoder_chkpt", {}).get("run_id", None)
     if decoder_run_id:
         # if run is a continuation, decoder should already be present from primary load
@@ -250,8 +247,7 @@ def init_model_and_shard(
                 cf, model, device, decoder_run_id, with_ddp, with_fsdp, decoder_mini_epoch
             )
 
-    # Optionally overlay the encoder from a separate checkpoint -- the mirror of the decoder
-    # overlay above
+    # Optionally overlay the encoder from a separate checkpoint -- as above.
     encoder_run_id = cf.get("load_encoder_chkpt", {}).get("run_id", None)
     if encoder_run_id:
         if run_id_contd is not None:

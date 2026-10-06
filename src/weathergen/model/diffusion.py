@@ -170,8 +170,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.edm_preconditioning = self.cf.get("fe_diffusion_edm_preconditioning", False)
 
         # EDM stochastic sampler (Karras et al. 2022, Algorithm 2) knobs — inference only.
-        # s_churn == 0 (the default) keeps the deterministic Heun sampler, bit-identical.
-        # See _stochastic_churn() and _run_ode().
+        # s_churn == 0 (the default) keeps the deterministic Heun sampler.
         self.s_churn = float(self.cf.get("fe_diffusion_s_churn", 0.0))
         self.s_min = float(self.cf.get("fe_diffusion_s_min", 0.0))
         _s_max = self.cf.get("fe_diffusion_s_max", None)
@@ -508,22 +507,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         ``t_hat`` by injecting fresh Gaussian noise, so the subsequent denoise+Heun step acts
         as a Langevin corrector. Returns ``(x_hat, t_hat)``.
 
-        With ``s_max = min(fe_diffusion_s_max, sigma_max_eff)`` and
-        ``gamma = min(s_churn / num_steps, sqrt(2) - 1)`` (only for ``t_cur`` inside
-        ``[s_min, s_max]``)::
-
-            t_hat = min((1 + gamma) * t_cur, s_max)
-            x_hat = x_cur + sqrt(t_hat**2 - t_cur**2) * s_noise * N(0, I)
-
         ``fe_diffusion_s_max`` is capped at ``sigma_max_eff`` (the top of the training-aligned
         inference schedule) so churn can neither operate at nor raise the noise level into the
         untrained high-sigma tail.
 
-        No-op — returns ``(x_cur, t_cur)`` with the global RNG stream **untouched** — when
+        No-op — returns ``(x_cur, t_cur)`` with the global RNG stream untouched — when
         ``s_churn <= 0`` (the default), ``t_cur`` is outside ``[s_min, s_max]``, ``gamma``
-        rounds to 0, or the ``s_max`` cap leaves nothing to add. The RNG guard matters: an
-        unconditional ``torch.randn_like(...) * 0`` would still advance the RNG and shift the
-        initial noise of every later sample / forecast step.
+        rounds to 0, or the ``s_max`` cap leaves nothing to add.
 
         Works for both trajectory mode (``x_cur`` is ``(1, H, D)``) and ensemble mode
         (``x_cur`` is ``(N, H, D)`` — each member gets independent churn noise).
@@ -665,10 +655,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
             x_cur = x_next
 
-            # Increase noise temporarily (EDM Algorithm 2 churn). No-op — x_hat is x_cur,
-            # t_hat is t_cur, RNG untouched — when fe_diffusion_s_churn == 0 (the default),
-            # so the deterministic Heun sampler below is unchanged. sigma_max_eff caps the
-            # churn so it never reaches into the untrained high-sigma tail.
+            # Increase noise temporarily (EDM Algorithm 2 churn).
             x_hat, t_hat = self._stochastic_churn(x_cur, t_cur, num_steps, sigma_max_eff)
 
             # Euler step.
