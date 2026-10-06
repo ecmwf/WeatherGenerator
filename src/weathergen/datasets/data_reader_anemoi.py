@@ -158,6 +158,11 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.mean_geoinfo = np.zeros(0)
             self.stdev_geoinfo = np.ones(0)
 
+        self.ens_member = 0
+        if stream_info.get("ensemble_member") is not None:
+            self.ens_member = stream_info.get("ensemble_member")
+            _logger.info(f"{stream_info['name']}: using ensemble member {self.ens_member}")
+
         ds_name = stream_info["name"]
         _logger.info(f"{ds_name}: source channels: {self.source_channels}")
         _logger.info(f"{ds_name}: target channels: {self.target_channels}")
@@ -213,7 +218,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
         try:
-            data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
+            data = self.ds[didx_start:didx_end][:, :, self.ens_member].astype(np.float32)
         except MissingDateError as e:
             _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
             return ReaderData.empty(
