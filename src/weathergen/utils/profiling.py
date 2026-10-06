@@ -41,12 +41,9 @@ MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
 
 class BatchTracker(Protocol):
     """
-    What `ProfilingTrainer` expects of a per-step measurement tool.
+    A per-step measurement tool for `ProfilingTrainer`.
 
-    `step` is called once per training step, after that step has completed, on every rank
-    (`ThroughputTracker` and anything else that syncs across ranks relies on that). It is
-    given the batch that was just trained on, the step index it was trained at, and a
-    `log_fn` that writes a metrics dict to the train logger at that step.
+    `step` is called after every training step on every rank, so it may sync across ranks.
     """
 
     def step(
@@ -59,9 +56,7 @@ class ProfilingSchedule:
     """
     The wait/warmup/active/repeat cycle of the profiled stretch, in training steps.
 
-    It belongs to the profiling section as a whole, not to one collector: the PyTorch
-    profiler steps through it, the memory snapshot records from the first active step
-    onwards, and `num_steps` is how long a `stop_after_profiling` run lasts.
+    Shared by all collectors; `num_steps` is how long a `stop_after_profiling` run lasts.
     """
 
     wait: int = 1
@@ -101,18 +96,23 @@ class ProfilingConfig:
     """
     The `profiling` section of a run config: tracing a bounded stretch of training.
 
-    The section is deliberately absent from `config/default_config.yml` — the defaults below
-    are the only ones, so a run config that predates a key (e.g. when continuing an older
-    run) needs no migration. `config/config_performance.yml` documents the keys.
+    Absent from `config/default_config.yml`; the defaults below are the only ones. Example:
+    `config/config_performance.yml`. Traces go to `config.get_path_profiling_traces`.
+
+    Attributes:
+        enabled: master switch for the section.
+        stop_after_profiling: end the run after the profiled stretch, skipping validation
+            and checkpointing.
+        schedule: length and wait/warmup/active split of the profiled stretch.
+        pytorch_profiler: chrome trace and memory timeline per cycle (root rank).
+        memory_snapshot: CUDA memory history from the first active step (root rank); view
+            at https://pytorch.org/memory_viz.
+        nvtx_annotate: nvtx ranges around batches and model blocks, for nsys.
     """
 
-    # collect traces, which requires the ProfilingTrainer
     enabled: bool = False
-    # end the run once the profiled stretch is done, instead of training as configured
     stop_after_profiling: bool = False
-    # how long the profiled stretch is, and how it is split into wait/warmup/active
     schedule: ProfilingSchedule = ProfilingSchedule()
-    # collectors, independent of each other; each one is opted into explicitly
     pytorch_profiler: bool = False
     memory_snapshot: bool = False
     nvtx_annotate: bool = False
@@ -142,12 +142,14 @@ class ProfilingConfig:
 @dataclasses.dataclass(frozen=True)
 class PerformanceLoggingConfig:
     """
-    The `performance_logging` section of a run config: how the run itself performs.
+    The `performance_logging` section of a run config: cheap whole-run metrics.
 
-    Unlike profiling, these metrics are cheap, cover the whole run and are logged next to
-    the training metrics rather than written to a trace. Throughput is the only one so far;
-    peak memory is meant to join it. As with `ProfilingConfig`, the defaults below are the
-    only ones; the section is not in `config/default_config.yml`.
+    Logged with the training metrics; does not change training, so safe for full runs.
+    Absent from `config/default_config.yml`, like `ProfilingConfig`.
+
+    Attributes:
+        throughput: log `performance.throughput.*` metrics.
+        throughput_warmup_steps: steps to skip before reporting throughput.
     """
 
     throughput: bool = False
@@ -177,9 +179,7 @@ def pytorch_profiler_session(cf: Config, schedule: ProfilingSchedule) -> Iterato
     """
     Run the enclosed block under the PyTorch profiler, on the root rank only.
 
-    Yields the profiler on the root rank (call `.step()` on it once per training step) and
-    None everywhere else. Each cycle of the schedule writes a chrome trace and a memory
-    timeline to `config.get_path_profiling_traces(cf)`; a summary is logged at the end.
+    Yields the profiler on the root rank (call `.step()` once per training step), else None.
     """
     if not is_root():
         yield None
@@ -204,13 +204,7 @@ def pytorch_profiler_session(cf: Config, schedule: ProfilingSchedule) -> Iterato
 
 @contextlib.contextmanager
 def memory_snapshot_session(cf: Config) -> Iterator[None]:
-    """
-    Record the CUDA memory history over the enclosed block, on the root rank only.
-
-    The snapshot is dumped to `config.get_path_profiling_traces(cf)` on exit and can be
-    viewed at https://pytorch.org/memory_viz. Independent of the PyTorch profiler; the
-    caller enters this once the schedule's wait and warmup steps are done.
-    """
+    """Record the CUDA memory history over the enclosed block, on the root rank only."""
     if not is_root() or not _cuda_available():
         yield
         return
@@ -289,11 +283,9 @@ def _cuda_available() -> bool:
 
 def wrap_module_forward_with_profiling(model: torch.nn.Module, prefix: str = "") -> None:
     """
-    Recursively annotate the forward of every custom submodule with `record_function`.
+    Recursively wrap the forward of every non-torch submodule in `record_function`.
 
-    This makes the trace readable in terms of WeatherGenerator modules instead of bare aten
-    ops. It patches `forward` on the module instances, so only use it on a model that is
-    about to be profiled and then thrown away.
+    Patches the instances in place, so only use it on a model that is about to be profiled.
     """
     for name, module in model.named_children():
         module_name = f"{prefix}.{name}" if prefix else name

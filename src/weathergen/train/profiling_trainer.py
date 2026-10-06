@@ -41,25 +41,15 @@ logger = logging.getLogger(__name__)
 
 class ProfilingTrainer(Trainer):
     """
-    Trainer that measures the training loop, configured by `profiling` and
-    `performance_logging`.
+    Trainer that measures the training loop (see `ProfilingConfig`,
+    `PerformanceLoggingConfig`).
 
-    The training step itself is inherited unchanged from `Trainer`: only the iteration
-    seams (`mini_epochs`, `train_batches`) are overridden, so the measured code path and
-    the code path of a normal run cannot drift apart. Everything that measures a step hangs
-    off `train_batches`, which regains control once the step for the batch it yielded is
-    done — `Trainer` therefore knows about no measurement tool at all.
+    Only the iteration seams (`mini_epochs`, `train_batches`) are overridden, so the
+    training step is the same as in a normal run. Measurement happens in `train_batches`,
+    which regains control after each yielded batch has been trained on.
 
-    `profiling` traces the profiled stretch (`schedule.num_steps` training steps) on the
-    root rank, while the other ranks run the same steps untraced so that collectives stay
-    matched. The PyTorch profiler steps through the schedule; the memory snapshot records
-    from the first active step onwards. With `stop_after_profiling` (the default) the run
-    ends once the stretch is done, without validating or checkpointing, so that the traces
-    cover the training step and nothing else.
-
-    `performance_logging` builds the `BatchTracker`s (see `get_trackers`) that measure every
-    step of the whole run on every rank. It is cheap: a run with only this enabled trains
-    exactly as a plain `Trainer` run would, and just logs more.
+    Traces are collected on the root rank only; the other ranks run the same steps untraced
+    so collectives stay matched.
     """
 
     def __init__(self, train_logging: Config):
@@ -82,13 +72,7 @@ class ProfilingTrainer(Trainer):
             self.training_loop_annotation_context = nvtx_range
 
     def get_trackers(self) -> list[BatchTracker]:
-        """
-        Build the per-step measurement tools the `performance_logging` config asks for.
-
-        This is where a new tracking tool is added: implement `BatchTracker` and append it
-        here. The trainer only ever calls `step` on them, once per training step and on
-        every rank, so a tracker is free to sync across ranks.
-        """
+        """Build the `BatchTracker`s enabled in `performance_logging`; add new ones here."""
         trackers: list[BatchTracker] = []
 
         if self.performance_cfg.throughput:
@@ -122,12 +106,7 @@ class ProfilingTrainer(Trainer):
     def _tracked(
         self, batches: Iterator[tuple[int, ModelBatch]]
     ) -> Iterator[tuple[int, ModelBatch]]:
-        """
-        Step the trackers once per training step, on every rank.
-
-        Control returns here after `train()` has finished the step for the batch that was
-        yielded, which is what lets the measurement live outside the training step.
-        """
+        """Step the trackers after each training step, on every rank."""
         if not self.trackers:
             yield from batches
             return
