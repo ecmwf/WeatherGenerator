@@ -83,12 +83,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.embedding_dim = self.cf.embedding_dim
         noise_emb_cfg = self.cf.get("noise_embedding", None) or {}
         if "type" not in noise_emb_cfg:
-            # The default stays "dit_legacy" for now so that existing checkpoints (trained without a
-            # noise_embedding block) keep loading. New runs should set log_fourier explicitly.
             logger.warning(
-                "No noise_embedding.type set; falling back to 'dit_legacy' for backward "
-                "compatibility with existing checkpoints. Its frequencies barely vary over the "
-                "c_noise range, so the noise level is poorly resolved. For new runs we recommend "
+                "noise_embedding.type not set in config; falling back to 'dit_legacy' for backward "
+                "compatibility with existing checkpoints. For new runs we recommend "
                 "noise_embedding: {type: log_fourier, f_min: 0.5, f_max: 25.13 (8*pi), "
                 "include_raw: true}."
             )
@@ -767,14 +764,10 @@ class NoiseEmbedder(torch.nn.Module):
     Embeds the scalar noise level c_noise = ln(sigma) / 4 into a vector representation.
 
     embedding_type:
-      - "dit_legacy": DiT timestep embedding, frequencies 10000^(-k/half) in [1e-4, 1]. These were
-        designed for integer timesteps in [0, 1000]; over the ~1-3 unit range of c_noise almost all
-        channels are constant, so the noise level reaches the MLP only as a small, near-linear
-        signal.
+      - "dit_legacy": DiT timestep embedding, frequencies 10000^(-k/half) in [1e-4, 1]. Should not
+        be used for new runs, only for backward compatibility with legacy checkpoints"
       - "log_fourier": log-spaced frequencies in [f_min, f_max] (rad per unit c_noise), fitted to
-        the c_noise range: f_min gives a slow monotone-ish channel (period >> range), f_max sets
-        the resolution (period 2*pi/f_max in c_noise, i.e. a sigma factor of exp(8*pi/f_max)).
-        Optionally the raw c_noise is appended as an extra, directly monotone channel.
+        the c_noise range. Optionally the raw c_noise is appended as an extra, directly monotone channel.
         Recommended: f_min=0.5, f_max=8*pi, include_raw (the f_* defaults here).
 
     The default embedding_type is "dit_legacy" only temporarily, for backward compatibility with
