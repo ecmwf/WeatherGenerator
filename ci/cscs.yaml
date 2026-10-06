@@ -32,6 +32,9 @@ test_job:
         echo "Pytest version: $(pytest --version) path: $(which pytest)"
         echo "Run tests"
         ./scripts/actions.sh integration-test${STAGE_TYPE:-}
+        echo "Test installation"
+        uv pip install -e .
+        echo "Testing complete"
     variables:
         SLURM_JOB_NUM_NODES: 1
         SLURM_GPUS_PER_NODE: 4
