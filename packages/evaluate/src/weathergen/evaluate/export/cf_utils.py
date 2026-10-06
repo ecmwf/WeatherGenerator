@@ -5,9 +5,12 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+from pint import DimensionalityError, UnitRegistry
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+ureg = UnitRegistry()
+Q_ = ureg.Quantity
 
 
 class CfParser:
@@ -74,6 +77,33 @@ class CfParser:
 
         scaled_data = data * scale_factor + add_offset
         return scaled_data
+
+    def convert_units(self, ds, da, wg_unit, std_unit) -> str:
+        """
+        Convert units from WeatherGenerator to standard units.
+        Parameters
+        ----------
+            wg_unit : str
+                WeatherGenerator unit.
+            std_unit : str
+                Standard unit to convert to.
+        Returns
+        -------
+            str
+                Unit conversion string.
+        """
+        unit_conversion = {
+            "m": {"kg m**-2": 0.001},  # essentially converting m to mm as it is precip (water)
+            "W/m^2": {"J m**-2": 1 / (3600 * ds["forecast_step"])},
+        }
+        if ureg(wg_unit) != ureg(std_unit):
+            try:
+                _logger.debug(f"Converting from {wg_unit} to {std_unit} for CF compliance.")
+                da.values = Q_(da.values, ureg(wg_unit)).to(ureg(std_unit)).magnitude
+            except DimensionalityError:
+                _logger.debug(f"Using manual lookup to convert {wg_unit} to {std_unit}")
+                if wg_unit in unit_conversion and std_unit in unit_conversion[wg_unit]:
+                    da = da * unit_conversion[wg_unit][std_unit]
 
 
 ##########################################
