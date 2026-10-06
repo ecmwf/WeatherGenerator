@@ -53,11 +53,26 @@ def get_healpix_level(config: Config) -> int:
         for stream in streams_without_level:
             stream["healpix_level"] = config.healpix_level
 
-    # All streams must have the same level until multi-encoders are implemented.
+    # Encoders share one latent grid and downstream decoder.
     levels = {stream.healpix_level for stream in streams}
     assert len(levels) == 1, "All streams must use the same healpix_level."
 
     return levels.pop()
+
+
+def get_encoder_configs(cf: Config) -> dict[str, Config]:
+    """Merge encoder overrides and select streams without changing the model config."""
+    if not cf.get("encoders"):
+        return {}
+    base = cf.copy()
+    resolved = {}
+    for name, settings in base.pop("encoders").items():
+        overrides = settings.copy()
+        streams = {key: cf.streams[key] for key in overrides.pop("streams", cf.streams)}
+        child = OmegaConf.merge(base, overrides)
+        child.streams = {key: streams[key] for key in cf.streams if key in streams}
+        resolved[name] = child
+    return resolved
 
 
 def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
@@ -284,7 +299,8 @@ def load_run_config(
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _apply_fixes(config)
+    config = _apply_fixes(config)
+    return config
 
 
 def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):

@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common.config import Config, get_healpix_level
+from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
@@ -104,6 +104,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # Batch assembly still requires a common HEALPix level.
         get_healpix_level(cf)
+        self.encoder_streams = {
+            name: list(encoder_cf.streams) for name, encoder_cf in get_encoder_configs(cf).items()
+        }
         self.masker = Masker(stage, cf.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(self.masker)
 
@@ -679,6 +682,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             num_target_samples,
             self.output_offset,
             num_output_steps,
+            encoder_streams=self.encoder_streams,
         )
 
         # for all streams
