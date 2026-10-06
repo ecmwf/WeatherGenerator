@@ -25,16 +25,18 @@ from weathergen.common.config import Config
 from weathergen.common.logger import init_loggers
 from weathergen.train.profiling_trainer import ProfilingTrainer
 from weathergen.train.trainer import Trainer
-from weathergen.utils.profiling import PerformanceLoggingConfig, ProfilingConfig
+from weathergen.utils.performance import ThroughputTracker
+from weathergen.utils.profiling import ProfilingConfig
 
 logger = logging.getLogger(__name__)
 
 
 def get_trainer(cf: Config) -> Trainer:
     """Select the trainer: the ProfilingTrainer if the run is measured, a plain one otherwise."""
-    if ProfilingConfig.from_config(cf).enabled or PerformanceLoggingConfig.from_config(cf).enabled:
-        logger.info("Profiling or performance logging enabled: running with ProfilingTrainer.")
-        return ProfilingTrainer(cf.train_logging)
+    profiling_cfg = ProfilingConfig.from_config(cf)
+    if profiling_cfg.enabled or ThroughputTracker.is_enabled(cf):
+        logger.info("Profiling or throughput logging enabled: running with ProfilingTrainer.")
+        return ProfilingTrainer(cf.train_logging, profiling_cfg)
 
     return Trainer(cf.train_logging)
 

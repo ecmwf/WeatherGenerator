@@ -8,23 +8,21 @@
 # nor does it submit to any jurisdiction.
 
 """
-Configuration and helpers for measuring a training run.
+Profiling: tracing a bounded stretch of training (PyTorch profiler, CUDA memory snapshot).
 
-The `profiling` and `performance_logging` sections of a run config are parsed here; the
-trainer side of both lives in `weathergen.train.profiling_trainer`. Profiling traces a
-bounded stretch of training (PyTorch profiler, CUDA memory snapshot) and is expensive;
-performance logging measures the run as a whole (throughput, later peak memory) and is not.
+The `profiling` config section is parsed here; cheap whole-run metrics live in
+`weathergen.utils.performance`. Both are driven by
+`weathergen.train.profiling_trainer.ProfilingTrainer`.
 """
 
 import contextlib
 import dataclasses
 import logging
 import platform
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Protocol
 
 import torch
 from torch.profiler import ProfilerActivity, profile, record_function
@@ -37,18 +35,6 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
 MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
-
-
-class BatchTracker(Protocol):
-    """
-    A per-step measurement tool for `ProfilingTrainer`.
-
-    `step` is called after every training step on every rank, so it may sync across ranks.
-    """
-
-    def step(
-        self, batch, istep: int, log_fn: Callable[[dict[str, float]], None] | None = None
-    ) -> None: ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -65,7 +51,7 @@ class ProfilingSchedule:
     repeat: int = 1
 
     @classmethod
-    def from_config(cls, profiling_cfg: Config | dict) -> "ProfilingSchedule":
+    def from_section(cls, profiling_cfg: Config | dict) -> "ProfilingSchedule":
         """Read the schedule from the `profiling` section of a run config."""
         defaults = cls()
         return cls(
@@ -100,7 +86,7 @@ class ProfilingConfig:
     `config/config_performance.yml`. Traces go to `config.get_path_profiling_traces`.
 
     Attributes:
-        enabled: master switch for the section.
+        enabled: master switch for the section, including `nvtx_annotate`.
         stop_after_profiling: end the run after the profiled stretch, skipping validation
             and checkpointing.
         schedule: length and wait/warmup/active split of the profiled stretch.
@@ -127,7 +113,7 @@ class ProfilingConfig:
         return cls(
             enabled=cfg.get("enabled", defaults.enabled),
             stop_after_profiling=cfg.get("stop_after_profiling", defaults.stop_after_profiling),
-            schedule=ProfilingSchedule.from_config(cfg),
+            schedule=ProfilingSchedule.from_section(cfg),
             pytorch_profiler=pytorch_profiler_cfg.get("enabled", defaults.pytorch_profiler),
             memory_snapshot=memory_snapshot_cfg.get("enabled", defaults.memory_snapshot),
             nvtx_annotate=cfg.get("nvtx_annotate", defaults.nvtx_annotate),
@@ -138,44 +124,16 @@ class ProfilingConfig:
         """Whether the profiled stretch writes anything to the traces directory."""
         return self.enabled and (self.pytorch_profiler or self.memory_snapshot)
 
-
-@dataclasses.dataclass(frozen=True)
-class PerformanceLoggingConfig:
-    """
-    The `performance_logging` section of a run config: cheap whole-run metrics.
-
-    Logged with the training metrics; does not change training, so safe for full runs.
-    Absent from `config/default_config.yml`, like `ProfilingConfig`.
-
-    Attributes:
-        throughput: log `performance.throughput.*` metrics.
-        throughput_warmup_steps: steps to skip before reporting throughput.
-    """
-
-    throughput: bool = False
-    throughput_warmup_steps: int = 2
-
-    @classmethod
-    def from_config(cls, cf: Config) -> "PerformanceLoggingConfig":
-        cfg = cf.get("performance_logging") or {}
-        throughput_cfg = cfg.get("throughput") or {}
-        defaults = cls()
-
-        return cls(
-            throughput=throughput_cfg.get("enabled", defaults.throughput),
-            throughput_warmup_steps=throughput_cfg.get(
-                "warmup_steps", defaults.throughput_warmup_steps
-            ),
-        )
-
     @property
-    def enabled(self) -> bool:
-        """Whether anything is logged, i.e. whether the run needs the ProfilingTrainer."""
-        return self.throughput
+    def annotates_nvtx(self) -> bool:
+        """Whether batches and model blocks get nvtx ranges."""
+        return self.enabled and self.nvtx_annotate
 
 
 @contextlib.contextmanager
-def pytorch_profiler_session(cf: Config, schedule: ProfilingSchedule) -> Iterator[profile | None]:
+def pytorch_profiler_session(
+    cf: Config, schedule: ProfilingSchedule
+) -> Generator[profile | None, None, None]:
     """
     Run the enclosed block under the PyTorch profiler, on the root rank only.
 
@@ -194,34 +152,38 @@ def pytorch_profiler_session(cf: Config, schedule: ProfilingSchedule) -> Iterato
         with_modules=True,
         with_flops=True,
         schedule=schedule.to_torch(),
-        on_trace_ready=partial(trace_handler, cf),
+        on_trace_ready=partial(_trace_handler, cf),
     ) as prof:
         yield prof
 
-    log_profiler_summary(prof)
+    _log_profiler_summary(prof)
     logger.info(f"PyTorch profiler traces written to {traces_path}")
 
 
 @contextlib.contextmanager
-def memory_snapshot_session(cf: Config) -> Iterator[None]:
+def memory_snapshot_session(cf: Config) -> Generator[None, None, None]:
     """Record the CUDA memory history over the enclosed block, on the root rank only."""
-    if not is_root() or not _cuda_available():
+    if not is_root():
         yield
         return
 
-    traces_path = _prepare_traces_path(cf)
+    if not torch.cuda.is_available():
+        logger.info("CUDA unavailable. Not recording memory history")
+        yield
+        return
+
+    _prepare_traces_path(cf)
     logger.info("Starting snapshot record_memory_history")
     torch.cuda.memory._record_memory_history(max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT)
     try:
         yield
         _export_memory_snapshot(cf)
-        logger.info(f"Memory snapshot written to {traces_path}")
     finally:
         logger.info("Stopping snapshot record_memory_history")
         torch.cuda.memory._record_memory_history(enabled=None)
 
 
-def log_profiler_summary(prof: profile) -> None:
+def _log_profiler_summary(prof: profile) -> None:
     """Log the aggregated profiler tables (FLOPs, time per module, memory)."""
     logger.info("\n" + "=" * 80 + "\nPROFILING SUMMARY\n" + "=" * 80)
 
@@ -239,7 +201,7 @@ def log_profiler_summary(prof: profile) -> None:
     logger.info(prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=20))
 
 
-def trace_handler(cf: Config, prof: profile) -> None:
+def _trace_handler(cf: Config, prof: profile) -> None:
     """Write the chrome trace and the memory timeline for one profiler cycle."""
     file_prefix = _trace_file_prefix(cf)
 
@@ -249,16 +211,18 @@ def trace_handler(cf: Config, prof: profile) -> None:
     if platform.machine() == "aarch64":
         logger.info("[profiler] Memory distribution timeline skipped on aarch64")
     else:
+        # only the root rank profiles, and it runs on the first local device
         prof.export_memory_timeline(f"{file_prefix}.html", device="cuda:0")
 
 
 def _export_memory_snapshot(cf: Config) -> None:
-    file_prefix = _trace_file_prefix(cf)
+    snapshot_path = f"{_trace_file_prefix(cf)}.pickle"
     try:
-        logger.info(f"Saving snapshot to local file: {file_prefix}.pickle")
-        torch.cuda.memory._dump_snapshot(f"{file_prefix}.pickle")
+        torch.cuda.memory._dump_snapshot(snapshot_path)
     except Exception as e:
-        logger.error(f"Failed to capture memory snapshot {e}")
+        logger.error(f"Failed to capture memory snapshot: {e}")
+    else:
+        logger.info(f"Memory snapshot written to {snapshot_path}")
 
 
 def _prepare_traces_path(cf: Config) -> Path:
@@ -271,14 +235,6 @@ def _trace_file_prefix(cf: Config) -> Path:
     """Timestamped, rank-specific path prefix shared by all profiling artifacts."""
     timestamp = datetime.now().strftime(TIME_FORMAT_STR)
     return config.get_path_profiling_traces(cf) / f"{timestamp}_rank_{get_rank()}"
-
-
-def _cuda_available() -> bool:
-    if torch.cuda.is_available():
-        return True
-
-    logger.info("CUDA unavailable. Not recording memory history")
-    return False
 
 
 def wrap_module_forward_with_profiling(model: torch.nn.Module, prefix: str = "") -> None:

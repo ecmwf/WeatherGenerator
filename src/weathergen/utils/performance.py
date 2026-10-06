@@ -7,7 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Utilities for measuring training throughput metrics."""
+"""
+Performance logging: cheap per-step metrics of the whole run (throughput), and nvtx ranges.
+
+Tracing a bounded stretch of training lives in `weathergen.utils.profiling`. Both are
+driven by `weathergen.train.profiling_trainer.ProfilingTrainer`.
+"""
 
 import logging
 import time
@@ -16,9 +21,14 @@ from contextlib import contextmanager
 
 import torch
 
+from weathergen.common.config import Config
 from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
+
+
+def _throughput_section(cf: Config) -> Config | dict:
+    return (cf.get("performance_logging") or {}).get("throughput") or {}
 
 
 class ThroughputTracker:
@@ -26,7 +36,32 @@ class ThroughputTracker:
 
     Accumulates per-batch sample and source-byte counts across ranks, with the warmup
     / accumulation logic required to produce stable global throughput metrics.
+
+    Configured by `performance_logging.throughput` (`enabled`, `warmup_steps`), which is
+    absent from `config/default_config.yml`; the defaults here are the only ones. Cheap and
+    does not change training, so safe for full runs.
     """
+
+    DEFAULT_WARMUP_STEPS: int = 2
+
+    @staticmethod
+    def is_enabled(cf: Config) -> bool:
+        """Whether the run config asks for throughput logging."""
+        return _throughput_section(cf).get("enabled", False)
+
+    @classmethod
+    def from_config(
+        cls, cf: Config, device: torch.device, batch_size_per_gpu: int
+    ) -> "ThroughputTracker | None":
+        """The tracker the run config asks for, or None if throughput logging is off."""
+        if not cls.is_enabled(cf):
+            return None
+
+        return cls(
+            device=device,
+            warmup_steps=_throughput_section(cf).get("warmup_steps", cls.DEFAULT_WARMUP_STEPS),
+            batch_size_per_gpu=batch_size_per_gpu,
+        )
 
     def __init__(
         self,

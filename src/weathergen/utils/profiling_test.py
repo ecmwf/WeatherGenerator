@@ -7,23 +7,25 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+from pathlib import Path
+from unittest.mock import patch
+
 from omegaconf import OmegaConf
 
 from weathergen.common.config import _DEFAULT_CONFIG_PTH
-from weathergen.utils.profiling import (
-    PerformanceLoggingConfig,
-    ProfilingConfig,
-    ProfilingSchedule,
-)
+from weathergen.utils import profiling
+from weathergen.utils.performance import ThroughputTracker
+from weathergen.utils.profiling import ProfilingConfig, ProfilingSchedule
 
 _PERFORMANCE_CONFIG_PTH = _DEFAULT_CONFIG_PTH.parent / "config_performance.yml"
 
 
-def test_schedule_from_config():
+def test_schedule_from_section():
     cfg = OmegaConf.create(
         {"wait_iteration": 2, "warmup_iteration": 3, "active_iteration": 4, "repeat": 5}
     )
-    schedule = ProfilingSchedule.from_config(cfg)
+    schedule = ProfilingSchedule.from_section(cfg)
 
     assert schedule == ProfilingSchedule(wait=2, warmup=3, active=4, repeat=5)
     assert schedule.num_steps == (2 + 3 + 4) * 5
@@ -54,16 +56,24 @@ def test_collecting_traces_needs_profiling_enabled():
     assert not ProfilingConfig.from_config(cfg).collects_traces
 
 
-def test_performance_logging_is_independent_of_profiling():
-    cfg = OmegaConf.create({"performance_logging": {"throughput": {"warmup_steps": 5}}})
-    performance_cfg = PerformanceLoggingConfig.from_config(cfg)
+def test_nvtx_annotation_needs_profiling_enabled():
+    cfg = OmegaConf.create({"profiling": {"enabled": False, "nvtx_annotate": True}})
+    assert not ProfilingConfig.from_config(cfg).annotates_nvtx
 
-    assert not ProfilingConfig.from_config(cfg).enabled
-    assert not performance_cfg.enabled, "throughput is off by default"
-    assert performance_cfg.throughput_warmup_steps == 5
+    cfg.profiling.enabled = True
+    assert ProfilingConfig.from_config(cfg).annotates_nvtx
 
-    cfg.performance_logging.throughput.enabled = True
-    assert PerformanceLoggingConfig.from_config(cfg).enabled
+
+def test_memory_snapshot_failure_is_not_reported_as_written(tmp_path: Path, caplog):
+    with (
+        patch.object(profiling, "_trace_file_prefix", return_value=tmp_path / "snapshot"),
+        patch.object(profiling.torch.cuda.memory, "_dump_snapshot", side_effect=RuntimeError),
+        caplog.at_level(logging.INFO, logger=profiling.__name__),
+    ):
+        profiling._export_memory_snapshot(OmegaConf.create({}))
+
+    assert "Failed to capture memory snapshot" in caplog.text
+    assert "written" not in caplog.text
 
 
 def test_config_without_the_sections():
@@ -78,7 +88,7 @@ def test_config_without_the_sections():
     assert "profiling" not in default_cfg
     assert "performance_logging" not in default_cfg
     assert ProfilingConfig.from_config(default_cfg) == ProfilingConfig()
-    assert PerformanceLoggingConfig.from_config(default_cfg) == PerformanceLoggingConfig()
+    assert not ThroughputTracker.is_enabled(default_cfg)
     assert ProfilingConfig.from_config(OmegaConf.create({})) == ProfilingConfig()
 
 
@@ -92,4 +102,4 @@ def test_performance_config_measures_everything():
     assert profiling_cfg.stop_after_profiling
     assert profiling_cfg.collects_traces
     assert profiling_cfg.schedule.num_steps == 5
-    assert PerformanceLoggingConfig.from_config(cfg).enabled
+    assert ThroughputTracker.is_enabled(cfg)

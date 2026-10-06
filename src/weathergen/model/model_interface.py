@@ -32,6 +32,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import register_nvtx_hooks
+from weathergen.utils.profiling import ProfilingConfig
 from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def init_model_and_shard(
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
-    if cf.get("profiling", {}).get("nvtx_annotate", False):
+    if ProfilingConfig.from_config(cf).annotates_nvtx:
         logger.info("Registering NVTX hooks for model.")
         register_nvtx_hooks(model)
 
