@@ -207,6 +207,23 @@ class BatchSamples:
             bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
+    def select_streams(self, stream_names: list[str]) -> "BatchSamples":
+        """Select streams without copying their observation data."""
+        original_names = list(self.samples[0].streams_data)
+        if stream_names == original_names:
+            return self
+
+        selected = copy.copy(self)
+        selected.samples = [copy.copy(sample) for sample in self.samples]
+        for sample in selected.samples:
+            sample.streams_data = {name: sample.streams_data[name] for name in stream_names}
+            sample.meta_info = {
+                name: sample.meta_info[name] for name in stream_names if name in sample.meta_info
+            }
+        indices = [original_names.index(name) for name in stream_names]
+        selected.tokens_lens = self.tokens_lens[:, :, indices]
+        return selected
+
     def get_num_source_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
@@ -275,16 +292,27 @@ class BatchSamples:
         return self
 
 
+class MultiSamples(BatchSamples):
+    """Shared batch samples with encoder-named stream views."""
+
+    def __init__(self, stream_names, num_samples, output_steps, output_idxs, encoder_streams):
+        super().__init__(stream_names, num_samples, output_steps, output_idxs)
+        self.encoder_streams = encoder_streams
+
+    def __getitem__(self, encoder_name: str) -> BatchSamples:
+        return self.select_streams(self.encoder_streams[encoder_name])
+
+
 class ModelBatch:
     """
     Container for all data and metadata for one training batch.
     """
 
     # source samples (for model)
-    source_samples: BatchSamples
+    source_samples: MultiSamples
 
     # target samples (for TargetAuxCalculator)
-    target_samples: BatchSamples
+    target_samples: MultiSamples
 
     # index of corresponding target (for source samples) or source (for target samples)
     # these are in 1-to-1 corresponding for classical training modes (e.g. MTM, forecasting) but
@@ -305,6 +333,7 @@ class ModelBatch:
         num_target_samples: int,
         output_offset,
         output_steps,
+        encoder_streams: dict[str, list[str]] | None = None,
     ) -> None:
         """ """
 
@@ -313,11 +342,12 @@ class ModelBatch:
         self.output_steps = output_steps
         self.output_idxs = list(range(output_offset, output_steps))
 
-        self.source_samples = BatchSamples(
-            stream_names, num_source_samples, output_steps, self.output_idxs
+        encoder_streams = encoder_streams or {"default": stream_names}
+        self.source_samples = MultiSamples(
+            stream_names, num_source_samples, output_steps, self.output_idxs, encoder_streams
         )
-        self.target_samples = BatchSamples(
-            stream_names, num_target_samples, output_steps, self.output_idxs
+        self.target_samples = MultiSamples(
+            stream_names, num_target_samples, output_steps, self.output_idxs, encoder_streams
         )
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
@@ -445,7 +475,7 @@ class ModelBatch:
         """
         return self.source_samples.samples[idx]
 
-    def get_source_samples(self, subset: list | None = None) -> BatchSamples:
+    def get_source_samples(self, subset: list | None = None) -> MultiSamples:
         """
         Get source samples
         """
@@ -457,7 +487,7 @@ class ModelBatch:
         """
         return self.target_samples.samples[idx]
 
-    def get_target_samples(self, subset: list | None = None) -> BatchSamples:
+    def get_target_samples(self, subset: list | None = None) -> MultiSamples:
         """
         Get target samples
         """
