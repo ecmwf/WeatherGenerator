@@ -27,6 +27,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
+from weathergen.model.encoder import EncoderModule
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
@@ -60,12 +61,15 @@ def init_model_and_shard(
         logger.info("Registering NVTX hooks for model.")
         register_nvtx_hooks(model)
 
+    encoders = [module for module in model.encoder.modules() if isinstance(module, EncoderModule)]
+
     # freeze request model part
     apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
 
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
-        model.encoder.q_cells.requires_grad = False
+        for encoder in encoders:
+            encoder.q_cells.requires_grad = False
 
     if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
@@ -98,17 +102,23 @@ def init_model_and_shard(
             MultiSelfAttentionHeadVarlen,
         )
 
-        for module in model.encoder.ae_local_engine.ae_local_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
-
-        for module in model.encoder.ae_local_global_engine.ae_adapter.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
-
-        for module in model.encoder.ae_global_engine.ae_global_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+        for encoder in encoders:
+            encoder_policy = (
+                MixedPrecisionPolicy(
+                    param_dtype=get_dtype(encoder.cf.mixed_precision_dtype),
+                    reduce_dtype=torch.float32,
+                )
+                if encoder.cf.with_mixed_precision
+                else None
+            )
+            for engine in (
+                encoder.ae_local_engine,
+                encoder.ae_local_global_engine,
+                encoder.ae_global_engine,
+            ):
+                for module in engine.modules():
+                    if isinstance(module, modules_to_shard):
+                        fully_shard(module, mp_policy=encoder_policy)
 
         for module in model.forecast_engine.fe_blocks.modules():
             if isinstance(module, modules_to_shard):
@@ -146,8 +156,9 @@ def init_model_and_shard(
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.encoder.embed_engine.embeds.values():
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward")
+        for encoder in encoders:
+            for embed in encoder.embed_engine.embeds.values():
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward")
 
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is not None:
@@ -167,8 +178,12 @@ def init_model_and_shard(
                 model.reset_parameters()
 
     # model params
-    model_params = ModelParams(cf).create(cf)
-    model_params.reset_parameters(cf)
+    model_cf = (
+        model.module.cf
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel)
+        else model.cf
+    )
+    model_params = ModelParams(model_cf).create(model_cf)
     model_params = model_params.to(f"cuda:{cf.local_rank}")
 
     return model, model_params
