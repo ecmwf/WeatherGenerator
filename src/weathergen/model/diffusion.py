@@ -82,6 +82,16 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.frequency_embedding_dim = self.cf.frequency_embedding_dim
         self.embedding_dim = self.cf.embedding_dim
         noise_emb_cfg = self.cf.get("noise_embedding", None) or {}
+        if "type" not in noise_emb_cfg:
+            # The default stays "dit_legacy" for now so that existing checkpoints (trained without a
+            # noise_embedding block) keep loading. New runs should set log_fourier explicitly.
+            logger.warning(
+                "No noise_embedding.type set; falling back to 'dit_legacy' for backward "
+                "compatibility with existing checkpoints. Its frequencies barely vary over the "
+                "c_noise range, so the noise level is poorly resolved. For new runs we recommend "
+                "noise_embedding: {type: log_fourier, f_min: 0.5, f_max: 25.13 (8*pi), "
+                "include_raw: true}."
+            )
         self.noise_embedder = NoiseEmbedder(
             embedding_dim=self.embedding_dim,
             frequency_embedding_dim=self.frequency_embedding_dim,
@@ -765,6 +775,10 @@ class NoiseEmbedder(torch.nn.Module):
         the c_noise range: f_min gives a slow monotone-ish channel (period >> range), f_max sets
         the resolution (period 2*pi/f_max in c_noise, i.e. a sigma factor of exp(8*pi/f_max)).
         Optionally the raw c_noise is appended as an extra, directly monotone channel.
+        Recommended: f_min=0.5, f_max=8*pi, include_raw (the f_* defaults here).
+
+    The default embedding_type is "dit_legacy" only temporarily, for backward compatibility with
+    checkpoints trained before this option existed; new runs should use "log_fourier".
     """
 
     def __init__(
