@@ -433,8 +433,6 @@ class Model(torch.nn.Module):
                 )
             else:
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
-            # Flow-matching shares the fe_diffusion_model time-conditioned backbone; when
-            # fe_flow_matching_model is set it wraps that backbone (checked before diffusion).
             if cf.get("fe_flow_matching_model", False):
                 self.forecast_engine = FlowMatchingForecastEngine(
                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
