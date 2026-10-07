@@ -370,7 +370,9 @@ def _plot_score_maps_per_stream(
         metric=[m for m, _ in valid],
     ).compute()
 
-    if "ens" in preds.dims:
+    # Probabilistic scores (crps, ssr, ...) consume the ensemble dimension, so it only
+    # needs re-attaching when it actually survived into the concatenated scores.
+    if "ens" in plot_metrics.dims and "ens" in preds.coords:
         plot_metrics["ens"] = preds.ens
 
     has_ens = "ens" in plot_metrics.coords
@@ -1120,6 +1122,11 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "baseline": eval_opt.get("baseline", None),
     }
 
+    # Optional co-plotting of related metrics in a single figure, e.g.
+    #   overlay_metrics: {rmse: ["rmse_ens_mean"]}
+    # draws the ensemble-mean RMSE into the per-member RMSE figure.
+    overlay_metrics = eval_opt.get("overlay_metrics", {}) or {}
+
     plotter = LinePlots(plot_cfg, summary_dir)
     sc_plotter = ScoreCards(plot_cfg, summary_dir)
     br_plotter = BarPlots(plot_cfg, summary_dir)
@@ -1132,7 +1139,15 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 elif metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:
-                    plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+                    plot_metric_region(
+                        metric,
+                        region,
+                        runs,
+                        scores_dict,
+                        plotter,
+                        print_summary,
+                        overlay_metrics=list(overlay_metrics.get(metric, [])),
+                    )
             if eval_opt.get("ratio_plots", False):
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("heat_maps", False):

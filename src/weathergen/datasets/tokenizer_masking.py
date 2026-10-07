@@ -227,7 +227,9 @@ class TokenizerMasking(Tokenizer):
         )
 
         idxs_ord_inv = None
-        if data.numel() > 0:
+        # row count, not numel(): zero-width data (skip_target_values) still needs the
+        # inverse ordering so written coords/times/preds keep the original point order
+        if data.shape[0] > 0:
             # flatten per-token indices into one flat list
             idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
             # compute indices for inversion

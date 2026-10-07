@@ -38,6 +38,9 @@ class EncoderTeacher(TargetAndAuxModuleBase):
     Subclasses must implement forward_teacher().
     """
 
+    # forward_teacher() encodes the target samples to build the SSL targets
+    encodes_target_samples = True
+
     def __init__(self, teacher_model, training_cfg, **kwargs):
         self.teacher_model = teacher_model
 

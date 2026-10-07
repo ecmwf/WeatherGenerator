@@ -15,6 +15,7 @@ focused on the public API and caching.
 """
 
 import contextlib
+import errno
 import logging
 import os
 import resource
@@ -25,8 +26,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xarray as xr
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, parallel_config
 from joblib.externals.loky import get_reusable_executor
+from joblib.externals.loky.process_executor import TerminatedWorkerError
 from numpy.typing import NDArray
 
 from weathergen.evaluate.io.data.dataarray_builders import (
@@ -90,16 +92,17 @@ class IOState:
 # ---------------------------------------------------------------------------
 
 
-def get_num_workers(*, check_process_headroom: bool = False, max_workers: int | None = None) -> int:
+def get_num_workers(*, check_process_headroom: bool = True, max_workers: int | None = None) -> int:
     """Determine safe number of parallel workers.
 
     Parameters
     ----------
     check_process_headroom : bool
-        When *True* (useful for ``loky`` / process-based backends), also
-        verify that the user has enough ``RLIMIT_NPROC`` headroom before
-        returning > 1.  If headroom is dangerously low the function
-        returns 1 regardless of the CPU-based estimate.
+        When *True* (the default), cap the result at the number of workers
+        that fit in the process's remaining *task* budget -- see
+        :func:`_apply_process_headroom`.  Defaults to *True* because every
+        call site wants it: a pool that does not fit does not fail cheaply,
+        it falls back to sequential and costs minutes.
     max_workers : int | None
         Optional hard cap for max workers.  When set from the eval config
         (``max_workers`` key in the YAML), it overrides the default of 36.
@@ -136,39 +139,191 @@ def get_num_workers(*, check_process_headroom: bool = False, max_workers: int | 
     return n
 
 
-def _apply_process_headroom(n: int) -> int:
-    """Reduce *n* to 1 when the user's RLIMIT_NPROC headroom is dangerously low."""
+# Threads a worker may use for BLAS / OpenMP.  Pinned rather than left to
+# joblib, which hands each worker ``cpu_count // n_jobs`` threads -- so
+# *shrinking* the pool makes every worker *more* expensive, exactly backwards
+# when we are shrinking it to fit a budget.  Measured import cost per worker:
+# inner=2 -> 5 threads, inner=6 -> 17, inner=12 -> 35, inner=24 -> 71.
+WORKER_INNER_THREADS = 2
+
+# What we pin zarr's per-process ThreadPoolExecutor to inside a worker.  Left
+# unpinned, zarr falls through to asyncio's default executor --
+# ``min(32, cpu_count + 4)`` threads per worker, more than everything else in
+# the worker combined, and not scaled down by joblib.
+ZARR_WORKER_THREADS = 4
+
+# Tasks (threads, not processes) one worker occupies while running
+# _read_sample, measured on the santis login node with both pins applied:
+# ~5 BLAS + 4 zarr + the loky and asyncio bookkeeping threads, ~12 total.
+TASKS_PER_WORKER = 16
+
+# Tasks left free for the parent process and for whatever else the user is
+# running (an IDE session on a login node easily holds 300+).
+TASK_RESERVE = 96
+
+
+def _cgroup_task_budget() -> tuple[int, int] | None:
+    """Return ``(used, limit)`` tasks from the tightest cgroup v2 ancestor.
+
+    The pids controller counts *tasks* -- threads, not processes -- and the
+    limit that binds is whichever ancestor has the least headroom, which on a
+    systemd login node is normally ``user.slice/user-<uid>.slice`` via
+    logind's ``TasksMax``.  Returns *None* when no cgroup v2 pids limit
+    applies (cgroup v1, no controller, or every ancestor set to ``max``).
+    """
     try:
-        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
-        if soft_limit == resource.RLIM_INFINITY:
-            soft_limit = 65536
+        rel = ""
+        for line in Path("/proc/self/cgroup").read_text().splitlines():
+            hid, ctrl, path = line.split(":", 2)
+            if hid == "0" and ctrl == "":  # cgroup v2 unified line
+                rel = path.lstrip("/")
+                break
+        else:
+            return None
 
-        result = subprocess.run(
-            ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "pid"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        user_procs = len(result.stdout.strip().splitlines()) if result.returncode == 0 else 0
+        tightest: tuple[int, int] | None = None
+        node = Path("/sys/fs/cgroup") / rel
+        root = Path("/sys/fs/cgroup")
+        while True:
+            try:
+                limit_raw = (node / "pids.max").read_text().strip()
+                used = int((node / "pids.current").read_text().strip())
+            except OSError:
+                limit_raw, used = "max", 0
+            if limit_raw != "max":
+                limit = int(limit_raw)
+                if tightest is None or (limit - used) < (tightest[1] - tightest[0]):
+                    tightest = (used, limit)
+            if node == root:
+                break
+            node = node.parent
+        return tightest
+    except Exception:
+        return None
 
-        available = soft_limit - user_procs
-        if available < 64:
-            _logger.info(
-                f"Low process headroom ({available}/{soft_limit} slots free). Forcing n_workers=1."
+
+def _apply_process_headroom(n: int) -> int:
+    """Cap *n* to the number of workers that actually fit in the task budget.
+
+    Prefers the cgroup v2 pids limit, which is what binds in practice on a
+    login node; ``RLIMIT_NPROC`` is typically ~1e6 there and never fires.
+    """
+    try:
+        budget = _cgroup_task_budget()
+        if budget is not None:
+            used, limit = budget
+            source = "cgroup pids"
+        else:
+            soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
+            if soft_limit == resource.RLIM_INFINITY:
+                soft_limit = 65536
+            result = subprocess.run(
+                ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "nlwp"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
-            return 1
+            used = sum(int(x) for x in result.stdout.split()) if result.returncode == 0 else 0
+            limit, source = soft_limit, "RLIMIT_NPROC"
 
-        capped = min(n, available // 8)
+        available = limit - used - TASK_RESERVE
+        capped = max(1, available // TASKS_PER_WORKER)
         if capped < n:
-            _logger.info(
-                f"Process headroom {available}/{soft_limit} free. "
+            _logger.warning(
+                f"Task headroom is tight: {used}/{limit} {source} tasks in use, "
+                f"{max(0, available)} usable after a {TASK_RESERVE}-task reserve, "
+                f"~{TASKS_PER_WORKER} tasks per worker. "
                 f"Capping n_workers from {n} to {capped}."
             )
-        return max(1, capped)
+            return capped
+        return n
 
     except Exception as exc:
-        _logger.debug(f"Could not check process headroom ({exc}). Keeping n_workers={n}.")
+        _logger.debug(f"Could not check task headroom ({exc}). Keeping n_workers={n}.")
         return n
+
+
+def _run_pool(calls: list, n_workers: int, backend: str, verbose: int) -> list:
+    """Run *calls* on a pool of *n_workers*, pinning each worker's inner threads.
+
+    ``inner_max_num_threads`` has to be set on the backend held by the
+    ``parallel_config`` context, so ``Parallel`` is deliberately constructed
+    *without* a ``backend=`` argument here -- passing one would build a fresh
+    backend instance and drop the pin.
+    """
+    if backend != "loky":
+        return Parallel(n_jobs=n_workers, backend=backend, verbose=verbose)(calls)
+    with parallel_config(backend=backend, inner_max_num_threads=WORKER_INNER_THREADS):
+        return Parallel(n_jobs=n_workers, verbose=verbose)(calls)
+
+
+def _fit_pool_to_budget(n_workers: int, backend: str, desc: str) -> int:
+    """Re-measure the task budget immediately before the pool is created.
+
+    ``get_num_workers`` runs once, when the reader is built; the pool starts
+    minutes later, by which time another job (or another rank of this one) may
+    have taken the headroom.  Sizing off the stale number is how an 8-worker
+    pool ends up failing to start.
+    """
+    if backend != "loky" or n_workers <= 1:
+        return n_workers
+    fitted = _apply_process_headroom(n_workers)
+    if fitted < n_workers:
+        _logger.info(
+            f"{desc}: {_task_budget_str()}; using {fitted} workers instead of {n_workers}."
+        )
+    return fitted
+
+
+def _shutdown_loky(backend: str) -> None:
+    """Release the loky pool between dispatches so its tasks return to the budget.
+
+    ``reuse=True`` is what makes this shut down *the pool joblib just used*.
+    Called with no arguments, ``get_reusable_executor()`` defaults
+    ``max_workers`` to ``cpu_count()``, concludes the existing (smaller) pool
+    "cannot be reused", tears it down and builds a fresh executor object --
+    which we would then immediately shut down again.
+    """
+    if backend != "loky":
+        return
+    with contextlib.suppress(Exception):
+        get_reusable_executor(reuse=True).shutdown(wait=True)
+
+
+def _is_pool_resource_error(exc: BaseException) -> bool:
+    """True when *exc* is the pool failing to start, not the work failing.
+
+    An exhausted task budget surfaces from loky as ``RuntimeError: can't start
+    new thread`` (pthread_create -> EAGAIN) or as an ``OSError`` with EAGAIN /
+    ENOMEM from ``fork()``; a worker killed under memory pressure surfaces as
+    ``TerminatedWorkerError``.  Anything else came out of the dispatched
+    function itself and must not be hidden behind a silent sequential retry --
+    that turns a real bug into a slow run that still reports success.
+    """
+    if isinstance(exc, TerminatedWorkerError | MemoryError):
+        return True
+    if isinstance(exc, OSError) and exc.errno in (errno.EAGAIN, errno.ENOMEM):
+        return True
+    return isinstance(exc, RuntimeError) and "can't start new thread" in str(exc)
+
+
+def _task_budget_str() -> str:
+    """Human-readable cgroup task budget, for diagnosing pool failures from a log."""
+    budget = _cgroup_task_budget()
+    if budget is None:
+        return "no cgroup pids limit found"
+    used, limit = budget
+    return f"{used}/{limit} cgroup tasks in use, {limit - used} free"
+
+
+def _relax_zarr_threads(calls: list) -> None:
+    """Undo the worker-sized zarr pin before a sequential retry.
+
+    The retry runs alone in this process, where the wide pool is a pure win.
+    """
+    for c in calls:
+        if isinstance(c[2], dict) and "zarr_threads" in c[2]:
+            c[2]["zarr_threads"] = None
 
 
 # Generic parallel dispatch with fallback
@@ -214,27 +369,30 @@ def dispatch_parallel(
     if n_tasks == 0:
         return []
 
-    effective = min(n_workers, n_tasks)
+    effective = _fit_pool_to_budget(min(n_workers, n_tasks), backend, desc)
 
     # skip Parallel entirely when sequential loky to avoid pool-creation overhead
     if effective <= 1 and backend == "loky":
+        _relax_zarr_threads(calls)
         results = [c[0](*c[1], **c[2]) for c in calls]
 
     # parallel: try, then fall back to sequential on pool-creation failure.
     else:
         try:
-            results = Parallel(n_jobs=effective, backend=backend, verbose=verbose)(calls)
-            if backend == "loky":
-                with contextlib.suppress(Exception):
-                    get_reusable_executor().shutdown(wait=True)
+            results = _run_pool(calls, effective, backend, verbose)
+            _shutdown_loky(backend)
         except Exception as exc:
+            if not _is_pool_resource_error(exc):
+                _shutdown_loky(backend)
+                raise
             _logger.warning(
-                f"{desc}: parallel pool failed ({type(exc).__name__}: {exc}). "
+                f"{desc}: could not start a {effective}-worker {backend} pool "
+                f"({type(exc).__name__}: {exc}); {_task_budget_str()}, "
+                f"~{TASKS_PER_WORKER} tasks needed per worker. "
                 f"Falling back to sequential."
             )
-            if backend == "loky":
-                with contextlib.suppress(Exception):
-                    get_reusable_executor().shutdown(wait=True)
+            _shutdown_loky(backend)
+            _relax_zarr_threads(calls)
             results = [c[0](*c[1], **c[2]) for c in calls]
 
     return results
@@ -324,6 +482,7 @@ def _parallel_read(
         ``(results, fell_back)`` — the per-sample results and whether
         the dispatch fell back from parallel to sequential execution.
     """
+    effective = _fit_pool_to_budget(min(n_workers, len(samples)), backend, label)
     kwargs = dict(
         zarr_path=zarr_path,
         stream=stream,
@@ -333,27 +492,32 @@ def _parallel_read(
         read_coords=need_coords,
         is_gridded=is_gridded,
         regrid_opts=regrid_opts,
+        zarr_threads=ZARR_WORKER_THREADS if effective > 1 else None,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
-    effective = min(n_workers, len(calls))
 
     if effective <= 1:
+        _relax_zarr_threads(calls)
         results = [c[0](*c[1], **c[2]) for c in calls]
         return results, False
 
     try:
-        results = Parallel(n_jobs=effective, backend=backend, verbose=5)(calls)
-        with contextlib.suppress(Exception):
-            get_reusable_executor().shutdown(wait=True)
+        results = _run_pool(calls, effective, backend, verbose=5)
+        _shutdown_loky(backend)
         return results, False
     except Exception as exc:
+        if not _is_pool_resource_error(exc):
+            _shutdown_loky(backend)
+            raise
         _logger.warning(
-            f"{label}: parallel pool failed ({type(exc).__name__}: {exc}). "
+            f"{label}: could not start a {effective}-worker {backend} pool "
+            f"({type(exc).__name__}: {exc}); {_task_budget_str()}, "
+            f"~{TASKS_PER_WORKER} tasks needed per worker. "
             f"Falling back to sequential."
         )
-        with contextlib.suppress(Exception):
-            get_reusable_executor().shutdown(wait=True)
+        _shutdown_loky(backend)
+        _relax_zarr_threads(calls)
         results = [c[0](*c[1], **c[2]) for c in calls]
         return results, True
 
@@ -623,6 +787,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
         regrid_opts=state.regrid_opts,
+        zarr_threads=(ZARR_WORKER_THREADS if min(state.n_workers, n_total) > 1 else None),
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)

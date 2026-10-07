@@ -12,6 +12,9 @@ from weathergen.train.target_and_aux_module_base import (
 
 
 class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
+    # compute() encodes the target samples to build the latent diffusion target
+    encodes_target_samples = True
+
     def __init__(self, cf, encoder, is_model_sharded=True):
         # Todo: make sure this is a frozen clone or forward without gradients in compute()
         self.cf = cf

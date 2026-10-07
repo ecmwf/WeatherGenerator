@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 import dataclasses
+import logging
 import math
 
 import torch
@@ -31,7 +32,10 @@ from weathergen.model.embeddings import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
+from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingEngine(torch.nn.Module):
@@ -593,6 +597,27 @@ class IdentityEngine(torch.nn.Module):
         return tokens
 
 
+def _fe_arch_overrides(cf) -> tuple[bool, str]:
+    """Resolve the forecast engine's XSA / MLP-type switches.
+
+    Each falls back to the corresponding global key when its ``fe_``-scoped override is
+    absent, so an unset config reproduces the previous behaviour exactly. Scoping these to
+    the forecast engine lets it (and the diffusion engine wrapping it) be ablated without
+    touching the encoder, decoder or SSL heads, which keep reading the global keys.
+
+    Note the two are not equally free to change on an existing checkpoint:
+    ``fe_use_xsa`` selects a parameter-free operation and may be flipped at inference,
+    while ``fe_mlp_type`` changes MLP tensor shapes and is training-time only.
+
+    :param cf: Configuration object.
+    :return: ``(use_xsa, mlp_type)`` for the forecast engine's blocks.
+    """
+    return (
+        bool(cf.get("fe_use_xsa", cf.get("use_xsa", False))),
+        str(cf.get("fe_mlp_type", cf.get("mlp_type", "mlp"))),
+    )
+
+
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
@@ -607,6 +632,21 @@ class ForecastingEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
+
+        # FE-local overrides for the two architecture switches; unset == global == unchanged.
+        self.fe_use_xsa, self.fe_mlp_type = _fe_arch_overrides(cf)
+        if is_root():
+            logger.info(
+                f"ForecastingEngine architecture: use_xsa={self.fe_use_xsa} "
+                f"mlp_type={self.fe_mlp_type}"
+            )
+            if self.fe_mlp_type != cf.get("mlp_type", "mlp"):
+                logger.warning(
+                    f"fe_mlp_type={self.fe_mlp_type} differs from the global "
+                    f"mlp_type={cf.get('mlp_type', 'mlp')}: this changes the forecast engine's "
+                    "MLP tensor shapes, so the checkpoint being loaded must have been trained "
+                    "with the same value."
+                )
 
         _concat_hd = (
             self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
@@ -626,7 +666,7 @@ class ForecastingEngine(torch.nn.Module):
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
-                            use_xsa=self.cf.get("use_xsa", False),
+                            use_xsa=self.fe_use_xsa,
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
@@ -648,7 +688,7 @@ class ForecastingEngine(torch.nn.Module):
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
-                            use_xsa=self.cf.get("use_xsa", False),
+                            use_xsa=self.fe_use_xsa,
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
@@ -686,7 +726,7 @@ class ForecastingEngine(torch.nn.Module):
                         num_layers=2,
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
-                        mlp_type=self.cf.get("mlp_type", "mlp"),
+                        mlp_type=self.fe_mlp_type,
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,

@@ -25,6 +25,26 @@ from weathergen.evaluate.utils.derived_channels import is_derivable_channel
 _logger = logging.getLogger(__name__)
 
 
+def _pin_zarr_threads(max_workers: int | None) -> None:
+    """Bound zarr's per-process I/O thread pool to *max_workers*.
+
+    ``zarr.core.sync`` only installs its own executor when
+    ``threading.max_workers`` is set; left unset it falls through to asyncio's
+    default executor, which is ``ThreadPoolExecutor(max_workers=None)`` ->
+    ``min(32, cpu_count + 4)`` threads *per process*.  Inside a loky pool that
+    is ~32 extra tasks per worker, and the cgroup pids controller counts tasks,
+    not processes -- it is what exhausts the limit long before the BLAS pools
+    joblib already sizes down do.
+
+    A no-op when *max_workers* is None, which keeps the wide pool for
+    single-process (sequential) reads where it is a pure win.
+    """
+    if max_workers is None:
+        return
+    with contextlib.suppress(Exception):
+        zarr.config.set({"threading.max_workers": max_workers})
+
+
 def _compute_early_channel_selection(
     read_channels: list[str],
     requested_channels: list[str],
@@ -92,6 +112,7 @@ def _read_sample(
     read_coords: bool = False,
     is_gridded: bool = True,
     regrid_opts: dict | None = None,
+    zarr_threads: int | None = None,
 ) -> tuple[list[NDArray], list[NDArray], list[NDArray], dict]:
     """
     Read all forecast steps for one sample via direct zarr array access.
@@ -121,6 +142,11 @@ def _read_sample(
         with multiple forecast sub-steps per fstep).  If False (scatter/obs data),
         keep all observations in a single array per fstep — each observation has
         its own time and splitting would create one array per observation.
+    zarr_threads : int | None
+        Bound zarr's I/O thread pool to this many threads in the calling
+        process (see :func:`_pin_zarr_threads`).  Pass a small number when
+        running inside a worker pool, ``None`` (the default, ~32 threads) when
+        reading sequentially.
 
     Returns
     -------
@@ -136,6 +162,8 @@ def _read_sample(
                     "coords": list[np.ndarray | None]} where coords has
                     one entry per fstep (each may be None or shape (n_ip, 2)).
     """
+    _pin_zarr_threads(zarr_threads)
+
     if is_zip:
         store = zarr.storage.ZipStore(zarr_path, mode="r")
         ds = zarr.open_group(store=store, mode="r")
