@@ -44,17 +44,30 @@ def _fake_engine(**over):
         time_scale=1000.0,
         edm_noise_time_scale=1.0,
         no_skip_connection=False,
+        # _sampling_nodes branches on cf.noise_distribution to pick the training-aligned
+        # sigma bounds, mirroring diffusion.py. Default to log_normal (the historic path).
+        cf={"noise_distribution": "log_normal"},
     )
     for k, v in over.items():
         setattr(ns, k, v)
     return ns
 
 
-def _edm_ref_nodes(num_steps, p_mean, p_std, sigma_min, sigma_max, sigma_data, rho, q):
-    """Transcription of the sigma schedule in diffusion.py:442-476."""
-    sigma_max_eff = min(sigma_max, math.exp(p_mean + 3.0 * p_std))
-    z = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}.get(q, -1.645)
-    sigma_min_eff = max(sigma_min, math.exp(p_mean + z * p_std), sigma_data * 0.01)
+def _edm_ref_nodes(
+    num_steps, p_mean, p_std, sigma_min, sigma_max, sigma_data, rho, q, dist="log_normal"
+):
+    """Transcription of the sigma schedule in diffusion.py, including its branch on
+    noise_distribution for the training-aligned bounds."""
+    if dist == "log_uniform":
+        log_min, log_max = math.log(sigma_min), math.log(sigma_max)
+        sigma_max_eff = min(sigma_max, math.exp(log_max))
+        sigma_min_eff = max(
+            sigma_min, math.exp(log_min + q * (log_max - log_min)), sigma_data * 0.01
+        )
+    else:
+        sigma_max_eff = min(sigma_max, math.exp(p_mean + 3.0 * p_std))
+        z = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}.get(q, -1.645)
+        sigma_min_eff = max(sigma_min, math.exp(p_mean + z * p_std), sigma_data * 0.01)
     si = torch.arange(num_steps, dtype=torch.float64)
     t = (
         sigma_max_eff ** (1 / rho)
@@ -122,14 +135,33 @@ def test_ve_eps_recovery_roundtrip(sig):
 @pytest.mark.parametrize("num_steps", [10, 18, 50])
 @pytest.mark.parametrize("pm,ps", [(1.5, 1.2), (0.5, 1.0), (2.0, 0.8)])
 @pytest.mark.parametrize("q", [0.05, 0.01, 0.10])
-def test_ve_schedule_bit_matches_diffusion(num_steps, pm, ps, q):
-    fe = _fake_engine(p_mean=pm, p_std=ps, sigma_min_quantile=q)
+@pytest.mark.parametrize("dist", ["log_normal", "log_uniform"])
+def test_ve_schedule_bit_matches_diffusion(num_steps, pm, ps, q, dist):
+    fe = _fake_engine(p_mean=pm, p_std=ps, sigma_min_quantile=q, cf={"noise_distribution": dist})
     got = FlowMatchingForecastEngine._sampling_nodes(fe, num_steps, "cpu")
     ref = _edm_ref_nodes(
-        num_steps, pm, ps, fe.sigma_min, fe.sigma_max, fe.sigma_data, fe.rho, q
+        num_steps, pm, ps, fe.sigma_min, fe.sigma_max, fe.sigma_data, fe.rho, q, dist
     )
     assert got.dtype == ref.dtype == torch.float64
     assert torch.equal(got, ref)  # bit-identical
+
+
+def test_log_uniform_bounds_differ_from_log_normal():
+    """Regression guard: the two distributions must NOT give the same floor. Before the
+    noise_distribution branch existed, log_uniform silently reused the log-normal formula and
+    raised the ODE floor (0.6225 vs 0.5092 at sigma 0.4-50, p_mean 1.5, p_std 1.2),
+    under-denoising the sample."""
+    kw = dict(sigma_min=0.4, sigma_max=50.0, p_mean=1.5, p_std=1.2, sigma_min_quantile=0.05)
+    lu = FlowMatchingForecastEngine._sampling_nodes(
+        _fake_engine(**kw, cf={"noise_distribution": "log_uniform"}), 18, "cpu"
+    )
+    ln = FlowMatchingForecastEngine._sampling_nodes(
+        _fake_engine(**kw, cf={"noise_distribution": "log_normal"}), 18, "cpu"
+    )
+    assert not torch.equal(lu, ln)
+    assert lu[-2] < ln[-2]  # log_uniform reaches a lower final sigma
+    assert math.isclose(float(lu[-2]), 0.5092, rel_tol=1e-3)
+    assert math.isclose(float(ln[-2]), 0.6225, rel_tol=1e-3)
 
 
 def test_condot_schedule_unchanged():
@@ -151,9 +183,7 @@ def test_ve_preconditioner_matches_edm(sig):
         FlowMatchingForecastEngine._c_in(fe, s), 1.0 / (s**2 + fe.sigma_data**2).sqrt()
     )
     # embedder input = log(sigma)/4 * scale  (diffusion.py:271); default scale 1.0
-    assert torch.allclose(
-        FlowMatchingForecastEngine._emb_input(fe, s), s.reshape(1).log() / 4.0
-    )
+    assert torch.allclose(FlowMatchingForecastEngine._emb_input(fe, s), s.reshape(1).log() / 4.0)
 
 
 @pytest.mark.parametrize("sig", _SIGMAS)

@@ -516,24 +516,43 @@ class FlowMatchingForecastEngine(torch.nn.Module):
 
         - **condot**: ascending ``t`` linspace in ``[t_eps, 1 - t_eps]``.
         - **ve (EDM)**: descending, rho-spaced ``sigma`` between *training-aligned* bounds plus a
-          terminal 0 — a faithful transcription of ``DiffusionForecastEngine._run_ode``
-          (diffusion.py:442-476), so the generic sampler reproduces EDM's schedule exactly.
+          terminal 0 — a faithful transcription of ``DiffusionForecastEngine._run_ode``,
+          so the generic sampler reproduces EDM's schedule exactly for both
+          ``log_normal`` and ``log_uniform`` training noise.
         """
         if self.path.kind != "ve":
             return torch.linspace(
                 self.t_eps, 1.0 - self.t_eps, num_steps + 1, dtype=torch.float32, device=device
             )
 
-        # Training-aligned sigma bounds (diffusion.py:442-457).
-        sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
+        # Training-aligned sigma bounds, mirroring diffusion.py's branch on noise_distribution
+        # (see the "Training-aligned sigma bounds" block around diffusion.py:571-600). The
+        # bounds MUST come from the distribution the model was actually trained on: applying
+        # the log-normal p_mean/p_std formula to a log_uniform-trained model raises the ODE
+        # floor and leaves the sample under-denoised.
+        # train_log_min/max mirror diffusion.py:188-189 -- log of the config sigma bounds.
+        if self.cf.get("noise_distribution", None) == "log_uniform":
+            # log(sigma) ~ Uniform[log sigma_min, log sigma_max]; quantiles are linear in
+            # log-space, so sigma at quantile q is exp(log_min + q * (log_max - log_min)).
+            train_log_min = math.log(self.sigma_min)
+            train_log_max = math.log(self.sigma_max)
+            sigma_max_train = math.exp(train_log_max)
+            sigma_min_from_dist = math.exp(
+                train_log_min + self.sigma_min_quantile * (train_log_max - train_log_min)
+            )
+        else:
+            # log_normal: cap sigma_max at the ~99.7th percentile (p_mean + 3 p_std); sigma at
+            # quantile q is exp(p_mean + Phi^-1(q) * p_std), Phi^-1 via standard z-scores.
+            sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
+            _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
+            _z = _z_scores.get(self.sigma_min_quantile, -1.645)
+            sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
-        _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
-        _z = _z_scores.get(self.sigma_min_quantile, -1.645)
-        sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
         sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
         logger.info(
-            f"EDM sigma schedule: sigma_max_eff={sigma_max_eff:.4f} "
-            f"(config={self.sigma_max}, train 3sigma={sigma_max_train:.4f}), "
+            f"EDM sigma schedule ({self.cf.get('noise_distribution', None)}): "
+            f"sigma_max_eff={sigma_max_eff:.4f} "
+            f"(config={self.sigma_max}, train bound={sigma_max_train:.4f}), "
             f"sigma_min_eff={sigma_min_eff:.4f} (config={self.sigma_min}, "
             f"dist q={self.sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
             f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
