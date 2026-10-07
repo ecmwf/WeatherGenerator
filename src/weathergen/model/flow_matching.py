@@ -194,13 +194,18 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         # Time embedding (analogous to diffusion's NoiseEmbedder; self-contained).
         self.frequency_embedding_dim = cf.frequency_embedding_dim
         self.embedding_dim = cf.embedding_dim
+        # Log-spaced Fourier features of the conditioning scalar, matching
+        # mh/develop-ssl-diffusion-v1/noise-embedding. Flow matching has no pre-existing
+        # checkpoints, so the DiT-legacy ladder is not carried over -- log_fourier is the
+        # only embedding here.
+        noise_emb_cfg = cf.get("noise_embedding", None) or {}
         self.time_embedder = TimeEmbedder(
             embedding_dim=self.embedding_dim,
             frequency_embedding_dim=self.frequency_embedding_dim,
+            f_min=noise_emb_cfg.get("f_min", 0.5),
+            f_max=noise_emb_cfg.get("f_max", 2 * math.pi * 4),
+            include_raw=noise_emb_cfg.get("include_raw", True),
         )
-        # Continuous t in (0,1) is scaled before the sinusoidal features so the
-        # frequency band (max_period=1e4) is actually exercised (DiT/SiT convention).
-        self.time_scale = cf.get("fm_time_scale", 1000.0)
 
         # Conditioning (reuse the diffusion conditioning keys so the shared backbone
         # is built consistently). Initial scope: "forecast" (previous latent state)
@@ -436,8 +441,11 @@ class FlowMatchingForecastEngine(torch.nn.Module):
             # see edm_noise_time_scale and the diffusion-branch noise-embedding A/B).
             return (s.reshape(1).log() / 4.0) * self.edm_noise_time_scale
             # TODO: Check why we are taking log/deviding by 4
-        # condot: t in (0,1) scaled up into the frequency band the ladder was calibrated for.
-        return s.reshape(1) * self.time_scale
+        # condot: t in (0,1), embedded raw. The log_fourier band is stated directly as
+        # [f_min, f_max] (0.5..8*pi by default, ~4 cycles across the range), so unlike the DiT
+        # ladder it needs no pre-scaling -- the frequencies are fitted to the scalar's own
+        # range, exactly as the diffusion engine does for c_noise = ln(sigma)/4.
+        return s.reshape(1)
 
     def _precondition_output(
         self, raw: torch.Tensor, x: torch.Tensor, s: torch.Tensor
@@ -754,34 +762,64 @@ class FlowMatchingForecastEngine(torch.nn.Module):
 
 
 class TimeEmbedder(torch.nn.Module):
-    """Sinusoidal embedding of a scalar time ``t`` followed by an MLP.
+    """Log-spaced Fourier embedding of a scalar time ``t`` followed by an MLP.
 
     Self-contained equivalent of diffusion.py's NoiseEmbedder (feeds ``t`` rather than
     ``log(sigma)/4``); kept here to avoid coupling to the EDM engine.
+
+    Frequencies are log-spaced in [f_min, f_max] (rad per unit of the embedded scalar) and the
+    raw scalar is optionally appended as a directly monotone channel. Defaults f_min=0.5,
+    f_max=8*pi, include_raw -- matching the diffusion engine's recommended settings. The
+    DiT-legacy ladder is deliberately absent: flow matching has no legacy checkpoints.
     """
 
-    def __init__(self, embedding_dim: int, frequency_embedding_dim: int, dtype=torch.bfloat16):
+    def __init__(
+        self,
+        embedding_dim: int,
+        frequency_embedding_dim: int,
+        dtype=torch.bfloat16,
+        f_min: float = 0.5,
+        f_max: float = 2 * math.pi * 4,
+        include_raw: bool = True,
+    ):
         super().__init__()
+        assert 0 < f_min < f_max, f"Need 0 < f_min < f_max (got {f_min}, {f_max})"
         self.dtype = dtype
+        self.f_min = float(f_min)
+        self.f_max = float(f_max)
+        self.include_raw = include_raw
+        in_dim = frequency_embedding_dim + (1 if self.include_raw else 0)
         self.frequency_embedding_dim = frequency_embedding_dim
         self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(frequency_embedding_dim, embedding_dim, bias=True),
+            torch.nn.Linear(in_dim, embedding_dim, bias=True),
             torch.nn.SiLU(),
             torch.nn.Linear(embedding_dim, embedding_dim, bias=True),
         )
 
-    def timestep_embedding(self, t: torch.Tensor, max_period: int = 10000) -> torch.Tensor:
-        if t.ndim == 0:
-            t = t.view(1)
+    def log_fourier_embedding(self, t: torch.Tensor) -> torch.Tensor:
+        """
+        Sinusoidal features of the conditioning scalar at log-spaced frequencies in
+        [f_min, f_max]. Mirrors diffusion.py's NoiseEmbedder.log_fourier_embedding.
+        Frequencies are computed on the fly in fp32 (not a buffer: the model is built on the
+        meta device and to_empty()'d, which would leave a buffer uninitialised).
+        :return: (N, frequency_embedding_dim [+1]) Tensor.
+        """
+        t = t.reshape(-1, 1).float()
         half = self.frequency_embedding_dim // 2
-        freqs = torch.exp(
-            -math.log(max_period) * torch.arange(start=0, end=half, dtype=self.dtype) / half
-        ).to(device=t.device)
-        args = t[:, None].float() * freqs[None]
-        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        freqs = torch.logspace(
+            math.log10(self.f_min),
+            math.log10(self.f_max),
+            half,
+            dtype=torch.float32,
+            device=t.device,
+        )
+        args = t * freqs[None]
+        parts = [torch.cos(args), torch.sin(args)]
         if self.frequency_embedding_dim % 2:
-            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
-        return embedding
+            parts.append(torch.zeros_like(t))
+        if self.include_raw:
+            parts.append(t)
+        return torch.cat(parts, dim=-1)
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
-        return self.mlp(self.timestep_embedding(t))
+        return self.mlp(self.log_fourier_embedding(t))

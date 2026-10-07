@@ -86,7 +86,6 @@ fe_flow_num_ensemble_members: 1
 fm_t_eps: 1.0e-3                 # clamp t to [t_eps, 1-t_eps]
 fm_num_steps: 50                # inference integration steps
 fm_sde_sigma: 0.0               # SDE diffusion coefficient (0 -> ODE)
-fm_time_scale: 1000.0           # scale t before sinusoidal time embedding
 fm_c_in: 1.0                    # input preconditioning (identity for flow matching)
 
 # t is drawn directly at the source (masking.py) as noise_level_rn ~ Unif[t_min, t_max];
@@ -96,6 +95,15 @@ noise_distribution: uniform
 diffusion_conditioning_embed_dim: 32
 frequency_embedding_dim: 256
 embedding_dim: 512
+
+# Log-spaced Fourier features of the path time t, matching the diffusion engine's
+# noise_embedding. f_max = 8*pi gives ~4 cycles across t in (0,1); include_raw appends t
+# itself as a directly monotone channel (so in_dim = frequency_embedding_dim + 1).
+# These are the defaults in code -- stated here for reproducibility.
+noise_embedding:
+  f_min: 0.5
+  f_max: 25.132741228718345   # 8*pi
+  include_raw: true
 # Diffusion/EDM-only knobs kept for backbone/config compatibility (unused by flow matching).
 sigma_min: 0.002
 sigma_max: 80
