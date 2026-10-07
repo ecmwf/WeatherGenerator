@@ -33,6 +33,7 @@ test_job:
         echo "Run tests"
         ./scripts/actions.sh integration-test${STAGE_TYPE:-}
         echo "Test installation"
+        echo "uv version: $(uv --version) path: $(which uv)"
         uv pip install -e .
         uv pip install weathergen@git+https://github.com/ecmwf/WeatherGenerator.git@develop
         uv pip install weathergen-common@git+https://github.com/ecmwf/WeatherGenerator.git@develop#subdirectory=packages/common
