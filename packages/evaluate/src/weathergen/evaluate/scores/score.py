@@ -1653,8 +1653,14 @@ class Scores:
                 block_size=None if rank_slice.chunks is None else "auto",
             ).values.astype(np.float64)
 
+        # histogram() builds a fresh DataArray and drops scalar coords (e.g. lead_time)
+        # present on gt/p, so re-attach them here for downstream lead-time plotting.
+        scalar_coords = {
+            name: coord for name, coord in gt.coords.items() if coord.dims == ()
+        }
+
         if not preserve_dims:
-            counts_da = xr.DataArray(_counts(rank), dims=["rank_bin"])
+            counts_da = xr.DataArray(_counts(rank), dims=["rank_bin"], coords=scalar_coords)
             counts_da.attrs["n_bins"] = n_bins
             return counts_da
 
@@ -1668,6 +1674,7 @@ class Scores:
             counts_values[idx] = _counts(rank_slice)
 
         coords = {d: rank.coords[d] for d in preserve_dims if d in rank.coords}
+        coords.update(scalar_coords)
         counts_da = xr.DataArray(counts_values, dims=[*preserve_dims, "rank_bin"], coords=coords)
         counts_da.attrs["n_bins"] = n_bins
         counts_da.attrs["preserve_dims"] = preserve_dims
@@ -1725,7 +1732,8 @@ class Scores:
 
         attrs = Scores._rank_histogram_attrs(normed, n_bins)
         if "preserve_dims" not in attrs:
-            score_da = xr.DataArray(float(score.values))
+            # preserve scalar coords (e.g. lead_time) dropped by converting to a bare float
+            score_da = xr.DataArray(float(score.values), coords=score.coords)
             score_da.attrs.update(attrs)
             return score_da
 
@@ -1774,7 +1782,7 @@ class Scores:
 
         attrs = self._rank_histogram_attrs(counts, n_bins)
         if "preserve_dims" not in attrs:
-            result = xr.DataArray(float(npoints.values))
+            result = xr.DataArray(float(npoints.values), coords=npoints.coords)
             result.attrs.update(attrs)
             return result
 
