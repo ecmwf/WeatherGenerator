@@ -34,8 +34,11 @@ test_job:
         ./scripts/actions.sh integration-test${STAGE_TYPE:-}
         echo "Test installation"
         uv pip install -e .
+        uv pip install weathergen@git+https://github.com/ecmwf/WeatherGenerator.git@develop
+        uv pip install weathergen-common@git+https://github.com/ecmwf/WeatherGenerator.git@develop#subdirectory=packages/common
         echo "Testing complete"
-    variables:
+
+        variables:
         SLURM_JOB_NUM_NODES: 1
         SLURM_GPUS_PER_NODE: 4
         WITH_UENV_VIEW: "modules"
