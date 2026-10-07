@@ -105,6 +105,9 @@ def _rope_coordinates(cf: Config, device):
 class _EncoderParams(torch.nn.Module):
     """Non-trainable positional state for one encoder."""
 
+    rope_coords: torch.Tensor | None
+    rope_cell_coords: torch.Tensor | None
+
     def __init__(self, cf: Config):
         super().__init__()
         self.cf = cf
@@ -179,6 +182,8 @@ class _EncoderParams(torch.nn.Module):
 
 class ModelParams(torch.nn.Module):
     """Independent encoder positional state and downstream grid parameters."""
+
+    rope_coords: torch.Tensor | None
 
     def __init__(self, cf: Config):
         super().__init__()
