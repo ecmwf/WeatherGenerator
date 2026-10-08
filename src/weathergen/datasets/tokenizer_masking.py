@@ -156,7 +156,13 @@ class _TargetCoordsCacheEntry:
 
 
 class TokenizerMasking(Tokenizer):
-    def __init__(self, healpix_level: int, masker: Masker):
+    def __init__(
+        self,
+        healpix_level: int,
+        masker: Masker,
+        grid_cache_option: bool | None = None,
+        grid_cache_verify_option: bool | None = None,
+    ):
         super().__init__(healpix_level)
         self.masker = masker
         self.rng = None
