@@ -523,11 +523,6 @@ class ZarrIO:
         """Query available forecast steps in this zarr store."""
         # assume stream/samples/forecast_steps are orthogonal
         _, example_sample = next(self.data_root.groups())
-
-        # Find the first stream that actually contains forecast step groups.
-        # The first stream alphabetically (e.g. "latent") may be empty or
-        # have a different structure than the primary data streams.
-        example_stream = None
         _, example_stream = next(example_sample.groups())
 
         all_steps = sorted(list(example_stream.group_keys()))
