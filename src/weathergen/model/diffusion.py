@@ -168,6 +168,15 @@ class DiffusionForecastEngine(torch.nn.Module):
         # When True, use EDM preconditioning (c_skip/c_out, EDM Eq. 7) in denoise().
         # When False (default), the network predicts x0 directly (c_skip=0, c_out=1).
         self.edm_preconditioning = self.cf.get("fe_diffusion_edm_preconditioning", False)
+
+        # EDM stochastic sampler (Karras et al. 2022, Algorithm 2) knobs — inference only.
+        # s_churn == 0 (the default) keeps the deterministic Heun sampler.
+        self.s_churn = float(self.cf.get("fe_diffusion_s_churn", 0.0))
+        self.s_min = float(self.cf.get("fe_diffusion_s_min", 0.0))
+        _s_max = self.cf.get("fe_diffusion_s_max", None)
+        self.s_max = math.inf if _s_max is None else float(_s_max)
+        self.s_noise = float(self.cf.get("fe_diffusion_s_noise", 1.0))
+
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
         self._fixed_noise_level: float | None = None
@@ -185,7 +194,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         fstep: int = None,
         meta_info: dict[str, SampleMetaData] = None,
         coords: torch.Tensor = None,
-        num_steps: int = 10,
     ) -> torch.Tensor:
         """
         Forward pass that routes to training_forward or inference_forward based on model status.
@@ -204,7 +212,6 @@ class DiffusionForecastEngine(torch.nn.Module):
             fstep: Forecast step index - required for both modes
             meta_info: Sample metadata dict containing timestamps - required for both modes
             coords: Optional coordinate tensor
-            num_steps: Number of diffusion steps for inference (default: 30)
 
         Returns:
             torch.Tensor: Model output (denoised prediction during training,
@@ -243,9 +250,9 @@ class DiffusionForecastEngine(torch.nn.Module):
                 if fstep is None:
                     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
                 self.cur_token = tokens.detach() if tokens is not None else None
-                # Allow the number of ODE denoising steps to be set from the config.
-                # Falls back to the `num_steps` argument default when not configured.
-                num_steps = self.cf.get("fe_diffusion_num_inference_steps", None) or num_steps
+                # Number of ODE denoising steps, read from config. 10 is the historical
+                # hardcoded value and remains the default when the key is unset.
+                num_steps = self.cf.get("fe_diffusion_num_inference_steps", 10)
                 return self.inference_forward(
                     fstep=fstep,
                     num_steps=num_steps,
@@ -491,6 +498,39 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
         return intermediate_x
 
+    def _stochastic_churn(
+        self, x_cur: torch.Tensor, t_cur: torch.Tensor, num_steps: int, sigma_max_eff: float
+    ) -> "tuple[torch.Tensor, torch.Tensor]":
+        """EDM Algorithm 2 churn step: temporarily raise the noise level from ``t_cur`` to
+        ``t_hat`` by injecting fresh Gaussian noise, so the subsequent denoise+Heun step acts
+        as a Langevin corrector. Returns ``(x_hat, t_hat)``.
+
+        ``fe_diffusion_s_max`` is capped at ``sigma_max_eff`` (the top of the training-aligned
+        inference schedule) so churn can neither operate at nor raise the noise level into the
+        untrained high-sigma tail.
+
+        No-op — returns ``(x_cur, t_cur)`` with the global RNG stream untouched — when
+        ``s_churn <= 0`` (the default), ``t_cur`` is outside ``[s_min, s_max]``, ``gamma``
+        rounds to 0, or the ``s_max`` cap leaves nothing to add.
+
+        Works for both trajectory mode (``x_cur`` is ``(1, H, D)``) and ensemble mode
+        (``x_cur`` is ``(N, H, D)`` — each member gets independent churn noise).
+        """
+        if self.s_churn <= 0.0:
+            return x_cur, t_cur
+        s_max = min(self.s_max, sigma_max_eff)
+        sigma = t_cur.item()
+        if not (self.s_min <= sigma <= s_max):
+            return x_cur, t_cur
+        gamma = min(self.s_churn / num_steps, math.sqrt(2.0) - 1.0)
+        sigma_hat = min((1.0 + gamma) * sigma, s_max)
+        if sigma_hat <= sigma:
+            # gamma == 0, or the s_max cap clamps t_hat back to t_cur — nothing to inject.
+            return x_cur, t_cur
+        t_hat = torch.full_like(t_cur, sigma_hat)
+        x_hat = x_cur + math.sqrt(sigma_hat**2 - sigma**2) * self.s_noise * torch.randn_like(x_cur)
+        return x_hat, t_hat
+
     def _run_ode(
         self,
         c: torch.Tensor | None,
@@ -560,12 +600,18 @@ class DiffusionForecastEngine(torch.nn.Module):
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
         sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
         if log_diagnostics:
+            _churn = (
+                f", stochastic churn: s_churn={self.s_churn}, s_min={self.s_min}, "
+                f"s_max={self.s_max}, s_noise={self.s_noise}"
+                if self.s_churn > 0
+                else " (deterministic Heun sampler)"
+            )
             logger.info(
                 f"Inference sigma schedule ({self.noise_distribution}): "
                 f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
                 f"sigma_min_eff={sigma_min_eff:.4f} "
                 f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
-                f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
+                f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn}"
             )
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
@@ -581,6 +627,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # --- Per-step tracking for diagnostics ---
         track = {
             "sigma": [],
+            "sigma_hat": [],  # post-churn sigma; == "sigma" for the deterministic sampler
             "x_std": [],
             "denoised_std": [],
             "l2_to_target": [],
@@ -606,12 +653,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
             x_cur = x_next
 
-            # Increase noise temporarily. (Stochastic sampling; not used for now)
-            # gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
-            # t_hat = self.net.round_sigma(t_cur + gamma * t_cur)
-            # x_hat = x_cur + (t_hat**2 - t_cur**2).sqrt() * s_noise * torch.randn_like(x_cur)
-            x_hat = x_cur
-            t_hat = t_cur
+            # Increase noise temporarily (EDM Algorithm 2 churn).
+            x_hat, t_hat = self._stochastic_churn(x_cur, t_cur, num_steps, sigma_max_eff)
 
             # Euler step.
             denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep, coords=coords)
@@ -628,6 +671,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             with torch.no_grad():
                 s = t_cur.item()
                 track["sigma"].append(s)
+                track["sigma_hat"].append(t_hat.item())
                 track["c_skip"].append(self.sigma_data**2 / (s**2 + self.sigma_data**2))
                 track["x_std"].append(x_next.std().item())
                 track["denoised_std"].append(denoised.std().item())
@@ -661,7 +705,17 @@ class DiffusionForecastEngine(torch.nn.Module):
         fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
 
         # 1) Sigma schedule
-        axes[0].semilogy(steps, track["sigma"], "o-", markersize=3)
+        axes[0].semilogy(steps, track["sigma"], "o-", markersize=3, label="sigma (schedule)")
+        if track.get("sigma_hat") and track["sigma_hat"] != track["sigma"]:
+            # Stochastic sampler: show the per-step noise bump from churn.
+            axes[0].semilogy(
+                steps,
+                track["sigma_hat"],
+                "x--",
+                markersize=4,
+                color="tab:green",
+                label="sigma_hat (post-churn)",
+            )
         axes[0].set_ylabel("sigma (noise level)")
         axes[0].set_title(
             f"Sampling diagnostics  |  sigma_max_eff={track['sigma'][0]:.2f}, "

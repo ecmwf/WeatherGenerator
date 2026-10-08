@@ -39,6 +39,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
+from weathergen.model.flow_matching import FlowMatchingForecastEngine
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
@@ -432,7 +433,11 @@ class Model(torch.nn.Module):
                 )
             else:
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
-            if cf.get("fe_diffusion_model", False):
+            if cf.get("fe_flow_matching_model", False):
+                self.forecast_engine = FlowMatchingForecastEngine(
+                    cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                )
+            elif cf.get("fe_diffusion_model", False):
                 self.forecast_engine = DiffusionForecastEngine(
                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
                 )
