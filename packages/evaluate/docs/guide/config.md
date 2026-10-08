@@ -208,7 +208,7 @@ Controls what to compute and how to visualise summary scores.
 evaluation:
   metrics: ["rmse", "mae"]
   regions: ["global", "nhem"]
-  score_plots: [lead_time, ratio]
+  score_plots: [metric_plots, ratio]
   summary_dir: "./plots/"
   plot_ensemble: "members"
   print_summary: false
@@ -235,24 +235,26 @@ evaluation:
 
 | Value | Produces |
 |-------|----------|
-| `lead_time` | Line plots of score vs forecast step, one per metric × region × stream × channel. Also produces the Q-Q plots when `qq_analysis` is in `metrics`. |
+| `metric_plots` | The standard plot of each metric in `metrics`, per region × stream × channel: score vs forecast step for most metrics, a Q-Q plot for `qq_analysis`, and a PSD plot for `psd`. |
 | `ratio` | Ratio plots (score relative to `baseline`). Requires `baseline` to be set. |
 | `heatmap` | Heat-map plots (score as a function of lead time and channel). |
 | `scorecard` | Score-card summary plots. |
 | `bar` | Bar plots of scores. |
 | `score_map` | 2D spatial maps of scores per forecast step (zarr runs only). **Slows down evaluation significantly.** |
 | `score_animation` | Animations of the score maps across forecast steps. Needs `score_map` as well, since the animations are built from its frames. |
-| `timeseries` | Score timeseries grouped by initialisation hour of the day (zarr runs only). |
+| `init_hour` | Score vs the hour of day the forecast was initialised (0–23 h), one line per forecast step (zarr runs only). |
 
-PSD plots are produced automatically whenever `psd` is in `metrics`; no `score_plots` value is
-needed. An unknown value raises an error listing the supported ones.
+`psd` and `qq_analysis` are metrics like any other: their plots need `metric_plots`. The other
+score plots (`ratio`, `heatmap`, …) do not apply to `psd`. An unknown value raises an error
+listing the supported ones. The earlier name `lead_time` is still read as `metric_plots`, with a
+deprecation warning.
 
 > **Deprecated boolean flags.** Older configs used one boolean per plot type. They are still
 > read when `score_plots` is absent (with a deprecation warning) and map as follows:
-> `summary_plots` → `lead_time`, `ratio_plots` → `ratio`, `heat_maps` → `heatmap`,
+> `summary_plots` → `metric_plots`, `ratio_plots` → `ratio`, `heat_maps` → `heatmap`,
 > `score_cards` → `scorecard`, `bar_plots` → `bar`, `plot_score_maps` → `score_map`,
 > `plot_score_animations` → `score_animation`,
-> `plot_score_init_time_series` (or `plot_score_init_timeseries`) → `timeseries`.
+> `plot_score_init_time_series` (or `plot_score_init_timeseries`) → `init_hour`.
 > If `score_plots` is set, these flags are ignored.
 
 ---
@@ -857,7 +859,7 @@ Individual config values can be overridden from the command line without editing
 
 ```bash
 uv run evaluate --config myconfig.yml \
-  --options evaluation.score_plots=[lead_time] evaluation.regions=[global,nhem]
+  --options evaluation.score_plots=[metric_plots] evaluation.regions=[global,nhem]
 ```
 
 The `--options` flag uses OmegaConf dot-notation and does **not** support overriding

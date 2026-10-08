@@ -28,18 +28,19 @@ SUPPORTED_DATA_PLOTS = frozenset(
 )
 SUPPORTED_SCORE_PLOTS = frozenset(
     {
-        "lead_time",
+        "metric_plots",  # standard plot of each metric (line, Q-Q or PSD plot)
         "ratio",
         "heatmap",
         "scorecard",
         "bar",
-        "qq",
-        "rank_histogram",
         "score_map",
         "score_animation",
-        "timeseries",
+        "init_hour",  # score vs initialisation hour of the day
     }
 )
+
+# Renamed score_plots values.
+_DEPRECATED_SCORE_PLOTS = {"lead_time": "metric_plots"}
 
 # ── Old boolean key → new list entry ─────────────────────────────────────────
 
@@ -52,15 +53,15 @@ _DATA_PLOT_BOOL_MAP = {
     "plot_timeseries": "timeseries",
 }
 _SCORE_PLOT_BOOL_MAP = {
-    "summary_plots": "lead_time",
+    "summary_plots": "metric_plots",
     "ratio_plots": "ratio",
     "heat_maps": "heatmap",
     "score_cards": "scorecard",
     "bar_plots": "bar",
     "plot_score_maps": "score_map",
     "plot_score_animations": "score_animation",
-    "plot_score_init_timeseries": "timeseries",
-    "plot_score_init_time_series": "timeseries",  # key read before the list-based config
+    "plot_score_init_timeseries": "init_hour",
+    "plot_score_init_time_series": "init_hour",  # key read before the list-based config
 }
 
 
@@ -89,7 +90,7 @@ def parse_score_plots(eval_cfg: dict | None) -> list[str]:
     if not eval_cfg:
         return []
     if "score_plots" in eval_cfg:
-        result = list(eval_cfg["score_plots"])
+        result = _replace_deprecated_score_plots(list(eval_cfg["score_plots"]))
         _validate(result, SUPPORTED_SCORE_PLOTS, "score_plots")
         return result
     return _convert_bools(eval_cfg, _SCORE_PLOT_BOOL_MAP, "score_plots", SUPPORTED_SCORE_PLOTS)
@@ -122,7 +123,7 @@ def get_plot_score_options(eval_cfg: dict) -> dict[str, bool]:
     return {
         "plot_score_maps": "score_map" in sp,
         "plot_score_animations": "score_animation" in sp,
-        "plot_score_init_time_series": "timeseries" in sp,
+        "plot_score_init_time_series": "init_hour" in sp,
     }
 
 
@@ -152,6 +153,22 @@ def _convert_bools(cfg, bool_map, field_name, supported, *, histograms_special=F
             DeprecationWarning,
             stacklevel=3,
         )
+    return result
+
+
+def _replace_deprecated_score_plots(values: list[str]) -> list[str]:
+    """Map renamed ``score_plots`` values to their replacement, with a deprecation warning."""
+    result = []
+    for value in values:
+        new = _DEPRECATED_SCORE_PLOTS.get(value, value)
+        if new != value:
+            warnings.warn(
+                f"score_plots value '{value}' is deprecated. Use '{new}' instead.",
+                DeprecationWarning,
+                stacklevel=4,
+            )
+        if new not in result:
+            result.append(new)
     return result
 
 

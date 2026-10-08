@@ -1294,7 +1294,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     # fall back to old-style individual booleans.
     score_plots_list = eval_opt.get("score_plots", [])
     _sp = set(score_plots_list)
-    do_lead_time = "lead_time" in _sp or "qq_analysis" in _sp
+    do_metric_plots = "metric_plots" in _sp
     do_ratio = "ratio" in _sp or eval_opt.get("ratio_plots", False)
     do_heatmap = "heatmap" in _sp or eval_opt.get("heat_maps", False)
     do_scorecard = "scorecard" in _sp or eval_opt.get("score_cards", False)
@@ -1303,13 +1303,13 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     # Map each resolved plot option to the subdir(s) it produces, so PDF merging
     # can reuse the same flags without re-deriving them from eval_opt.
     plot_option_subdirs = {
-        "lead_time": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
+        "metric_plots": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
         "ratio": [PlotSubdir.ratio_plots],
         "scorecard": [PlotSubdir.score_cards],
         "bar": [PlotSubdir.bar_plots],
     }
     enabled_opts = {
-        "lead_time": do_lead_time,
+        "metric_plots": do_metric_plots,
         "ratio": do_ratio,
         "scorecard": do_scorecard,
         "bar": do_bar,
@@ -1323,13 +1323,15 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             br_plotter.set_subdir(metric, region)
             quantile_plotter.set_subdir(metric, region)
 
-            # PSD plots are always produced when psd is in the metrics —
-            # they are intrinsic to the metric, not a separate plot option.
+            # metric_plots draws each metric in its standard form: a PSD plot for psd,
+            # a Q-Q plot for qq_analysis, and score vs lead time for all others.
+            # psd is a spectrum, so none of the other score plots apply to it.
             if metric == "psd":
-                psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                if do_metric_plots:
+                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
                 continue
 
-            if do_lead_time:
+            if do_metric_plots:
                 if metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:
