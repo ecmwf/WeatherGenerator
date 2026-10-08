@@ -446,29 +446,17 @@ def plot_loss_per_stream(
                         # find the cols of the requested metric (e.g. mse) and channel
                         # for all streams
                         data_cols = []
+                        suffix = f".{stream_name}.{err}.{channel}"
                         for col in run_data_mode.columns:
-                            col_split = col.split(".")
-                            if len(col_split) < 4:
-                                if stream_name in col:
-                                    data_cols += [col]
-                                    title_col = col if title_col is None else title_col
-                            elif len(col_split) == 4:
-                                if (
-                                    col_split[1].lower() == stream_name.lower()
-                                    and col_split[2].lower() == err.lower()
-                                    and col_split[3] == channel
-                                ):
-                                    data_cols += [col]
-                                    title_col = col if title_col is None else title_col
-                            elif len(col_split) == 5:
-                                if (
-                                    col_split[1].lower() == stream_name.lower()
-                                    and col_split[2].lower() == err.lower()
-                                    and col_split[3] == channel
-                                    and int(col_split[4]) in forecast_steps
-                                ):
-                                    data_cols += [col]
-                                    title_col = col if title_col is None else title_col
+                            if col.lower().endswith(suffix.lower()):
+                                title_col = col if title_col is None else title_col
+                                data_cols += [col]
+                            else:
+                                for fstep in forecast_steps:
+                                    if col.lower().endswith(f"{suffix}.{fstep}".lower()):
+                                        title_col = col if title_col is None else title_col
+                                        data_cols += [col]
+                                        break
 
                         for col in data_cols:
                             x_vals = np.array(run_data_mode[x_col])
@@ -520,10 +508,12 @@ def plot_loss_per_stream(
                 if x_lim is not None:
                     plt.xlim(x_lim)
 
-                # if len(title_col) == 0 :
-                # import code; code.interact( local=locals())
-                title_loss = ".".join(title_col.split(".")[:-1])
-                plt.title(title_loss + " (" + ", ".join(modes) + ")")
+                if title_col is not None:
+                    idx = title_col.lower().find(f".{stream_name.lower()}")
+                    title_prefix = f"{title_col[:idx]}." if idx > 0 else ""
+                    plt.title(f"{title_prefix}{stream_name}.{err}.{channel} ({', '.join(modes)})")
+                else:
+                    plt.title(f"{stream_name}.{err}.{channel} ({', '.join(modes)})")
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
                 plt.tight_layout()
@@ -627,13 +617,11 @@ def plot_loss_per_run(
             # find the cols of the requested metric (e.g. mse) for all streams
             data_cols = []
             for col in run_data_mode.columns:
-                col_split = col.split(".")
-                if (
-                    len(col_split) >= 4
-                    and col_split[2].lower() == err.lower()
-                    and col_split[3] in channels
-                ):
-                    data_cols += [col]
+                for channel in channels:
+                    expected_substr = f".{err}.{channel}"
+                    if expected_substr.lower() in col.lower():
+                        data_cols += [col]
+                        break
 
             for _, col in enumerate(data_cols):
                 for j, stream_name in enumerate(stream_names):
