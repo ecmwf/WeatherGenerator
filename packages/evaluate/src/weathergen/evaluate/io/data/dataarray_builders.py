@@ -128,7 +128,16 @@ def build_gridded_dataarrays(
         tars_list, preds_list, lat, lon = regrid_dataarrays(tars_list, preds_list, regrid_opts)
 
     n_samples = len(samples)
-    n_ipoints = tars_list[0].shape[0]
+    # Derive n_ipoints from predictions when targets are empty (no-target runs).
+    n_ipoints_tar = tars_list[0].shape[0]
+    n_ipoints_pred = preds_list[0].shape[0]
+    n_ipoints = n_ipoints_pred if n_ipoints_tar == 0 else n_ipoints_tar
+
+    # If targets are empty, synthesise NaN-filled targets matching prediction shape.
+    if n_ipoints_tar == 0 and n_ipoints_pred > 0:
+        n_channels = preds_list[0].shape[1] if preds_list[0].ndim >= 2 else len(read_channels)
+        tars_list = [np.full((n_ipoints, n_channels), np.nan, dtype=np.float32)] * n_samples
+
     sub_lat = lat[:n_ipoints]
     sub_lon = lon[:n_ipoints]
 

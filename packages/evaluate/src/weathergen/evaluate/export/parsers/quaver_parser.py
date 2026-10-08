@@ -87,6 +87,20 @@ class QuaverParser(CfParser):
         -------
             None
         """
+        # Identify variables that need accumulation across forecast steps
+        accum_vars = {
+            var
+            for var in self.channels
+            if self.mapping.get(var, self.mapping.get(var.split("_")[0] if "_" in var else var, {})).get(
+                "accumulate", False
+            )
+        }
+        # Running accumulator: {var_name: 1D numpy array}
+        accum_state: dict[str, np.ndarray] = {}
+
+        if accum_vars:
+            _logger.info(f"Accumulating total precipitation for variables: {accum_vars}")
+
         for result in fstep_iterator_results:
             if result is None:
                 continue
@@ -115,6 +129,25 @@ class QuaverParser(CfParser):
 
                     field_data = da_sub.sel(channel=var)
                     field_data = self.scale_data(field_data, var)
+                    field_values = field_data.values.copy()
+
+                    # Clamp negative precipitation to zero.
+                    if var in accum_vars:
+                        field_values = np.maximum(field_values, 0.0)
+
+                    # Accumulate precipitation: replace per-step values with
+                    # running total (current step + all previous steps).
+                    if var in accum_vars:
+                        if var in accum_state:
+                            accum_state[var] = accum_state[var] + field_values
+                        else:
+                            accum_state[var] = field_values.copy()
+                        field_values = accum_state[var].copy()
+                        _logger.info(
+                            f"[Worker] Accumulated {var}: step sum={field_values.sum():.6g}, "
+                            f"total sum={accum_state[var].sum():.6g}"
+                        )
+
                     template_field = self.template_cache.get((var, level), None)
                     if template_field is None:
                         _logger.error(f"Template for var={var}, level={level} not found. Skipping.")
@@ -123,12 +156,14 @@ class QuaverParser(CfParser):
                     metadata = self.get_metadata(
                         ref_time=ref_time,
                         valid_time=vt,
+                        source_interval_start=source_interval_start,
                         source_interval_end=source_interval_end,
                         level=level,
+                        var=var,
                     )
 
                     encoded = self.encoder.encode(
-                        values=field_data.values,
+                        values=field_values,
                         template=template_field,
                         metadata=metadata,
                     )
@@ -153,10 +188,20 @@ class QuaverParser(CfParser):
             tuple[str, str, str]
                 Variable short name, level, and level type.
         """
-        var_short = var.split("_")[0] if "_" in var else var
-        level = int(var.split("_")[-1]) if "_" in var else "sfc"
+        # Try full variable name first, then fall back to first token before '_'
+        if var in self.mapping:
+            var_short = var
+            var_config = self.mapping[var]
+            level = "sfc"
+        elif "_" in var:
+            var_short = var.split("_")[0]
+            var_config = self.mapping.get(var_short, {})
+            level = int(var.split("_")[-1])
+        else:
+            var_short = var
+            var_config = self.mapping.get(var_short, {})
+            level = "sfc"
 
-        var_config = self.mapping.get(var_short, {})
         if not var_config:
             raise ValueError(
                 f"Variable '{var} (using: {var_short})' not found in configuration mapping."
@@ -209,7 +254,7 @@ class QuaverParser(CfParser):
         """
         return (
             Path(self.output_dir)
-            / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}.{self.file_extension}"
+            / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}_rank{int(self.rank):04d}.{self.file_extension}"
         )
 
     def assign_coords(self, data: xr.DataArray) -> xr.DataArray:
@@ -236,26 +281,36 @@ class QuaverParser(CfParser):
         self,
         ref_time: pd.Timestamp,
         valid_time: np.datetime64,
+        source_interval_start: np.datetime64,
         source_interval_end: np.datetime64,
         level: str,
+        var: str = None,
     ):
         """
         Add metadata to the dataset attributes.
 
-        The GRIB ``step`` is computed as ``valid_time - source_interval_end``
-        (in hours), i.e. the lead time relative to the end of the
-        conditioning window.
+        The GRIB ``date``/``time`` is set to ``source_interval_start``
+        (the true initialisation time of the forecast).  The GRIB ``step``
+        is computed as ``valid_time - source_interval_start`` (in hours).
         """
-        step_hours = int((valid_time - source_interval_end) / np.timedelta64(1, "h"))
+        step_hours = int((valid_time - source_interval_start) / np.timedelta64(1, "h"))
 
         metadata = {
-            "date": ref_time,
+            "date": pd.Timestamp(source_interval_start),
             "step": step_hours,
             "expver": self.expver,
             "marsClass": "rd",
         }
         if level != "sfc":
             metadata["level"] = level
+
+        # Override paramId if specified in the variable config.
+        if var is not None:
+            var_config = self.mapping.get(var, self.mapping.get(var.split("_")[0] if "_" in var else var, {}))
+            param_id = var_config.get("paramId")
+            if param_id is not None:
+                metadata["paramId"] = param_id
+
         return metadata
 
     def save(self, encoded_fields: list, level_type: str):

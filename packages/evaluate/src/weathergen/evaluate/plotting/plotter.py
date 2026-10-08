@@ -812,13 +812,18 @@ class Plotter:
             parts.append(str(self.sample))
 
         if "valid_time" in data.coords:
-            valid_time = data["valid_time"][0].values
-            if ~np.isnat(valid_time):
-                parts.append(
-                    valid_time.astype("datetime64[m]")
-                    .astype(datetime.datetime)
-                    .strftime("%Y-%m-%dT%H%M")
-                )
+            vt = data["valid_time"].values
+            valid_time = vt.flat[0] if vt.ndim > 0 else vt.item()
+            try:
+                valid_time = np.datetime64(valid_time, "ns")
+                if not np.isnat(valid_time):
+                    parts.append(
+                        valid_time.astype("datetime64[m]")
+                        .astype(datetime.datetime)
+                        .strftime("%Y-%m-%dT%H%M")
+                    )
+            except (ValueError, TypeError):
+                pass
 
         if self.stream:
             parts.append(self.stream)
