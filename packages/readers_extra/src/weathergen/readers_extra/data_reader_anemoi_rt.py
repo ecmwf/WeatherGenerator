@@ -31,6 +31,31 @@ from weathergen.utils.distributed import is_root
 _logger = logging.getLogger(__name__)
 
 
+def _grid_cache_enabled(option: bool | None = None) -> bool:
+    """
+    Grid cache is on by default. Switch it off with the stream option `grid_cache=False`
+    (e.g. streams.ERA5.grid_cache=False) or the environment variable WEATHERGEN_GRID_CACHE=0.
+    """
+    if option is not None:
+        return bool(option)
+    return os.environ.get("WEATHERGEN_GRID_CACHE", "1") != "0"
+
+
+def _grid_cache_verify(option: bool | None = None) -> bool:
+    """Check cache hits against a fresh computation (stream option `grid_cache_verify=True`)."""
+    if option is not None:
+        return bool(option)
+    return os.environ.get("WEATHERGEN_GRID_CACHE_VERIFY", "0") == "1"
+
+
+@dataclass
+class _Grid:
+    """Time-independent part of a data window."""
+
+    coords: NDArray
+    geoinfos: NDArray
+
+
 class DataReaderAnemoiRT(DataReaderTimestep):
     """
     Real-time version of DataReaderAnemoi for inference from a pretrained model. This data reader is
