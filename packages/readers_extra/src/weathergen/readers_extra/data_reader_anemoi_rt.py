@@ -285,9 +285,7 @@ class DataReaderAnemoiRT(DataReaderTimestep):
             datetimes += [t_cur]
             t_cur += self.frequency
 
-        # extract geoinfo channels (can be time-varying, so read from dataset)
-        geoinfos_static = self.ds[0, list(self.geoinfo_idx_static)][0].transpose()
-        geoinfos_static = np.concatenate([geoinfos_static for _ in t_idxs])
+        # dynamic (time dependent) geoinfo channels are computed for every window
         geoinfos_dynamic = _anemoi_get_dynamic_forcings(
             datetimes, self.latitudes, self.longitudes, self.geoinfo_channels_dynamic
         )
