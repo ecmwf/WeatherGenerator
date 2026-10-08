@@ -87,7 +87,7 @@ class Timeseries:
         ax.plot(valid_times, da_tars_ts.values, label=stream, linestyle="--")
         fig.suptitle(
             f"Timeseries Average - {region.capitalize()}",
-            fontsize=13,
+            fontsize="x-large",
             fontweight="bold",
         )
         ax.set_ylabel(channel)

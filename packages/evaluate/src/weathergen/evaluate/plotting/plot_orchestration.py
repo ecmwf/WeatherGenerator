@@ -918,6 +918,23 @@ def plot_data(
 
     model_output = output_data
     if output_data is None:
+        empty = [
+            name
+            for name, val in (
+                ("forecast_step", available_data.fsteps),
+                ("sample", available_data.samples),
+                ("channel", available_data.channels),
+            )
+            if val is not None and len(val) == 0
+        ]
+        if empty:
+            _logger.warning(
+                f"RUN {run_id} - {stream}: none of the requested {', '.join(empty)}(s) "
+                f"for plotting exist in the output (available forecast steps: "
+                f"{sorted(int(f) for f in reader.get_forecast_steps())[:5]}...). "
+                f"Skipping plots."
+            )
+            return
         model_output = reader.get_data(
             stream,
             samples=available_data.samples,

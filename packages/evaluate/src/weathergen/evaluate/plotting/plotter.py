@@ -37,7 +37,11 @@ except ImportError:
     HAS_DATASHADER = False
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plotting.plot_utils import DefaultMarkerSize, format_datetime
+from weathergen.evaluate.plotting.plot_utils import (
+    DefaultMarkerSize,
+    apply_font_settings,
+    format_datetime,
+)
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -130,6 +134,9 @@ class Plotter:
             Stream identifier for which the plots will be created.
             It can also be set later via update_data_selection.
         """
+        # Plotters are constructed inside loky worker processes, which do not
+        # inherit rcParams set in the parent — apply font settings here.
+        apply_font_settings(plotter_cfg)
 
         _logger.debug(f"Taking cartopy paths from {work_dir}")
 
@@ -441,7 +448,7 @@ class Plotter:
             stat_text,
             ha="center",
             va="top",
-            fontsize=7,
+            fontsize="x-small",
             family="monospace",
             bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
         )
@@ -1083,10 +1090,10 @@ class Plotter:
             shrink=0.6,
             orientation="horizontal",
         )
-        cbar.set_label(f"Variable: {varname}", fontsize=7)
-        cbar.ax.tick_params(labelsize=6)
+        cbar.set_label(f"Variable: {varname}", fontsize="x-small")
+        cbar.ax.tick_params(labelsize="xx-small")
         cbar.outline.set_linewidth(0.3)
-        plt.title(title, fontsize=8)
+        plt.title(title, fontsize="small")
 
         # save
         name = self._build_map_filename(varname, regionname, tag, data)
