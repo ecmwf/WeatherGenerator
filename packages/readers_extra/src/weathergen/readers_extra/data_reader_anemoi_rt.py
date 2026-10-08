@@ -9,6 +9,8 @@
 
 import datetime
 import logging
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import override
 
@@ -289,10 +291,9 @@ class DataReaderAnemoiRT(DataReaderTimestep):
         geoinfos_dynamic = _anemoi_get_dynamic_forcings(
             datetimes, self.latitudes, self.longitudes, self.geoinfo_channels_dynamic
         )
-        # insert static and dynamic into common array
-        geoinfos = np.empty((coords.shape[0], len(self.geoinfo_idx)))
-        for idx, i in enumerate(self.geoinfo_idx_static_lin):
-            geoinfos[:, i] = geoinfos_static[:, idx]
+        # insert static (cached) and dynamic into common array. The static columns of
+        # grid.geoinfos are already in place, the dynamic columns are overwritten.
+        geoinfos = grid.geoinfos.copy() if is_cached else grid.geoinfos
         for i, ch in zip(self.geoinfo_idx_dynamic_lin, self.geoinfo_channels_dynamic, strict=True):
             geoinfos[:, i] = geoinfos_dynamic[ch]
 
