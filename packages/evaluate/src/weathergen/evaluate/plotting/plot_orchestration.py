@@ -34,6 +34,7 @@ from weathergen.evaluate.plotting.plot_orchestration_utils import (
 )
 from weathergen.evaluate.plotting.plot_utils import (
     PlotSubdir,
+    apply_font_settings,
     bar_plot_metric_region,
     heat_maps_metric_region,
     plot_metric_region,
@@ -891,9 +892,9 @@ def plot_data(
         "log_y": global_plotting_opts.get("log_y", False),
         "n_bins": global_plotting_opts.get("n_bins", 50),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
+        | plot_settings.get("plot_subtimesteps", False),
         "font_size": global_plotting_opts.get("font_size"),
         "font_type": global_plotting_opts.get("font_type"),
-        | plot_settings.get("plot_subtimesteps", False),
     }
 
     apply_font_settings(plotter_cfg)
