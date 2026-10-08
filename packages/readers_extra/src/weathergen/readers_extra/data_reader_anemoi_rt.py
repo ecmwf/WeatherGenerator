@@ -183,6 +183,70 @@ class DataReaderAnemoiRT(DataReaderTimestep):
     def length(self) -> int:
         return 1
 
+    def _build_grid(self, num_t: int) -> "_Grid":
+        """
+        Build the time-independent part of a window with `num_t` time steps: lat/lon coordinates
+        tiled `num_t` times and geoinfos with the static channels filled in (dynamic channels are
+        left at zero and have to be filled in per window).
+        """
+        # construct lat/lon coords
+        latlon = np.concatenate(
+            [
+                np.expand_dims(self.latitudes, 0),
+                np.expand_dims(self.longitudes, 0),
+            ],
+            axis=0,
+        ).transpose()
+        # repeat latlon num_t times
+        coords = np.vstack(list((latlon,) * num_t))
+
+        # extract static geoinfo channels (can be time-varying, so read from dataset)
+        geoinfos_static = self.ds[0, list(self.geoinfo_idx_static)][0].transpose()
+        geoinfos_static = np.concatenate([geoinfos_static for _ in range(num_t)])
+        geoinfos = np.zeros((coords.shape[0], len(self.geoinfo_idx)))
+        for idx, i in enumerate(self.geoinfo_idx_static_lin):
+            geoinfos[:, i] = geoinfos_static[:, idx]
+
+        return _Grid(coords=coords, geoinfos=geoinfos)
+
+    def _get_grid(self, num_t: int) -> tuple["_Grid", bool]:
+        """
+        Return the time-independent grid for windows with `num_t` time steps, together with a flag
+        that tells whether the returned arrays are owned by the cache (and must not be modified).
+        Stream options grid_cache=False / grid_cache_verify=True disable the cache / check every
+        cache hit against a fresh computation.
+        """
+        if not _grid_cache_enabled(self._grid_cache_option) or num_t in self._grid_disabled:
+            return self._build_grid(num_t), False
+        if num_t not in self._grid_cache:
+            self._grid_cache[num_t] = self._build_grid(num_t)
+            return self._grid_cache[num_t], True
+        cached = self._grid_cache[num_t]
+        if num_t not in self._grid_confirmed:
+            # second window with this length: rebuild and compare with window 0
+            fresh = self._build_grid(num_t)
+            for name in ("coords", "geoinfos"):
+                a, b = getattr(cached, name), getattr(fresh, name)
+                if not (a.dtype == b.dtype and a.shape == b.shape and np.array_equal(a, b)):
+                    _logger.warning(
+                        "Grid cache dropped for anemoi_rt (num_t=%s): %s of window 1 differs "
+                        "from window 0. Using uncached grid from now on.",
+                        num_t,
+                        name,
+                    )
+                    self._grid_disabled.add(num_t)
+                    self._grid_cache.pop(num_t, None)
+                    return fresh, False
+            self._grid_confirmed.add(num_t)
+        elif _grid_cache_verify(self._grid_cache_verify_option):
+            fresh = self._build_grid(num_t)
+            for name in ("coords", "geoinfos"):
+                a, b = getattr(cached, name), getattr(fresh, name)
+                assert a.dtype == b.dtype and a.shape == b.shape and np.array_equal(a, b), (
+                    f"grid cache mismatch in {name}"
+                )
+        return cached, True
+
     @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
         """
