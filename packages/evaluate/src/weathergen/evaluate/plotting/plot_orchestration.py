@@ -49,6 +49,7 @@ from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
+from weathergen.evaluate.utils.config_compat import parse_data_plots
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -347,7 +348,7 @@ def run_score_map_pipeline(
     calls = [delayed(_plot_score_maps_per_stream)(**t) for t in fstep_tasks]
     dispatch_parallel(calls, n_workers=n_plot_workers, backend="loky", desc=f"Score maps {stream}")
 
-    plot_score_animations = plot_score_options.get("score_animation", False)
+    plot_score_animations = (plot_score_options or {}).get("plot_score_animations", False)
     if plot_score_animations:
         _dispatch_score_map_animations(
             map_dir=map_dir,
@@ -917,16 +918,20 @@ def plot_data(
         _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
         return
 
-    # Resolve plotting flags: prefer new-style data_plots list, fall back to old booleans.
-    data_plots_list = plot_settings.get("data_plots", [])
-
-    _dp = set(data_plots_list)
-    plot_maps = ("maps" in _dp) or plot_settings.get("plot_maps", False)
-    plot_bias = ("bias" in _dp) or plot_settings.get("plot_bias", False)
-    plot_target = ("target" in _dp) or plot_settings.get("plot_target", False)
-    plot_timeseries = ("timeseries" in _dp) or plot_settings.get("plot_timeseries", False)
-    plot_histograms = ("histograms" in _dp) or plot_settings.get("plot_histograms", False)
-    plot_animations = ("animations" in _dp) or plot_settings.get("plot_animations", False)
+    # Resolve plotting flags from the data_plots list; legacy booleans are only used
+    # when no list is given (parse_data_plots converts them).
+    _dp = set(parse_data_plots(plot_settings))
+    plot_maps = "maps" in _dp
+    plot_bias = "bias" in _dp
+    plot_target = "target" in _dp
+    plot_timeseries = "timeseries" in _dp
+    plot_animations = "animations" in _dp
+    # Legacy ``plot_histograms: "per-sample" | "across-samples"`` restricts the histogram
+    # mode; ``histograms`` in the list (or ``plot_histograms: true``) produces both.
+    hist_mode = plot_settings.get("plot_histograms")
+    plot_histograms = "histograms" in _dp and (
+        hist_mode if hist_mode in ("per-sample", "across-samples") else True
+    )
 
     model_output = output_data
     if output_data is None:

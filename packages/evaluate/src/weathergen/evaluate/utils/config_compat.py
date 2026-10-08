@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 import warnings
 
+from omegaconf import DictConfig
+
 _logger = logging.getLogger(__name__)
 
 # ── Supported values ─────────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ _SCORE_PLOT_BOOL_MAP = {
     "plot_score_maps": "score_map",
     "plot_score_animations": "score_animation",
     "plot_score_init_timeseries": "timeseries",
+    "plot_score_init_time_series": "timeseries",  # key read before the list-based config
 }
 
 
@@ -88,15 +91,16 @@ def parse_plot_config(cfg: dict) -> dict:
     eval_cfg = cfg.get("evaluation") or {}
     _set_key(eval_cfg, "score_plots", parse_score_plots(eval_cfg))
 
+    # The config is usually an OmegaConf DictConfig, which is not a ``dict``.
     for stream_cfg in (cfg.get("default_streams") or {}).values():
-        if isinstance(stream_cfg, dict) and stream_cfg.get("plotting") is not None:
+        if isinstance(stream_cfg, dict | DictConfig) and stream_cfg.get("plotting") is not None:
             _set_key(stream_cfg["plotting"], "data_plots", parse_data_plots(stream_cfg["plotting"]))
 
     for run_cfg in (cfg.get("run_ids") or {}).values():
-        if not isinstance(run_cfg, dict):
+        if not isinstance(run_cfg, dict | DictConfig):
             continue
         for stream_cfg in (run_cfg.get("streams") or {}).values():
-            if isinstance(stream_cfg, dict) and stream_cfg.get("plotting") is not None:
+            if isinstance(stream_cfg, dict | DictConfig) and stream_cfg.get("plotting") is not None:
                 _set_key(
                     stream_cfg["plotting"], "data_plots", parse_data_plots(stream_cfg["plotting"])
                 )
