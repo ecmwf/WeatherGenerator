@@ -498,7 +498,12 @@ def _read_sample(
                 filename=anemoi_target_cfg["filename"],
             )
         else:
-            target_data = np.asarray(ds[f"{base}/target/data"])
+            try:
+                target_data = np.asarray(ds[f"{base}/target/data"])
+            except KeyError:
+                # Prediction-only output (inference with skip_target_values): no
+                # target to compare against, so all-missing of the prediction's shape.
+                target_data = np.full(pred_data.shape[:2], np.nan, dtype=np.float32)
             if channel_idxs is not None:
                 target_data = target_data[:, channel_idxs]
 
