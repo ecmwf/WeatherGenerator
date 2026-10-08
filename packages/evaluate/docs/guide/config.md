@@ -87,7 +87,8 @@ Applied to all runs. Stream-level blocks inside this section allow per-stream ov
 |-----|------|----------|---------|-------------|
 | `regions` | list[str] | yes | `["global"]` | Regions for which 2D map plots are generated. See [section 9](#9-regions-reference) for supported values. |
 | `image_format` | str | yes | `"png"` | File format for all saved images. Options: `"png"`, `"pdf"`, `"svg"`, `"eps"`, `"jpg"`. |
-| `animation_format` | str | yes | `"gif"` | File format for animations. Options: `"gif"`, `"mp4"`. |
+| `animation_format` | str | yes | `"mp4"` | File format for animations. Options: `"mp4"` (full truecolor), `"gif"` (256-color palette, some quality loss). |
+| `log_colorbar` | bool | yes | `false` | Use a logarithmic colorscale on 2D map plots. |
 | `dpi_val` | int | yes | `300` | DPI for all saved images. |
 | `fps` | int | yes | `2` | Frames per second for animations. |
 | `n_bins` | int | yes | `50` | Number of bins used in histogram plots. |
@@ -168,7 +169,7 @@ limits for 2D maps.
 global_plotting_options:
   regions: ["global", "europe"]
   image_format: "png"
-  animation_format: "gif"
+  animation_format: "mp4"
   log_colorbar: false
   dpi_val: 300
   fps: 2

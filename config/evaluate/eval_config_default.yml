@@ -3,7 +3,7 @@
 #global_plotting_options:
 #  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
-#  animation_format: "gif" #options: "mp4", "gif"
+#  animation_format: "mp4" #options: "mp4", "gif"
 #  dpi_val : 300
 #  fps: 2
 #  ERA5:
