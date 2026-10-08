@@ -208,16 +208,9 @@ Controls what to compute and how to visualise summary scores.
 evaluation:
   metrics: ["rmse", "mae"]
   regions: ["global", "nhem"]
-  summary_plots: true
-  ratio_plots: false
-  heat_maps: false
-  score_cards: false
-  bar_plots: false
+  score_plots: [lead_time, ratio]
   summary_dir: "./plots/"
   plot_ensemble: "members"
-  plot_score_maps: false
-  plot_score_animations: false
-  plot_score_init_time_series: false
   print_summary: false
   log_scale: false
   add_grid: false
@@ -230,20 +223,37 @@ evaluation:
 | `metrics` | list | no | — | Metrics to compute. Each item is either a metric name string or a single-key dict `{name: {param: value}}` for parametrised metrics. See [section 8](#8-metrics-reference). |
 | `regions` | list[str] | yes | `["global"]` | Regions over which scores are computed. Overrides any region set on individual streams. See [section 9](#9-regions-reference). |
 | `summary_dir` | str | yes | `<repo_root>/plots/` | Output directory for all summary (line/ratio/heatmap/etc.) plots. |
-| `summary_plots` | bool | yes | `false` | Generate line plots of score vs forecast step, one per metric × region × stream × channel. |
-| `ratio_plots` | bool | yes | `false` | Generate ratio plots (score relative to baseline). Requires `baseline` to be set. |
-| `heat_maps` | bool | yes | `false` | Generate heat-map plots (score as a function of lead-time and channel). |
-| `score_cards` | bool | yes | `false` | Generate score-card summary plots. |
-| `bar_plots` | bool | yes | `false` | Generate bar plots of scores. |
+| `score_plots` | list[str] | yes | `[]` | Score visualisations to produce. See the values below. |
 | `baseline` | str | yes | — | `run_id` to use as the reference for ratio and improvement calculations. |
 | `plot_ensemble` | str\|bool | yes | `false` | How to render ensemble spread on summary line plots. Options: `false` (no spread), `"std"` (mean ± std), `"minmax"` (shaded min–max), `"members"` (individual member lines). |
-| `plot_score_maps` | bool | yes | `false` | Plot 2D spatial maps of scores per forecast step. **Slows down evaluation significantly.** |
-| `plot_score_animations` | bool | yes | `false` | Animate score maps across forecast steps. Implies `plot_score_maps` must have data. |
-| `plot_score_init_time_series` | bool | yes | `false` | Plot score timeseries grouped by initialisation hour of the day. |
 | `print_summary` | bool | yes | `false` | Print score values to stdout. Can be very verbose for large runs. |
 | `log_scale` | bool | yes | `false` | Use logarithmic y-axis on summary line plots. |
 | `add_grid` | bool | yes | `false` | Add a background grid to summary line plots. |
 | `agg_dims` | str\|list[str] | yes | `"ipoint"` | **Advanced.** Dimension(s) to aggregate (average) scores over. Supported values: `"ipoint"`, `"sample"`, `"forecast_step"`, `"ensemble"`. Default averages over spatial points only. Use with caution — averaging over sample or forecast_step hides temporal structure. |
+
+#### `score_plots` values
+
+| Value | Produces |
+|-------|----------|
+| `lead_time` | Line plots of score vs forecast step, one per metric × region × stream × channel. Also produces the Q-Q plots when `qq_analysis` is in `metrics`. |
+| `ratio` | Ratio plots (score relative to `baseline`). Requires `baseline` to be set. |
+| `heatmap` | Heat-map plots (score as a function of lead time and channel). |
+| `scorecard` | Score-card summary plots. |
+| `bar` | Bar plots of scores. |
+| `score_map` | 2D spatial maps of scores per forecast step (zarr runs only). **Slows down evaluation significantly.** |
+| `score_animation` | Animations of the score maps across forecast steps. Needs `score_map` as well, since the animations are built from its frames. |
+| `timeseries` | Score timeseries grouped by initialisation hour of the day (zarr runs only). |
+
+PSD plots are produced automatically whenever `psd` is in `metrics`; no `score_plots` value is
+needed. An unknown value raises an error listing the supported ones.
+
+> **Deprecated boolean flags.** Older configs used one boolean per plot type. They are still
+> read when `score_plots` is absent (with a deprecation warning) and map as follows:
+> `summary_plots` → `lead_time`, `ratio_plots` → `ratio`, `heat_maps` → `heatmap`,
+> `score_cards` → `scorecard`, `bar_plots` → `bar`, `plot_score_maps` → `score_map`,
+> `plot_score_animations` → `score_animation`,
+> `plot_score_init_time_series` (or `plot_score_init_timeseries`) → `timeseries`.
+> If `score_plots` is set, these flags are ignored.
 
 ---
 
@@ -266,11 +276,7 @@ default_streams:
       sample: [0, 1]
       forecast_step: [1, 2, 4, 8]
       ensemble: [0]
-      plot_maps: true
-      plot_bias: false
-      plot_target: false
-      plot_histograms: true
-      plot_animations: false
+      data_plots: [maps, histograms]
   CERRA:
     regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"]
@@ -280,9 +286,7 @@ default_streams:
     plotting:
       sample: [0]
       forecast_step: "all"
-      plot_maps: true
-      plot_histograms: true
-      plot_animations: false
+      data_plots: [maps, histograms]
 ```
 
 If a `run_id` does not define its own `streams` block, `default_streams` is used as-is. When a run
@@ -461,11 +465,7 @@ ERA5:                                 # stream name
     forecast_step: [1, 2, 4, 8]
     sample: [0, 1]
     ensemble: [0]
-    plot_maps: true
-    plot_bias: false
-    plot_target: false
-    plot_histograms: true
-    plot_animations: false
+    data_plots: [maps, histograms]
 ```
 
 | Key | Type | Optional | Default | Description |
@@ -498,11 +498,31 @@ both time and disk space.
 | `forecast_step` | str\|list[int] | yes | `"all"` | Forecast steps for which plots are created. Same syntax as `evaluation.forecast_step`. |
 | `sample` | list[int] | yes | `"all"` | Samples for which plots are created. |
 | `ensemble` | str\|list[int] | yes | `"all"` | Ensemble members for which maps/histograms are created. Same syntax as `evaluation.ensemble`. |
-| `plot_maps` | bool | yes | `false` | Plot a 2D scatter map for each channel, valid time, and selected sample/ensemble member. |
-| `plot_bias` | bool | yes | `true` | Plot the bias (prediction − target) as a 2D map alongside the prediction map. |
-| `plot_target` | bool | yes | `true` | Also plot the target (ground truth) data using the same plotting options. |
-| `plot_histograms` | bool\|str | yes | `false` | Plot histograms of target vs prediction. `true` or `"per-sample"` creates one histogram per sample; `"across-samples"` aggregates all samples into a single histogram. |
-| `plot_animations` | bool | yes | `false` | Build an animation (GIF/MP4) cycling through forecast steps for each channel and sample. |
+| `data_plots` | list[str] | yes | `[]` | Data visualisations to produce for the selected forecast steps, samples and ensemble members. See the values below. |
+
+#### `data_plots` values
+
+| Value | Produces |
+|-------|----------|
+| `maps` | 2D scatter map of the prediction for each channel, valid time, and selected sample/ensemble member. |
+| `target` | 2D maps of the target (ground truth), with the same plotting options. Independent of `maps`. |
+| `bias` | 2D maps of the bias (prediction − target). Independent of `maps`. |
+| `histograms` | Histograms of target vs prediction, both per sample and across all samples (the two values below). |
+| `histograms_per_sample` | One histogram per sample. |
+| `histograms_across_samples` | One histogram aggregating all samples. |
+| `animations` | Animations (GIF/MP4) cycling through forecast steps for each channel and sample, for the map types listed. |
+| `timeseries` | Prediction and target over forecast steps, one figure per channel and sample (and ensemble member) in each region. |
+
+An unknown value raises an error listing the supported ones.
+
+> **Deprecated boolean flags.** Older configs used one boolean per plot type. They are still
+> read when `data_plots` is absent (with a deprecation warning) and map as follows:
+> `plot_maps` → `maps`, `plot_target` → `target`, `plot_bias` → `bias`,
+> `plot_histograms: true` → `histograms`, `plot_histograms: "per-sample"` →
+> `histograms_per_sample`, `plot_histograms: "across-samples"` → `histograms_across_samples`,
+> `plot_animations` → `animations`, `plot_timeseries` → `timeseries`.
+> Unset flags are off, including `plot_bias` and `plot_target`. If `data_plots` is set, these flags
+> are ignored.
 
 ### 7.3 Regridding
 
@@ -837,7 +857,7 @@ Individual config values can be overridden from the command line without editing
 
 ```bash
 uv run evaluate --config myconfig.yml \
-  --options evaluation.summary_plots=true evaluation.regions=[global,nhem]
+  --options evaluation.score_plots=[lead_time] evaluation.regions=[global,nhem]
 ```
 
 The `--options` flag uses OmegaConf dot-notation and does **not** support overriding
