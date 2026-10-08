@@ -39,6 +39,122 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
     return rdata
 
 
+def grid_cache_enabled(option: bool | None = None) -> bool:
+    """
+    Grid caches are on by default. Switch them off with the config option
+    `data_loading.grid_cache=False` (or the environment variable WEATHERGEN_GRID_CACHE=0, which
+    is not forwarded to slurm jobs by the launcher) to restore the uncached behaviour.
+    """
+    if option is not None:
+        return bool(option)
+    return os.environ.get("WEATHERGEN_GRID_CACHE", "1") != "0"
+
+
+def grid_cache_verify(option: bool | None = None) -> bool:
+    """
+    `data_loading.grid_cache_verify=True` (or WEATHERGEN_GRID_CACHE_VERIFY=1): on every cache hit
+    also compute the regular result and raise if it is not bitwise identical. Slow; for validating
+    a run on real data.
+    """
+    if option is not None:
+        return bool(option)
+    return os.environ.get("WEATHERGEN_GRID_CACHE_VERIFY", "0") == "1"
+
+
+def _assert_identical(what: str, cached, regular) -> None:
+    """Raise AssertionError unless the two (nested) results are bitwise identical."""
+    if cached is None or regular is None:
+        assert cached is None and regular is None, f"grid cache mismatch in {what}: None"
+    elif isinstance(cached, torch.Tensor):
+        assert isinstance(regular, torch.Tensor), f"grid cache mismatch in {what}: type"
+        assert cached.dtype == regular.dtype and cached.shape == regular.shape, (
+            f"grid cache mismatch in {what}: dtype/shape {cached.dtype}{tuple(cached.shape)} vs "
+            f"{regular.dtype}{tuple(regular.shape)}"
+        )
+        assert torch.equal(cached, regular), f"grid cache mismatch in {what}: values"
+    elif isinstance(cached, (list, tuple)):
+        assert len(cached) == len(regular), f"grid cache mismatch in {what}: length"
+        for i, (c, r) in enumerate(zip(cached, regular, strict=True)):
+            _assert_identical(f"{what}[{i}]", c, r)
+    else:
+        c, r = np.asarray(cached), np.asarray(regular)
+        assert c.dtype == r.dtype and c.shape == r.shape and np.array_equal(c, r), (
+            f"grid cache mismatch in {what}: values"
+        )
+
+
+def _is_identical(cached, regular) -> bool:
+    try:
+        _assert_identical("confirm", cached, regular)
+    except AssertionError:
+        return False
+    return True
+
+
+def _geometry_digest(
+    coords: torch.Tensor,
+    coords_local: torch.Tensor,
+    coords_per_cell: torch.Tensor,
+    idxs_ord_inv: torch.Tensor,
+    n_times: int,
+    n_geoinfos: int,
+) -> bytes:
+    """
+    Hash of the cacheable part of get_target_coords: everything except the time and geoinfo
+    columns of coords_local, which are rewritten every step.
+    """
+    h = hashlib.sha256()
+    for tensor in (coords, coords_per_cell, idxs_ord_inv):
+        x = tensor.detach().contiguous().cpu().numpy()
+        h.update(x.dtype.str.encode())
+        h.update(np.asarray(x.shape, dtype=np.int64).tobytes())
+        h.update(x.tobytes())
+    cl = coords_local.detach().contiguous()
+    varying = slice(1, 1 + n_times + n_geoinfos)
+    keep = torch.cat([cl[..., :1], cl[..., varying.stop :]], dim=-1)
+    x = keep.cpu().numpy()
+    h.update(x.dtype.str.encode())
+    h.update(np.asarray(x.shape, dtype=np.int64).tobytes())
+    h.update(x.tobytes())
+    return h.digest()
+
+
+@dataclass
+class _TokensCacheEntry:
+    """Tokenization of the last window of a stream (valid for windows with equal coords)."""
+
+    coords: torch.Tensor
+    idxs_cells: list
+    idxs_cells_lens: list
+
+
+@dataclass
+class _TargetCoordsCacheEntry:
+    """
+    Geometry dependent part of the target coordinates of a stream. It is valid as long as the
+    tokenization (idxs_cells / idxs_cells_lens objects), the token mask and the coordinates are the
+    same; only datetimes and geoinfos can change between windows.
+    """
+
+    # inputs the entry is valid for
+    idxs_cells: list
+    idxs_cells_lens: list
+    mask_tokens: np.typing.NDArray
+    coords_raw: torch.Tensor
+    # outputs that only depend on the above
+    idxs_data: torch.Tensor | None = None
+    coords: torch.Tensor | None = None
+    masked_points_per_cell: torch.Tensor | None = None
+    idxs_ord_inv: torch.Tensor | None = None
+    # result of get_target_coords_local of an earlier window and the number of
+    # (geoinfo, time) columns it was built with
+    coords_local: torch.Tensor | None = None
+    num_geoinfos: int = -1
+    num_times: int = -1
+    # digest of the geometry of the first window; compared with the second matching window
+    geometry_digest: bytes | None = None
+
+
 class TokenizerMasking(Tokenizer):
     def __init__(self, healpix_level: int, masker: Masker):
         super().__init__(healpix_level)
