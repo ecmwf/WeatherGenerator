@@ -172,6 +172,13 @@ class DataReaderAnemoiRT(DataReaderTimestep):
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
 
+        # time-independent grid (coords + static geoinfos), keyed by number of time steps per window
+        self._grid_cache: dict[int, _Grid] = {}
+        self._grid_confirmed: set[int] = set()
+        self._grid_disabled: set[int] = set()
+        self._grid_cache_option = stream_info.get("grid_cache", None)
+        self._grid_cache_verify_option = stream_info.get("grid_cache_verify", None)
+
     @override
     def length(self) -> int:
         return 1
