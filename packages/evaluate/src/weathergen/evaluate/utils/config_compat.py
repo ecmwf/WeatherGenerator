@@ -15,7 +15,16 @@ _logger = logging.getLogger(__name__)
 # ── Supported values ─────────────────────────────────────────────────────────
 
 SUPPORTED_DATA_PLOTS = frozenset(
-    {"maps", "bias", "target", "histograms", "animations", "timeseries"}
+    {
+        "maps",
+        "bias",
+        "target",
+        "histograms",  # both of the two below
+        "histograms_per_sample",
+        "histograms_across_samples",
+        "animations",
+        "timeseries",
+    }
 )
 SUPPORTED_SCORE_PLOTS = frozenset(
     {
@@ -129,8 +138,12 @@ def _convert_bools(cfg, bool_map, field_name, supported, *, histograms_special=F
             continue
         found = True
         if histograms_special and old_key == "plot_histograms":
-            if value is True or value in ("per-sample", "across-samples"):
+            if value is True:
                 result.append(new_entry)
+            elif value == "per-sample":
+                result.append("histograms_per_sample")
+            elif value == "across-samples":
+                result.append("histograms_across_samples")
         elif value:
             result.append(new_entry)
     if found:

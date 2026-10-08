@@ -776,15 +776,15 @@ def _plot_single_sample(
 
     data_selection = {"sample": sample, "stream": stream, "forecast_step": fstep}
 
-    if plot_maps:
-        if plot_target:
-            plotter.create_maps_per_sample(tars, plot_chs, data_selection, "targets", maps_cfg)
+    # Prediction, target and bias maps are enabled independently.
+    if plot_target:
+        plotter.create_maps_per_sample(tars, plot_chs, data_selection, "targets", maps_cfg)
 
-        # Plot bias once if it doesn't carry an ensemble dimension,
-        # otherwise it will be sliced per member inside the loop below.
-        bias_has_ens = bias_data is not None and "ens" in bias_data.dims
-        if plot_bias and bias_data is not None and not bias_has_ens:
-            plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
+    # Plot bias once if it doesn't carry an ensemble dimension,
+    # otherwise it will be sliced per member inside the loop below.
+    bias_has_ens = bias_data is not None and "ens" in bias_data.dims
+    if plot_bias and bias_data is not None and not bias_has_ens:
+        plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
     for ens in ensemble:
         preds_ens = _select_ensemble_data(preds, ens)
@@ -800,12 +800,10 @@ def _plot_single_sample(
                 preds_ens, plot_chs, data_selection, preds_name, cfg_to_use
             )
 
-            if plot_bias and bias_has_ens:
-                bias_ens = _select_ensemble_data(bias_data, ens)
-                bias_tag = "_".join(filter(None, ["bias", preds_tag]))
-                plotter.create_maps_per_sample(
-                    bias_ens, plot_chs, data_selection, bias_tag, bias_cfg
-                )
+        if plot_bias and bias_has_ens:
+            bias_ens = _select_ensemble_data(bias_data, ens)
+            bias_tag = "_".join(filter(None, ["bias", preds_tag]))
+            plotter.create_maps_per_sample(bias_ens, plot_chs, data_selection, bias_tag, bias_cfg)
 
         if plot_histograms is True or plot_histograms == "per-sample":
             plotter.create_histograms(
@@ -926,12 +924,17 @@ def plot_data(
     plot_target = "target" in _dp
     plot_timeseries = "timeseries" in _dp
     plot_animations = "animations" in _dp
-    # Legacy ``plot_histograms: "per-sample" | "across-samples"`` restricts the histogram
-    # mode; ``histograms`` in the list (or ``plot_histograms: true``) produces both.
-    hist_mode = plot_settings.get("plot_histograms")
-    plot_histograms = "histograms" in _dp and (
-        hist_mode if hist_mode in ("per-sample", "across-samples") else True
-    )
+    # ``histograms`` produces both histogram kinds; the specific entries produce one each.
+    hist_per_sample = bool(_dp & {"histograms", "histograms_per_sample"})
+    hist_across = bool(_dp & {"histograms", "histograms_across_samples"})
+    if hist_per_sample and hist_across:
+        plot_histograms: bool | str = True
+    elif hist_per_sample:
+        plot_histograms = "per-sample"
+    elif hist_across:
+        plot_histograms = "across-samples"
+    else:
+        plot_histograms = False
 
     model_output = output_data
     if output_data is None:
@@ -1117,7 +1120,7 @@ def plot_data(
         plot_samples = _sel(list(np.unique(last_tars.sample.values)), plot_sample_set)
 
         max_wk = reader.eval_cfg.get("max_workers", None)
-        anim_samples = plot_samples + (["all_samples"] if plot_histograms else [])
+        anim_samples = plot_samples + (["all_samples"] if hist_across else [])
         anim_kw = dict(
             plotter=plotter,
             samples=anim_samples,
