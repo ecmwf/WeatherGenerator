@@ -13,11 +13,10 @@ import re
 from collections.abc import Iterable, Sequence
 from enum import Enum
 
+import matplotlib as mpl
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
-
-import matplotlib as mpl
 
 _logger = logging.getLogger(__name__)
 
