@@ -528,15 +528,7 @@ class ZarrIO:
         # The first stream alphabetically (e.g. "latent") may be empty or
         # have a different structure than the primary data streams.
         example_stream = None
-        for _, candidate in example_sample.groups():
-            child_keys = list(candidate.group_keys())
-            if child_keys:
-                example_stream = candidate
-                break
-
-        if example_stream is None:
-            msg = f"No stream with forecast steps found in {self._store_path}"
-            raise FileNotFoundError(msg)
+        _, example_stream = next(example_sample.groups())
 
         all_steps = sorted(list(example_stream.group_keys()))
 
