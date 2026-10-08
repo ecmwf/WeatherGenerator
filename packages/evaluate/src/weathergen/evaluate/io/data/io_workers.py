@@ -18,7 +18,6 @@ import logging
 import threading
 from collections import OrderedDict
 
-import anemoi.datasets
 import numpy as np
 import zarr
 from numpy.typing import NDArray
@@ -83,6 +82,10 @@ def _open_anemoi_dataset(anemoi_cfg: dict) -> tuple:
     (longitudes normalised to ``[-180, 180)``) used for nearest-neighbour
     matching to the prediction grid points.
     """
+    # Imported here, not at module level: only this optional reference-target
+    # path needs anemoi-datasets, which plotting environments may not have.
+    import anemoi.datasets
+
     filename = anemoi_cfg["filename"]
     if filename in _anemoi_cache:
         return _anemoi_cache[filename]
