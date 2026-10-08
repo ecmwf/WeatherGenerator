@@ -167,6 +167,15 @@ class TokenizerMasking(Tokenizer):
         self.masker = masker
         self.rng = None
         self.token_size = None
+        # caches for streams with a fixed grid, see get_tokens_windows and get_target_coords
+        self._grid_cache_enabled = grid_cache_enabled(grid_cache_option)
+        self._grid_cache_verify = grid_cache_verify(grid_cache_verify_option)
+        self._tokens_cache: dict[tuple, _TokensCacheEntry] = {}
+        self._target_coords_cache: dict[int, _TargetCoordsCacheEntry] = {}
+        # keys that passed the window-0 vs window-1 check; keys we will not cache again
+        self._tokens_confirmed: set[tuple] = set()
+        self._tokens_disabled: set[tuple] = set()
+        self._target_coords_disabled: set[int] = set()
 
     def reset_rng(self, rng) -> None:
         """
