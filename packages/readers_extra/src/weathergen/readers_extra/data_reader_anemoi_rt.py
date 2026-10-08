@@ -271,16 +271,12 @@ class DataReaderAnemoiRT(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # construct lat/lon coords
-        latlon = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-            ],
-            axis=0,
-        ).transpose()
-        # repeat latlon len(t_idxs) times
-        coords = np.vstack(list((latlon,) * len(t_idxs)))
+        # The grid (lat/lon tiled over the time steps of a window) and the static geoinfo
+        # channels are identical for every window, only the datetimes and the dynamic forcings
+        # change. They are therefore built once per number of time steps and reused.
+        grid, is_cached = self._get_grid(len(t_idxs))
+        # callers may modify the arrays in place -> never hand out the cached arrays themselves
+        coords = grid.coords.copy() if is_cached else grid.coords
 
         # use time_window and frequency to compute required time information
         datetimes = []
