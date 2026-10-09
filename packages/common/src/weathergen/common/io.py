@@ -489,21 +489,39 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
+        if self.example_key.forecast_step != 0:
+            # Fstep 0 always holds source and targets when forecast_offset=0, so
+            # a store without it was written with forecast_offset=1.
+            return 1
         fstep0_datasets = self._get_datasets(self.example_key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
-    @functools.cached_property
-    def example_key(self) -> ItemKey:
+    def _example_sample_and_stream(self) -> tuple[str, zarr.Group, str, zarr.Group]:
+        """Return the first sample and its first stream that has forecast step groups.
+
+        Streams are not guaranteed to contain forecast steps (e.g. "latent", or
+        input-only streams), so skip the ones without any.
+        """
         try:
             sample, example_sample = next(self.data_root.groups())
-            stream, example_stream = next(example_sample.groups())
-            fstep = list(example_stream.keys())[0]
-            if int(fstep) > 1:
-                _logger.warning("First fstep > 1. This is unexpected.")
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
 
+        for stream, candidate in example_sample.groups():
+            if any(True for _ in candidate.group_keys()):
+                return sample, example_sample, stream, candidate
+
+        msg = f"No stream with forecast steps found in {self._store_path}"
+        raise FileNotFoundError(msg)
+
+    @functools.cached_property
+    def example_key(self) -> ItemKey:
+        """Key of fstep 0 (or the first stored fstep if fstep 0 was not written)."""
+        sample, _, stream, example_stream = self._example_sample_and_stream()
+        fstep = min(int(step) for step in example_stream.group_keys())
+        if fstep > 1:
+            _logger.warning(f"First stored fstep is {fstep} (> 1). This is unexpected.")
         return ItemKey(sample, fstep, stream)
 
     @functools.cached_property
@@ -522,15 +540,12 @@ class ZarrIO:
     def forecast_steps(self) -> list[int]:
         """Query available forecast steps in this zarr store."""
         # assume stream/samples/forecast_steps are orthogonal
-        _, example_sample = next(self.data_root.groups())
-        _, example_stream = next(example_sample.groups())
+        _, _, _, example_stream = self._example_sample_and_stream()
+        all_steps = sorted(example_stream.group_keys(), key=int)
 
-        all_steps = sorted(list(example_stream.group_keys()))
-
-        if self.forecast_offset == 1:
-            return all_steps[1:]  # exclude fstep with no targets/preds
-        else:
-            return all_steps
+        if self.forecast_offset == 1 and all_steps and int(all_steps[0]) == 0:
+            return all_steps[1:]  # exclude fstep 0, which has no targets/preds
+        return all_steps
 
 
 class ZipZarrIO(ZarrIO):
