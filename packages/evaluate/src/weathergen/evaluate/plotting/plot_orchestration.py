@@ -49,6 +49,7 @@ from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
+from weathergen.evaluate.utils.config_compat import MAP_KINDS, parse_data_plots
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -347,7 +348,7 @@ def run_score_map_pipeline(
     calls = [delayed(_plot_score_maps_per_stream)(**t) for t in fstep_tasks]
     dispatch_parallel(calls, n_workers=n_plot_workers, backend="loky", desc=f"Score maps {stream}")
 
-    plot_score_animations = plot_score_options.get("score_animation", False)
+    plot_score_animations = (plot_score_options or {}).get("plot_score_animations", False)
     if plot_score_animations:
         _dispatch_score_map_animations(
             map_dir=map_dir,
@@ -575,11 +576,12 @@ def _dispatch_animations(
     select: dict,
     tag: str,
     max_workers: int | None = None,
+    prefixes: tuple[str, ...] = ("map", "histogram"),
 ) -> list[str]:
     """Build GIF animations in parallel for all (region, sample, variable) combinations.
 
-    Animations are built for both maps and histograms — whichever image files
-    exist on disk will be picked up automatically.
+    Animations are built from the frame types in *prefixes* (``"map"``, ``"histogram"``);
+    whichever image files exist on disk will be picked up automatically.
 
     Parameters
     ----------
@@ -587,6 +589,8 @@ def _dispatch_animations(
         Plotter instance (used only for config: regions, fps, image_format, run_id, stream).
     samples, fsteps, variables, select, tag
         Same arguments that ``Plotter.animation`` used to accept.
+    prefixes : tuple[str, ...]
+        Frame types to animate: ``"map"`` and/or ``"histogram"``.
 
     Returns
     -------
@@ -597,10 +601,10 @@ def _dispatch_animations(
 
     duration_ms = int(1000 / plotter.fps) if plotter.fps > 0 else 400
 
-    prefixes = [
-        ("map", plotter.get_map_output_dir(tag)),
-        ("histogram", plotter.get_hist_output_dir()),
-    ]
+    frame_dirs = {
+        "map": plotter.get_map_output_dir(tag),
+        "histogram": plotter.get_hist_output_dir(),
+    }
 
     tasks = [
         {
@@ -617,7 +621,8 @@ def _dispatch_animations(
             "duration_ms": duration_ms,
             "prefix": prefix,
         }
-        for prefix, output_dir in prefixes
+        for prefix, output_dir in frame_dirs.items()
+        if prefix in prefixes
         for region in plotter.regions
         for sample in samples
         for var in variables
@@ -775,15 +780,15 @@ def _plot_single_sample(
 
     data_selection = {"sample": sample, "stream": stream, "forecast_step": fstep}
 
-    if plot_maps:
-        if plot_target:
-            plotter.create_maps_per_sample(tars, plot_chs, data_selection, "targets", maps_cfg)
+    # Prediction, target and bias maps are enabled independently.
+    if plot_target:
+        plotter.create_maps_per_sample(tars, plot_chs, data_selection, "targets", maps_cfg)
 
-        # Plot bias once if it doesn't carry an ensemble dimension,
-        # otherwise it will be sliced per member inside the loop below.
-        bias_has_ens = bias_data is not None and "ens" in bias_data.dims
-        if plot_bias and bias_data is not None and not bias_has_ens:
-            plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
+    # Plot bias once if it doesn't carry an ensemble dimension,
+    # otherwise it will be sliced per member inside the loop below.
+    bias_has_ens = bias_data is not None and "ens" in bias_data.dims
+    if plot_bias and bias_data is not None and not bias_has_ens:
+        plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
     for ens in ensemble:
         preds_ens = _select_ensemble_data(preds, ens)
@@ -799,12 +804,10 @@ def _plot_single_sample(
                 preds_ens, plot_chs, data_selection, preds_name, cfg_to_use
             )
 
-            if plot_bias and bias_has_ens:
-                bias_ens = _select_ensemble_data(bias_data, ens)
-                bias_tag = "_".join(filter(None, ["bias", preds_tag]))
-                plotter.create_maps_per_sample(
-                    bias_ens, plot_chs, data_selection, bias_tag, bias_cfg
-                )
+        if plot_bias and bias_has_ens:
+            bias_ens = _select_ensemble_data(bias_data, ens)
+            bias_tag = "_".join(filter(None, ["bias", preds_tag]))
+            plotter.create_maps_per_sample(bias_ens, plot_chs, data_selection, bias_tag, bias_cfg)
 
         if plot_histograms is True or plot_histograms == "per-sample":
             plotter.create_histograms(
@@ -889,11 +892,8 @@ def plot_data(
     run_id = reader.run_id
     stream_cfg = reader.get_stream(stream)
     plot_settings = stream_cfg.get("plotting", {})
-
-    plot_keys = ("plot_maps", "plot_histograms", "plot_animations", "plot_timeseries")
-    has_old_style = any(plot_settings.get(k, False) for k in plot_keys)
-    has_new_style = bool(plot_settings.get("data_plots"))
-    if not plot_settings or not (has_old_style or has_new_style):
+    spec = parse_data_plots(plot_settings)
+    if not spec:
         return
 
     plotter_cfg = {
@@ -917,16 +917,21 @@ def plot_data(
         _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
         return
 
-    # Resolve plotting flags: prefer new-style data_plots list, fall back to old booleans.
-    data_plots_list = plot_settings.get("data_plots", [])
-
-    _dp = set(data_plots_list)
-    plot_maps = ("maps" in _dp) or plot_settings.get("plot_maps", False)
-    plot_bias = ("bias" in _dp) or plot_settings.get("plot_bias", False)
-    plot_target = ("target" in _dp) or plot_settings.get("plot_target", False)
-    plot_timeseries = ("timeseries" in _dp) or plot_settings.get("plot_timeseries", False)
-    plot_histograms = ("histograms" in _dp) or plot_settings.get("plot_histograms", False)
-    plot_animations = ("animations" in _dp) or plot_settings.get("plot_animations", False)
+    # Per-step images are produced for every requested plot (videos are built from them).
+    plot_maps = "predictions" in spec.maps
+    plot_target = "target" in spec.maps
+    plot_bias = "bias" in spec.maps
+    plot_timeseries = spec.timeseries
+    hist_per_sample = "per_sample" in spec.histograms
+    hist_across = "across_samples" in spec.histograms
+    if hist_per_sample and hist_across:
+        plot_histograms: bool | str = True
+    elif hist_per_sample:
+        plot_histograms = "per-sample"
+    elif hist_across:
+        plot_histograms = "across-samples"
+    else:
+        plot_histograms = False
 
     model_output = output_data
     if output_data is None:
@@ -1101,7 +1106,9 @@ def plot_data(
             n_workers=num_plot_workers,
         )
 
-    if plot_animations:
+    map_videos = spec.map_videos()
+    hist_videos = spec.histogram_videos()
+    if map_videos or hist_videos:
         last_fstep = list(da_tars.keys())[-1]
         last_preds = da_preds[last_fstep]
         last_tars = da_tars[last_fstep]
@@ -1111,34 +1118,45 @@ def plot_data(
         plot_chs = _sel(list(np.atleast_1d(last_tars.channel.values)), plot_channel_set)
         plot_samples = _sel(list(np.unique(last_tars.sample.values)), plot_sample_set)
 
-        max_wk = reader.eval_cfg.get("max_workers", None)
-        anim_samples = plot_samples + (["all_samples"] if plot_histograms else [])
         anim_kw = dict(
             plotter=plotter,
-            samples=anim_samples,
             fsteps=da_tars.keys(),
             variables=plot_chs,
-            max_workers=max_wk,
+            max_workers=reader.eval_cfg.get("max_workers", None),
             select={"sample": plot_samples[-1], "stream": stream, "forecast_step": last_fstep},
         )
 
-        tags: list[str] = []
-        for ens in available_data.ensemble:
-            if ens in ("mean", "std"):
-                tags.append(f"preds_ens_{ens}")
-            else:
-                tags.append("preds" if not has_ens else f"preds_ens_{ens}")
-        if plot_target:
-            tags.append("targets")
-        if plot_bias:
+        # Frame tags per ensemble member, as written by _plot_single_sample.
+        def _ens_tags(prefix: str) -> list[str]:
+            tags = []
             for ens in available_data.ensemble:
                 if ens in ("mean", "std"):
-                    tags.append(f"bias_ens_{ens}")
+                    tags.append(f"{prefix}_ens_{ens}")
                 else:
-                    tags.append("bias" if not has_ens else f"bias_ens_{ens}")
+                    tags.append(prefix if not has_ens else f"{prefix}_ens_{ens}")
+            return tags
 
-        for tag in tags:
-            _dispatch_animations(**anim_kw, tag=tag)
+        map_tags = {
+            "predictions": _ens_tags("preds"),
+            "target": ["targets"],
+            "bias": _ens_tags("bias"),
+        }
+        for kind in MAP_KINDS:
+            if kind in map_videos:
+                for tag in map_tags[kind]:
+                    _dispatch_animations(
+                        **anim_kw, samples=plot_samples, tag=tag, prefixes=("map",)
+                    )
+
+        # Histogram frames are tagged like the predictions they compare.
+        hist_samples = (plot_samples if "per_sample" in hist_videos else []) + (
+            ["all_samples"] if "across_samples" in hist_videos else []
+        )
+        if hist_samples:
+            for tag in _ens_tags("preds"):
+                _dispatch_animations(
+                    **anim_kw, samples=hist_samples, tag=tag, prefixes=("histogram",)
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1286,7 +1304,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     # fall back to old-style individual booleans.
     score_plots_list = eval_opt.get("score_plots", [])
     _sp = set(score_plots_list)
-    do_lead_time = "lead_time" in _sp or "qq_analysis" in _sp
+    do_metric_plots = "metric_plots" in _sp
     do_ratio = "ratio" in _sp or eval_opt.get("ratio_plots", False)
     do_heatmap = "heatmap" in _sp or eval_opt.get("heat_maps", False)
     do_scorecard = "scorecard" in _sp or eval_opt.get("score_cards", False)
@@ -1295,13 +1313,13 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     # Map each resolved plot option to the subdir(s) it produces, so PDF merging
     # can reuse the same flags without re-deriving them from eval_opt.
     plot_option_subdirs = {
-        "lead_time": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
+        "metric_plots": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
         "ratio": [PlotSubdir.ratio_plots],
         "scorecard": [PlotSubdir.score_cards],
         "bar": [PlotSubdir.bar_plots],
     }
     enabled_opts = {
-        "lead_time": do_lead_time,
+        "metric_plots": do_metric_plots,
         "ratio": do_ratio,
         "scorecard": do_scorecard,
         "bar": do_bar,
@@ -1315,13 +1333,15 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             br_plotter.set_subdir(metric, region)
             quantile_plotter.set_subdir(metric, region)
 
-            # PSD plots are always produced when psd is in the metrics —
-            # they are intrinsic to the metric, not a separate plot option.
+            # metric_plots draws each metric in its standard form: a PSD plot for psd,
+            # a Q-Q plot for qq_analysis, and score vs lead time for all others.
+            # psd is a spectrum, so none of the other score plots apply to it.
             if metric == "psd":
-                psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                if do_metric_plots:
+                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
                 continue
 
-            if do_lead_time:
+            if do_metric_plots:
                 if metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:

@@ -55,11 +55,13 @@ evaluation:
   # metrics  : ["rmse", "mae"]
   # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
 
-  # ── Score visualisations (new list-based config) ──
-  # Supported values: lead_time, ratio, heatmap, scorecard, bar, qq,
-  #                   rank_histogram, score_map, score_animation, timeseries
-  # NOTE: PSD plots are produced automatically when psd is in metrics.
-  score_plots: [lead_time, timeseries]
+  # ── Score visualisations ──
+  # Supported values: metric_plots, ratio, heatmap, scorecard, bar,
+  #                   score_map, score_animation, init_hour
+  # metric_plots: draws each metric in its standard form (score vs lead time,
+  # or the Q-Q / PSD plot for qq_analysis / psd).
+  # init_hour:  the score vs the hour of day the forecast was initialised (x-axis, 0–23 h).
+  score_plots: [metric_plots, ratio]
 
   # Legacy boolean flags (deprecated — use score_plots list above instead):
   # summary_plots : true
@@ -94,16 +96,19 @@ default_streams:
       sample: [1, 3]
       forecast_step: [1,3, 2] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
       ensemble: [0,2,5] #supported: "all", "mean", "std", [0,1,2]
-      # ── Data visualisations (new list-based config) ──
-      # Supported values: maps, bias, target, histograms, animations, timeseries
-      data_plots: [maps, histograms, animations]
-      # Legacy boolean flags (deprecated — use data_plots list above instead):
-      # plot_maps: true
-      # plot_bias: false
-      # plot_target: false
-      # plot_histograms: true
-      # plot_animations: true
-      # plot_timeseries: false
+      # ── Data visualisations ──
+      # Each entry is a name or a name with output formats ([image], [video] or both;
+      # a video animates the per-forecast-step images, which are kept).
+      #   maps:            {predictions|target|bias: [formats]}   ("maps" alone = predictions images)
+      #   histograms, histograms_per_sample, histograms_across_samples   (images, or : [formats])
+      #   timeseries
+      data_plots:
+        - maps:
+            predictions: [image, video]
+            # target: [image]
+            # bias: [image, video]
+        - histograms: [image, video]
+        # - timeseries
 
   CERRA:
     regions: ["europe"]
@@ -114,7 +119,10 @@ default_streams:
     plotting:
       sample: [2, 3, 0]
       forecast_step: [1,3, 4, 5]
-      data_plots: [maps, histograms, animations]
+      data_plots:
+        - maps:
+            predictions: [image, video]
+        - histograms: [image, video]
       
   IMERG_ANEMOI:
     channels: ["tp_imerg_0"]
@@ -126,7 +134,10 @@ default_streams:
       sample: [1, 3]
       forecast_step: [1, 2, 3] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
       ensemble: [14]
-      data_plots: [maps, histograms, animations]
+      data_plots:
+        - maps:
+            predictions: [image, video]
+        - histograms: [image, video]
 
 run_ids :
   ar40mckx:
@@ -161,7 +172,10 @@ run_ids :
           sample: [1, 3]
           forecast_step: [1,3, 2]
           ensemble: "mean" 
-          data_plots: [maps, histograms, animations]
+          data_plots:
+            - maps:
+                predictions: [image, video]
+            - histograms: [image, video]
 
   
 
