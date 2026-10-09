@@ -30,8 +30,6 @@ from omegaconf import ListConfig
 
 _logger = logging.getLogger(__name__)
 
-_ANEMOI_STREAM_TYPES = ("anemoi", "anemoi_operan", "anemoi_rt")
-
 
 @dataclass(slots=True)
 class TargetRequest:
@@ -92,7 +90,8 @@ class AnemoiTargetSource(TargetSource):
             info = next((s for s in streams if s.get("name") == stream), {})
         else:
             info = streams.get(stream, {})
-        if info.get("type") not in _ANEMOI_STREAM_TYPES or not info.get("filenames"):
+        # All anemoi stream types (anemoi, anemoi_operan, ...) read the same datasets.
+        if not str(info.get("type", "")).startswith("anemoi") or not info.get("filenames"):
             return None
         data_path = Path(inference_cfg.get("data_path_anemoi", ""))
         filenames = [str(data_path / f) for f in info["filenames"]]

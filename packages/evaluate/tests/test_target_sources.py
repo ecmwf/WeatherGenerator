@@ -122,11 +122,13 @@ def test_from_inference_config_selects_anemoi_streams():
         "data_path_anemoi": "/data",
         "streams": {
             "ERA5": {"type": "anemoi", "filenames": ["a.zarr", "b.zarr"]},
+            "OPERAN": {"type": "anemoi_operan", "filenames": ["op.zarr"]},
             "OBS": {"type": "obs", "filenames": ["o.zarr"]},
         },
     }
     source = AnemoiTargetSource.from_inference_config(cfg, "ERA5", {"ensemble_member": 2})
     assert source.filenames == ["/data/a.zarr", "/data/b.zarr"]
     assert source.ensemble_member == 2
+    assert AnemoiTargetSource.from_inference_config(cfg, "OPERAN").filenames == ["/data/op.zarr"]
     assert AnemoiTargetSource.from_inference_config(cfg, "OBS") is None
     assert AnemoiTargetSource.from_inference_config(cfg, "missing") is None
