@@ -8,6 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 
+import hashlib
+import logging
+import os
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 
@@ -18,11 +23,14 @@ from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
     encode_times_target,
+    target_coords_from_template,
     tokenize_apply_mask_source,
     tokenize_apply_mask_target,
     tokenize_space,
     tokenize_spacetime,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
