@@ -127,13 +127,6 @@ class Sample:
         """
         self.meta_info[stream_name] = meta_info
 
-    def get_stream_data(self, stream_name: str) -> StreamData:
-        """
-        Get data for stream @stream_name from sample
-        """
-        assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
-        return self.streams_data[stream_name]
-
     def get_num_source_steps(self) -> int:
         """
         Get number of source steps from smallest of all available streams
@@ -427,53 +420,17 @@ class ModelBatch:
         """
         return self.target_samples.targets_nan()
 
-    def len_sources(self) -> int:
-        """
-        Number of source samples
-        """
-        return len(self.source_samples)
-
-    def len_targets(self) -> int:
-        """
-        Number of target samples
-        """
-        return len(self.target_samples)
-
-    def get_source_sample(self, idx: int) -> Sample:
-        """
-        Get a source sample
-        """
-        return self.source_samples.samples[idx]
-
     def get_source_samples(self, subset: list | None = None) -> BatchSamples:
         """
         Get source samples
         """
         return self.source_samples.get_subset(subset)
 
-    def get_target_sample(self, idx: int) -> Sample:
-        """
-        Get a target sample
-        """
-        return self.target_samples.samples[idx]
-
     def get_target_samples(self, subset: list | None = None) -> BatchSamples:
         """
         Get target samples
         """
         return self.target_samples.get_subset(subset)
-
-    def get_source_idx_for_target(self, target_idx: int) -> int:
-        """
-        Get index of source sample for a given target sample index
-        """
-        return int(self.target2source_matching_idxs[target_idx])
-
-    def get_target_idx_for_source(self, source_idx: int) -> int:
-        """
-        Get index of target sample for a given source sample index
-        """
-        return int(self.source2target_matching_idxs[source_idx])
 
     def get_output_idxs(self) -> int:
         """

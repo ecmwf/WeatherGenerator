@@ -506,24 +506,6 @@ class DataReaderBase(metaclass=ABCMeta):
 
         return target_channel_weights
 
-    def normalize_coords(self, coords: NDArray[DType]) -> NDArray[DType]:
-        """
-        Normalize coordinates
-
-        Parameters
-        ----------
-        coords :
-            coordinates to be normalized
-
-        Returns
-        -------
-        Normalized coordinates
-        """
-        coords[..., 0] = np.sin(np.deg2rad(coords[..., 0]))
-        coords[..., 1] = np.sin(0.5 * np.deg2rad(coords[..., 1]))
-
-        return coords
-
     @staticmethod
     def _normalize(
         data: NDArray[DType],
