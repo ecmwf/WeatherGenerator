@@ -35,6 +35,9 @@ type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
+# pseudo-stream name for latent outputs
+LATENT_STREAM = "latent"
+
 _logger = logging.getLogger(__name__)
 
 
@@ -331,7 +334,7 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
-        forecast_offset=int | None,
+        forecast_offset: int,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
@@ -407,6 +410,63 @@ class ZarrIO:
         for dataset in item.datasets:
             if dataset is not None:
                 self._write_dataset(group, dataset)
+
+    def write_latent(
+        self,
+        sample: int,
+        forecast_step: int,
+        latents: dict[str, NDArray],
+        *,
+        coords: NDArray | None = None,
+        num_register_tokens: int = 0,
+        num_class_tokens: int = 0,
+    ) -> None:
+        """Write normalized latent arrays to ``sample/latent/forecast_step``.
+
+        Packed ``tokens`` are split when their length matches the coordinates
+        plus the extra-token counts. Explicit extra-token arrays take precedence.
+        Matching coordinates add spatial metadata. Existing groups and failed
+        array writes raise Zarr errors; no requested array is silently skipped.
+        """
+        assert self.data_root is not None, "ZarrIO must be opened before accessing data."
+        assert not self.read_only, "Cannot write to a read-only store."
+        arrays = {name: np.asarray(array) for name, array in latents.items()}
+        representation = arrays.get("tokens", next(iter(arrays.values())))
+        npoints = representation.shape[0] if representation.ndim else None
+        num_extra_tokens = num_register_tokens + num_class_tokens
+        metadata = {}
+        if coords is not None:
+            coords = np.asarray(coords, dtype=np.float32)
+            tokens = arrays.get("tokens")
+            if tokens is not None and tokens.ndim and len(tokens) == len(coords) + num_extra_tokens:
+                if num_register_tokens:
+                    arrays.setdefault("register_tokens", tokens[:num_register_tokens])
+                if num_class_tokens:
+                    arrays.setdefault("class_token", tokens[num_register_tokens:num_extra_tokens])
+                arrays["tokens"] = tokens[num_extra_tokens:]
+            if npoints in (None, len(coords), len(coords) + num_extra_tokens):
+                arrays.update(
+                    coords=coords,
+                    geoinfo=np.zeros((len(coords), 0), dtype=np.float32),
+                    times=np.full(len(coords), np.datetime64("NaT"), dtype="datetime64[ns]"),
+                )
+                metadata = {
+                    "num_extra_tokens": num_extra_tokens,
+                    "num_register_tokens": num_register_tokens,
+                    "num_class_tokens": num_class_tokens,
+                    "spatial_points": len(coords),
+                    "coords_order": "lat_lon",
+                }
+                if npoints is not None:
+                    metadata["total_points"] = npoints
+        key = ItemKey(sample, forecast_step, LATENT_STREAM)
+        group = self.data_root.create_group(key.path, attributes=metadata)
+        for name, array in arrays.items():
+            group.create_array(name, data=array)
+
+    def get_latent(self, sample: int, forecast_step: int) -> zarr.Group:
+        """Read a latent group; arrays and metadata are available through keys and attrs."""
+        return self._get_group(ItemKey(sample, forecast_step, LATENT_STREAM), create=False)
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
@@ -486,7 +546,7 @@ class ZarrIO:
     def example_key(self) -> ItemKey:
         try:
             sample, example_sample = next(self.data_root.groups())
-            stream, example_stream = next(example_sample.groups())
+            stream = next(name for name in example_sample.group_keys() if name != LATENT_STREAM)
             fstep = 0
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
@@ -510,8 +570,7 @@ class ZarrIO:
     def forecast_steps(self) -> list[int]:
         """Query available forecast steps in this zarr store."""
         # assume stream/samples/forecast_steps are orthogonal
-        _, example_sample = next(self.data_root.groups())
-        _, example_stream = next(example_sample.groups())
+        example_stream = self.data_root[f"{self.example_key.sample}/{self.example_key.stream}"]
 
         all_steps = sorted(list(example_stream.group_keys()))
 

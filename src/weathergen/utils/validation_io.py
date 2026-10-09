@@ -8,14 +8,18 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from functools import cache
 
+import astropy_healpix as hp
 import numpy as np
+import numpy.typing as npt
 import torch
 
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.model.engines import LatentState
 from weathergen.utils.utils import is_stream_reconstructed
 
 _logger = logging.getLogger(__name__)
@@ -110,14 +114,27 @@ def write_output(
     Interface for writing model output
     """
 
-    # TODO: how to handle multiple physical loss terms
-    outputs_physical = [
-        loss_name
-        for i, (loss_name, loss_term) in enumerate(val_cfg.losses.items())
-        if loss_term.type == "LossPhysical"
-    ]
-    assert len(outputs_physical) == 1
-    target_aux_out = target_aux_out[outputs_physical[0]]
+    stream_names = list(cf.streams.keys())
+    output_stream_names = val_cfg.output.get("streams")
+    if output_stream_names is None:
+        output_stream_names = stream_names
+    output_streams = {
+        name: stream_names.index(name) for name in output_stream_names if name != io.LATENT_STREAM
+    }
+    latents_all = (
+        get_latent_output(batch, model_output) if io.LATENT_STREAM in output_stream_names else []
+    )
+    has_latents = any(sample for step in latents_all for sample in step)
+
+    if output_streams:
+        # TODO: how to handle multiple physical loss terms
+        outputs_physical = [
+            loss_name
+            for loss_name, loss_term in val_cfg.losses.items()
+            if loss_term.type == "LossPhysical"
+        ]
+        assert len(outputs_physical) == 1
+        target_aux_out = target_aux_out[outputs_physical[0]]
 
     # collect all target / prediction-related information
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
@@ -133,10 +150,12 @@ def write_output(
     chunk_forecast_offset = model_output.forecast_offset
     timestep_idxs_chunk = [s for s in model_output.forecast_steps if s >= chunk_forecast_offset]
 
-    n_samples = len(batch.get_source_samples().get_samples())
+    source_samples = batch.get_source_samples().get_samples()
+    n_samples = len(source_samples)
 
-    # process all time steps in current chunk
-    for t_idx in timestep_idxs_chunk:
+    # Collect physical data only when physical streams were requested.
+    physical_steps = timestep_idxs_chunk if output_streams else []
+    for t_idx in physical_steps:
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
@@ -171,74 +190,135 @@ def write_output(
             targets_coords_all[-1] += [np.concatenate(t_coords_s)]
             targets_times_all[-1] += [np.concatenate(t_times_s)]
 
-    if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
-        _logger.warning("Writing no data since predictions are empty.")
+    has_physical = any(
+        step[stream_idx].shape[1] > 0
+        for step in preds_all
+        for stream_idx in output_streams.values()
+    )
+    if not has_physical and not has_latents:
+        _logger.warning("Writing no data since physical and requested latent outputs are empty.")
         return
-
-    # collect source information
-    sources = []
-    for sample in batch.get_source_samples().get_samples():
-        sources += [[]]
-        for _, stream_data in sample.streams_data.items():
-            # TODO: support multiple input steps
-            sources[-1] += [stream_data.source_raw[0]]
-
-    sample_idxs = [
-        list(sample.streams_data.values())[0].sample_idx
-        for sample in batch.get_source_samples().get_samples()
-    ]
-
-    # more prep work
-
-    # output stream names to be written, use specified ones or all if nothing specified
-    stream_names = list(cf.streams.keys())
-    stream_infos = list(cf.streams.values())
-    if val_cfg.get("output").get("streams") is not None:
-        output_stream_names = val_cfg.output.streams
-    else:
-        output_stream_names = stream_names
-
-    output_streams = {name: stream_names.index(name) for name in output_stream_names}
-    _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
-
-    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
-    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in stream_infos]
-
-    geoinfo_channels = [[] for _ in stream_infos]  # TODO obtain channels
 
     # calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * batch_size
 
-    # write output
+    if has_physical:
+        # TODO: support multiple input steps
+        sources = [
+            [stream_data.source_raw[0] for stream_data in sample.streams_data.values()]
+            for sample in source_samples
+        ]
+        sample_idxs = [
+            list(sample.streams_data.values())[0].sample_idx for sample in source_samples
+        ]
+        stream_infos = list(cf.streams.values())
+        target_channels = [list(stream.val_target_channels) for stream in stream_infos]
+        source_channels = [list(stream.val_source_channels) for stream in stream_infos]
+        geoinfo_channels = [[] for _ in stream_infos]  # TODO obtain channels
 
-    start_date = val_cfg.start_date
-    end_date = val_cfg.end_date
+        twh = TimeWindowHandler(
+            val_cfg.start_date,
+            val_cfg.end_date,
+            val_cfg.time_window_len,
+            val_cfg.time_window_step,
+        )
+        source_windows = (twh.window(idx) for idx in sample_idxs)
+        source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
-    twh = TimeWindowHandler(
-        start_date,
-        end_date,
-        val_cfg.time_window_len,
-        val_cfg.time_window_step,
-    )
-    source_windows = (twh.window(idx) for idx in sample_idxs)
-    source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
-
-    data = io.OutputBatchData(
-        sources,
-        source_intervals,
-        targets_all,
-        preds_all,
-        targets_coords_all,
-        targets_times_all,
-        targets_lens,
-        output_streams,
-        target_channels,
-        source_channels,
-        geoinfo_channels,
-        sample_start,
-        forecast_offset,
-        forecast_steps_override=timestep_idxs_chunk,
-    )
+        data = io.OutputBatchData(
+            sources,
+            source_intervals,
+            targets_all,
+            preds_all,
+            targets_coords_all,
+            targets_times_all,
+            targets_lens,
+            output_streams,
+            target_channels,
+            source_channels,
+            geoinfo_channels,
+            sample_start,
+            forecast_offset,
+            forecast_steps_override=timestep_idxs_chunk,
+        )
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
-        for subset in data.items():
-            zio.write_zarr(subset)
+        if has_physical:
+            for subset in data.items():
+                zio.write_zarr(subset)
+        if has_latents:
+            # Step 0 is emitted only for a chunk that encoded its input. With
+            # offset 0, shift forecast latents to reserve 0 for that initial state.
+            latent_steps = [step + int(forecast_offset == 0) for step in timestep_idxs_chunk]
+            if model_output.initial_latent is not None:
+                latent_steps.insert(0, 0)
+            for latent_step, latents_in_step in zip(latent_steps, latents_all, strict=True):
+                for sample_idx, latents_in_sample in enumerate(latents_in_step):
+                    if latents_in_sample:
+                        zio.write_latent(
+                            sample_start + sample_idx,
+                            latent_step,
+                            latents_in_sample,
+                            coords=_get_latent_coords(cf, source_samples[sample_idx]),
+                            num_register_tokens=int(cf.get("num_register_tokens", 0)),
+                            num_class_tokens=int(cf.get("num_class_tokens", 0)),
+                        )
+
+
+@cache
+def _get_healpix_coords(healpix_level: int) -> npt.NDArray:
+    """Cache latitude/longitude coordinates for each HEALPix level."""
+    ipix = np.arange(12 * 4**healpix_level)
+    lon, lat = hp.healpix_to_lonlat(ipix, 2**healpix_level, order="nested")
+    return np.stack([lat.to_value("deg"), lon.to_value("deg")], axis=1).astype(np.float32)
+
+
+def _get_latent_coords(cf, sample) -> npt.NDArray | None:
+    """Collect HEALPix coordinates and apply the source sample's spatial mask."""
+    if "healpix_level" not in cf:
+        return None
+    coords = _get_healpix_coords(int(cf.healpix_level))
+    for meta in sample.meta_info.values():
+        if hasattr(meta, "mask") and meta.mask is not None:
+            mask = meta.mask.detach().cpu().numpy().astype(bool)
+            if mask.shape[0] == coords.shape[0]:
+                coords = coords[mask]
+            break
+    return coords
+
+
+def get_latent_output(batch, model_output):
+    """Collect per-sample arrays, prepending the encoded state when present."""
+    n_samples = len(batch.get_source_samples().get_samples())
+    latent_preds = [
+        model_output.get_latent_prediction(model_output.chunk_idx(step))
+        for step in model_output.forecast_steps
+        if step >= model_output.forecast_offset
+    ]
+    if model_output.initial_latent is not None:
+        latent_preds.insert(0, {"latent_state": model_output.initial_latent})
+
+    latents_all = []
+    for latent_pred in latent_preds:
+        tensors = {}
+        for name, value in latent_pred.items():
+            if name == "posteriors":
+                continue
+            if isinstance(value, LatentState):
+                fields = {
+                    "tokens": value.z_pre_norm,
+                    "register_tokens": value.register_tokens,
+                    "class_token": value.class_token,
+                }
+            else:
+                fields = {name: value}
+            tensors.update({key: tensor for key, tensor in fields.items() if tensor is not None})
+        per_step = []
+        for sample in range(n_samples):
+            per_step.append(
+                {
+                    name: tensor[sample].detach().to(torch.float32).cpu().numpy()
+                    for name, tensor in tensors.items()
+                }
+            )
+        latents_all.append(per_step)
+    return latents_all

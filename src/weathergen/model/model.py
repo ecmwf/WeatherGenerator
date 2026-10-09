@@ -55,6 +55,7 @@ class ModelOutput:
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
     latent_deep: list[dict[str, list[torch.Tensor]]] | None
+    initial_latent: LatentState | None
 
     def __init__(
         self,
@@ -72,6 +73,7 @@ class ModelOutput:
         self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
         self.batch_samples = source_samples
         self.latent_deep = None
+        self.initial_latent = None
 
     def chunk_idx(self, fstep: int) -> int:
         """Index of forecast step fstep into chunk-local data, e.g. predictions."""
@@ -740,6 +742,8 @@ class Model(torch.nn.Module):
         forecast_offset = global_steps[0]
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
+        if posteriors is not None:
+            output.initial_latent = self.tokens_to_latent_state(self.latent_pre_norm(tokens), tokens)
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
