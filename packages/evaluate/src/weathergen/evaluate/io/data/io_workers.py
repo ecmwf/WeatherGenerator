@@ -91,7 +91,8 @@ def _read_sample(
     is_zip: bool,
     read_coords: bool = False,
     is_gridded: bool = True,
-) -> tuple[list[NDArray], list[NDArray], list[NDArray], dict]:
+    read_target: bool = True,
+) -> tuple[list[NDArray], list[NDArray | None], list[NDArray], dict]:
     """
     Read all forecast steps for one sample via direct zarr array access.
 
@@ -120,6 +121,9 @@ def _read_sample(
         with multiple forecast sub-steps per fstep).  If False (scatter/obs data),
         keep all observations in a single array per fstep — each observation has
         its own time and splitting would create one array per observation.
+    read_target : bool
+        If False, skip the zarr ``target`` group; targets are ``None`` and
+        filled later by a :class:`TargetSource`.
 
     Returns
     -------
@@ -176,7 +180,7 @@ def _read_sample(
 
         # Direct array access — bypasses OutputDataset/as_xarray/dask entirely
         pred_data = np.asarray(ds[f"{base}/prediction/data"])
-        target_data = np.asarray(ds[f"{base}/target/data"])
+        target_data = np.asarray(ds[f"{base}/target/data"]) if read_target else None
         times_data = np.asarray(ds[f"{base}/prediction/times"])
 
         # Select channels by index
@@ -184,7 +188,8 @@ def _read_sample(
             pred_data = (
                 pred_data[:, channel_idxs] if pred_data.ndim == 2 else pred_data[:, channel_idxs, :]
             )
-            target_data = target_data[:, channel_idxs]
+            if target_data is not None:
+                target_data = target_data[:, channel_idxs]
 
         # Handle sub-steps (gridded data with multiple valid_times per fstep).
         # For scatter/observation data each observation has its own timestamp,
@@ -196,7 +201,7 @@ def _read_sample(
             for ut in unique_times:
                 mask = times_data == ut
                 preds_all.append(pred_data[mask])
-                targets_all.append(target_data[mask])
+                targets_all.append(None if target_data is None else target_data[mask])
                 count += 1
             times_all.append(unique_times)
             n_substeps.append(count)
