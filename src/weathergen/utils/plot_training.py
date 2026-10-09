@@ -79,23 +79,6 @@ def _add_legend(
 
 
 ####################################################################################################
-def _ensure_list(value):
-    """
-    Ensure that the input value is a list. If it is not a list, convert it to a list.
-    Parameters
-    ----------
-    value : any
-        Input value to check.
-    Returns
-    -------
-    list
-        A list containing the input value if it was not a list,
-          or the input value itself if it was already a list.
-    """
-    return value if isinstance(value, list) else [value]
-
-
-####################################################################################################
 def _check_run_id_dict(run_id_dict: dict) -> bool:
     """
     Check if the run_id_dict is valid.
