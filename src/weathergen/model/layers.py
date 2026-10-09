@@ -101,9 +101,6 @@ class MLP(torch.nn.Module):
                 else norm(dim_in, eps=norm_eps)
             )
             self.noise_conditioning = LinearNormConditioning(dim_in)
-            self.noise_conditioning = LinearNormConditioning(dim_in)
-        # the below was dealiased – previosuly was appended AND registered as .lnorm 
-        # when loading older models, the .lnorm attribute will be 'missing', but still be in self.layers
         elif dim_aux is not None:
             self.layers.append(AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps))
         else:
