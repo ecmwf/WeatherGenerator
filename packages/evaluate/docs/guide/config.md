@@ -278,7 +278,11 @@ default_streams:
       sample: [0, 1]
       forecast_step: [1, 2, 4, 8]
       ensemble: [0]
-      data_plots: [maps, histograms]
+      data_plots:
+        - maps:
+            predictions: [image, video]
+            bias: [image]
+        - histograms_per_sample
   CERRA:
     regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"]
@@ -288,7 +292,9 @@ default_streams:
     plotting:
       sample: [0]
       forecast_step: "all"
-      data_plots: [maps, histograms]
+      data_plots:
+        - maps
+        - histograms
 ```
 
 If a `run_id` does not define its own `streams` block, `default_streams` is used as-is. When a run
@@ -467,7 +473,13 @@ ERA5:                                 # stream name
     forecast_step: [1, 2, 4, 8]
     sample: [0, 1]
     ensemble: [0]
-    data_plots: [maps, histograms]
+    data_plots:
+      - maps:
+          predictions: [image, video]
+          target: [image]
+          bias: [image, video]
+      - histograms_per_sample
+      - timeseries
 ```
 
 | Key | Type | Optional | Default | Description |
@@ -500,31 +512,40 @@ both time and disk space.
 | `forecast_step` | str\|list[int] | yes | `"all"` | Forecast steps for which plots are created. Same syntax as `evaluation.forecast_step`. |
 | `sample` | list[int] | yes | `"all"` | Samples for which plots are created. |
 | `ensemble` | str\|list[int] | yes | `"all"` | Ensemble members for which maps/histograms are created. Same syntax as `evaluation.ensemble`. |
-| `data_plots` | list[str] | yes | `[]` | Data visualisations to produce for the selected forecast steps, samples and ensemble members. See the values below. |
+| `data_plots` | list | yes | `[]` | Data visualisations to produce for the selected forecast steps, samples and ensemble members, and in which formats. See below. |
 
-#### `data_plots` values
+#### `data_plots` entries
 
-| Value | Produces |
-|-------|----------|
-| `maps` | 2D scatter map of the prediction for each channel, valid time, and selected sample/ensemble member. |
-| `target` | 2D maps of the target (ground truth), with the same plotting options. Independent of `maps`. |
-| `bias` | 2D maps of the bias (prediction − target). Independent of `maps`. |
-| `histograms` | Histograms of target vs prediction, both per sample and across all samples (the two values below). |
-| `histograms_per_sample` | One histogram per sample. |
-| `histograms_across_samples` | One histogram aggregating all samples. |
-| `animations` | Animations (GIF/MP4) cycling through forecast steps for each channel and sample, for the map types listed. |
-| `timeseries` | Prediction and target over forecast steps, one figure per channel and sample (and ensemble member) in each region. |
+Each entry is either a plain name or a name with options. Output formats are given as a list of
+`image` (one plot per forecast step) and/or `video` (an animation, GIF/MP4, cycling through the
+forecast steps). A video is built from the per-step images, so those are always written as well.
 
-An unknown value raises an error listing the supported ones.
+| Entry | Options | Produces |
+|-------|---------|----------|
+| `maps` | mapping of map kind → formats; kinds: `predictions`, `target`, `bias` | 2D scatter maps for each channel, valid time and selected sample/ensemble member: the prediction, the target (ground truth) and/or the bias (prediction − target). Each kind is independent. `maps` on its own means `predictions: [image]`. |
+| `histograms` | formats (default `[image]`) | Histograms of target vs prediction, both per sample and across all samples. |
+| `histograms_per_sample` | formats (default `[image]`) | One histogram per sample. |
+| `histograms_across_samples` | formats (default `[image]`) | One histogram aggregating all samples. |
+| `timeseries` | — | Prediction and target over forecast steps, one figure per channel and sample (and ensemble member) in each region. |
 
-> **Deprecated boolean flags.** Older configs used one boolean per plot type. They are still
-> read when `data_plots` is absent (with a deprecation warning) and map as follows:
-> `plot_maps` → `maps`, `plot_target` → `target`, `plot_bias` → `bias`,
-> `plot_histograms: true` → `histograms`, `plot_histograms: "per-sample"` →
-> `histograms_per_sample`, `plot_histograms: "across-samples"` → `histograms_across_samples`,
-> `plot_animations` → `animations`, `plot_timeseries` → `timeseries`.
-> Unset flags are off, including `plot_bias` and `plot_target`. If `data_plots` is set, these flags
-> are ignored.
+```yaml
+data_plots:
+  - maps:
+      predictions: [video]          # animation (its per-step images are written too)
+      target: [image]
+      bias: [image, video]
+  - histograms_across_samples: [image, video]
+  - timeseries
+```
+
+An unknown entry, map kind or format raises an error listing the supported ones.
+
+> **Former syntax.** The boolean flags `plot_maps`, `plot_bias`, `plot_target`, `plot_histograms`,
+> `plot_animations`, `plot_timeseries` and the flat list (e.g. `data_plots: [maps, target,
+> animations]`) are no longer supported and raise an error. For example,
+> `plot_maps: true` + `plot_animations: true` becomes
+> `data_plots: [{maps: {predictions: [image, video]}}]`, and `plot_histograms: "per-sample"`
+> becomes `- histograms_per_sample`.
 
 ### 7.3 Regridding
 

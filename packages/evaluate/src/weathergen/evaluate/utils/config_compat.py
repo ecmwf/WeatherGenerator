@@ -1,31 +1,33 @@
-"""Normalise legacy boolean plot flags to list-based ``data_plots``/``score_plots`` config.
+"""Parse the plot options of the evaluation config.
 
-Detects old-style booleans, converts to lists, and emits DeprecationWarning.
+* ``evaluation.score_plots``: list of score visualisations.  Legacy boolean flags are
+  converted with a DeprecationWarning.
+* ``<stream>.plotting.data_plots``: list of data visualisations, each produced as images
+  and/or videos (see :func:`parse_data_plots`).
 """
 
 from __future__ import annotations
 
 import logging
 import warnings
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 
 _logger = logging.getLogger(__name__)
 
 # ── Supported values ─────────────────────────────────────────────────────────
 
-SUPPORTED_DATA_PLOTS = frozenset(
-    {
-        "maps",
-        "bias",
-        "target",
-        "histograms",  # both of the two below
-        "histograms_per_sample",
-        "histograms_across_samples",
-        "animations",
-        "timeseries",
-    }
-)
+MAP_KINDS = ("predictions", "target", "bias")
+PLOT_FORMATS = ("image", "video")
+# data_plots histogram entries -> histogram kinds they produce
+HISTOGRAM_ENTRIES = {
+    "histograms": ("per_sample", "across_samples"),
+    "histograms_per_sample": ("per_sample",),
+    "histograms_across_samples": ("across_samples",),
+}
+SUPPORTED_DATA_PLOTS = ("maps", *HISTOGRAM_ENTRIES, "timeseries")
 SUPPORTED_SCORE_PLOTS = frozenset(
     {
         "metric_plots",  # standard plot of each metric (line, Q-Q or PSD plot)
@@ -42,16 +44,27 @@ SUPPORTED_SCORE_PLOTS = frozenset(
 # Renamed score_plots values.
 _DEPRECATED_SCORE_PLOTS = {"lead_time": "metric_plots"}
 
+_DATA_PLOTS_EXAMPLE = """\
+  data_plots:
+    - maps:
+        predictions: [image, video]
+        target: [image]
+        bias: [image, video]
+    - histograms_per_sample        # or histograms_per_sample: [image, video]
+    - timeseries"""
+
+# Plotting keys of the former syntax, rejected with a pointer to data_plots.
+_LEGACY_DATA_PLOT_KEYS = (
+    "plot_maps",
+    "plot_bias",
+    "plot_target",
+    "plot_histograms",
+    "plot_animations",
+    "plot_timeseries",
+)
+
 # ── Old boolean key → new list entry ─────────────────────────────────────────
 
-_DATA_PLOT_BOOL_MAP = {
-    "plot_maps": "maps",
-    "plot_bias": "bias",
-    "plot_target": "target",
-    "plot_histograms": "histograms",
-    "plot_animations": "animations",
-    "plot_timeseries": "timeseries",
-}
 _SCORE_PLOT_BOOL_MAP = {
     "summary_plots": "metric_plots",
     "ratio_plots": "ratio",
@@ -68,21 +81,95 @@ _SCORE_PLOT_BOOL_MAP = {
 # ── Public API ───────────────────────────────────────────────────────────────
 
 
-def parse_data_plots(plotting_cfg: dict | None) -> list[str]:
-    """Convert per-stream plotting config to a validated ``data_plots`` list."""
+@dataclass
+class DataPlotSpec:
+    """Data plots requested for one stream, each with its output formats.
+
+    A format set contains ``"image"`` and/or ``"video"``.  Videos are animations over
+    forecast steps built from the per-step images, so those images are always written.
+    """
+
+    maps: dict[str, frozenset[str]] = field(default_factory=dict)  # map kind -> formats
+    histograms: dict[str, frozenset[str]] = field(default_factory=dict)  # hist kind -> formats
+    timeseries: bool = False
+
+    def __bool__(self) -> bool:
+        return bool(self.maps or self.histograms or self.timeseries)
+
+    def map_videos(self) -> set[str]:
+        """Map kinds to animate."""
+        return {kind for kind, formats in self.maps.items() if "video" in formats}
+
+    def histogram_videos(self) -> set[str]:
+        """Histogram kinds (``per_sample``/``across_samples``) to animate."""
+        return {kind for kind, formats in self.histograms.items() if "video" in formats}
+
+
+def parse_data_plots(plotting_cfg: Mapping | None) -> DataPlotSpec:
+    """Parse ``plotting.data_plots`` of one stream into a :class:`DataPlotSpec`.
+
+    Each list entry is either a plain name or a single-key mapping::
+
+        data_plots:
+          - maps:                          # map kind -> formats
+              predictions: [image, video]
+              target: [image]
+              bias: [video]
+          - histograms_per_sample          # images; or histograms_per_sample: [image, video]
+          - timeseries
+
+    ``maps`` alone means ``predictions: [image]``; ``histograms`` covers both
+    ``histograms_per_sample`` and ``histograms_across_samples``.
+    """
+    spec = DataPlotSpec()
     if not plotting_cfg:
-        return []
-    if "data_plots" in plotting_cfg:
-        result = list(plotting_cfg["data_plots"])
-        _validate(result, SUPPORTED_DATA_PLOTS, "data_plots")
-        return result
-    return _convert_bools(
-        plotting_cfg,
-        _DATA_PLOT_BOOL_MAP,
-        "data_plots",
-        SUPPORTED_DATA_PLOTS,
-        histograms_special=True,
-    )
+        return spec
+
+    legacy = [key for key in _LEGACY_DATA_PLOT_KEYS if key in plotting_cfg]
+    if legacy:
+        raise ValueError(
+            f"Plotting options {legacy} are no longer supported. "
+            f"Use 'data_plots' instead, e.g.:\n{_DATA_PLOTS_EXAMPLE}"
+        )
+
+    entries = plotting_cfg.get("data_plots")
+    if entries is None:
+        return spec
+    if not isinstance(entries, list | ListConfig):
+        raise ValueError(f"'data_plots' must be a list, e.g.:\n{_DATA_PLOTS_EXAMPLE}")
+
+    for entry in entries:
+        name, options = _split_entry(entry)
+        if name == "maps":
+            kinds = {"predictions": ["image"]} if options is None else options
+            if not isinstance(kinds, Mapping):
+                raise ValueError(
+                    "'maps' takes a mapping of map kind to formats "
+                    f"(kinds: {list(MAP_KINDS)}), e.g.:\n{_DATA_PLOTS_EXAMPLE}"
+                )
+            for kind, formats in kinds.items():
+                if kind not in MAP_KINDS:
+                    raise ValueError(
+                        f"Unsupported map kind '{kind}' in 'data_plots'. "
+                        f"Supported: {list(MAP_KINDS)}"
+                    )
+                spec.maps[kind] = spec.maps.get(kind, frozenset()) | _parse_formats(
+                    formats, f"maps.{kind}"
+                )
+        elif name in HISTOGRAM_ENTRIES:
+            formats = _parse_formats(["image"] if options is None else options, name)
+            for kind in HISTOGRAM_ENTRIES[name]:
+                spec.histograms[kind] = spec.histograms.get(kind, frozenset()) | formats
+        elif name == "timeseries":
+            if options is not None:
+                raise ValueError("'timeseries' in 'data_plots' takes no options.")
+            spec.timeseries = True
+        else:
+            raise ValueError(
+                f"Unsupported entry '{name}' in 'data_plots'. "
+                f"Supported: {list(SUPPORTED_DATA_PLOTS)}, e.g.:\n{_DATA_PLOTS_EXAMPLE}"
+            )
+    return spec
 
 
 def parse_score_plots(eval_cfg: dict | None) -> list[str]:
@@ -97,23 +184,22 @@ def parse_score_plots(eval_cfg: dict | None) -> list[str]:
 
 
 def parse_plot_config(cfg: dict) -> dict:
-    """Normalise full config in-place: resolve ``score_plots`` + per-stream ``data_plots``."""
+    """Resolve ``score_plots`` in place and validate every stream's ``data_plots``.
+
+    ``data_plots`` is validated up front so that config errors surface before any data is
+    loaded; it is parsed again where the plots are made.
+    """
     eval_cfg = cfg.get("evaluation") or {}
     _set_key(eval_cfg, "score_plots", parse_score_plots(eval_cfg))
 
     # The config is usually an OmegaConf DictConfig, which is not a ``dict``.
-    for stream_cfg in (cfg.get("default_streams") or {}).values():
-        if isinstance(stream_cfg, dict | DictConfig) and stream_cfg.get("plotting") is not None:
-            _set_key(stream_cfg["plotting"], "data_plots", parse_data_plots(stream_cfg["plotting"]))
-
+    stream_cfgs = list((cfg.get("default_streams") or {}).values())
     for run_cfg in (cfg.get("run_ids") or {}).values():
-        if not isinstance(run_cfg, dict | DictConfig):
-            continue
-        for stream_cfg in (run_cfg.get("streams") or {}).values():
-            if isinstance(stream_cfg, dict | DictConfig) and stream_cfg.get("plotting") is not None:
-                _set_key(
-                    stream_cfg["plotting"], "data_plots", parse_data_plots(stream_cfg["plotting"])
-                )
+        if isinstance(run_cfg, dict | DictConfig):
+            stream_cfgs.extend((run_cfg.get("streams") or {}).values())
+    for stream_cfg in stream_cfgs:
+        if isinstance(stream_cfg, dict | DictConfig) and stream_cfg.get("plotting") is not None:
+            parse_data_plots(stream_cfg["plotting"])
     return cfg
 
 
@@ -130,7 +216,35 @@ def get_plot_score_options(eval_cfg: dict) -> dict[str, bool]:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _convert_bools(cfg, bool_map, field_name, supported, *, histograms_special=False):
+def _split_entry(entry) -> tuple[str, object]:
+    """Return ``(name, options)`` of a ``data_plots`` entry; options is None for a plain name."""
+    if isinstance(entry, str):
+        return entry, None
+    if isinstance(entry, Mapping) and len(entry) == 1:
+        return next(iter(entry.items()))
+    raise ValueError(
+        f"Each 'data_plots' entry must be a name or a single-key mapping, got {entry!r}. "
+        f"Example:\n{_DATA_PLOTS_EXAMPLE}"
+    )
+
+
+def _parse_formats(formats, where: str) -> frozenset[str]:
+    """Validate a list of output formats (``image``/``video``)."""
+    if isinstance(formats, str) or not isinstance(formats, list | ListConfig) or not formats:
+        raise ValueError(
+            f"'{where}' in 'data_plots' needs a non-empty list of formats from "
+            f"{list(PLOT_FORMATS)}, got {formats!r}."
+        )
+    unknown = set(formats) - set(PLOT_FORMATS)
+    if unknown:
+        raise ValueError(
+            f"Unsupported format(s) {sorted(unknown)} for '{where}' in 'data_plots'. "
+            f"Supported: {list(PLOT_FORMATS)}"
+        )
+    return frozenset(formats)
+
+
+def _convert_bools(cfg, bool_map, field_name, supported):
     """Convert old-style boolean flags to a list, emitting a deprecation warning."""
     result, found = [], False
     for old_key, new_entry in bool_map.items():
@@ -138,14 +252,7 @@ def _convert_bools(cfg, bool_map, field_name, supported, *, histograms_special=F
         if value is None:
             continue
         found = True
-        if histograms_special and old_key == "plot_histograms":
-            if value is True:
-                result.append(new_entry)
-            elif value == "per-sample":
-                result.append("histograms_per_sample")
-            elif value == "across-samples":
-                result.append("histograms_across_samples")
-        elif value:
+        if value:
             result.append(new_entry)
     if found:
         warnings.warn(

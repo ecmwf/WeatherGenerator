@@ -49,7 +49,7 @@ from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
-from weathergen.evaluate.utils.config_compat import parse_data_plots
+from weathergen.evaluate.utils.config_compat import MAP_KINDS, parse_data_plots
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -576,11 +576,12 @@ def _dispatch_animations(
     select: dict,
     tag: str,
     max_workers: int | None = None,
+    prefixes: tuple[str, ...] = ("map", "histogram"),
 ) -> list[str]:
     """Build GIF animations in parallel for all (region, sample, variable) combinations.
 
-    Animations are built for both maps and histograms — whichever image files
-    exist on disk will be picked up automatically.
+    Animations are built from the frame types in *prefixes* (``"map"``, ``"histogram"``);
+    whichever image files exist on disk will be picked up automatically.
 
     Parameters
     ----------
@@ -588,6 +589,8 @@ def _dispatch_animations(
         Plotter instance (used only for config: regions, fps, image_format, run_id, stream).
     samples, fsteps, variables, select, tag
         Same arguments that ``Plotter.animation`` used to accept.
+    prefixes : tuple[str, ...]
+        Frame types to animate: ``"map"`` and/or ``"histogram"``.
 
     Returns
     -------
@@ -598,10 +601,10 @@ def _dispatch_animations(
 
     duration_ms = int(1000 / plotter.fps) if plotter.fps > 0 else 400
 
-    prefixes = [
-        ("map", plotter.get_map_output_dir(tag)),
-        ("histogram", plotter.get_hist_output_dir()),
-    ]
+    frame_dirs = {
+        "map": plotter.get_map_output_dir(tag),
+        "histogram": plotter.get_hist_output_dir(),
+    }
 
     tasks = [
         {
@@ -618,7 +621,8 @@ def _dispatch_animations(
             "duration_ms": duration_ms,
             "prefix": prefix,
         }
-        for prefix, output_dir in prefixes
+        for prefix, output_dir in frame_dirs.items()
+        if prefix in prefixes
         for region in plotter.regions
         for sample in samples
         for var in variables
@@ -888,11 +892,8 @@ def plot_data(
     run_id = reader.run_id
     stream_cfg = reader.get_stream(stream)
     plot_settings = stream_cfg.get("plotting", {})
-
-    plot_keys = ("plot_maps", "plot_histograms", "plot_animations", "plot_timeseries")
-    has_old_style = any(plot_settings.get(k, False) for k in plot_keys)
-    has_new_style = bool(plot_settings.get("data_plots"))
-    if not plot_settings or not (has_old_style or has_new_style):
+    spec = parse_data_plots(plot_settings)
+    if not spec:
         return
 
     plotter_cfg = {
@@ -916,17 +917,13 @@ def plot_data(
         _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
         return
 
-    # Resolve plotting flags from the data_plots list; legacy booleans are only used
-    # when no list is given (parse_data_plots converts them).
-    _dp = set(parse_data_plots(plot_settings))
-    plot_maps = "maps" in _dp
-    plot_bias = "bias" in _dp
-    plot_target = "target" in _dp
-    plot_timeseries = "timeseries" in _dp
-    plot_animations = "animations" in _dp
-    # ``histograms`` produces both histogram kinds; the specific entries produce one each.
-    hist_per_sample = bool(_dp & {"histograms", "histograms_per_sample"})
-    hist_across = bool(_dp & {"histograms", "histograms_across_samples"})
+    # Per-step images are produced for every requested plot (videos are built from them).
+    plot_maps = "predictions" in spec.maps
+    plot_target = "target" in spec.maps
+    plot_bias = "bias" in spec.maps
+    plot_timeseries = spec.timeseries
+    hist_per_sample = "per_sample" in spec.histograms
+    hist_across = "across_samples" in spec.histograms
     if hist_per_sample and hist_across:
         plot_histograms: bool | str = True
     elif hist_per_sample:
@@ -1109,7 +1106,9 @@ def plot_data(
             n_workers=num_plot_workers,
         )
 
-    if plot_animations:
+    map_videos = spec.map_videos()
+    hist_videos = spec.histogram_videos()
+    if map_videos or hist_videos:
         last_fstep = list(da_tars.keys())[-1]
         last_preds = da_preds[last_fstep]
         last_tars = da_tars[last_fstep]
@@ -1119,34 +1118,45 @@ def plot_data(
         plot_chs = _sel(list(np.atleast_1d(last_tars.channel.values)), plot_channel_set)
         plot_samples = _sel(list(np.unique(last_tars.sample.values)), plot_sample_set)
 
-        max_wk = reader.eval_cfg.get("max_workers", None)
-        anim_samples = plot_samples + (["all_samples"] if hist_across else [])
         anim_kw = dict(
             plotter=plotter,
-            samples=anim_samples,
             fsteps=da_tars.keys(),
             variables=plot_chs,
-            max_workers=max_wk,
+            max_workers=reader.eval_cfg.get("max_workers", None),
             select={"sample": plot_samples[-1], "stream": stream, "forecast_step": last_fstep},
         )
 
-        tags: list[str] = []
-        for ens in available_data.ensemble:
-            if ens in ("mean", "std"):
-                tags.append(f"preds_ens_{ens}")
-            else:
-                tags.append("preds" if not has_ens else f"preds_ens_{ens}")
-        if plot_target:
-            tags.append("targets")
-        if plot_bias:
+        # Frame tags per ensemble member, as written by _plot_single_sample.
+        def _ens_tags(prefix: str) -> list[str]:
+            tags = []
             for ens in available_data.ensemble:
                 if ens in ("mean", "std"):
-                    tags.append(f"bias_ens_{ens}")
+                    tags.append(f"{prefix}_ens_{ens}")
                 else:
-                    tags.append("bias" if not has_ens else f"bias_ens_{ens}")
+                    tags.append(prefix if not has_ens else f"{prefix}_ens_{ens}")
+            return tags
 
-        for tag in tags:
-            _dispatch_animations(**anim_kw, tag=tag)
+        map_tags = {
+            "predictions": _ens_tags("preds"),
+            "target": ["targets"],
+            "bias": _ens_tags("bias"),
+        }
+        for kind in MAP_KINDS:
+            if kind in map_videos:
+                for tag in map_tags[kind]:
+                    _dispatch_animations(
+                        **anim_kw, samples=plot_samples, tag=tag, prefixes=("map",)
+                    )
+
+        # Histogram frames are tagged like the predictions they compare.
+        hist_samples = (plot_samples if "per_sample" in hist_videos else []) + (
+            ["all_samples"] if "across_samples" in hist_videos else []
+        )
+        if hist_samples:
+            for tag in _ens_tags("preds"):
+                _dispatch_animations(
+                    **anim_kw, samples=hist_samples, tag=tag, prefixes=("histogram",)
+                )
 
 
 # ---------------------------------------------------------------------------

@@ -97,17 +97,18 @@ default_streams:
       forecast_step: [1,3, 2] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
       ensemble: [0,2,5] #supported: "all", "mean", "std", [0,1,2]
       # ── Data visualisations ──
-      # Supported values: maps, bias, target, histograms, animations, timeseries,
-      #                   histograms_per_sample, histograms_across_samples
-      # (maps = predictions, target/bias add their own maps; histograms = both kinds)
-      data_plots: [maps, histograms, animations]
-      # Legacy boolean flags (deprecated — use data_plots list above instead):
-      # plot_maps: true
-      # plot_bias: false
-      # plot_target: false
-      # plot_histograms: true
-      # plot_animations: true
-      # plot_timeseries: false
+      # Each entry is a name or a name with output formats ([image], [video] or both;
+      # a video animates the per-forecast-step images, which are kept).
+      #   maps:            {predictions|target|bias: [formats]}   ("maps" alone = predictions images)
+      #   histograms, histograms_per_sample, histograms_across_samples   (images, or : [formats])
+      #   timeseries
+      data_plots:
+        - maps:
+            predictions: [image, video]
+            # target: [image]
+            # bias: [image, video]
+        - histograms: [image, video]
+        # - timeseries
 
   CERRA:
     regions: ["europe"]
@@ -118,7 +119,10 @@ default_streams:
     plotting:
       sample: [2, 3, 0]
       forecast_step: [1,3, 4, 5]
-      data_plots: [maps, histograms, animations]
+      data_plots:
+        - maps:
+            predictions: [image, video]
+        - histograms: [image, video]
       
   IMERG_ANEMOI:
     channels: ["tp_imerg_0"]
@@ -130,7 +134,10 @@ default_streams:
       sample: [1, 3]
       forecast_step: [1, 2, 3] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
       ensemble: [14]
-      data_plots: [maps, histograms, animations]
+      data_plots:
+        - maps:
+            predictions: [image, video]
+        - histograms: [image, video]
 
 run_ids :
   ar40mckx:
@@ -165,7 +172,10 @@ run_ids :
           sample: [1, 3]
           forecast_step: [1,3, 2]
           ensemble: "mean" 
-          data_plots: [maps, histograms, animations]
+          data_plots:
+            - maps:
+                predictions: [image, video]
+            - histograms: [image, video]
 
   
 
