@@ -46,7 +46,23 @@ class TargetRequest:
 
 
 def _fill_blocks(targets: list[NDArray], blocks: list[tuple[int, int]], arr: NDArray) -> None:
-    """Copy the ``(n_grid, n_channels)`` date array *arr* into each ``(request, block)``."""
+    """
+    Copy one date's anemoi grid into every target block valid at that date.
+
+    Parameters
+    ----------
+    targets : list[NDArray]
+        Target arrays of shape ``(n_rows, n_channels)``, modified in place.
+    blocks : list[tuple[int, int]]
+        ``(request index, block index)`` pairs; block ``b`` of a target holds
+        rows ``b * n_grid`` to ``(b + 1) * n_grid``.
+    arr : NDArray
+        ``(n_grid, n_channels)`` values of the date.
+
+    Returns
+    -------
+    None
+    """
     for ri, b in blocks:
         targets[ri].reshape(-1, *arr.shape)[b] = arr
 
@@ -68,6 +84,28 @@ class AnemoiTargetSource:
         max_read_bytes: int = 2 * 1024**3,
         cache_bytes: int = 1024**3,
     ) -> None:
+        """
+        Set up a target source for one or more anemoi datasets.
+
+        Parameters
+        ----------
+        filenames : list[str]
+            Anemoi dataset paths; several files are combined by
+            ``anemoi.datasets.open_dataset``.
+        ensemble_member : int
+            Member to read when the dataset has an ensemble dimension.
+        n_threads : int | None
+            Maximum number of threads reading dates in parallel (default:
+            ``min(16, cpu_count)``).
+        max_read_bytes : int
+            Upper bound on data decompressed by in-flight reads.
+        cache_bytes : int
+            Size of the LRU of already-read dates, kept across calls.
+
+        Returns
+        -------
+        None
+        """
         self.filenames = [str(f) for f in filenames]
         self.ensemble_member = ensemble_member
         self.n_threads = n_threads or min(16, os.cpu_count() or 4)
@@ -82,7 +120,24 @@ class AnemoiTargetSource:
     def from_inference_config(
         cls, inference_cfg: dict, stream: str, overrides: dict | None = None
     ) -> AnemoiTargetSource | None:
-        """Build a source for *stream*, or return ``None`` if it is not an anemoi stream."""
+        """
+        Build a target source for a stream from the inference config.
+
+        Parameters
+        ----------
+        inference_cfg : dict
+            Inference run config with ``streams`` and ``data_path_anemoi``.
+        stream : str
+            Stream name.
+        overrides : dict | None
+            Keyword arguments passed on to the constructor (e.g. ``n_threads``).
+
+        Returns
+        -------
+        AnemoiTargetSource | None
+            The source, or ``None`` if the stream is not an anemoi stream or
+            has no filenames.
+        """
         streams = inference_cfg.get("streams", {})
         if isinstance(streams, list | ListConfig):
             info = next((s for s in streams if s.get("name") == stream), {})
@@ -97,11 +152,36 @@ class AnemoiTargetSource:
         return cls(filenames, **dict(overrides or {}))
 
     def _open(self):
+        """
+        Open the anemoi dataset.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        anemoi.datasets.data.dataset.Dataset
+            The dataset over ``self.filenames``.
+        """
         return anemoi.datasets.open_dataset(
             self.filenames[0] if len(self.filenames) == 1 else self.filenames
         )
 
     def _dataset(self):
+        """
+        Return the anemoi dataset, opening it and caching its metadata on first use.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        anemoi.datasets.data.dataset.Dataset
+            The dataset; its variables and dates are stored in ``self._variables``
+            and ``self._dates``.
+        """
         if self._ds is None:
             self._ds = ds = self._open()
             self._variables = list(ds.variables)
@@ -109,6 +189,24 @@ class AnemoiTargetSource:
         return self._ds
 
     def _date_indices(self, times: NDArray) -> NDArray:
+        """
+        Find the dataset date index of each valid time.
+
+        Parameters
+        ----------
+        times : NDArray
+            Valid times (datetime64).
+
+        Returns
+        -------
+        NDArray
+            Index into the dataset's date axis for each time.
+
+        Raises
+        ------
+        ValueError
+            If a valid time is not a date of the dataset.
+        """
         times = np.asarray(times).astype("datetime64[s]")
         idx = np.searchsorted(self._dates, times)
         missing = self._dates[np.minimum(idx, len(self._dates) - 1)] != times
@@ -120,7 +218,32 @@ class AnemoiTargetSource:
         return idx
 
     def fill_targets(self, requests: list[TargetRequest], channels: list[str]) -> list[NDArray]:
-        """Return one ``(n_rows, len(channels))`` float32 array per request."""
+        """
+        Read the targets of a batch of requests from the anemoi dataset.
+
+        Each date needed by the batch is read once, consecutive dates in one
+        slice and slices in parallel; dates read in earlier calls come from the
+        cache.  Channels missing from the dataset are left as NaN.
+
+        Parameters
+        ----------
+        requests : list[TargetRequest]
+            Targets to fill; their rows are the anemoi grid in order, repeated
+            once per valid time.
+        channels : list[str]
+            Channel names, in the column order of the targets.
+
+        Returns
+        -------
+        list[NDArray]
+            One ``(n_rows, len(channels))`` float32 array per request.
+
+        Raises
+        ------
+        ValueError
+            If a request's rows do not match the anemoi grid, valid times change
+            within a grid block, or a valid time is not in the dataset.
+        """
         ds = self._dataset()
         present = [ch for ch in channels if ch in self._variables]
         for ch in sorted(set(channels) - set(present) - self._warned):
@@ -198,7 +321,28 @@ class AnemoiTargetSource:
     def _read_run(
         self, ds, cols: list[int], var_idx: list[int], n_channels: int, run: NDArray
     ) -> dict[int, NDArray]:
-        """Read a run of consecutive dates as ``{date: (n_grid, n_channels)}`` arrays."""
+        """
+        Read a run of consecutive dates in one slice.
+
+        Parameters
+        ----------
+        ds : anemoi.datasets.data.dataset.Dataset
+            The anemoi dataset.
+        cols : list[int]
+            Target columns of the channels present in the dataset.
+        var_idx : list[int]
+            Dataset variable index of each of those channels.
+        n_channels : int
+            Number of requested channels (target columns).
+        run : NDArray
+            Consecutive date indices to read.
+
+        Returns
+        -------
+        dict[int, NDArray]
+            ``{date index: (n_grid, n_channels)}`` float32 arrays, NaN for
+            channels missing from the dataset.
+        """
         lo = int(run[0])
         block = np.asarray(ds[lo : int(run[-1]) + 1])  # (n_dates, n_vars, n_ens, n_grid)
         member = min(self.ensemble_member, block.shape[2] - 1)
@@ -210,6 +354,21 @@ class AnemoiTargetSource:
         return out
 
     def _cache_put(self, key: tuple, arr: NDArray) -> None:
+        """
+        Add a date array to the LRU cache, evicting the oldest entries if full.
+
+        Parameters
+        ----------
+        key : tuple
+            ``(channels, date index)`` cache key.
+        arr : NDArray
+            ``(n_grid, n_channels)`` values of the date; not cached if larger
+            than the whole cache.
+
+        Returns
+        -------
+        None
+        """
         if arr.nbytes > self.cache_bytes:
             return
         self._cache[key] = arr
