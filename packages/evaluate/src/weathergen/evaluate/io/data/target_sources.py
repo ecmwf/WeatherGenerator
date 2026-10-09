@@ -20,6 +20,7 @@ import os
 from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import anemoi.datasets
@@ -42,6 +43,12 @@ class TargetRequest:
     target_idx: int
     n_rows: int
     times: NDArray
+
+
+def _fill_blocks(targets: list[NDArray], blocks: list[tuple[int, int]], arr: NDArray) -> None:
+    """Copy the ``(n_grid, n_channels)`` date array *arr* into each ``(request, block)``."""
+    for ri, b in blocks:
+        targets[ri].reshape(-1, *arr.shape)[b] = arr
 
 
 class AnemoiTargetSource:
@@ -154,32 +161,15 @@ class AnemoiTargetSource:
             for b, d in enumerate(self._date_indices(block_times)):
                 by_date[int(d)].append((ri, b))
 
-        def fill(d: int, arr: NDArray) -> None:
-            # Blocks of different (request, date) pairs never overlap: no locking needed.
-            for ri, b in by_date[d]:
-                targets[ri].reshape(-1, n_grid, len(channels))[b] = arr
-
         to_read = []
         for d in sorted(by_date):
             if (key := (tuple(channels), d)) in self._cache:
                 self._cache.move_to_end(key)
-                fill(d, self._cache[key])
+                _fill_blocks(targets, by_date[d], self._cache[key])
             else:
                 to_read.append(d)
         if not to_read:
             return targets
-
-        def read_run(run: NDArray) -> dict[int, NDArray]:
-            lo = int(run[0])
-            block = np.asarray(ds[lo : int(run[-1]) + 1])  # (n_dates, n_vars, n_ens, n_grid)
-            member = min(self.ensemble_member, block.shape[2] - 1)
-            out = {}
-            for i in range(len(block)):
-                arr = np.full((block.shape[3], len(channels)), np.nan, dtype=np.float32)
-                arr[:, cols] = block[i, var_idx, member].T
-                fill(lo + i, arr)
-                out[lo + i] = arr
-            return out
 
         # Split into runs of consecutive dates, keeping <= max_read_bytes in flight.
         bytes_per_date = len(self._variables) * ds.shape[2] * n_grid * 4
@@ -192,9 +182,11 @@ class AnemoiTargetSource:
             for run in np.split(to_read, np.flatnonzero(np.diff(to_read) != 1) + 1)
             for i in range(0, len(run), run_len)
         ]
+        read_run = partial(self._read_run, ds, cols, var_idx, len(channels))
         with ThreadPoolExecutor(max_workers=min(n_threads, len(runs))) as pool:
             for out in pool.map(read_run, runs):
                 for d, arr in out.items():
+                    _fill_blocks(targets, by_date[d], arr)
                     self._cache_put((tuple(channels), d), arr)
 
         _logger.info(
@@ -202,6 +194,20 @@ class AnemoiTargetSource:
             f"({len(to_read)} read in {len(runs)} slice(s))."
         )
         return targets
+
+    def _read_run(
+        self, ds, cols: list[int], var_idx: list[int], n_channels: int, run: NDArray
+    ) -> dict[int, NDArray]:
+        """Read a run of consecutive dates as ``{date: (n_grid, n_channels)}`` arrays."""
+        lo = int(run[0])
+        block = np.asarray(ds[lo : int(run[-1]) + 1])  # (n_dates, n_vars, n_ens, n_grid)
+        member = min(self.ensemble_member, block.shape[2] - 1)
+        out = {}
+        for i in range(len(block)):
+            arr = np.full((block.shape[3], n_channels), np.nan, dtype=np.float32)
+            arr[:, cols] = block[i, var_idx, member].T
+            out[lo + i] = arr
+        return out
 
     def _cache_put(self, key: tuple, arr: NDArray) -> None:
         if arr.nbytes > self.cache_bytes:
