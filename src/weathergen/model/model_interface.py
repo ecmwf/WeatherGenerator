@@ -226,21 +226,46 @@ def init_model_and_shard(
     if is_root():
         log_trainable_summary(model)
 
-    # Optionally overlay the physical decoder from a separate checkpoint. This runs after the
-    # primary load so it takes precedence for decoder weights while keeping the encoder /
-    # forecast engine from the primary checkpoint (e.g. inference with a latent-diffusion run
-    # that has no trained decoder, reusing a pretrained decoder from another run).
+    # Optionally overlay the physical decoder from a separate checkpoint.
     decoder_run_id = cf.get("load_decoder_chkpt", {}).get("run_id", None)
     if decoder_run_id:
-        decoder_mini_epoch = cf.load_decoder_chkpt.get("mini_epoch", -1)
-        if is_root():
-            logger.info(
-                f"Loading decoder weights from id={decoder_run_id} "
-                f"at mini_epoch {decoder_mini_epoch}."
+        # if run is a continuation, decoder should already be present from primary load
+        if run_id_contd is not None:
+            if is_root():
+                logger.info(
+                    "Run is a continuation, decoder not loaded separately; it is already "
+                    f"present from the primary model ({run_id_contd})."
+                )
+        else:
+            decoder_mini_epoch = cf.load_decoder_chkpt.get("mini_epoch", -1)
+            if is_root():
+                logger.info(
+                    f"Loading decoder weights from id={decoder_run_id} "
+                    f"at mini_epoch {decoder_mini_epoch}."
+                )
+            model = load_decoder_from_checkpoint(
+                cf, model, device, decoder_run_id, with_ddp, with_fsdp, decoder_mini_epoch
             )
-        model = load_decoder_from_checkpoint(
-            cf, model, device, decoder_run_id, with_ddp, with_fsdp, decoder_mini_epoch
-        )
+
+    # Optionally overlay the encoder from a separate checkpoint -- as above.
+    encoder_run_id = cf.get("load_encoder_chkpt", {}).get("run_id", None)
+    if encoder_run_id:
+        if run_id_contd is not None:
+            if is_root():
+                logger.info(
+                    "Run is a continuation, encoder not loaded separately; it is already "
+                    f"present from the primary model ({run_id_contd})."
+                )
+        else:
+            encoder_mini_epoch = cf.load_encoder_chkpt.get("mini_epoch", -1)
+            if is_root():
+                logger.info(
+                    f"Loading encoder weights from id={encoder_run_id} "
+                    f"at mini_epoch {encoder_mini_epoch}."
+                )
+            model = load_encoder_from_checkpoint(
+                cf, model, device, encoder_run_id, with_ddp, with_fsdp, encoder_mini_epoch
+            )
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -248,6 +273,34 @@ def init_model_and_shard(
     model_params = model_params.to(f"cuda:{cf.local_rank}")
 
     return model, model_params
+
+
+def _strip_module_prefix(key: str) -> str:
+    """Drop a single leading ``module.`` from a state_dict key, if present.
+
+    Deliberately not ``key.replace("module.", "")``: that strips the substring anywhere in the
+    path, so a genuine submodule named ``module`` would be corrupted.
+    """
+    return key[len("module.") :] if key.startswith("module.") else key
+
+
+def _align_module_prefix(params: dict, model_sd) -> dict:
+    """Match a checkpoint's ``module.`` key convention to the model's.
+
+    A DDP-wrapped save carries a ``module.`` prefix that a bare model's state_dict lacks (and
+    vice versa). Both load paths resolve parameters by exact name, so a mismatch means every
+    lookup misses -- silently, in the sharded path, which skips non-matching names one by one
+    and can end up loading nothing at all.
+    """
+    if not params:
+        return params
+    model_has_prefix = next(iter(model_sd)).split(".")[0] == "module"
+    params_has_prefix = next(iter(params)).split(".")[0] == "module"
+    if model_has_prefix and not params_has_prefix:
+        return {"module." + k: v for k, v in params.items()}
+    if not model_has_prefix and params_has_prefix:
+        return {_strip_module_prefix(k): v for k, v in params.items()}
+    return params
 
 
 def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, mini_epoch: int):
@@ -269,22 +322,9 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
 
     is_model_sharded = with_ddp and with_fsdp
     if is_model_sharded:
-        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
-        params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
-        if model_has_prefix_module and not params_has_prefix_module:
-            # add "module." prefix
-            params_temp = {}
-            for k in params.keys():
-                params_temp["module." + k] = params[k]
-            params = params_temp
-        elif not model_has_prefix_module and params_has_prefix_module:
-            # remove "module." prefix
-            params_temp = {}
-            for k in params.keys():
-                params_temp[k.replace("module.", "")] = params[k]
-            params = params_temp
-
         meta_sharded_sd = model.state_dict()
+        params = _align_module_prefix(params, meta_sharded_sd)
+
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
@@ -326,20 +366,7 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
 
     else:
         # fix mismatch between state_dict keys that can occur between interactive/non-interactive
-        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
-        params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
-        if model_has_prefix_module and not params_has_prefix_module:
-            # add "module." prefix
-            params_temp = {}
-            for k in params.keys():
-                params_temp["module." + k] = params[k]
-            params = params_temp
-        elif not model_has_prefix_module and params_has_prefix_module:
-            # remove "module." prefix
-            params_temp = {}
-            for k in params.keys():
-                params_temp[k.replace("module.", "")] = params[k]
-            params = params_temp
+        params = _align_module_prefix(params, model.state_dict())
         # load checkpoint
         mkeys, ukeys = model.load_state_dict(params, strict=False)
         model = model.to(device)
@@ -358,6 +385,9 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
 # top-level module prefixes that make up the physical decoder
 _DECODER_PREFIXES = ("embed_target_coords", "target_token_engines", "pred_heads")
 
+# top-level module prefix that makes up the encoder (stream embedders + ae_* engines + queries)
+_ENCODER_PREFIXES = ("encoder",)
+
 
 def load_decoder_from_checkpoint(
     cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, mini_epoch=-1
@@ -373,6 +403,68 @@ def load_decoder_from_checkpoint(
         run_id : model_id of the run providing the decoder weights
         mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
     """
+    return _load_part_from_checkpoint(
+        cf,
+        model,
+        device,
+        run_id,
+        with_ddp,
+        with_fsdp,
+        mini_epoch,
+        prefixes=_DECODER_PREFIXES,
+        part="decoder",
+        cfg_key="load_decoder_chkpt",
+    )
+
+
+def load_encoder_from_checkpoint(
+    cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, mini_epoch=-1
+):
+    """Overlay only the encoder weights from a separate checkpoint.
+
+    The mirror of :func:`load_decoder_from_checkpoint`: filters the checkpoint to ``encoder.*``
+    (stream embedders, ae_local / ae_local_global / ae_global / ae_aggregation engines and the
+    learned queries) and loads them with ``strict=False``, leaving the forecast engine and
+    decoder from the primary load untouched. Use it to pair one run's forecast engine with a
+    *different* run's encoder.
+
+    Shapes must already agree -- this overlays weights, it does not reshape anything. Encoders
+    from different backbones are compatible only when their architecture and stream set produce
+    identical tensor shapes; check before relying on it, since a partial match loads what it can
+    and reports the rest rather than failing.
+
+    Args:
+        run_id : model_id of the run providing the encoder weights
+        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
+    """
+    return _load_part_from_checkpoint(
+        cf,
+        model,
+        device,
+        run_id,
+        with_ddp,
+        with_fsdp,
+        mini_epoch,
+        prefixes=_ENCODER_PREFIXES,
+        part="encoder",
+        cfg_key="load_encoder_chkpt",
+    )
+
+
+def _load_part_from_checkpoint(
+    cf,
+    model,
+    device,
+    run_id: str,
+    with_ddp: bool,
+    with_fsdp: bool,
+    mini_epoch,
+    *,
+    prefixes: tuple[str, ...],
+    part: str,
+    cfg_key: str,
+):
+    """Overlay one named part of a model (``prefixes``) from another run's checkpoint."""
 
     path_run = get_path_model(run_id=run_id)
     mini_epoch_id = (
@@ -384,31 +476,33 @@ def load_decoder_from_checkpoint(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
 
-    def _strip(key: str) -> str:
-        return key[len("module.") :] if key.startswith("module.") else key
+    part_params = {k: v for k, v in params.items() if _strip_module_prefix(k).startswith(prefixes)}
 
-    decoder_params = {k: v for k, v in params.items() if _strip(k).startswith(_DECODER_PREFIXES)}
-
-    if not decoder_params:
-        logger.warning(
-            f"No decoder weights (matching {_DECODER_PREFIXES}) found in checkpoint {filename}."
+    if not part_params:
+        msg = (
+            f"{cfg_key}: no {part} weights (matching {prefixes}) found in "
+            f"checkpoint {filename} (run_id={run_id}). Asking for a {part} overlay from a "
+            f"checkpoint that has no {part} is always a misconfiguration."
         )
-        return model
+        raise RuntimeError(msg)
+
+    # Align the "module." convention *before* either load path.
+    model_sd = model.state_dict()
+    num_matched = len(part_params)
+    part_params = _align_module_prefix(part_params, model_sd)
 
     is_model_sharded = with_ddp and with_fsdp
     if is_model_sharded:
-        meta_sharded_sd = model.state_dict()
+        meta_sharded_sd = model_sd
         maybe_sharded_sd = {}
-        for param_name, full_tensor in decoder_params.items():
+        skipped = []
+        for param_name, full_tensor in part_params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
             if (
                 sharded_meta_param is None
                 or type(sharded_meta_param) is not torch.distributed.tensor.DTensor
             ):
-                logger.warning(
-                    f"Decoder parameter {param_name} from checkpoint not found in model "
-                    "or not sharded; skipping."
-                )
+                skipped.append(param_name)
                 continue
             sharded_tensor = distribute_tensor(
                 full_tensor,
@@ -416,27 +510,36 @@ def load_decoder_from_checkpoint(
                 sharded_meta_param.placements,
             )
             maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+        if skipped and is_root():
+            # one summary line, not one per parameter per rank -- the old per-param warning
+            # produced thousands of lines and buried the "Loaded 0" that mattered.
+            logger.warning(
+                f"{cfg_key}: skipped {len(skipped)}/{num_matched} {part} parameters "
+                f"(not found in model or not sharded), e.g. {skipped[:3]}."
+            )
         _, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
         loaded = maybe_sharded_sd
     else:
-        # align "module." prefix with the model's state dict key convention
-        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
-        params_has_prefix_module = next(iter(decoder_params)).split(".")[0] == "module"
-        if model_has_prefix_module and not params_has_prefix_module:
-            decoder_params = {"module." + k: v for k, v in decoder_params.items()}
-        elif not model_has_prefix_module and params_has_prefix_module:
-            decoder_params = {_strip(k): v for k, v in decoder_params.items()}
-        _, ukeys = model.load_state_dict(decoder_params, strict=False)
+        _, ukeys = model.load_state_dict(part_params, strict=False)
         model = model.to(device)
-        loaded = decoder_params
+        loaded = part_params
+
+    if not loaded:
+        msg = (
+            f"{cfg_key} matched {num_matched} {part} tensors in {filename} "
+            f"(run_id={run_id}) but loaded none into the model -- this would silently train a "
+            f"randomly initialised {part}. Checkpoint key: {next(iter(part_params))!r}; "
+            f"model key: {next(iter(model_sd))!r}."
+        )
+        raise RuntimeError(msg)
 
     logger.info(
-        f"Loaded {len(loaded)} decoder tensors from checkpoint {filename} (run_id={run_id})."
+        f"Loaded {len(loaded)}/{num_matched} {part} tensors from checkpoint {filename} "
+        f"(run_id={run_id})."
     )
-    # ukeys = decoder keys that are absent in the model; missing keys are intentionally not
-    # reported here since the primary checkpoint provides all non-decoder weights.
+    # ukeys = keys absent in the model; missing keys are intentionally not reported here
     if len(ukeys) > 0:
-        logger.warning(f"Decoder keys from checkpoint not present in model: {ukeys}")
+        logger.warning(f"{part.capitalize()} keys from checkpoint not present in model: {ukeys}")
 
     return model
 

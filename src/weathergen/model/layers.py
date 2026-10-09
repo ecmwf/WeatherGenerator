@@ -101,15 +101,10 @@ class MLP(torch.nn.Module):
                 else norm(dim_in, eps=norm_eps)
             )
             self.noise_conditioning = LinearNormConditioning(dim_in)
-            self.noise_conditioning = LinearNormConditioning(dim_in)
         elif dim_aux is not None:
-            self.lnorm = AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps)
+            self.layers.append(AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps))
         else:
-            self.lnorm = norm(dim_in, eps=norm_eps)
-
-        # TODO: The below should be consolidated – implementing in layer list for backward compatibility
-        if not is_dit:
-            self.layers.append(self.lnorm)
+            self.layers.append(norm(dim_in, eps=norm_eps))
 
         if self.mlp_type == "swiglu":
             self.layers.append(torch.nn.Linear(dim_in, 2 * dim_hidden))
