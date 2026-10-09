@@ -96,7 +96,10 @@ class CfParser:
             "m": {"kg m**-2": 0.001},  # essentially converting m to mm as it is precip (water)
             "W/m^2": {"J m**-2": 1 / (3600 * ds["forecast_step"])},
         }
-        if ureg(wg_unit) != ureg(std_unit):
+
+        if ureg(wg_unit if isinstance(wg_unit, str) else str(wg_unit)) != ureg(
+            std_unit if isinstance(std_unit, str) else str(std_unit)
+        ):
             try:
                 _logger.debug(f"Converting from {wg_unit} to {std_unit} for CF compliance.")
                 da.values = Q_(da.values, ureg(wg_unit)).to(ureg(std_unit)).magnitude
