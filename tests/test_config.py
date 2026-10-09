@@ -159,7 +159,7 @@ def config_fresh(private_config_file):
 def base_config():
     return OmegaConf.create(DUMMY_BASE_CONF)
 
-@pytest.fixure
+@pytest.fixture
 def base_file(base_config):
     with tempfile.NamedTemporaryFile("w+") as temp:
         temp.write(OmegaConf.to_yaml(base_config))
