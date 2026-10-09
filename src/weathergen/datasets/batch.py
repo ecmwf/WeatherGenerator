@@ -25,6 +25,10 @@ class SampleMetaData:
 
     global_params: dict | None = None
 
+    # Per-step scalar conditioning values, shape (num_output_steps, scalar_dim).
+    # Populated by MultiStreamDataSampler for streams with timestep_conditioning: scalar.
+    conditioning: np.typing.NDArray | None = None
+
 
 class Sample:
     # keys: stream name, values: SampleMetaData
@@ -67,6 +71,10 @@ class Sample:
                 if self.meta_info[key].mask is not None
                 else None
             )
+            if self.meta_info[key].conditioning is not None:
+                self.meta_info[key].conditioning = self.meta_info[key].conditioning.to(
+                    device, non_blocking=True
+                )
 
         for key, val in self.streams_data.items():
             if val is not None:
@@ -301,6 +309,7 @@ class ModelBatch:
     def __init__(
         self,
         stream_names: list[str],
+        conditioning_stream_names: list[str],
         num_source_samples: int,
         num_target_samples: int,
         output_offset,
@@ -320,6 +329,13 @@ class ModelBatch:
             stream_names, num_target_samples, output_steps, self.output_idxs
         )
 
+        self.conditioning_samples = BatchSamples(
+            stream_names=conditioning_stream_names,
+            num_samples=1,
+            output_steps=output_steps,
+            output_idxs=self.output_idxs,
+        )
+
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
@@ -332,6 +348,9 @@ class ModelBatch:
         # pin target samples
         self.target_samples.pin_memory()
 
+        # pin conditioning samples
+        self.conditioning_samples.pin_memory()
+
         return self
 
     def to_device(self, device):  # -> ModelBatch
@@ -341,6 +360,7 @@ class ModelBatch:
 
         self.source_samples.to_device(device)
         self.target_samples.to_device(device)
+        self.conditioning_samples.to_device(device)
 
         self.device = device
 
@@ -390,6 +410,40 @@ class ModelBatch:
                 "invalid value for source_sample_idx"
             )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
+
+    def add_scalar_conditioning_stream(self, stream_name, conditioning_values):
+        """
+        Add scalar conditioning values for all samples in the batch for a specific stream.
+        """
+        for sample in self.source_samples.samples:
+            if stream_name not in sample.meta_info:
+                sample.add_meta_info(stream_name, SampleMetaData(params={}))
+            sample.meta_info[stream_name].conditioning = conditioning_values
+
+    def add_field_conditioning_stream(self, stream_name, stream_data: StreamData):
+        """
+        Add field conditioning values for all samples in the batch for a specific stream.
+        The StreamData contains one source step per forecast step.
+        """
+        for sample in self.conditioning_samples.samples:
+            sample.streams_data[stream_name] = stream_data
+
+    def get_scalar_conditioning_values(
+        self, stream_name: str, step: int
+    ) -> np.typing.NDArray | None:
+        """
+        Get scalar conditioning values for all samples at a specific forecast step.
+
+        Returns np.ndarray of shape (num_samples, scalar_dim), or None if not available
+        for any sample.
+        """
+        values = []
+        for sample in self.source_samples.samples:
+            meta = sample.meta_info.get(stream_name)
+            if meta is None or meta.conditioning is None or step >= len(meta.conditioning):
+                return None
+            values.append(meta.conditioning[step])
+        return torch.stack(values, dim=0) if values else None
 
     def is_empty(self):
         """
