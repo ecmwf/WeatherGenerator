@@ -136,7 +136,8 @@ class AnemoiTargetSource(TargetSource):
         cols = [channels.index(ch) for ch in present]
         var_idx = [self._variables.index(ch) for ch in present]
 
-        # Group the rows of every request by anemoi date: date -> [(request, rows or None)].
+        # Every n_grid-row block of a target is the anemoi grid at one valid time:
+        # group the blocks by anemoi date, date -> [(request, block)].
         n_grid = ds.shape[-1]
         by_date: dict[int, list] = defaultdict(list)
         for ri, req in enumerate(requests):
@@ -145,25 +146,27 @@ class AnemoiTargetSource(TargetSource):
                     f"{req.n_rows} prediction rows do not match the {n_grid}-point grid "
                     f"of anemoi dataset {self.filenames}."
                 )
-            times = np.asarray(req.times)
             if req.n_rows == 0:
                 continue
+            times = np.asarray(req.times)
             if times.ndim == 0:
-                by_date[int(self._date_indices(times[None])[0])].append((ri, None))
-                continue
-            date_idx = self._date_indices(times)
-            order = np.argsort(date_idx, kind="stable")
-            uniq, starts = np.unique(date_idx[order], return_index=True)
-            for d, rows in zip(uniq, np.split(order, starts[1:]), strict=True):
-                by_date[int(d)].append((ri, rows))
+                block_times = np.broadcast_to(times, req.n_rows // n_grid)
+            else:
+                blocks = times.reshape(-1, n_grid)
+                if np.any(blocks != blocks[:, :1]):
+                    raise ValueError(
+                        f"Valid times change within a {n_grid}-row block: predictions are not "
+                        f"stored grid by grid per valid time (e.g. interleaved by time), so "
+                        f"they cannot be matched to anemoi dataset {self.filenames}."
+                    )
+                block_times = blocks[:, 0]
+            for b, d in enumerate(self._date_indices(block_times)):
+                by_date[int(d)].append((ri, b))
 
         def fill(d: int, arr: NDArray) -> None:
-            # Rows of different (request, date) pairs never overlap: no locking needed.
-            for ri, rows in by_date[d]:
-                if rows is None:
-                    targets[ri].reshape(-1, n_grid, len(channels))[:] = arr
-                else:
-                    targets[ri][rows] = arr[rows % n_grid]
+            # Blocks of different (request, date) pairs never overlap: no locking needed.
+            for ri, b in by_date[d]:
+                targets[ri].reshape(-1, n_grid, len(channels))[b] = arr
 
         to_read = []
         for d in sorted(by_date):

@@ -111,6 +111,10 @@ def test_missing_date_or_grid_mismatch_raises():
         )
     with pytest.raises(ValueError, match="do not match"):
         source.fill_targets([TargetRequest(0, 0, N_GRID - 1, DATES[0])], ["2t"])
+    # Grid interleaved by time (point-major): valid times change within a grid block.
+    interleaved = DATES[np.tile([2, 9], N_GRID)]
+    with pytest.raises(ValueError, match="change within"):
+        source.fill_targets([TargetRequest(0, 0, 2 * N_GRID, interleaved)], ["2t"])
 
 
 def test_from_inference_config_selects_anemoi_streams():
