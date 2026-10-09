@@ -123,7 +123,7 @@ def _read_sample(
         its own time and splitting would create one array per observation.
     read_target : bool
         If False, skip the zarr ``target`` group; targets are ``None`` and
-        filled later by a :class:`TargetSource`.
+        filled later by an :class:`AnemoiTargetSource`.
 
     Returns
     -------

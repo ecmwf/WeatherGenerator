@@ -44,7 +44,7 @@ from weathergen.evaluate.io.data.io_workers import (
     _read_coords_and_meta,
     _read_sample,
 )
-from weathergen.evaluate.io.data.target_sources import TargetRequest, TargetSource
+from weathergen.evaluate.io.data.target_sources import AnemoiTargetSource, TargetRequest
 from weathergen.evaluate.io.io_reader import ReaderOutput
 from weathergen.evaluate.utils.derived_channels import scale_z_channels
 
@@ -86,7 +86,7 @@ class IOState:
         None  # fallback offset in hours for init_time when source_interval is missing
     )
     sample_labels: list[int] | None = None  # global sample indices for coordinate labeling
-    target_source: TargetSource | None = None  # if set, targets come from here, not zarr
+    target_source: AnemoiTargetSource | None = None  # if set, targets come from here, not zarr
 
     def get_sample_labels(self) -> list[int]:
         """Return global sample labels (falls back to local samples if not set)."""
@@ -263,7 +263,7 @@ def build_io_state(
     ens_select: EnsembleSelect,
     rank: str = "",
     sample_labels: list[int] | None = None,
-    target_source: TargetSource | None = None,
+    target_source: AnemoiTargetSource | None = None,
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)

@@ -9,7 +9,7 @@
 
 """External target sources for the zarr I/O path.
 
-With a :class:`TargetSource` the I/O workers skip the zarr ``target`` group and
+With an :class:`AnemoiTargetSource` the I/O workers skip the zarr ``target`` group and
 the source fills the targets afterwards in the parent process.
 """
 
@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import os
-from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -45,15 +44,7 @@ class TargetRequest:
     times: NDArray
 
 
-class TargetSource(ABC):
-    """Fills targets that the I/O workers did not read from the zarr store."""
-
-    @abstractmethod
-    def fill_targets(self, requests: list[TargetRequest], channels: list[str]) -> list[NDArray]:
-        """Return one ``(n_rows, len(channels))`` float32 array per request."""
-
-
-class AnemoiTargetSource(TargetSource):
+class AnemoiTargetSource:
     """Reads targets from an anemoi dataset.
 
     Each date needed by a call is read once, consecutive dates in one slice and
@@ -122,6 +113,7 @@ class AnemoiTargetSource(TargetSource):
         return idx
 
     def fill_targets(self, requests: list[TargetRequest], channels: list[str]) -> list[NDArray]:
+        """Return one ``(n_rows, len(channels))`` float32 array per request."""
         ds = self._dataset()
         present = [ch for ch in channels if ch in self._variables]
         for ch in sorted(set(channels) - set(present) - self._warned):
