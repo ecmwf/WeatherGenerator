@@ -40,6 +40,26 @@ _logger = logging.getLogger(__name__)
 Config = DictConfig
 
 
+def get_healpix_level(config: Config) -> int:
+    """Find the healpix level from stream config or the main config."""
+    streams = config.streams.values()
+    streams_without_level = [stream for stream in streams if "healpix_level" not in stream]
+
+    if "healpix_level" in config and streams_without_level:
+        _logger.warning(
+            "Setting healpix level in the main config is going to be deprecated. "
+            "Please set healpix_level in each stream instead."
+        )
+        for stream in streams_without_level:
+            stream["healpix_level"] = config.healpix_level
+
+    # All streams must have the same level until multi-encoders are implemented.
+    levels = {stream.healpix_level for stream in streams}
+    assert len(levels) == 1, "All streams must use the same healpix_level."
+
+    return levels.pop()
+
+
 def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
     """
     Parse a value into a numpy timedelta64[ms].

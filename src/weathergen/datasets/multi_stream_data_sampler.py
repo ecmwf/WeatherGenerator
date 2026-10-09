@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, get_healpix_level
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
@@ -29,9 +29,7 @@ from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.utils import (
-    get_tokens_lens,
-)
+from weathergen.datasets.utils import get_tokens_lens, hp_level_to_num_cells
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
@@ -104,11 +102,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        # initialise healpic
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+        # Batch assembly still requires a common HEALPix level.
+        get_healpix_level(cf)
+        self.masker = Masker(stage, cf.streams, self.mode_cfg)
+        self.tokenizer = TokenizerMasking(self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -350,13 +347,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         self.mini_epoch += 1
 
     def get_sources_size(self):
+        stream_time_size = self.tokenizer.get_size_time_embedding()
         return [
             0
             if ds.readers[0].get_source_num_channels() == 0
             else ds.readers[0].get_source_num_channels()
             + ds.readers[0].get_geoinfo_size()
             + ds.readers[0].get_coords_size()
-            + self.tokenizer.get_size_time_embedding()
+            + stream_time_size
             for ds in self.streams_datasets.values()
         ]
 
@@ -367,10 +365,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         return [ds.readers[0].get_target_num_channels() for ds in self.streams_datasets.values()]
 
     def get_targets_coords_size(self):
+        stream_time_size = self.tokenizer.get_size_time_embedding()
         # TODO: avoid hard coding magic values
-        # +6 at the end for stream_id and time encoding
         return [
-            (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + stream_time_size
             for ds in self.streams_datasets.values()
         ]
 
@@ -527,11 +525,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         num_output_steps = self._get_output_length(num_forecast_steps)
+        num_cells = hp_level_to_num_cells(stream_info["healpix_level"])
         stream_data = StreamData(
             base_idx,
             num_steps_input,
             num_output_steps,
-            self.num_healpix_cells,
+            num_cells,
         )
 
         stream_data = self._build_stream_data_input(
@@ -563,6 +562,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
 
+        Empty windows use the first reader's stream HEALPix level for spoofed data.
         """
 
         # source data: iterate overall input steps
@@ -571,13 +571,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
-
+            stream_info = stream_ds[0].stream_info
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
-                    self.healpix_level,
+                    stream_info["healpix_level"],
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
@@ -599,7 +599,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
-                    self.healpix_level,
+                    stream_info["healpix_level"],
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),
@@ -620,7 +620,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # Build source and target sample masks
             masks[stream_name] = self.tokenizer.build_samples_for_stream(
                 training_mode,
-                self.num_healpix_cells,
                 stream_info,
             )
             # identical for all streams
