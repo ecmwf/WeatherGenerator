@@ -563,3 +563,29 @@ def get_target_coords_local(
     a[..., 95] = np.cos(coords[:, 1])
 
     return a
+
+
+def target_coords_from_template(
+    template: Tensor,
+    target_geoinfos: Tensor,
+    target_times: Tensor,
+) -> Tensor:
+    """Build the result of `get_target_coords_local` from a previous result for the same geometry.
+
+    `get_target_coords_local` writes the encoded times to columns [1, 1 + T) and the geoinfos to
+    columns [1 + T, 1 + T + G) of its output; every other column only depends on the coordinates
+    (and the healpix cell structure). If those are unchanged, a previous output can be used as
+    `template`: it is cloned and only the time and geoinfo columns are replaced. The result is
+    bitwise identical to calling `get_target_coords_local` with the new times and geoinfos.
+    """
+    n_t = target_times.shape[1]
+    n_g = target_geoinfos.shape[1]
+    assert template.shape[-1] > 1 + n_t + n_g, "template does not match times/geoinfos"
+
+    a = template.clone()
+    geoinfo_offset = 1
+    a[..., geoinfo_offset : geoinfo_offset + n_t] = target_times
+    geoinfo_offset += n_t
+    a[..., geoinfo_offset : geoinfo_offset + n_g] = target_geoinfos
+
+    return a

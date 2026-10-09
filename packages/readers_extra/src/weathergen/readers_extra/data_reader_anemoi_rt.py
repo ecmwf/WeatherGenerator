@@ -9,6 +9,8 @@
 
 import datetime
 import logging
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import override
 
@@ -29,6 +31,31 @@ from weathergen.train.utils import Stage
 from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
+
+
+def _grid_cache_enabled(option: bool | None = None) -> bool:
+    """
+    Grid cache is on by default. Switch it off with the stream option `grid_cache=False`
+    (e.g. streams.ERA5.grid_cache=False) or the environment variable WEATHERGEN_GRID_CACHE=0.
+    """
+    if option is not None:
+        return bool(option)
+    return os.environ.get("WEATHERGEN_GRID_CACHE", "1") != "0"
+
+
+def _grid_cache_verify(option: bool | None = None) -> bool:
+    """Check cache hits against a fresh computation (stream option `grid_cache_verify=True`)."""
+    if option is not None:
+        return bool(option)
+    return os.environ.get("WEATHERGEN_GRID_CACHE_VERIFY", "0") == "1"
+
+
+@dataclass
+class _Grid:
+    """Time-independent part of a data window."""
+
+    coords: NDArray
+    geoinfos: NDArray
 
 
 class DataReaderAnemoiRT(DataReaderTimestep):
@@ -147,9 +174,80 @@ class DataReaderAnemoiRT(DataReaderTimestep):
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
 
+        # time-independent grid (coords + static geoinfos), keyed by number of time steps per window
+        self._grid_cache: dict[int, _Grid] = {}
+        self._grid_confirmed: set[int] = set()
+        self._grid_disabled: set[int] = set()
+        self._grid_cache_option = stream_info.get("grid_cache", None)
+        self._grid_cache_verify_option = stream_info.get("grid_cache_verify", None)
+
     @override
     def length(self) -> int:
         return 1
+
+    def _build_grid(self, num_t: int) -> "_Grid":
+        """
+        Build the time-independent part of a window with `num_t` time steps: lat/lon coordinates
+        tiled `num_t` times and geoinfos with the static channels filled in (dynamic channels are
+        left at zero and have to be filled in per window).
+        """
+        # construct lat/lon coords
+        latlon = np.concatenate(
+            [
+                np.expand_dims(self.latitudes, 0),
+                np.expand_dims(self.longitudes, 0),
+            ],
+            axis=0,
+        ).transpose()
+        # repeat latlon num_t times
+        coords = np.vstack(list((latlon,) * num_t))
+
+        # extract static geoinfo channels (can be time-varying, so read from dataset)
+        geoinfos_static = self.ds[0, list(self.geoinfo_idx_static)][0].transpose()
+        geoinfos_static = np.concatenate([geoinfos_static for _ in range(num_t)])
+        geoinfos = np.zeros((coords.shape[0], len(self.geoinfo_idx)))
+        for idx, i in enumerate(self.geoinfo_idx_static_lin):
+            geoinfos[:, i] = geoinfos_static[:, idx]
+
+        return _Grid(coords=coords, geoinfos=geoinfos)
+
+    def _get_grid(self, num_t: int) -> tuple["_Grid", bool]:
+        """
+        Return the time-independent grid for windows with `num_t` time steps, together with a flag
+        that tells whether the returned arrays are owned by the cache (and must not be modified).
+        Stream options grid_cache=False / grid_cache_verify=True disable the cache / check every
+        cache hit against a fresh computation.
+        """
+        if not _grid_cache_enabled(self._grid_cache_option) or num_t in self._grid_disabled:
+            return self._build_grid(num_t), False
+        if num_t not in self._grid_cache:
+            self._grid_cache[num_t] = self._build_grid(num_t)
+            return self._grid_cache[num_t], True
+        cached = self._grid_cache[num_t]
+        if num_t not in self._grid_confirmed:
+            # second window with this length: rebuild and compare with window 0
+            fresh = self._build_grid(num_t)
+            for name in ("coords", "geoinfos"):
+                a, b = getattr(cached, name), getattr(fresh, name)
+                if not (a.dtype == b.dtype and a.shape == b.shape and np.array_equal(a, b)):
+                    _logger.warning(
+                        "Grid cache dropped for anemoi_rt (num_t=%s): %s of window 1 differs "
+                        "from window 0. Using uncached grid from now on.",
+                        num_t,
+                        name,
+                    )
+                    self._grid_disabled.add(num_t)
+                    self._grid_cache.pop(num_t, None)
+                    return fresh, False
+            self._grid_confirmed.add(num_t)
+        elif _grid_cache_verify(self._grid_cache_verify_option):
+            fresh = self._build_grid(num_t)
+            for name in ("coords", "geoinfos"):
+                a, b = getattr(cached, name), getattr(fresh, name)
+                assert a.dtype == b.dtype and a.shape == b.shape and np.array_equal(a, b), (
+                    f"grid cache mismatch in {name}"
+                )
+        return cached, True
 
     @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
@@ -175,16 +273,12 @@ class DataReaderAnemoiRT(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # construct lat/lon coords
-        latlon = np.concatenate(
-            [
-                np.expand_dims(self.latitudes, 0),
-                np.expand_dims(self.longitudes, 0),
-            ],
-            axis=0,
-        ).transpose()
-        # repeat latlon len(t_idxs) times
-        coords = np.vstack(list((latlon,) * len(t_idxs)))
+        # The grid (lat/lon tiled over the time steps of a window) and the static geoinfo
+        # channels are identical for every window, only the datetimes and the dynamic forcings
+        # change. They are therefore built once per number of time steps and reused.
+        grid, is_cached = self._get_grid(len(t_idxs))
+        # callers may modify the arrays in place -> never hand out the cached arrays themselves
+        coords = grid.coords.copy() if is_cached else grid.coords
 
         # use time_window and frequency to compute required time information
         datetimes = []
@@ -193,16 +287,13 @@ class DataReaderAnemoiRT(DataReaderTimestep):
             datetimes += [t_cur]
             t_cur += self.frequency
 
-        # extract geoinfo channels (can be time-varying, so read from dataset)
-        geoinfos_static = self.ds[0, list(self.geoinfo_idx_static)][0].transpose()
-        geoinfos_static = np.concatenate([geoinfos_static for _ in t_idxs])
+        # dynamic (time dependent) geoinfo channels are computed for every window
         geoinfos_dynamic = _anemoi_get_dynamic_forcings(
             datetimes, self.latitudes, self.longitudes, self.geoinfo_channels_dynamic
         )
-        # insert static and dynamic into common array
-        geoinfos = np.empty((coords.shape[0], len(self.geoinfo_idx)))
-        for idx, i in enumerate(self.geoinfo_idx_static_lin):
-            geoinfos[:, i] = geoinfos_static[:, idx]
+        # insert static (cached) and dynamic into common array. The static columns of
+        # grid.geoinfos are already in place, the dynamic columns are overwritten.
+        geoinfos = grid.geoinfos.copy() if is_cached else grid.geoinfos
         for i, ch in zip(self.geoinfo_idx_dynamic_lin, self.geoinfo_channels_dynamic, strict=True):
             geoinfos[:, i] = geoinfos_dynamic[ch]
 
