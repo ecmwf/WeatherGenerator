@@ -2,7 +2,7 @@
 Standalone tests for the ERA5 grid caches (no GPU, no ERA5 files, no Slurm).
 
 Covers tokenization, target coordinates and the anemoi_rt reader. Cached vs uncached results
-are compared bitwise (`torch.equal` / `np.array_equal`). Heavy anemoi/earthkit imports are stubbed.
+are compared bitwise (`torch.equal` / `np.array_equal`). 
 
 From this worktree:
 
