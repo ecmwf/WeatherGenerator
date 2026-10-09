@@ -520,6 +520,8 @@ class ZarrIO:
         """Key of fstep 0 (or the first stored fstep if fstep 0 was not written)."""
         sample, _, stream, example_stream = self._example_sample_and_stream()
         fstep = min(int(step) for step in example_stream.group_keys())
+        if fstep > 1:
+            _logger.warning(f"First stored fstep is {fstep} (> 1). This is unexpected.")
         return ItemKey(sample, fstep, stream)
 
     @functools.cached_property
