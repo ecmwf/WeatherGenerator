@@ -334,11 +334,10 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
-        forecast_offset: int | None,
+        forecast_offset: int,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
-        latent: list[OutputDataset] | None = None,
     ):
         """Collection of possible datasets for one output item."""
         self.key = key
@@ -351,11 +350,9 @@ class OutputItem:
         if self.key.with_source:
             self._append_dataset(self.source, "source")
 
-        if forecast_offset is not None and self.key.with_target(forecast_offset):
+        if self.key.with_target(forecast_offset):
             self._append_dataset(self.target, "target")
             self._append_dataset(self.prediction, "prediction")
-        if latent is not None:
-            self._append_dataset(latent, "latent")
 
     def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
@@ -413,6 +410,63 @@ class ZarrIO:
         for dataset in item.datasets:
             if dataset is not None:
                 self._write_dataset(group, dataset)
+
+    def write_latent(
+        self,
+        sample: int,
+        forecast_step: int,
+        latents: dict[str, NDArray],
+        *,
+        coords: NDArray | None = None,
+        num_register_tokens: int = 0,
+        num_class_tokens: int = 0,
+    ) -> None:
+        """Write normalized latent arrays to ``sample/latent/forecast_step``.
+
+        Packed ``tokens`` are split when their length matches the coordinates
+        plus the extra-token counts. Explicit extra-token arrays take precedence.
+        Matching coordinates add spatial metadata. Existing groups and failed
+        array writes raise Zarr errors; no requested array is silently skipped.
+        """
+        assert self.data_root is not None, "ZarrIO must be opened before accessing data."
+        assert not self.read_only, "Cannot write to a read-only store."
+        arrays = {name: np.asarray(array) for name, array in latents.items()}
+        representation = arrays.get("tokens", next(iter(arrays.values())))
+        npoints = representation.shape[0] if representation.ndim else None
+        num_extra_tokens = num_register_tokens + num_class_tokens
+        metadata = {}
+        if coords is not None:
+            coords = np.asarray(coords, dtype=np.float32)
+            tokens = arrays.get("tokens")
+            if tokens is not None and tokens.ndim and len(tokens) == len(coords) + num_extra_tokens:
+                if num_register_tokens:
+                    arrays.setdefault("register_tokens", tokens[:num_register_tokens])
+                if num_class_tokens:
+                    arrays.setdefault("class_token", tokens[num_register_tokens:num_extra_tokens])
+                arrays["tokens"] = tokens[num_extra_tokens:]
+            if npoints in (None, len(coords), len(coords) + num_extra_tokens):
+                arrays.update(
+                    coords=coords,
+                    geoinfo=np.zeros((len(coords), 0), dtype=np.float32),
+                    times=np.full(len(coords), np.datetime64("NaT"), dtype="datetime64[ns]"),
+                )
+                metadata = {
+                    "num_extra_tokens": num_extra_tokens,
+                    "num_register_tokens": num_register_tokens,
+                    "num_class_tokens": num_class_tokens,
+                    "spatial_points": len(coords),
+                    "coords_order": "lat_lon",
+                }
+                if npoints is not None:
+                    metadata["total_points"] = npoints
+        key = ItemKey(sample, forecast_step, LATENT_STREAM)
+        group = self.data_root.create_group(key.path, attributes=metadata)
+        for name, array in arrays.items():
+            group.create_array(name, data=array)
+
+    def get_latent(self, sample: int, forecast_step: int) -> zarr.Group:
+        """Read a latent group; arrays and metadata are available through keys and attrs."""
+        return self._get_group(ItemKey(sample, forecast_step, LATENT_STREAM), create=False)
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
@@ -492,7 +546,7 @@ class ZarrIO:
     def example_key(self) -> ItemKey:
         try:
             sample, example_sample = next(self.data_root.groups())
-            stream, example_stream = next(example_sample.groups())
+            stream = next(name for name in example_sample.group_keys() if name != LATENT_STREAM)
             fstep = 0
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
@@ -516,8 +570,7 @@ class ZarrIO:
     def forecast_steps(self) -> list[int]:
         """Query available forecast steps in this zarr store."""
         # assume stream/samples/forecast_steps are orthogonal
-        _, example_sample = next(self.data_root.groups())
-        _, example_stream = next(example_sample.groups())
+        example_stream = self.data_root[f"{self.example_key.sample}/{self.example_key.stream}"]
 
         all_steps = sorted(list(example_stream.group_keys()))
 
@@ -582,10 +635,6 @@ class OutputBatchData:
     source_channels: list[list[str]]
     geoinfo_channels: list[list[str]]
 
-    # latent outputs: outer list over forecast steps, inner list over samples.
-    # each entry is a dict mapping latent_name -> ndarray
-    latents: list[list[dict]] | None
-
     sample_start: int
     forecast_offset: int
     forecast_steps_override: list[int] | None = None
@@ -628,15 +677,6 @@ class OutputBatchData:
             self.samples, self.forecast_steps, self.streams.keys()
         ):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
-
-    def latent_items(self) -> typing.Generator[OutputItem, None, None]:
-        """Additionally yield latent output items if a latent stream name was provided"""
-        if self.latents:
-            for s, fo_s in itertools.product(self.samples, self.forecast_steps):
-                key = ItemKey(int(s), int(fo_s), LATENT_STREAM)
-                latent_item = self._make_latent_item(key)
-                if latent_item is not None:
-                    yield latent_item
 
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
@@ -803,53 +843,6 @@ class OutputBatchData:
         _logger.debug(f"source shape: {source_dataset.data.shape}")
 
         return source_dataset
-
-    def _make_latent_item(self, key: ItemKey) -> OutputItem | None:
-        """Create a lightweight output-like item for latent datasets.
-
-        Returns an object with attributes `key` and `datasets` suitable for
-        `ZarrIO.write_zarr`.
-        """
-        offset_key = self._offset_key(key)
-
-        # ensure latents were provided
-        if len(self.latents) <= offset_key.forecast_step:
-            return None
-        latents_for_fstep = self.latents[offset_key.forecast_step]
-
-        if len(latents_for_fstep) <= offset_key.sample:
-            return None
-        latents_for_sample = latents_for_fstep[offset_key.sample]
-
-        if not latents_for_sample:
-            return None
-
-        source_interval = self.source_intervals[offset_key.sample]
-
-        datasets: list[OutputDataset] = []
-        for lname, arr in latents_for_sample.items():
-            arr = np.asarray(arr)
-            # determine datapoints
-            n = arr.shape[0] if arr.ndim > 0 else 0
-            # times/coords placeholders
-            times = np.array([], dtype="datetime64[ns]")
-            coords = np.zeros((n, 2), dtype=np.float32)
-            geoinfo = np.empty((0, 0))
-
-            if arr.ndim == 1:
-                data = arr.reshape((n, 1))
-                channels = [lname]
-            else:
-                data = arr
-                channels = [f"{lname}_{i}" for i in range(data.shape[1])]
-
-            ds = OutputDataset(
-                lname, key, source_interval, data, times, coords, geoinfo, channels, []
-            )
-            datasets.append(ds)
-
-        # TODO: missing forecast offset
-        return OutputItem(key=key, forecast_offset=None, latent=datasets)
 
 
 def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:
