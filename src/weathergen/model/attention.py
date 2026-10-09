@@ -24,6 +24,16 @@ coordinates aligned with the token order (lat, lon in radians).
 """
 
 
+def _apply_xsa(attn_out: torch.Tensor, self_values: torch.Tensor) -> torch.Tensor:
+    attn_out_float = attn_out.float()
+    self_values_float = self_values.float()
+    denom = self_values_float.pow(2).sum(dim=-1, keepdim=True).clamp_min(
+        torch.finfo(self_values_float.dtype).eps
+    )
+    proj = (attn_out_float * self_values_float).sum(dim=-1, keepdim=True) / denom
+    return (attn_out_float - (proj * self_values_float)).to(attn_out.dtype)
+
+
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
         self,
@@ -41,6 +51,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
+        use_xsa=False,
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -50,6 +61,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.softcap = softcap
         self.with_residual = with_residual
         self.with_2d_rope = with_2d_rope
+        self.use_xsa = use_xsa
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -118,6 +130,9 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
             dropout_p=dropout_rate,
         )
 
+        if self.use_xsa:
+            outs = _apply_xsa(outs, vs)
+
         out = self.proj_out(outs.flatten(-2, -1))
 
         if self.with_residual:
@@ -141,6 +156,7 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         softcap=0.0,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        use_xsa=False,
     ):
         super(MultiSelfAttentionHeadVarlenFlex, self).__init__()
 
@@ -148,6 +164,7 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
         self.with_residual = with_residual
+        self.use_xsa = use_xsa
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -200,6 +217,9 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
 
         outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
+        if self.use_xsa:
+            outs = _apply_xsa(outs, vs.transpose(1, 2).squeeze())
+
         out = self.dropout(self.proj_out(outs.flatten(-2, -1)))
         if self.with_residual:
             out = out + x_in
@@ -226,6 +246,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
+        use_xsa=False,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -234,6 +255,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.softcap = softcap
         self.with_residual = with_residual
         self.with_2d_rope = with_2d_rope
+        self.use_xsa = use_xsa
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -294,6 +316,9 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
+
+        if self.use_xsa:
+            outs = _apply_xsa(outs, vs.transpose(1, 2))
 
         out = self.proj_out(self.dropout(outs.flatten(-2, -1)))
         if self.with_residual:
@@ -541,6 +566,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
+        use_xsa=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -550,6 +576,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
         self.with_2d_rope = with_2d_rope
+        self.use_xsa = use_xsa
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -609,6 +636,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
         outs = flash_attn_func(qs, ks, vs, softcap=self.softcap, dropout_p=dropout_rate)
+
+        if self.use_xsa:
+            outs = _apply_xsa(outs, vs)
 
         out = self.proj_out(outs.flatten(-2, -1))
         if self.with_residual:
