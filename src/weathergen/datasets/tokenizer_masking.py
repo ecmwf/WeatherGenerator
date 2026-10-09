@@ -203,16 +203,55 @@ class TokenizerMasking(Tokenizer):
         hl = self.healpix_level
         token_size = stream_info["token_size"]
 
+        # Tokenizing in space only depends on the coordinates. For streams with a fixed grid (e.g.
+        # ERA5 targets) all windows therefore have the same tokenization and it is reused as long
+        # as the coordinates are bitwise identical. tokenize_spacetime also depends on the
+        # datetimes and is never cached.
+        stream_id = stream_info.get("stream_id", None)
+        use_cache = self._grid_cache_enabled and not tok_spacetime and stream_id is not None
+        cache_key = (stream_id, token_size, bool(pad_tokens), hl)
+
         tokens = []
         for rdata in data:
             # skip empty data
             if rdata.is_empty():
                 tokens += [(None, None)]
                 continue
+            rdata = readerdata_to_torch(rdata)
+            # reuse tokenization of previous window with identical coordinates
+            if use_cache and cache_key not in self._tokens_disabled:
+                entry = self._tokens_cache.get(cache_key)
+                if entry is not None and torch.equal(entry.coords, rdata.coords):
+                    # first coords-equal window: recompute and compare with window 0
+                    if cache_key not in self._tokens_confirmed:
+                        regular = tok(rdata, token_size, hl, pad_tokens)
+                        if not _is_identical(
+                            (entry.idxs_cells, entry.idxs_cells_lens), regular
+                        ):
+                            _logger.warning(
+                                "Grid cache dropped for tokenization stream_id=%s: HEALPix "
+                                "indices of window 1 differ from window 0 even though "
+                                "coordinates match. Using uncached tokenization from now on.",
+                                stream_id,
+                            )
+                            self._tokens_disabled.add(cache_key)
+                            self._tokens_cache.pop(cache_key, None)
+                            tokens += [regular]
+                            continue
+                        self._tokens_confirmed.add(cache_key)
+                    elif self._grid_cache_verify:
+                        regular = tok(rdata, token_size, hl, pad_tokens)
+                        _assert_identical(
+                            "tokenization", (entry.idxs_cells, entry.idxs_cells_lens), regular
+                        )
+                    tokens += [(entry.idxs_cells, entry.idxs_cells_lens)]
+                    continue
             # tokenize data
-            idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens
-            )
+            idxs_cells, idxs_cells_lens = tok(rdata, token_size, hl, pad_tokens)
+            if use_cache:
+                self._tokens_cache[cache_key] = _TokensCacheEntry(
+                    rdata.coords.clone(), idxs_cells, idxs_cells_lens
+                )
             tokens += [(idxs_cells, idxs_cells_lens)]
 
         return tokens
