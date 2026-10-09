@@ -420,6 +420,111 @@ class TokenizerMasking(Tokenizer):
 
         return (datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
 
+    @staticmethod
+    def _target_coords_cache_matches(
+        entry: _TargetCoordsCacheEntry, idxs_cells, idxs_cells_lens, mask_tokens, rdata
+    ) -> bool:
+        """
+        True if the cached geometry is valid for the given window. The tokenization is compared by
+        identity: the objects are kept alive by the entry and are reused by get_tokens_windows only
+        if the coordinates of that window were identical. Mask and coordinates are compared by
+        value.
+        """
+        return (
+            entry.idxs_cells is idxs_cells
+            and entry.idxs_cells_lens is idxs_cells_lens
+            and isinstance(rdata.coords, torch.Tensor)
+            and np.array_equal(entry.mask_tokens, mask_tokens)
+            and torch.equal(entry.coords_raw, rdata.coords)
+        )
+
+    def _update_target_coords_cache(self, entry, stream_id, inputs, outputs) -> None:
+        """
+        Remember the geometry of a window computed the regular way. The first window of a geometry
+        only registers its key; the outputs are stored when the same geometry is seen a second time
+        so that streams with changing coordinates (observations) never pay for storing outputs.
+        """
+        idxs_cells, idxs_cells_lens, mask_tokens, rdata, time_win = inputs
+        datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv = outputs
+
+        regular = (
+            coords.numel() > 0
+            and coords_local.numel() > 0
+            and idxs_ord_inv is not None
+            and isinstance(rdata.coords, torch.Tensor)
+        )
+        if not regular:
+            self._target_coords_cache.pop(stream_id, None)
+            return
+
+        n_geoinfos = rdata.geoinfos.shape[1]
+        n_times = encode_times_target(datetimes[:1], time_win).shape[1]
+        digest = _geometry_digest(
+            coords, coords_local, coords_per_cell, idxs_ord_inv, n_times, n_geoinfos
+        )
+
+        if entry is None:
+            # new geometry: register key + digest of window 0; outputs stored on window 1
+            self._target_coords_cache[stream_id] = _TargetCoordsCacheEntry(
+                idxs_cells,
+                idxs_cells_lens,
+                mask_tokens.copy(),
+                rdata.coords.clone(),
+                num_geoinfos=n_geoinfos,
+                num_times=n_times,
+                geometry_digest=digest,
+            )
+        elif entry.coords_local is None:
+            if entry.geometry_digest is not None and digest != entry.geometry_digest:
+                _logger.warning(
+                    "Grid cache dropped for target coords stream_id=%s: geometry of window 1 "
+                    "differs from window 0 (coords/mask matched). Using uncached target coords "
+                    "from now on.",
+                    stream_id,
+                )
+                self._target_coords_disabled.add(stream_id)
+                self._target_coords_cache.pop(stream_id, None)
+                return
+            # same geometry as window 0: store the outputs (private copies)
+            idxs_tokens = [i for t in idxs_cells for i in t]
+            entry.idxs_data = torch.cat(
+                [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
+            )
+            entry.coords = coords.clone()
+            entry.masked_points_per_cell = coords_per_cell.clone()
+            entry.idxs_ord_inv = idxs_ord_inv.clone()
+            entry.num_geoinfos = rdata.geoinfos.shape[1]
+            entry.num_times = encode_times_target(datetimes[:1], time_win).shape[1]
+            entry.coords_local = coords_local.clone()
+
+    @staticmethod
+    def _get_target_coords_cached(entry: _TargetCoordsCacheEntry, rdata, time_win):
+        """
+        Same result as the regular path of get_target_coords for a window whose geometry equals the
+        cached one. Returns None if the window is not compatible (caller falls back).
+        """
+        if rdata.geoinfos.shape[1] != entry.num_geoinfos:
+            return None
+
+        # same expressions as in tokenize_apply_mask_target
+        datetimes = np.atleast_1d(rdata.datetimes[entry.idxs_data])
+        datetimes_enc = encode_times_target(datetimes, time_win)
+        if datetimes_enc.shape[1] != entry.num_times:
+            return None
+        geoinfos = rdata.geoinfos[entry.idxs_data]
+
+        coords_local = target_coords_from_template(entry.coords_local, geoinfos, datetimes_enc)
+        coords_local.requires_grad = False
+
+        # clones: the caller owns the returned tensors and must not be able to alter the cache
+        return (
+            datetimes,
+            entry.coords.clone(),
+            coords_local,
+            entry.masked_points_per_cell.clone(),
+            entry.idxs_ord_inv.clone(),
+        )
+
     def get_target_values(
         self,
         stream_info: dict,
