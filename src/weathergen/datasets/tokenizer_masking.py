@@ -343,6 +343,58 @@ class TokenizerMasking(Tokenizer):
             idxs_cells, idxs_cells_lens, cell_mask
         )
 
+        # Streams with a fixed grid (e.g. ERA5 targets) have the same geometry in every window,
+        # only datetimes and geoinfos change. Reuse the geometry dependent part if tokenization,
+        # token mask and coordinates are identical to the cached ones.
+        cache_entry = None
+        stream_id = stream_info["stream_id"]
+        use_tc_cache = (
+            self._grid_cache_enabled
+            and stream_id not in self._target_coords_disabled
+            and mask_tokens is not None
+            and mask_channels is None
+        )
+        if use_tc_cache:
+            cache_entry = self._target_coords_cache.get(stream_id)
+            if cache_entry is not None and not self._target_coords_cache_matches(
+                cache_entry, idxs_cells, idxs_cells_lens, mask_tokens, rdata
+            ):
+                cache_entry = None
+            if cache_entry is not None and cache_entry.coords_local is not None:
+                cached = self._get_target_coords_cached(cache_entry, rdata, time_win)
+                if cached is not None:
+                    if self._grid_cache_verify:
+                        regular = self._get_target_coords_regular(
+                            stream_info,
+                            rdata,
+                            idxs_cells,
+                            idxs_cells_lens,
+                            mask_tokens,
+                            mask_channels,
+                            time_win,
+                        )
+                        _assert_identical("target_coords", cached, regular)
+                    return cached
+
+        result = self._get_target_coords_regular(
+            stream_info, rdata, idxs_cells, idxs_cells_lens, mask_tokens, mask_channels, time_win
+        )
+        datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv = result
+
+        if use_tc_cache:
+            self._update_target_coords_cache(
+                cache_entry,
+                stream_id,
+                (idxs_cells, idxs_cells_lens, mask_tokens, rdata, time_win),
+                (datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv),
+            )
+
+        return (datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
+
+    def _get_target_coords_regular(
+        self, stream_info, rdata, idxs_cells, idxs_cells_lens, mask_tokens, mask_channels, time_win
+    ):
+        """Uncached computation of the target coordinates (the original get_target_coords)."""
         # TODO: split up
         _, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
             stream_info["stream_id"],
