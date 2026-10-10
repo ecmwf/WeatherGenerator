@@ -124,7 +124,6 @@ class NetcdfParser(CfParser):
         -------
             Full path to the output file.
         """
-
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
         out_fname = (
             Path(self.output_dir)
