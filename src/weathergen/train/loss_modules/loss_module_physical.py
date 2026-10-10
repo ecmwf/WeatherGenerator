@@ -23,6 +23,8 @@ from weathergen.train.utils import TRAIN, VAL, Stage
 
 _logger = logging.getLogger(__name__)
 
+VALID_TIME_AGGREGATIONS = frozenset({"diff", "mean", "min", "max"})
+
 
 def get_num_samples(config) -> np.typing.NDArray:
     """
@@ -105,10 +107,18 @@ class LossPhysical(LossModuleBase):
         self.stage = stage
         self.device = device
         self.name = "LossPhysical"
+        self._warned_time_agg_mismatches = set()
 
         # Dynamic Loss state (extract it before parsing the actual loss functions)
         self.dynamic_loss_cfg = loss_fcts.get("dynamic_loss")
         self.forecast_offset = self.mode_cfg.forecast.offset
+
+        self.time_aggregation_types = {
+            name: self._parse_time_aggregation_types(name, params)
+            for name, params in loss_fcts.items()
+            if name != "dynamic_loss"
+        }
+        self.with_time_aggregation = any(self.time_aggregation_types.values())
 
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -126,6 +136,17 @@ class LossPhysical(LossModuleBase):
             self.cf.streams,
             self.device,
         )
+
+    @staticmethod
+    def _parse_time_aggregation_types(loss_name: str, params: dict) -> list[str]:
+        time_aggregation_types = params.get("time_aggregation_types", [])
+        invalid = sorted(set(time_aggregation_types) - VALID_TIME_AGGREGATIONS)
+        if invalid:
+            raise ValueError(
+                f"Unsupported time aggregation types for loss '{loss_name}': {invalid}. "
+                f"Supported values are {sorted(VALID_TIME_AGGREGATIONS)}."
+            )
+        return list(time_aggregation_types)
 
     def _get_weights(self, stream_name, stream_info):
         """
@@ -196,6 +217,193 @@ class LossPhysical(LossModuleBase):
             substep_masks.append(mask_t)
 
         return substep_masks
+
+    @staticmethod
+    def _nan_reduce(values: torch.Tensor, op_name: str, dim: int) -> torch.Tensor:
+        if op_name == "mean":
+            return torch.nanmean(values, dim=dim)
+
+        if op_name == "min":
+            mask_nan = torch.isnan(values)
+            reduced = torch.amin(torch.where(mask_nan, torch.inf, values), dim=dim)
+            return torch.where(mask_nan.all(dim=dim), torch.full_like(reduced, torch.nan), reduced)
+
+        if op_name == "max":
+            mask_nan = torch.isnan(values)
+            reduced = torch.amax(torch.where(mask_nan, -torch.inf, values), dim=dim)
+            return torch.where(mask_nan.all(dim=dim), torch.full_like(reduced, torch.nan), reduced)
+
+        raise ValueError(f"Unsupported time aggregation operation: {op_name}")
+
+    def _compute_time_aggregate_loss(
+        self,
+        loss_fct,
+        agg_op: str,
+        pred_time: torch.Tensor,
+        target_time: torch.Tensor,
+        weights_channels: torch.Tensor | None,
+        weights_locations: list[torch.Tensor | None],
+        step_weights: list[float],
+    ):
+        if agg_op == "diff":
+            if target_time.shape[0] < 2:
+                return None
+
+            loss_agg = torch.tensor(0.0, device=target_time.device, requires_grad=True)
+            losses_chs = torch.zeros(target_time.shape[-1], device=target_time.device)
+            ctr_steps = 0
+            pred_diff = pred_time[:, 1:] - pred_time[:, :-1]
+            target_diff = target_time[1:] - target_time[:-1]
+
+            for step_idx in range(target_diff.shape[0]):
+                loss_step, loss_step_chs = loss_fct(
+                    target_diff[step_idx],
+                    pred_diff[:, step_idx],
+                    weights_channels,
+                    weights_locations[step_idx],
+                )
+                step_weight = step_weights[step_idx] if step_idx < len(step_weights) else 1.0
+                loss_agg = loss_agg + step_weight * loss_step
+                losses_chs = losses_chs + step_weight * loss_step_chs.detach()
+                ctr_steps += 1 if loss_step > 0.0 else 0
+
+            if ctr_steps == 0:
+                return None
+
+            return loss_agg / ctr_steps, losses_chs / ctr_steps
+
+        pred_agg = self._nan_reduce(pred_time, agg_op, dim=1)
+        target_agg = self._nan_reduce(target_time, agg_op, dim=0)
+        weights_locations_agg = next((weights for weights in weights_locations if weights is not None), None)
+        return loss_fct(target_agg, pred_agg, weights_channels, weights_locations_agg)
+
+    def _can_time_aggregate(self, stream_name: str, loss_name: str, entries: list[dict]) -> bool:
+        if len(entries) < 2:
+            return False
+
+        target_shapes = {tuple(entry["target"].shape) for entry in entries}
+        pred_shapes = {tuple(entry["pred"].shape) for entry in entries}
+        if len(target_shapes) == 1 and len(pred_shapes) == 1:
+            return True
+
+        warn_key = (stream_name, loss_name)
+        if warn_key not in self._warned_time_agg_mismatches:
+            _logger.warning(
+                "Skipping time aggregation for stream '%s' and loss '%s' because forecast "
+                "steps do not share a consistent tensor shape.",
+                stream_name,
+                loss_name,
+            )
+            self._warned_time_agg_mismatches.add(warn_key)
+
+        return False
+
+    @staticmethod
+    def _get_shared_time_agg_location_weights(weights_locations):
+        if not weights_locations:
+            return None
+
+        first_weights_location = weights_locations[0]
+        if not any(weight is not None for weight in weights_locations):
+            return first_weights_location
+
+        if first_weights_location is None:
+            return None
+
+        if any(
+            weight is None or not torch.equal(weight, first_weights_location)
+            for weight in weights_locations
+        ):
+            return None
+
+        return first_weights_location
+
+    def _record_time_agg_candidate(
+        self,
+        time_agg_records,
+        stream_name: str,
+        correspondence_idx: int,
+        loss_fct_name: str,
+        timestep_idx: int,
+        target: torch.Tensor,
+        pred: torch.Tensor,
+        weights_channels: torch.Tensor | None,
+        weights_locations,
+        output_step_weight,
+        loss_fct,
+        loss_fct_weight: float,
+    ):
+        time_aggregation_types = self.time_aggregation_types.get(loss_fct_name, [])
+        if not time_aggregation_types:
+            return
+
+        record_key = (stream_name, correspondence_idx, loss_fct_name)
+        time_agg_records[record_key].append(
+            {
+                "timestep_idx": timestep_idx,
+                "target": target,
+                "pred": pred,
+                "weights_channels": weights_channels,
+                "weights_locations": self._get_shared_time_agg_location_weights(
+                    weights_locations
+                ),
+                "output_step_weight": (
+                    float(output_step_weight) if output_step_weight is not None else 1.0
+                ),
+                "loss_fct": loss_fct,
+                "loss_fct_weight": loss_fct_weight,
+                "time_aggregation_types": time_aggregation_types,
+            }
+        )
+
+    def _apply_time_aggregate_losses(
+        self,
+        stream_name: str,
+        target_channels,
+        losses_all,
+        time_agg_records,
+    ):
+        if not self.with_time_aggregation:
+            return torch.tensor(0.0, device=self.device, requires_grad=True), 0
+
+        aggregate_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+        aggregate_terms = set()
+        for (agg_stream_name, _, loss_name), entries in time_agg_records.items():
+            if agg_stream_name != stream_name:
+                continue
+
+            entries = sorted(entries, key=lambda entry: entry["timestep_idx"])
+            if not self._can_time_aggregate(stream_name, loss_name, entries):
+                continue
+
+            pred_time = torch.stack([entry["pred"] for entry in entries], dim=1)
+            target_time = torch.stack([entry["target"] for entry in entries], dim=0)
+            weights_locations = [entry["weights_locations"] for entry in entries]
+            step_weights = [entry["output_step_weight"] for entry in entries[:-1]]
+
+            for agg_op in entries[0]["time_aggregation_types"]:
+                agg_result = self._compute_time_aggregate_loss(
+                    entries[0]["loss_fct"],
+                    agg_op,
+                    pred_time,
+                    target_time,
+                    entries[0]["weights_channels"],
+                    weights_locations,
+                    step_weights,
+                )
+                if agg_result is None:
+                    continue
+
+                agg_loss, agg_loss_chs = agg_result
+                aggregate_loss = aggregate_loss + entries[0]["loss_fct_weight"] * agg_loss
+                aggregate_terms.add(agg_op)
+
+                agg_loss_name = f"{loss_name}_time_{agg_op}"
+                losses_all[stream_name]["aggregate"][agg_loss_name] = defaultdict(dict)
+                for ch_n, v in zip(target_channels, agg_loss_chs, strict=True):
+                    losses_all[stream_name]["aggregate"][agg_loss_name][ch_n] = v
+
+        return aggregate_loss, len(aggregate_terms)
 
     @staticmethod
     def _loss_per_loss_function(
@@ -307,6 +515,7 @@ class LossPhysical(LossModuleBase):
             # loss_stream: loss for given stream
             loss_stream = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_timesteps = 0
+            time_agg_records = defaultdict(list) if self.with_time_aggregation else None
             for timestep_idx, (preds_cur, target_cur) in enumerate(
                 zip(preds.physical, targets.physical, strict=True)
             ):
@@ -411,13 +620,40 @@ class LossPhysical(LossModuleBase):
                         loss_st_corr = loss_st_corr + loss_cur_w
                         ctr_loss_fcts += 1 if (loss_cur_w > 0.0 and not is_spoof) else 0
 
+                        if self.with_time_aggregation and not is_spoof:
+                            self._record_time_agg_candidate(
+                                time_agg_records,
+                                stream_name,
+                                pred_params.global_params.get("correspondence", -1),
+                                loss_fct_name,
+                                timestep_idx,
+                                target,
+                                pred,
+                                weights_channels,
+                                weights_locations,
+                                output_step_weight,
+                                loss_fct,
+                                loss_fct_weight,
+                            )
+
                     loss_timestep = loss_timestep + loss_st_corr
                     ctr_batch += 1 if ctr_loss_fcts > 0.0 else 0
 
                 loss_stream = loss_stream + loss_timestep
                 ctr_timesteps += 1 if ctr_batch > 0 else 0
 
-            denom = ctr_timesteps if ctr_timesteps > 0 else 1.0
+            aggregate_terms = 0
+            if self.with_time_aggregation:
+                aggregate_loss, aggregate_terms = self._apply_time_aggregate_losses(
+                    stream_name,
+                    target_channels,
+                    losses_all,
+                    time_agg_records,
+                )
+                loss_stream = loss_stream + aggregate_loss
+
+            denom = ctr_timesteps + aggregate_terms
+            denom = denom if denom > 0 else 1.0
             loss = loss + (stream_loss_weight * loss_stream) / denom
 
             ctr_streams += 1 if ctr_timesteps > 0 else 0
