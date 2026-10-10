@@ -33,6 +33,7 @@ from weathergen.evaluate.io.data.io_orchestration import (
     get_data_zipstore,
     get_num_workers,
 )
+from weathergen.evaluate.io.data.target_sources import AnemoiTargetSource
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 
@@ -432,6 +433,19 @@ class WeatherGenZarrReader(WeatherGenReader):
         self._max_workers: int | None = eval_cfg.get("max_workers")
         self._num_io_workers: int = get_num_workers(max_workers=self._max_workers)
 
+        # Per-stream anemoi target sources (``type: anemoi-target``), shared by all rank files.
+        self._target_sources: dict[str, AnemoiTargetSource | None] = {}
+
+    def _get_target_source(self, stream: str) -> AnemoiTargetSource | None:
+        if self.eval_cfg.get("type") != "anemoi-target":
+            return None
+        if stream not in self._target_sources:
+            options = self.get_stream(stream).get("target_source") or {}
+            self._target_sources[stream] = AnemoiTargetSource.from_inference_config(
+                self.inference_cfg, stream, dict(options)
+            )
+        return self._target_sources[stream]
+
     def _discover_rank_files(self) -> list[Path]:
         """Discover zarr rank files based on the ``rank`` config parameter.
 
@@ -688,6 +702,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 ens_select,
                 rank=rank_file.stem.split("rank")[-1],
                 sample_labels=rank_global_labels,
+                target_source=self._get_target_source(stream),
             )
             get_data_fn = get_data_zipstore if state.is_zip else get_data_dirstore
             result = get_data_fn(state)
