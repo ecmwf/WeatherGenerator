@@ -40,8 +40,8 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
 
 
 class TokenizerMasking(Tokenizer):
-    def __init__(self, healpix_level: int, masker: Masker):
-        super().__init__(healpix_level)
+    def __init__(self, healpix_level: int, masker: Masker, domain=None):
+        super().__init__(healpix_level, domain)
         self.masker = masker
         self.rng = None
         self.token_size = None
@@ -72,7 +72,7 @@ class TokenizerMasking(Tokenizer):
                 continue
             # tokenize data
             idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens
+                readerdata_to_torch(rdata), token_size, hl, pad_tokens, domain=self.domain
             )
             tokens += [(idxs_cells, idxs_cells_lens)]
 
