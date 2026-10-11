@@ -112,7 +112,8 @@ class DataReaderAnemoiRT(DataReaderTimestep):
             "pretrained model expected."
         )
         self.target_channels = stream_info.get(str(stage) + "_target_channels")
-        self.target_idx = [ds.variables.index(ch) for ch in self.target_channels]
+        # targets aren't necessarily available, so we don't attempt to find its indices
+        self.target_idx = []
 
         # select/filter requested geoinfo channels (can be any variable, not just constant-in-time)
         assert stream_info.get("geoinfo_channels") is not None, "pretrained model expected."
@@ -223,6 +224,19 @@ class DataReaderAnemoiRT(DataReaderTimestep):
 
         return rd
 
+    @override
+    def get_target_num_channels(self) -> int:
+        # Override this since self.target_idx isn't properly defined
+        return len(self.target_channels)
+
+    @override
+    def normalize_target_channels(self, target: np.typing.NDArray) -> np.typing.NDArray:
+        # Override this since we don't necessarily have normalization information for all variables
+        return target
+
+    @override
+    def denormalize_target_channels(self, data):
+        return data
 
 def _clip_lat(lats: NDArray) -> NDArray[np.float32]:
     """
