@@ -66,9 +66,7 @@ class AttentionKernel(ABC):
     """Abstract base class for attention kernels."""
 
     @abstractmethod
-    def __call__(
-        self, qs, ks, vs, seqlens: SeqLens | None = None, softcap=0.0, dropout_p=0.0
-    ):
+    def __call__(self, qs, ks, vs, seqlens: SeqLens | None = None, softcap=0.0, dropout_p=0.0):
         raise NotImplementedError("Attention kernels must implement the __call__ method.")
 
 
