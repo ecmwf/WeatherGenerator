@@ -26,6 +26,7 @@ dependencies = [
     "scipy>=1.12",
     "scores",
     "pypdf>=4.0",
+    "pint"
     ]
 
 [tool.uv.sources]
