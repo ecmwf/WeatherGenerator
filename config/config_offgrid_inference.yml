@@ -1,0 +1,38 @@
+# (C) Copyright 2026 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Overwrite config for offgrid inference: runs a trained model at an arbitrary
+# set of points instead of the grid of its dataset. Use it together with
+# --from-run-id, e.g.
+#
+#   uv run inference --from-run-id <run_id> --config config/config_offgrid_inference.yml
+#
+# Only the offgrid part is given here. Everything else about the stream
+# (dataset, channels, tokenization, embedding and prediction networks) is
+# inherited from the config of the trained model. Do not set streams_directory
+# in this file: that would replace the inherited streams instead of extending
+# them.
+
+streams:
+  # name of the stream in the config of the trained model
+  SYNOP:
+    type: offgrid
+    # reader type the stream was trained with, i.e. its `type` in the config of
+    # the trained model; has to be repeated because `type` is replaced above
+    base_type: obs
+    offgrid:
+      # points to run at: a default grid (o96, N320) or the absolute path of an
+      # (N, 2) .npy array of [lat, lon] in degrees
+      coords: N320
+      # (N, G) array with one column per entry of the stream's geoinfo_channels,
+      # in that order; required if the stream has geoinfo_channels, otherwise
+      # omit or set null; must be an absolute path
+      geoinfos: null
+      # temporal spacing between offgrid samples; defaults to time_window_step
+      frequency: 6h

@@ -28,6 +28,10 @@ def get_extra_reader(stream_type: str) -> object | None:
             from weathergen.readers_extra.data_reader_anemoi_operan import DataReaderAnemoiOperan
 
             return DataReaderAnemoiOperan
+        case "offgrid":
+            from weathergen.readers_extra.data_reader_offgrid import DataReaderOffgrid
+
+            return DataReaderOffgrid
         case "fesom":
             from weathergen.readers_extra.data_reader_fesom import DataReaderFesom
 
