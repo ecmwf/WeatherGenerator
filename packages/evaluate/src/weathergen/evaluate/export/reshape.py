@@ -244,7 +244,7 @@ class Regridder:
             Regridded xarray DataArray.
         """
         # create degree grid
-        # round to nearest 0.025
+        # round to nearest resolution of the specified degree
         lat_min, lat_max, lon_min, lon_max = self.region
         lat_min = np.round(lat_min / self.degree) * self.degree
         lat_max = np.round(lat_max / self.degree) * self.degree
@@ -318,12 +318,17 @@ class Regridder:
         """
 
         # set coords
+        lat_min = data["latitude"].min().item()
+        lat_max = data["latitude"].max().item()
+        lon_min = data["longitude"].min().item()
+        lon_max = data["longitude"].max().item()
+
         new_coords = data.coords.copy()
         new_coords.update(
             {
                 "valid_time": data["valid_time"].values,
-                "latitude": np.linspace(-90, 90, self.grid_shape[0]),
-                "longitude": np.linspace(0, 360 - self.degree, self.grid_shape[1]),
+                "latitude": np.linspace(lat_min, lat_max, self.grid_shape[0]),
+                "longitude": np.linspace(lon_min, lon_max - self.degree, self.grid_shape[1]),
             }
         )
         new_coords._drop_coords(["ncells"])
@@ -443,11 +448,16 @@ class Regridder:
         """
         # set coords
         new_coords = data.coords.copy()
+        #find lat, lon max and mins
+        lat_min = data["latitude"].min().item()
+        lat_max = data["latitude"].max().item()
+        lon_min = data["longitude"].min().item()
+        lon_max = data["longitude"].max().item()
         new_coords.update(
             {
                 "valid_time": data["valid_time"].values,
-                "latitude": np.linspace(-90, 90, self.grid_shape[0]),
-                "longitude": np.linspace(0, 360 - self.degree, self.grid_shape[1]),
+                "latitude": np.linspace(lat_min, lat_max, self.grid_shape[0]),
+                "longitude": np.linspace(lon_min, lon_max - self.degree, self.grid_shape[1]),
             }
         )
 
