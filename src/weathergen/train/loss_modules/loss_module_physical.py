@@ -138,8 +138,11 @@ class LossPhysical(LossModuleBase):
         if self.stage == TRAIN:
             # set loss_weights to 1. when not specified
             stream_info_loss_weight = stream_info.get("loss_weight", 1.0)
+            # list(): torch.tensor() on an OmegaConf ListConfig leaves a reference cycle (OmegaConf
+            # raises on torch's __cuda_array_interface__/__dlpack__ probes) that keeps the calling
+            # frames, and so the step's predictions and batch, alive until Python's cyclic GC runs
             weights_channels_static = (
-                torch.tensor(stream_info["target_channel_weights"]).to(
+                torch.tensor(list(stream_info["target_channel_weights"])).to(
                     device=device, non_blocking=True
                 )
                 if stream_info.get("target_channel_weights")
