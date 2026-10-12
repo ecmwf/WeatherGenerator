@@ -202,28 +202,27 @@ def write_output(
     # calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * batch_size
 
+    twh = TimeWindowHandler(
+        val_cfg.start_date,
+        val_cfg.end_date,
+        val_cfg.time_window_len,
+        val_cfg.time_window_step,
+    )
+    source_windows = (
+        twh.window(next(iter(sample.streams_data.values())).sample_idx) for sample in source_samples
+    )
+    source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
+
     if has_physical:
         # TODO: support multiple input steps
         sources = [
             [stream_data.source_raw[0] for stream_data in sample.streams_data.values()]
             for sample in source_samples
         ]
-        sample_idxs = [
-            list(sample.streams_data.values())[0].sample_idx for sample in source_samples
-        ]
         stream_infos = list(cf.streams.values())
         target_channels = [list(stream.val_target_channels) for stream in stream_infos]
         source_channels = [list(stream.val_source_channels) for stream in stream_infos]
         geoinfo_channels = [[] for _ in stream_infos]  # TODO obtain channels
-
-        twh = TimeWindowHandler(
-            val_cfg.start_date,
-            val_cfg.end_date,
-            val_cfg.time_window_len,
-            val_cfg.time_window_step,
-        )
-        source_windows = (twh.window(idx) for idx in sample_idxs)
-        source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
         data = io.OutputBatchData(
             sources,
@@ -246,6 +245,7 @@ def write_output(
             for subset in data.items():
                 zio.write_zarr(subset)
         if has_latents:
+            time_step = val_cfg.get("forecast", {}).get("time_step", np.timedelta64(0, "h"))
             # Step 0 is emitted only for a chunk that encoded its input. With
             # offset 0, shift forecast latents to reserve 0 for that initial state.
             latent_steps = [step + int(forecast_offset == 0) for step in timestep_idxs_chunk]
@@ -254,11 +254,15 @@ def write_output(
             for latent_step, latents_in_step in zip(latent_steps, latents_all, strict=True):
                 for sample_idx, latents_in_sample in enumerate(latents_in_step):
                     if latents_in_sample:
+                        source_interval = source_intervals[sample_idx]
+                        forecast_step = max(0, latent_step - int(forecast_offset == 0))
                         zio.write_latent(
                             sample_start + sample_idx,
                             latent_step,
                             latents_in_sample,
                             coords=_get_latent_coords(cf, source_samples[sample_idx]),
+                            source_interval=source_interval,
+                            valid_time=source_interval.end + forecast_step * time_step,
                             num_register_tokens=int(cf.get("num_register_tokens", 0)),
                             num_class_tokens=int(cf.get("num_class_tokens", 0)),
                         )
