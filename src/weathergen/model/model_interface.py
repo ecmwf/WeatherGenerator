@@ -27,7 +27,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
-from weathergen.model.latent_cascade import CascadeBlock
+from weathergen.model.latent_cascade import CascadeBlock, _PairOperator
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, build_model_params
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
@@ -212,6 +212,11 @@ def init_model_and_shard(
     return model, model_params
 
 
+def _reset_linear_and_norm(module) -> None:
+    if isinstance(module, torch.nn.Linear | torch.nn.LayerNorm):
+        module.reset_parameters()
+
+
 def reinit_new_cascade_blocks(model, missing_keys) -> None:
     """
     Re-apply the zero initialisation of latent-cascade blocks that were not in the loaded
@@ -220,7 +225,8 @@ def reinit_new_cascade_blocks(model, missing_keys) -> None:
     from the checkpoint are left untouched.
     """
     for name, module in model.named_modules():
-        if isinstance(module, CascadeBlock) and any(k.startswith(name + ".") for k in missing_keys):
+        is_cascade_op = isinstance(module, CascadeBlock | _PairOperator)
+        if is_cascade_op and any(k.startswith(name + ".") for k in missing_keys):
             module.init_residual_branches()
 
 
@@ -257,6 +263,24 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
             )
             # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
             maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+        # learnable query banks missing from the checkpoint (e.g. a latent level added for
+        # fine-tuning): they are plain Parameters, not covered by the module re-init below,
+        # so load a fresh initialisation through the same sharded path
+        for param_name, sharded_meta_param in meta_sharded_sd.items():
+            if param_name in maybe_sharded_sd:
+                continue
+            q_init = model.encoder.initial_q_cells(param_name)
+            if q_init is None:
+                continue
+            if is_root():
+                logger.info(f"Initializing {param_name} (not found in checkpoint).")
+            maybe_sharded_sd[param_name] = torch.nn.Parameter(
+                distribute_tensor(
+                    q_init.to(sharded_meta_param.dtype),
+                    sharded_meta_param.device_mesh,
+                    sharded_meta_param.placements,
+                )
+            )
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
 
@@ -278,7 +302,10 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
                     logger.info(f"Initializing new module not found in checkpoint: {path}")
                 module_to_init = all_modules[path]
                 module_to_init.to_empty(device="cuda")
-                module_to_init.reset_parameters()
+                # reset every Linear / LayerNorm below the new module (as in
+                # Model.reset_parameters); the module itself may be a container without
+                # reset_parameters()
+                module_to_init.apply(_reset_linear_and_norm)
             reinit_new_cascade_blocks(model, mkeys)
 
     else:

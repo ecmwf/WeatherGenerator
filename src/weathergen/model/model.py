@@ -676,6 +676,10 @@ class Model(torch.nn.Module):
 
         self.apply(_reset_params)
 
+        # learnable cell queries are plain Parameters (one bank per latent level), not
+        # covered by the line above: re-draw them (uninitialised memory after to_empty)
+        self.encoder.reset_q_cells()
+
         # multi-resolution latent: the line above resets every Linear, including the
         # zero-initialised last projections of the cascade blocks; re-apply those
         for cascade in self.latent_cascades():

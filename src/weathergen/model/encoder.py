@@ -199,6 +199,47 @@ class EncoderModule(torch.nn.Module):
             ae_local_global,
         )
 
+    def initial_q_cells(self, state_dict_key: str) -> torch.Tensor | None:
+        """
+        Freshly initialised learnable queries for a model state-dict key, or None if the
+        key is not a query bank. Used to fill query banks missing from a checkpoint
+        (e.g. a latent level added when fine-tuning) on the FSDP loading path.
+        """
+        if state_dict_key == "encoder.q_cells":
+            return self._build_q_cells(self.cf, self.domain).detach()
+        prefix = "encoder._q_cells_param_dict."
+        if self.multi_level and state_dict_key.startswith(prefix):
+            lvl = int(state_dict_key[len(prefix) :])
+            return self._build_q_cells(self.cf, self.domain_pyramid.domain(lvl)).detach()
+        return None
+
+    def reset_q_cells(self) -> None:
+        """
+        Re-draw the learnable cell queries of every latent level, with the same
+        initialisation as in __init__.
+
+        Needed after meta-device creation + to_empty() (the FSDP path): the model's
+        reset_parameters() only re-initialises nn.Linear / nn.LayerNorm, so the queries
+        would otherwise keep uninitialised memory (garbage or NaN).
+        """
+        from torch.distributed.tensor import DTensor, distribute_tensor
+
+        banks = [(self.q_cells, self.domain)]
+        if self.multi_level:
+            banks += [
+                (q, self.domain_pyramid.domain(int(lvl)))
+                for lvl, q in self._q_cells_param_dict.items()
+            ]
+        with torch.no_grad():
+            for q, domain in banks:
+                full = self._build_q_cells(self.cf, domain).detach().to(dtype=q.dtype)
+                if isinstance(q, DTensor):
+                    full = full.to(q.to_local().device)
+                    full = distribute_tensor(full, q.device_mesh, q.placements)
+                else:
+                    full = full.to(q.device)
+                q.copy_(full)
+
     def q_cells_all_levels(self) -> list[torch.nn.Parameter]:
         """The learnable query banks of all latent levels."""
         q = [self.q_cells]
@@ -355,8 +396,15 @@ class EncoderModule(torch.nn.Module):
                 continue
 
             if is_empty:
-                # one-token dummy chunk (see run_empty_chunks above)
-                toks = tokens.new_zeros((1, *tokens.shape[1:]))
+                # one-token dummy chunk (see run_empty_chunks above). The dummy input must
+                # require grad: FSDP2 attaches its post-backward hook (reduce-scatter +
+                # reshard) to a module call only if at least one input requires grad.
+                # With a constant input the first local block's post-backward is deferred
+                # to the end of backward, so this rank issues one all-gather less and in a
+                # different order than ranks without empty chunks -> NCCL deadlock.
+                toks = tokens.new_zeros(
+                    (1, *tokens.shape[1:]), requires_grad=torch.is_grad_enabled()
+                )
                 toks_global = tokens_global[0:1]
                 cell_lens_cur = torch.cat([zero_pad, torch.ones_like(zero_pad)])
             else:

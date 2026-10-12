@@ -56,6 +56,15 @@ class EMAModel:
         if needs_strip:
             maybe_sharded_sd = {k.removeprefix("module."): v for k, v in maybe_sharded_sd.items()}
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
+        # non-persistent buffers (the latent cascades' parent/child index maps of a
+        # multi-resolution latent) are not in the state dict and to_empty() left them
+        # uninitialised: rebuild them on the model's device
+        cascades = getattr(self.ema_model, "latent_cascades", lambda: [])()
+        if cascades:
+            p = next(self.ema_model.parameters())
+            device = p.to_local().device if hasattr(p, "to_local") else p.device
+            for cascade in cascades:
+                cascade.rebuild_index_buffers(device)
         self.ema_model.eval()
 
     def requires_grad_(self, flag: bool):
