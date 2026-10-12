@@ -537,8 +537,8 @@ class ZarrIO:
         return list(example_sample.group_keys())
 
     @functools.cached_property
-    def forecast_steps(self) -> list[int]:
-        """Query available forecast steps in this zarr store."""
+    def forecast_steps(self) -> list[str]:
+        """Query available forecast steps (zarr group names, sorted numerically) in this store."""
         # assume stream/samples/forecast_steps are orthogonal
         _, _, _, example_stream = self._example_sample_and_stream()
         all_steps = sorted(example_stream.group_keys(), key=int)
