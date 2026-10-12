@@ -448,7 +448,7 @@ class Regridder:
         """
         # set coords
         new_coords = data.coords.copy()
-        #find lat, lon max and mins
+        # find lat, lon max and mins
         lat_min = data["latitude"].min().item()
         lat_max = data["latitude"].max().item()
         lon_min = data["longitude"].min().item()
