@@ -221,13 +221,16 @@ def _process_stream(
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
         return run_id, stream, {}, {}
 
-    needs_plotting = stream_dict.get("plotting") and type_ in ("zarr", "anemoi-target")
+    # Readers backed by the zarr model output (anemoi-target also reads its predictions from
+    # zarr); only these can load data for plotting, score maps or score recomputation.
+    reads_zarr = type_ in ("zarr", "anemoi-target")
+    needs_plotting = stream_dict.get("plotting") and reads_zarr
     needs_scoring = stream_dict.get("evaluation", False)
 
     # --- Determine scoring state before loading any data ---
-    plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ == "zarr"
+    plot_score_maps = plot_score_options.get("plot_score_maps", False) and reads_zarr
     plot_score_init_time_series = (
-        plot_score_options.get("plot_score_init_time_series", False) and type_ == "zarr"
+        plot_score_options.get("plot_score_init_time_series", False) and reads_zarr
     )
 
     recomputable_metrics = {}
@@ -238,7 +241,7 @@ def _process_stream(
         stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
         needs_score_recomputation = (
             plot_score_maps or plot_score_init_time_series or bool(recomputable_metrics)
-        ) and type_ == "zarr"
+        ) and reads_zarr
 
     # --- Load data only when necessary ---
     output_data = None
