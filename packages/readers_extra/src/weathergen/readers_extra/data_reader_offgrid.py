@@ -20,7 +20,9 @@ an overwrite config switches its reader to this one::
         base_type: anemoi
         offgrid:
           coords: /abs/path/coords.npy
-          geoinfos: /abs/path/geoinfos.npy
+          geoinfos:
+            file: /abs/path/geoinfos.npy
+            channels: [z, lsm]
           frequency: 6h
 
 ``base_type`` is the reader type the stream was trained with, i.e. its ``type`` in the config of
@@ -30,20 +32,27 @@ the trained model. It has to be repeated because ``type`` now selects this reade
 (see ``_grid_coords``). All points are returned: ``max_num_targets`` of the trained model is not
 applied; set ``offgrid.max_num_targets`` to limit them.
 
+``geoinfos`` provides the static geoinfo channels of the stream at the points: ``file`` has one
+column per entry of ``channels``, and each static geoinfo channel takes the column of its name.
+Geoinfo channels that depend on time, e.g. ``insolation`` or ``cos_local_time``, are computed
+for each timestep (see ``_anemoi_dynamic_forcings``) and need no column.
+
 The model input (source) of the stream stays what it is: the data read by the reader of
 ``base_type``. Only the points the model predicts at (target) change: their coordinates and
-geoinfos come from the offgrid files, and their values are NaN since there is no data there.
+geoinfos are those of the offgrid points, and their values are NaN since there is no data there.
 Channels and normalization are taken from the reader of ``base_type`` as well, so they are the
 ones the model was trained with, whatever the format of the dataset. For a stream with several
 files the offgrid points are returned once, by the reader of the first file.
 """
 
+import datetime
 import logging
 import re
 from pathlib import Path
 from typing import override
 
 import numpy as np
+from earthkit.data.utils.dates import to_datetime
 from numpy.typing import NDArray
 
 from weathergen.common.config import parse_timedelta
@@ -83,8 +92,9 @@ class DataReaderOffgrid(DataReaderTimestep):
             information about stream. Keys beyond the common ones: ``base_type`` (reader type
             the stream was trained with) and ``offgrid`` with ``coords`` (file with an (N, 2)
             array of [lat, lon] in degrees, or the name of a default grid such as ``o96`` or
-            ``N320``), ``geoinfos`` ((N, G) array with one column per geoinfo channel of the
-            stream; needed if the stream has geoinfo channels), ``frequency`` (spacing of the
+            ``N320``), ``geoinfos`` (``file`` with an (N, G) array and ``channels`` with the names
+            of its G columns, which have to include the static geoinfo channels of the stream;
+            needed if the stream has static geoinfo channels), ``frequency`` (spacing of the
             offgrid samples; default is the time window step) and ``max_num_targets`` (default
             is -1, i.e. all points).
 
@@ -169,15 +179,36 @@ class DataReaderOffgrid(DataReaderTimestep):
         self.geoinfo_channels = self.reader.geoinfo_channels
         self.geoinfo_idx = self.reader.geoinfo_idx
 
-        # geoinfos at the offgrid points, one column per geoinfo channel
-        self.geoinfos = np.zeros((len(self.latitudes), 0), dtype=np.float32)
+        # geoinfo channels that depend on time are computed on the fly, all others are static
+        self.geoinfo_channels_static, self.geoinfo_channels_dynamic = [], []
+        self.geoinfo_idx_static_lin, self.geoinfo_idx_dynamic_lin = [], []
+        for idx, ch in enumerate(self.geoinfo_channels):
+            if ch in _anemoi_dynamic_forcings():
+                self.geoinfo_channels_dynamic += [ch]
+                self.geoinfo_idx_dynamic_lin += [idx]
+            else:
+                self.geoinfo_channels_static += [ch]
+                self.geoinfo_idx_static_lin += [idx]
+
+        # static geoinfos at the offgrid points; the columns of the file are named by
+        # offgrid.geoinfos.channels and each static geoinfo channel takes the column of its name
+        geoinfos, geoinfos_channels = np.zeros((self.n_points, 0), dtype=np.float32), []
         if offgrid.get("geoinfos") is not None:
-            self.geoinfos = np.load(offgrid["geoinfos"]).astype(np.float32)
-        assert self.geoinfos.shape == (len(self.latitudes), len(self.geoinfo_idx)), (
-            f"{ds_name}: offgrid.geoinfos must have shape "
-            f"({len(self.latitudes)}, {len(self.geoinfo_idx)}) to match the offgrid points and "
-            f"the geoinfo channels {list(self.geoinfo_channels)}, got {self.geoinfos.shape}."
+            geoinfos = np.load(offgrid["geoinfos"]["file"]).astype(np.float32)
+            geoinfos_channels = list(offgrid["geoinfos"]["channels"])
+        assert geoinfos.shape == (self.n_points, len(geoinfos_channels)), (
+            f"{ds_name}: offgrid.geoinfos.file must have shape "
+            f"({self.n_points}, {len(geoinfos_channels)}) to match the offgrid points and "
+            f"offgrid.geoinfos.channels, got {geoinfos.shape}."
         )
+        missing = [ch for ch in self.geoinfo_channels_static if ch not in geoinfos_channels]
+        assert len(missing) == 0, (
+            f"{ds_name}: static geoinfo channels {missing} are not in offgrid.geoinfos.channels "
+            f"{geoinfos_channels}."
+        )
+        self.geoinfos_static = geoinfos[
+            :, [geoinfos_channels.index(ch) for ch in self.geoinfo_channels_static]
+        ]
 
         _logger.info(f"{ds_name}: offgrid points: {len(self.latitudes)}")
         _logger.info(f"{ds_name}: source channels: {self.source_channels}")
@@ -244,15 +275,23 @@ class DataReaderOffgrid(DataReaderTimestep):
         latlon = np.stack([self.latitudes, self.longitudes], axis=1)
         coords = np.tile(latlon, (n_steps, 1))
 
-        # there is no data at the offgrid points; NaN marks the values as missing
+        # there is no data at the offgrid points
         data = np.full((n_total, len(channels_idx)), np.nan, dtype=np.float32)
-
-        # repeat geoinfos for each timestep
-        geoinfos = np.tile(self.geoinfos, (n_steps, 1))
 
         # compute absolute times for each step, then repeat per point
         step_times = self.data_start_time + self.period * t_idxs
         datetimes = np.repeat(step_times, self.n_points)
+
+        # repeat static geoinfos for each timestep and compute the dynamic ones for it
+        geoinfos_static = np.tile(self.geoinfos_static, (n_steps, 1))
+        geoinfos_dynamic = _anemoi_get_dynamic_forcings(
+            step_times, self.latitudes, self.longitudes, self.geoinfo_channels_dynamic
+        )
+        # insert static and dynamic into common array
+        geoinfos = np.empty((n_total, len(self.geoinfo_idx)), dtype=np.float32)
+        geoinfos[:, self.geoinfo_idx_static_lin] = geoinfos_static
+        for i, ch in zip(self.geoinfo_idx_dynamic_lin, self.geoinfo_channels_dynamic, strict=True):
+            geoinfos[:, i] = geoinfos_dynamic[ch]
 
         rd = ReaderData(
             coords=coords,
@@ -338,3 +377,99 @@ def _clip_lon(lons: NDArray) -> NDArray[np.float32]:
     Clip longitudes to the range [-180, 180] and ensure periodicity.
     """
     return ((lons + 180.0) % 360.0 - 180.0).astype(np.float32)
+
+
+# Dynamic forcings, same code as in data_reader_anemoi_rt.py:
+
+# Code taken from https://github.com/metno/bris-inference/blob/main/bris/forcings.py
+# based on EarthKit's implementation as used in Anemoi datasets
+
+
+# This is copied from earthkit, probably need to declare this somewhere
+def _anemoi_julian_day(date):
+    date = to_datetime(date)
+    delta = date - datetime.datetime(date.year, 1, 1)
+    julian_day = delta.days + delta.seconds / 86400.0
+    return julian_day
+
+
+def _anemoi_cos_julian_day(date):
+    radians = _anemoi_julian_day(date) / 365.25 * np.pi * 2
+    return np.cos(radians)
+
+
+def _anemoi_sin_julian_day(date):
+    radians = _anemoi_julian_day(date) / 365.25 * np.pi * 2
+    return np.sin(radians)
+
+
+def _anemoi_local_time(date, lon):
+    date = to_datetime(date)
+    delta = date - datetime.datetime(date.year, date.month, date.day)
+    hours_since_midnight = (delta.days + delta.seconds / 86400.0) * 24
+    return (lon / 360.0 * 24.0 + hours_since_midnight) % 24
+
+
+def _anemoi_cos_local_time(date, lon):
+    radians = _anemoi_local_time(date, lon) / 24 * np.pi * 2
+    return np.cos(radians)
+
+
+def _anemoi_sin_local_time(date, lon):
+    radians = _anemoi_local_time(date, lon) / 24 * np.pi * 2
+    return np.sin(radians)
+
+
+def _anemoi_insolation(date, lat, lon):
+    return _anemoi_cos_solar_zenith_angle(date, lat, lon)
+
+
+def _anemoi_cos_solar_zenith_angle(date, lat, lon):
+    from earthkit.meteo.solar import cos_solar_zenith_angle
+
+    date = to_datetime(date)
+    result = cos_solar_zenith_angle(
+        date,
+        lat,
+        lon,
+    )
+    return result.flatten()
+
+
+def _anemoi_dynamic_forcings():
+    """
+    Returns list of dynamic forcings calculated by anemoi datasets.
+    If this list is updated the forcing should also be implemented in get_dynamic_forcings
+    """
+    return [
+        "cos_julian_day",
+        "sin_julian_day",
+        "cos_local_time",
+        "sin_local_time",
+        "insolation",
+    ]
+
+
+def _anemoi_get_dynamic_forcings(times, lats, lons, selection):
+    forcings = {}
+    if selection is None:
+        return forcings
+
+    forcings = {k: [] for k in selection}
+
+    for time in times:
+        if "cos_julian_day" in selection:
+            forcings["cos_julian_day"] += [np.full(lats.shape, _anemoi_cos_julian_day(time))]
+        if "sin_julian_day" in selection:
+            forcings["sin_julian_day"] += [np.full(lats.shape, _anemoi_sin_julian_day(time))]
+        if "cos_local_time" in selection:
+            forcings["cos_local_time"] += [_anemoi_cos_local_time(time, lons)]
+        if "sin_local_time" in selection:
+            forcings["sin_local_time"] += [_anemoi_sin_local_time(time, lons)]
+        if "insolation" in selection:
+            forcings["insolation"] += [_anemoi_insolation(time, lats, lons)]
+
+    for k in selection:
+        forcings[k] = np.concatenate(forcings[k], axis=0)
+
+    return forcings
