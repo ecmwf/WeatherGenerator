@@ -187,7 +187,7 @@ def write_output(
         forecast_offset=forecast_offset,
     )
 
-    store_path = config.get_path_results(cf, mini_epoch)
+    store_path = config.get_path_results(cf, mini_epoch, batch_idx)
 
     with zarrio_writer(store_path) as zio:
         for subset in data.items():

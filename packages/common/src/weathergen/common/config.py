@@ -208,7 +208,12 @@ def save(config: Config, mini_epoch: int | None):
         f.write(json_str)
 
 
-def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
+def load_run_config(
+    run_id: str,
+    mini_epoch: int | None,
+    model_path: str | None,
+    private_config: Config | None = None,
+) -> Config:
     """
     Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
@@ -216,7 +221,9 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     Args:
         run_id: Run ID of the pretrained WeatherGenerator model
         mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
-        model_path: Path to the model directory. If None, uses the model_path from private config.
+        model_path: Parent model directory containing run-id subdirectories.
+        private_config: Configuration whose full_model_path specifies the exact checkpoint
+            directory (without appending run_id), used when model_path is None.
 
     Returns:
         Configuration object loaded from the specified run and mini_epoch.
@@ -228,7 +235,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     else:
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
-            path = get_path_model(run_id=run_id)
+            path = get_path_model(private_config, run_id=run_id)
         else:
             path = Path(model_path) / run_id
 
@@ -451,7 +458,7 @@ def load_merge_configs(
     if from_run_id is None:
         base_config = _load_base_conf(base)
     else:
-        base_config = load_run_config(from_run_id, mini_epoch, None)
+        base_config = load_run_config(from_run_id, mini_epoch, None, private_config=private_config)
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
@@ -698,26 +705,57 @@ def load_streams(streams_directory: Path) -> Config:
     return OmegaConf.create(streams)
 
 
-def get_path_run(config: Config) -> Path:
-    """Get the current runs results_path for storing run results and logs."""
-    return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
+def _get_path_output(path_config: Config, key: str, folder: str, run_id: str) -> Path:
+    """Use an exact directory override, or the existing shared per-run location."""
+    if path_config.get(key) is not None:
+        return Path(path_config[key])
+    working_dir = path_config.get("path_shared_working_dir")
+    root = Path(working_dir) if working_dir is not None else _get_shared_wg_path()
+    return root / folder / run_id
 
 
-def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
-    """Get the current runs model_path for storing model checkpoints."""
-    if config or run_id:
-        run_id = run_id if run_id else get_run_id_from_config(config)
+def get_path_logs(config: Config) -> Path:
+    """Get the application log directory."""
+    return _get_path_output(config, "path_logs", "logs", get_run_id_from_config(config))
+
+
+def get_path_model(model_config: Config | None = None, run_id: str | None = None) -> Path:
+    """Get full_model_path if set, otherwise the shared per-run checkpoint directory."""
+    if model_config or run_id:
+        run_id = run_id if run_id else get_run_id_from_config(model_config)
     else:
-        msg = f"Missing run_id and cannot infer it from config: {config}"
+        msg = f"Missing run_id and cannot infer it from config: {model_config}"
         raise ValueError(msg)
-    return _get_shared_wg_path() / "models" / run_id
+    private_config = model_config if model_config is not None else _load_private_conf()
+    return _get_path_output(private_config, "full_model_path", "models", run_id)
 
 
-def get_path_results(config: Config, mini_epoch: int) -> Path:
-    """Get the path to validation results for a specific mini_epoch and rank."""
-    ext = StoreType(config.zarr_store).value  # validate extension
-    base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
+def get_path_results(
+    model_config: Config,
+    mini_epoch: int | None = None,
+    step: int | None = None,
+) -> Path:
+    """Get the path for run results. Returns the results directory when mini_epoch is None."""
+    base_path = _get_path_output(
+        model_config, "path_results", "results", get_run_id_from_config(model_config)
+    )
+    if mini_epoch is None:
+        return base_path
+
+    ext = StoreType(model_config.zarr_store).value  # validate extension
+    default_name = f"validation_chkpt{mini_epoch:05d}_rank{model_config.rank:04d}.{ext}"
+    fname_template = model_config.get("output_name")
+    if fname_template is None:
+        fname = default_name
+    else:
+        try:
+            fname = fname_template.format(
+                epoch=mini_epoch,
+                step=step,
+                rank=model_config.rank,
+            )
+        except (IndexError, KeyError, ValueError):
+            fname = default_name
 
     return base_path / fname
 
