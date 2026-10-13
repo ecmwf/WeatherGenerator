@@ -521,8 +521,6 @@ def plot_loss_per_stream(
                 if x_lim is not None:
                     plt.xlim(x_lim)
 
-                # if len(title_col) == 0 :
-                # import code; code.interact( local=locals())
                 title_loss = (
                     ".".join(title_col.split(".")[:-1]) if title_col is not None else stream_name
                 )
