@@ -49,7 +49,6 @@ files the offgrid points are returned once, by the reader of the first file.
 
 import datetime
 import logging
-import re
 from pathlib import Path
 from typing import override
 
@@ -150,11 +149,11 @@ class DataReaderOffgrid(DataReaderTimestep):
             self.init_empty()
             return
 
-        # caches lats and lons; coords names a default grid or a file with the points
-        if re.fullmatch(r"[oOnN]\d+", str(offgrid["coords"])):
-            coords = _grid_coords(offgrid["coords"])
-        else:
+        # caches lats and lons; coords is a file with the points or names a default grid
+        if str(offgrid["coords"]).endswith(".npy"):
             coords = np.load(offgrid["coords"])
+        else:
+            coords = _grid_coords(str(offgrid["coords"]))
         assert coords.ndim == 2 and coords.shape[1] == 2, (
             f"{ds_name}: offgrid.coords must have shape (N, 2) for [lat, lon], got {coords.shape}."
         )
@@ -343,6 +342,9 @@ def _grid_coords(grid: str) -> NDArray[np.float64]:
     array of shape (num_points, 2) with [lat, lon] in degrees
     """
 
+    assert grid[:1].lower() in ("o", "n") and grid[1:].isdigit(), (
+        f"unknown grid '{grid}': expected 'o<N>' or 'N<N>', e.g. 'o96' or 'N320'."
+    )
     kind, num_lats = grid[0].lower(), int(grid[1:])
 
     # Gaussian latitudes, north to south
