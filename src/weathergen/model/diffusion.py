@@ -27,6 +27,7 @@ import logging
 import math
 
 import numpy as np
+import numpy.typing as npt
 import torch
 
 from weathergen.common.config import Config, get_path_run
@@ -126,9 +127,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             "concatenate_hdMLP",
             "spatial_ada_ln",
         }, (
-            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', 'concatenate', 'concatenate_hiddendim', 'concatenate_hdMLP', or 'spatial_ada_ln' when "
+            "fe_diffusion_model_conditioning_type must be 'cross_attn', "
+            "'additive', 'cross_attn_rev', 'concatenate', 'concatenate_hiddendim', ",
+            f"'concatenate_hdMLP', or 'spatial_ada_ln' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
-            f"(got '{self.conditioning_type}')"
+            f"(got '{self.conditioning_type}')",
         )
 
         if self.conditioning and (self.conditioning in ["date_time", "date", "time"]):
@@ -227,8 +230,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.training:
             if tokens is None or fstep is None or meta_info is None:
                 raise ValueError(
-                    f"During training, tokens, fstep, and meta_info are required. "
-                    f"Got tokens={tokens is not None}, fstep={fstep}, meta_info={meta_info is not None}"
+                    f"During training, tokens, fstep, and meta_info are required. Got "
+                    f"tokens={tokens is not None}, fstep={fstep}, meta_info={meta_info is not None}"
                 )
             return self.training_forward(
                 tokens=tokens,
@@ -294,7 +297,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
         elif self.conditioning == "forecast":
-            # c = meta_info["ERA5"].params["conditioning_tokens"]          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
+            # c = meta_info["ERA5"].params["conditioning_tokens"]
+            # X_{t-1} as conditioning (model.py extracts last step as target,
+            # passes second-to-last here)
             c = meta_info["LATENT_CONDITIONING_TOKENS"]
 
         if self.training:
@@ -312,7 +317,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Compute sigma from noise_level_rn.
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
         # log_uniform: noise_level_rn is log_sigma directly; sigma = exp(noise_level_rn)
-        # during validation, noise_level_rn is set to a fixed value (default: 0.0), so sigma = exp(0) = 1.0 (no noise) by default
+        # during validation, noise_level_rn is set to a fixed value (default: 0.0),
+        # so sigma = exp(0) = 1.0 (no noise) by default
         if self.noise_distribution == "log_uniform" or not self.training:
             sigma = noise_level_rn.exp()
         elif self.noise_distribution == "log_normal":
@@ -362,7 +368,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         net_input = c_in * x
 
         # Project input tokens and (where applicable) conditioning tokens from the encoder
-        # latent space (ae_global_dim_embed) up to the diffusion latent space (fe_diffusion_latent_dim).
+        # latent space (ae_global_dim_embed) up to the diffusion latent space
+        # (fe_diffusion_latent_dim).
         # For ada_ln, `c` is an embedded scalar signal, not encoder tokens — skip its projection.
         if self.latent_proj_up is not None:
             net_input = self.latent_proj_up(net_input)
@@ -370,7 +377,8 @@ class DiffusionForecastEngine(torch.nn.Module):
                 c = self.latent_proj_up(c)
 
         if self.conditioning_type == "concatenate":
-            # Concatenate conditioning tokens along sequence dim: (B, H, D') cat (B, H, D') -> (B, 2H, D')
+            # Concatenate conditioning tokens along sequence dim:
+            # (B, H, D') cat (B, H, D') -> (B, 2H, D')
             # Also double coords so 2D RoPE matches the doubled sequence length
             combined = torch.cat([net_input, c], dim=1)
             coords_combined = torch.cat([coords, coords], dim=1) if coords is not None else None
@@ -398,7 +406,8 @@ class DiffusionForecastEngine(torch.nn.Module):
             return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
 
         if self.conditioning_type == "concatenate_hdMLP":
-            # Concatenate along hidden dim then project back: (B, H, D') cat (B, H, D') -> (B, H, 2D') -> Linear -> (B, H, D')
+            # Concatenate along hidden dim then project back:
+            # (B, H, D') cat (B, H, D') -> (B, H, 2D') -> Linear -> (B, H, D')
             combined = torch.cat([net_input, c], dim=2)
             projected = self.concat_hd_proj(combined)
             raw_out = self.net(
@@ -529,7 +538,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         if sigma_post <= sigma:
             return x_cur, t_cur
         t_post = torch.full_like(t_cur, sigma_post)
-        x_post = x_cur + math.sqrt(sigma_post**2 - sigma**2) * self.s_noise * torch.randn_like(x_cur)
+        x_post = x_cur + math.sqrt(sigma_post**2 - sigma**2) * self.s_noise * torch.randn_like(
+            x_cur
+        )
         return x_post, t_post
 
     def _run_ode(
@@ -609,9 +620,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
             logger.info(
                 f"Inference sigma schedule ({self.noise_distribution}): "
-                f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
+                f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, "
+                f"train_max={sigma_max_train:.4f}), "
                 f"sigma_min_eff={sigma_min_eff:.4f} "
-                f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
+                f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/"
+                f"{sigma_min_from_dist:.4f}), "
                 f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn}"
             )
 
@@ -871,7 +884,7 @@ class DateTimeEncoder(torch.nn.Module):
         self.date_only = conditioning == "date"
         self.time_only = conditioning == "time"
 
-    def forward(self, timestamp: np.ndarray | np.datetime64) -> torch.Tensor:
+    def forward(self, timestamp: npt.NDArray | np.datetime64) -> torch.Tensor:
         """
         Encode numpy datetime64 timestamps into 32D multi-frequency calendar embeddings.
 

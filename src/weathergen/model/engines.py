@@ -661,7 +661,8 @@ class ForecastingEngine(torch.nn.Module):
                             == "ada_ln",
                         )
                     )
-                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
+                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for
+                # cross_attn conditioning
                 if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
                     self.fe_blocks.append(
                         MultiCrossAttentionHead(
@@ -761,14 +762,14 @@ class ForecastingEngine(torch.nn.Module):
                 else:
                     if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
                         assert conditioning is not None, (
-                            "conditioning must be provided for diffusion model conditioning"
+                            "conditioning must be provided when enabled"
                         )
                         tokens = checkpoint(
                             block, tokens, coords, noise_emb, conditioning, use_reentrant=False
                         )
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
                         assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                            "conditioning (e.g. enc(X_t)) needed for cross_attn conditioning"
                         )
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     elif (
@@ -776,27 +777,29 @@ class ForecastingEngine(torch.nn.Module):
                         == "cross_attn_rev"
                     ):
                         assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) must be provided for cross_attn_rev conditioning"
+                            "conditioning (e.g. enc(X_t)) needed for cross_attn_rev conditioning"
                         )
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "additive":
                         assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) must be provided for additive conditioning"
+                            "conditioning (e.g. enc(X_t)) needed for additive conditioning"
                         )
                         tokens = tokens + conditioning
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate":
-                        # Conditioning already baked into tokens via sequence concat in DiffusionForecastEngine.denoise()
+                        # Conditioning already baked into tokens via sequence concat
+                        # in DiffusionForecastEngine.denoise()
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     elif (
                         self.cf.get("fe_diffusion_model_conditioning_type", None)
                         == "concatenate_hiddendim"
                     ):
-                        # Conditioning already baked into tokens via hidden-dim concat in DiffusionForecastEngine.denoise()
+                        # Conditioning already baked into tokens via hidden-dim concat
+                        # in DiffusionForecastEngine.denoise()
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     else:
                         assert conditioning is None, (
-                            "conditioning should not be provided when diffusion model conditioning is disabled"
+                            "conditioning should not be provided when conditioning is disabled"
                         )
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
         else:

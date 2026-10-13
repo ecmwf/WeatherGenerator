@@ -322,8 +322,6 @@ def plot_loss_avg(
 
     _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
-    print(runs_data[0].train)
-
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
