@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
@@ -72,8 +72,7 @@ class AnemoiTargetSource:
 
     Each date needed by a call is read once, consecutive dates in one slice and
     slices in parallel on up to ``n_threads`` threads.  A date read decompresses
-    every variable, so ``max_read_bytes`` bounds the data in flight;
-    ``cache_bytes`` bounds the LRU of dates kept across calls.
+    every variable, so ``max_read_bytes`` bounds the data in flight.
     """
 
     def __init__(
@@ -82,7 +81,6 @@ class AnemoiTargetSource:
         ensemble_member: int = 0,
         n_threads: int | None = None,
         max_read_bytes: int = 2 * 1024**3,
-        cache_bytes: int = 1024**3,
     ) -> None:
         """
         Set up a target source for one or more anemoi datasets.
@@ -99,8 +97,6 @@ class AnemoiTargetSource:
             ``min(16, cpu_count)``).
         max_read_bytes : int
             Upper bound on data decompressed by in-flight reads.
-        cache_bytes : int
-            Size of the LRU of already-read dates, kept across calls.
 
         Returns
         -------
@@ -110,10 +106,9 @@ class AnemoiTargetSource:
         self.ensemble_member = ensemble_member
         self.n_threads = n_threads or min(16, os.cpu_count() or 4)
         self.max_read_bytes = max_read_bytes
-        self.cache_bytes = cache_bytes
-        self._cache: OrderedDict[tuple, NDArray] = OrderedDict()
-        self._cache_used = 0
         self._ds = None
+        self._variables: list[str] = []
+        self._dates: NDArray = np.empty(0, dtype="datetime64[s]")
         self._warned: set[str] = set()
 
     @classmethod
@@ -222,8 +217,8 @@ class AnemoiTargetSource:
         Read the targets of a batch of requests from the anemoi dataset.
 
         Each date needed by the batch is read once, consecutive dates in one
-        slice and slices in parallel; dates read in earlier calls come from the
-        cache.  Channels missing from the dataset are left as NaN.
+        slice and slices in parallel.  Channels missing from the dataset are
+        left as NaN.
 
         Parameters
         ----------
@@ -284,14 +279,7 @@ class AnemoiTargetSource:
             for b, d in enumerate(self._date_indices(block_times)):
                 by_date[int(d)].append((ri, b))
 
-        to_read = []
-        for d in sorted(by_date):
-            if (key := (tuple(channels), d)) in self._cache:
-                self._cache.move_to_end(key)
-                _fill_blocks(targets, by_date[d], self._cache[key])
-            else:
-                to_read.append(d)
-        if not to_read:
+        if not by_date:
             return targets
 
         # Split into runs of consecutive dates, keeping <= max_read_bytes in flight.
@@ -299,7 +287,7 @@ class AnemoiTargetSource:
         in_flight = max(1, self.max_read_bytes // bytes_per_date)
         n_threads = max(1, min(self.n_threads, in_flight))
         run_len = max(1, in_flight // n_threads)
-        to_read = np.array(to_read)
+        to_read = np.array(sorted(by_date))
         runs = [
             run[i : i + run_len]
             for run in np.split(to_read, np.flatnonzero(np.diff(to_read) != 1) + 1)
@@ -310,11 +298,10 @@ class AnemoiTargetSource:
             for out in pool.map(read_run, runs):
                 for d, arr in out.items():
                     _fill_blocks(targets, by_date[d], arr)
-                    self._cache_put((tuple(channels), d), arr)
 
         _logger.info(
             f"Anemoi targets: {len(requests)} targets from {len(by_date)} dates "
-            f"({len(to_read)} read in {len(runs)} slice(s))."
+            f"read in {len(runs)} slice(s)."
         )
         return targets
 
@@ -352,26 +339,3 @@ class AnemoiTargetSource:
             arr[:, cols] = block[i, var_idx, member].T
             out[lo + i] = arr
         return out
-
-    def _cache_put(self, key: tuple, arr: NDArray) -> None:
-        """
-        Add a date array to the LRU cache, evicting the oldest entries if full.
-
-        Parameters
-        ----------
-        key : tuple
-            ``(channels, date index)`` cache key.
-        arr : NDArray
-            ``(n_grid, n_channels)`` values of the date; not cached if larger
-            than the whole cache.
-
-        Returns
-        -------
-        None
-        """
-        if arr.nbytes > self.cache_bytes:
-            return
-        self._cache[key] = arr
-        self._cache_used += arr.nbytes
-        while self._cache_used > self.cache_bytes:
-            self._cache_used -= self._cache.popitem(last=False)[1].nbytes

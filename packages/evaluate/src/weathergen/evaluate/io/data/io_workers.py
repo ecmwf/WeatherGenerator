@@ -82,6 +82,28 @@ def _compute_early_channel_selection(
     return idxs, effective
 
 
+def _read_channels(array: zarr.Array, channel_idxs: list[int] | None) -> NDArray:
+    """
+    Read a ``(ipoints, channels[, ens])`` zarr array, keeping only ``channel_idxs``.
+
+    Parameters
+    ----------
+    array : zarr.Array
+        Prediction or target data array.
+    channel_idxs : list[int] | None
+        Channel indices to read, or ``None`` for all channels.
+
+    Returns
+    -------
+    NDArray
+        The array with only the selected channels.
+    """
+    if channel_idxs is None:
+        return np.asarray(array)
+    selection = (slice(None), channel_idxs) + (slice(None),) * (array.ndim - 2)
+    return array.oindex[selection]
+
+
 def _read_sample(
     zarr_path: str,
     sample: int,
@@ -178,18 +200,13 @@ def _read_sample(
     for fs in fsteps:
         base = f"{sample}/{stream}/{fs}"
 
-        # Direct array access — bypasses OutputDataset/as_xarray/dask entirely
-        pred_data = np.asarray(ds[f"{base}/prediction/data"])
-        target_data = np.asarray(ds[f"{base}/target/data"]) if read_target else None
+        # Direct array access — bypasses OutputDataset/as_xarray/dask entirely.
+        # Channels are selected in the zarr read so unneeded chunks are never decoded.
+        pred_data = _read_channels(ds[f"{base}/prediction/data"], channel_idxs)
+        target_data = (
+            _read_channels(ds[f"{base}/target/data"], channel_idxs) if read_target else None
+        )
         times_data = np.asarray(ds[f"{base}/prediction/times"])
-
-        # Select channels by index
-        if channel_idxs is not None:
-            pred_data = (
-                pred_data[:, channel_idxs] if pred_data.ndim == 2 else pred_data[:, channel_idxs, :]
-            )
-            if target_data is not None:
-                target_data = target_data[:, channel_idxs]
 
         # Handle sub-steps (gridded data with multiple valid_times per fstep).
         # For scatter/observation data each observation has its own timestamp,

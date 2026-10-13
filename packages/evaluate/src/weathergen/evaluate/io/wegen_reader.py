@@ -11,6 +11,7 @@
 import json
 import logging
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Third-party
@@ -421,7 +422,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         self.rank_files: list[Path] = self._discover_rank_files()
 
         # Validate metadata consistency across all ranks (fail-fast)
-        self._validated_metadata: dict = self._validate_rank_metadata()
+        self._validated_metadata: dict = self._read_rank_metadata()
 
         # Metadata caches — populated lazily on first access
         self._cached_samples: set[int] | None = None
@@ -502,39 +503,13 @@ class WeatherGenZarrReader(WeatherGenReader):
                 )
         return files
 
-    def _validate_rank_metadata(self) -> dict:
-        """Validate that all rank files share identical metadata (streams, fsteps).
-
-        Returns a dict with the validated common metadata.
-        Raises ValueError if any inconsistency is detected.
-        """
-        reference_streams: set[str] | None = None
-        reference_fsteps: set[int] | None = None
-
-        for rank_file in self.rank_files:
-            with zarrio_reader(rank_file) as zio:
-                streams = set(zio.streams)
-                fsteps = set(int(f) for f in zio.forecast_steps)
-
-            if reference_streams is None:
-                reference_streams = streams
-                reference_fsteps = fsteps
-            else:
-                if streams != reference_streams:
-                    raise ValueError(
-                        f"Stream mismatch: {rank_file.name} has {streams}, "
-                        f"expected {reference_streams}"
-                    )
-                if fsteps != reference_fsteps:
-                    raise ValueError(
-                        f"Forecast step mismatch: {rank_file.name} has {fsteps}, "
-                        f"expected {reference_fsteps}"
-                    )
-
-        return {
-            "streams": reference_streams or set(),
-            "forecast_steps": reference_fsteps or set(),
-        }
+    def _read_rank_metadata(self) -> dict:
+        """Read the streams and forecast steps, which all ranks of a run share, from one rank."""
+        with self._open_any_rank_for_metadata() as zio:
+            return {
+                "streams": set(zio.streams),
+                "forecast_steps": set(int(f) for f in zio.forecast_steps),
+            }
 
     def _open_any_rank_for_metadata(self):
         """Open a rank file for metadata queries. Tries each rank until one succeeds.
@@ -556,13 +531,22 @@ class WeatherGenZarrReader(WeatherGenReader):
         rank0: offset=0, rank1: offset=len(rank0_samples), etc.
         """
         if self._rank_sample_map is None:
+
+            def _local_samples(zarr_file: Path) -> list[int]:
+                with zarrio_reader(zarr_file) as zio:
+                    return sorted(int(s) for s in zio.samples)
+
+            # Opening a rank file is I/O bound, so open them on parallel threads.
+            n_threads = min(32, len(self.rank_files))
+            with ThreadPoolExecutor(max_workers=n_threads) as pool:
+                all_local = list(pool.map(_local_samples, self.rank_files))
+
             self._rank_sample_map = {}
             offset = 0
-            for zarr_file in self.rank_files:
-                with zarrio_reader(zarr_file) as zio:
-                    local = sorted(int(s) for s in zio.samples)
+            for zarr_file, local in zip(self.rank_files, all_local, strict=True):
                 self._rank_sample_map[zarr_file] = (local, offset)
                 offset += len(local)
+            _logger.info(f"Indexed {offset} samples across {len(self.rank_files)} rank file(s).")
         return self._rank_sample_map
 
     def _merge_fsteps(self, all_das: dict, global_sample_coords) -> dict:
@@ -822,16 +806,19 @@ class WeatherGenZarrReader(WeatherGenReader):
                 zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
             )
             dummy1 = zio.get_data(sample_idx, stream, fstep_idx)
+            # The (ipoint, 2) lat/lon array that as_xarray() takes "lat"/"lon" from;
+            # building the full DataArrays also reads data, times and geoinfo.
+            coords = np.asarray(dummy.prediction.coords)
+            coords1 = np.asarray(dummy1.prediction.coords)
 
-        da = dummy.prediction.as_xarray()
-        da1 = dummy1.prediction.as_xarray()
-
+        lat, lon = coords[..., 0], coords[..., 1]
+        lat1, lon1 = coords1[..., 0], coords1[..., 1]
         if (
-            da["lat"].shape != da1["lat"].shape
-            or da["lon"].shape != da1["lon"].shape
+            lat.shape != lat1.shape
+            or lon.shape != lon1.shape
             or not (
-                np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values))
-                and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
+                np.allclose(np.sort(lat), np.sort(lat1))
+                and np.allclose(np.sort(lon), np.sort(lon1))
             )
         ):
             _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
