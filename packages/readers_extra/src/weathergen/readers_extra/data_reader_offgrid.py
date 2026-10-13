@@ -32,7 +32,7 @@ applied; set ``offgrid.max_num_targets`` to limit them.
 
 The model input (source) of the stream stays what it is: the data read by the reader of
 ``base_type``. Only the points the model predicts at (target) change: their coordinates and
-geoinfos come from the offgrid files, with placeholder values where a dataset would have data.
+geoinfos come from the offgrid files, and their values are NaN since there is no data there.
 Channels and normalization are taken from the reader of ``base_type`` as well, so they are the
 ones the model was trained with, whatever the format of the dataset. For a stream with several
 files the offgrid points are returned once, by the reader of the first file.
@@ -244,8 +244,8 @@ class DataReaderOffgrid(DataReaderTimestep):
         latlon = np.stack([self.latitudes, self.longitudes], axis=1)
         coords = np.tile(latlon, (n_steps, 1))
 
-        # offgrid reader provides no atmospheric values; keep placeholder zeros
-        data = np.zeros((n_total, len(channels_idx)), dtype=np.float32)
+        # there is no data at the offgrid points; NaN marks the values as missing
+        data = np.full((n_total, len(channels_idx)), np.nan, dtype=np.float32)
 
         # repeat geoinfos for each timestep
         geoinfos = np.tile(self.geoinfos, (n_steps, 1))
