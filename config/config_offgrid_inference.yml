@@ -27,16 +27,18 @@ streams:
     # the trained model; has to be repeated because `type` is replaced above
     base_type: obs
     offgrid:
-      # points to run at: a default grid (o96, N320) or the absolute path of an
-      # (N, 2) .npy array of [lat, lon] in degrees
+      # points to run at: a default grid (o96, N320) or the path of an (N, 2)
+      # .npy array of [lat, lon] in degrees; a relative path is resolved from the
+      # working directory
       coords: N320
       # static geoinfos at the points; required if the stream has static
       # geoinfo_channels, otherwise omit or set null. Entries of geoinfo_channels
       # that depend on time (insolation, cos/sin_local_time, cos/sin_julian_day)
       # are computed and need no column.
       geoinfos:
-        # absolute path of an (N, G) .npy array
-        file: /abs/path/geoinfos.npy
+        # path of an (N, G) .npy array; a relative path is resolved from the
+        # working directory
+        file: /path/to/geoinfos.npy
         # names of its G columns; each static entry of geoinfo_channels takes
         # the column of its name, further columns are ignored
         channels: [elevation]

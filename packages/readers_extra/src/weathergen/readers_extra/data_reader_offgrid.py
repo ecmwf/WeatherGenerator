@@ -19,9 +19,9 @@ an overwrite config switches its reader to this one::
         type: offgrid
         base_type: anemoi
         offgrid:
-          coords: /abs/path/coords.npy
+          coords: /path/to/coords.npy
           geoinfos:
-            file: /abs/path/geoinfos.npy
+            file: /path/to/geoinfos.npy
             channels: [z, lsm]
           frequency: 6h
 
@@ -36,6 +36,8 @@ applied; set ``offgrid.max_num_targets`` to limit them.
 column per entry of ``channels``, and each static geoinfo channel takes the column of its name.
 Geoinfo channels that depend on time, e.g. ``insolation`` or ``cos_local_time``, are computed
 for each timestep (see ``_anemoi_dynamic_forcings``) and need no column.
+
+A relative path of a file is resolved from the working directory.
 
 The model input (source) of the stream stays what it is: the data read by the reader of
 ``base_type``. Only the points the model predicts at (target) change: their coordinates and
