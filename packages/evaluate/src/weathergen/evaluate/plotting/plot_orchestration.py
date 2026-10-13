@@ -34,6 +34,7 @@ from weathergen.evaluate.plotting.plot_orchestration_utils import (
 )
 from weathergen.evaluate.plotting.plot_utils import (
     PlotSubdir,
+    apply_font_settings,
     bar_plot_metric_region,
     heat_maps_metric_region,
     plot_metric_region,
@@ -305,8 +306,11 @@ def run_score_map_pipeline(
         "fig_size": cfg.get("fig_size", None),
         "animation_format": cfg.get("animation_format", "mp4"),
         "fps": cfg.get("fps", 2),
+        "font_size": cfg.get("font_size"),
+        "font_type": cfg.get("font_type"),
     }
     output_basedir = str(reader.runplot_dir)
+    apply_font_settings(plotter_cfg)
     run_id = reader.run_id
 
     _computed, raw_results = _compute_scores(
@@ -908,8 +912,11 @@ def plot_data(
         "n_bins": global_plotting_opts.get("n_bins", 50),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
         | plot_settings.get("plot_subtimesteps", False),
+        "font_size": global_plotting_opts.get("font_size"),
+        "font_type": global_plotting_opts.get("font_type"),
     }
 
+    apply_font_settings(plotter_cfg)
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")
@@ -930,6 +937,23 @@ def plot_data(
 
     model_output = output_data
     if output_data is None:
+        empty = [
+            name
+            for name, val in (
+                ("forecast_step", available_data.fsteps),
+                ("sample", available_data.samples),
+                ("channel", available_data.channels),
+            )
+            if val is not None and len(val) == 0
+        ]
+        if empty:
+            _logger.warning(
+                f"RUN {run_id} - {stream}: none of the requested {', '.join(empty)}(s) "
+                f"for plotting exist in the output (available forecast steps: "
+                f"{sorted(int(f) for f in reader.get_forecast_steps())[:5]}...). "
+                f"Skipping plots."
+            )
+            return
         model_output = reader.get_data(
             stream,
             samples=available_data.samples,
@@ -1270,8 +1294,11 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "add_grid": eval_opt.get("add_grid", False),
         "plot_ensemble": eval_opt.get("plot_ensemble", False),
         "baseline": eval_opt.get("baseline", None),
+        "font_size": plt_opt.get("font_size"),
+        "font_type": plt_opt.get("font_type"),
     }
 
+    apply_font_settings(plot_cfg)
     # Prefix the output directory with a run_ids identifier so that
     # different evaluation configs can coexist in the same base directory.
     run_ids_str = "_".join(sorted(runs.keys()))
