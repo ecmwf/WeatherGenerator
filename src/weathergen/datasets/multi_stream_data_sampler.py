@@ -10,7 +10,7 @@
 import dataclasses
 import logging
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 import numpy as np
 import torch
@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 
 from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
 from weathergen.common.io import IOReaderData
-from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.batch import ModelBatch, MultiBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -650,7 +650,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return batch
 
-    def _get_batch(self, idx: int, num_forecast_steps: int):
+    def _get_batch(self, idx: int, num_forecast_steps: int) -> MultiBatch:
         """
         Assemble a batch using the sample corresponding to idx
         """
@@ -681,7 +681,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             num_target_samples,
             self.output_offset,
             num_output_steps,
-            encoder_streams=self.encoder_streams,
         )
 
         # for all streams
@@ -758,9 +757,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
-        return batch
+        return MultiBatch(batch, self.encoder_streams)
 
-    def __iter__(self) -> ModelBatch:
+    def __iter__(self) -> Iterator[MultiBatch]:
         """
         Return one batch of data
 
@@ -793,8 +792,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # ensure the batch is valid, i.e. not completely empty and no NaN values
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
-                not_valid = batch.sources_empty() or batch.is_nan()
-                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
+                not_valid = (
+                    all(view.sources_empty() for view in batch.batches.values())
+                    or all(view.sources_nan() for view in batch.batches.values())
+                    or batch.batch.targets_nan()
+                )
+                not_valid = not_valid or (
+                    batch.batch.targets_empty() if "masking" in mode else False
+                )
 
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not_valid:

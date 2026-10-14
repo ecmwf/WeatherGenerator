@@ -12,7 +12,7 @@ from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config, get_encoder_configs
-from weathergen.datasets.batch import BatchSamples, MultiSamples
+from weathergen.datasets.batch import BatchSamples, MultiBatch
 from weathergen.datasets.utils import hp_level_to_num_cells
 from weathergen.model.engines import (
     EmbeddingEngine,
@@ -378,12 +378,14 @@ class MultiEncoder(torch.nn.Module):
             }
         )
 
-    def forward(self, model_params, batch: MultiSamples):
+    def forward(self, model_params, batch: MultiBatch):
         tokens = {}
         posteriors = {}
 
         for name, encoder in self.encoders.items():
-            latents, encoder_posteriors = encoder(model_params, batch[name])
+            latents, encoder_posteriors = encoder(
+                model_params, batch.batches[name].get_source_samples()
+            )
             tokens[name] = latents
             posteriors[name] = encoder_posteriors
 
