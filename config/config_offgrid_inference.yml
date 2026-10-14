@@ -1,0 +1,46 @@
+# (C) Copyright 2026 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Overwrite config for offgrid inference: runs a trained model at an arbitrary
+# set of points instead of the grid of its dataset. Use it together with
+# --from-run-id, e.g.
+#
+#   uv run inference --from-run-id <run_id> --config config/config_offgrid_inference.yml
+#
+# Only the offgrid part is given here. Everything else about the stream
+# (dataset, channels, tokenization, embedding and prediction networks) is
+# inherited from the config of the trained model. Do not set streams_directory
+# in this file: that would replace the inherited streams instead of extending
+# them.
+
+streams:
+  # name of the stream in the config of the trained model
+  SYNOP:
+    type: offgrid
+    # reader type the stream was trained with, i.e. its `type` in the config of
+    # the trained model; has to be repeated because `type` is replaced above
+    base_type: obs
+    offgrid:
+      # points to run at: a default grid (o96, N320) or the path of an (N, 2)
+      # .npy array of [lat, lon] in degrees; a relative path is resolved from the
+      # working directory
+      coords: N320
+      # static geoinfos at the points; required if the stream has static
+      # geoinfo_channels, otherwise omit or set null. Entries of geoinfo_channels
+      # that depend on time (insolation, cos/sin_local_time, cos/sin_julian_day)
+      # are computed and need no column.
+      geoinfos:
+        # path of an (N, G) .npy array; a relative path is resolved from the
+        # working directory
+        file: /path/to/geoinfos.npy
+        # names of its G columns; each static entry of geoinfo_channels takes
+        # the column of its name, further columns are ignored
+        channels: [elevation]
+      # temporal spacing between offgrid samples; defaults to time_window_step
+      frequency: 6h
