@@ -6,8 +6,6 @@ from functools import lru_cache
 import astropy_healpix as hp
 import numpy as np
 
-from weathergen.common.config import get_healpix_levels, validate_domains
-
 
 class Domain:
     def __init__(self, healpix_level, bbox=None):
@@ -23,10 +21,6 @@ class Domain:
                 else (lon >= lon_min) | (lon <= lon_max)
             )
             cells = cells[in_lon & (lat >= lat_min) & (lat <= lat_max)]
-            if not len(cells):
-                raise ValueError(
-                    f"Domain at HEALPix level {healpix_level} contains no cell centres."
-                )
             for _ in range(pad_rings):
                 with warnings.catch_warnings(action="ignore"):
                     neighbours = hp.neighbours(cells, 2**healpix_level, order="nested")
@@ -34,26 +28,19 @@ class Domain:
         self.active_cells = cells
         self.to_compact = np.full(12 * 4**healpix_level, -1, dtype=np.int64)
         self.to_compact[cells] = np.arange(len(cells), dtype=np.int64)
-        self.active_cells.flags.writeable = False
-        self.to_compact.flags.writeable = False
         self._centres = None
 
     @classmethod
     def from_config(cls, cf, level):
-        validate_domains(cf)
-        if type(level) is not int or level not in get_healpix_levels(cf):
-            raise ValueError(f"Domain level {level} is not an existing stream level.")
         bbox = cf.get("domains", {}).get(level)
+        if bbox is None:
+            return _domain(level, None)
         settings = (
-            None
-            if bbox is None
-            else (
-                bbox["lon_min"],
-                bbox["lon_max"],
-                bbox["lat_min"],
-                bbox["lat_max"],
-                bbox.get("pad_rings", 0),
-            )
+            bbox["lon_min"],
+            bbox["lon_max"],
+            bbox["lat_min"],
+            bbox["lat_max"],
+            bbox.get("pad_rings", 0),
         )
         return _domain(level, settings)
 

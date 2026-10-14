@@ -1,4 +1,5 @@
-encoders: {default: {}}
+encoders: {default: {streams: [ERA5]}}
+decoders: {default: {streams: [ERA5], healpix_level: 4}}
 
 streams_directory: "./integration_tests/streams/"
 run_path: "./results"

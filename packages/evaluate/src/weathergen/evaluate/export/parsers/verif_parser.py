@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
 
+from weathergen.common.io import source_stream_name
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import (
     find_pl,
@@ -179,6 +180,8 @@ class VerifParser(CfParser):
             .replace("%D", self.data_type)
             .replace("%R", self.run_id)
         )
+        if "%S" not in self.verif_template:
+            outfile = outfile.with_name(f"{self.stream}_{outfile.name}")
         outfile = Path(self.output_dir) / outfile
         pathdir = outfile.parent
         _logger.info(f"Output directory: {pathdir}")
@@ -550,7 +553,9 @@ class VerifParser(CfParser):
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
-            wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
+            wg_unit = mapped_units.get(
+                source_stream_name(self.stream), mapped_units.get("DEFAULT", None)
+            )
             verif_unit = mapped_info.get("verif_unit", None)
             if wg_unit != verif_unit:
                 # perform unit conversion

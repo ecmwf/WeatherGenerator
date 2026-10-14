@@ -41,6 +41,16 @@ LATENT_STREAM = "latent"
 _logger = logging.getLogger(__name__)
 
 
+def physical_output_name(decoder: str, stream: str) -> str:
+    """Qualified prediction identifier shared by metrics, storage and evaluation."""
+    return f"{decoder}::{stream}"
+
+
+def source_stream_name(output_name: str) -> str:
+    """Resolve source metadata without dropping the output's decoder identity."""
+    return output_name.rsplit("::", 1)[-1]
+
+
 def is_ndarray(obj: typing.Any) -> bool:
     """Check if object is an ndarray (wraps the linter warning)."""
     return isinstance(obj, (np.ndarray))  # noqa: TID251
@@ -251,6 +261,7 @@ class OutputDataset:
 
     channels: list[str]
     geoinfo_channels: list[str]
+    source_stream: str | None = None
 
     @classmethod
     def create(
@@ -286,6 +297,7 @@ class OutputDataset:
             "channels": self.channels,
             "geoinfo_channels": self.geoinfo_channels,
             "source_interval": self.source_interval.as_dict(),
+            "source_stream": self.source_stream or source_stream_name(self.item_key.stream),
         }
 
     @functools.cached_property
@@ -331,7 +343,13 @@ class OutputDataset:
             "lon": ("ipoint", coords[..., 1]),
             **geoinfo,
         }
-        return xr.DataArray(expanded_data, dims=dims, coords=ds_coords, name=self.name)
+        return xr.DataArray(
+            expanded_data,
+            dims=dims,
+            coords=ds_coords,
+            name=self.name,
+            attrs={"source_stream": self.source_stream or source_stream_name(self.item_key.stream)},
+        )
 
 
 class OutputItem:
@@ -696,14 +714,10 @@ class OutputBatchData:
         datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
         data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
 
-        if (datapoints.stop - datapoints.start) == 0:
-            target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
-            preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
-        else:
-            target_data = self.targets[offset_key.forecast_step][stream_idx][datapoints]
-            preds_data = self.predictions[offset_key.forecast_step][stream_idx].transpose(1, 2, 0)[
-                datapoints
-            ]
+        target_data = self.targets[offset_key.forecast_step][stream_idx][datapoints]
+        preds_data = self.predictions[offset_key.forecast_step][stream_idx].transpose(1, 2, 0)[
+            datapoints
+        ]
 
         assert len(data_coords.channels) == target_data.shape[1], (
             "Number of channel names does not align with target data."

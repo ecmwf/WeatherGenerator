@@ -91,7 +91,12 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
         "lon": ("ipoint", coords_arr[:, 1]),
     }
 
-    da_result = xr.DataArray(data_arr, dims=data_dims, coords=data_coords)
+    da_result = xr.DataArray(
+        data_arr,
+        dims=data_dims,
+        coords=data_coords,
+        attrs={"output_stream": stream, "source_stream": ds_group.attrs["source_stream"]},
+    )
 
     return (global_sample, fstep, da_result)
 
@@ -384,9 +389,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     fsteps = get_fsteps(fsteps_cfg, first_zarr)
     streams = get_streams(stream, first_zarr)
 
-    processed_samples = []  # for verif
-
     for stream in streams:
+        processed_samples = []
         grid_type = get_grid_type(data_type, stream, first_zarr)
         stream_channels = get_channels(channels_cfg, stream, first_zarr)
         kwargs["stream"] = stream
@@ -504,8 +508,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
             _logger.info(f"Rank {rank_label}: wrote {samples_written}/{len(samples)} samples.")
 
-    # Only save here if need to merge samples (i.e. verif), otherwise saved in process_sample
-    if processed_samples[0] is not None:
-        parser.save(processed_samples)
+        # Keep merged verification exports separate for each decoder-stream output.
+        if processed_samples and processed_samples[0] is not None:
+            parser.save(processed_samples)
 
     _logger.info(f"Export complete across {len(rank_files)} rank(s).")

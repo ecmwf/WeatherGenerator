@@ -1,4 +1,5 @@
-encoders: {default: {}}
+encoders: {default: {streams: [ERA5, NPPATMS, SurfaceCombined]}}
+decoders: {default: {streams: [ERA5, NPPATMS, SurfaceCombined], healpix_level: 5}}
 
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1

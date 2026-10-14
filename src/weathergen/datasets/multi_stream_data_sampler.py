@@ -16,7 +16,12 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common.config import Config, get_encoder_configs, get_healpix_levels
+from weathergen.common.config import (
+    Config,
+    get_decoder_configs,
+    get_encoder_configs,
+    get_healpix_levels,
+)
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
@@ -28,7 +33,7 @@ from weathergen.datasets.data_reader_base import (
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.domain import Domain
 from weathergen.datasets.masking import Masker
-from weathergen.datasets.stream_data import StreamData, spoof
+from weathergen.datasets.stream_data import DecoderTargets, StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import get_tokens_lens
 from weathergen.readers_extra.registry import get_extra_reader
@@ -145,6 +150,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
         self.check_samples(self._get_fsm())
         self.streams_datasets = self._init_stream_datasets(cf)
+        decoder_configs = get_decoder_configs(cf)
+        self.stream_decoders = {
+            stream.info["stream_id"]: {
+                name: (decoder_cf.healpix_level, coord_dim)
+                for name, decoder_cf in decoder_configs.items()
+                if stream_name in decoder_cf.streams
+            }
+            for (stream_name, stream), coord_dim in zip(
+                self.streams_datasets.items(), self.get_targets_coords_size(), strict=True
+            )
+        }
 
         # RNG seed setup
         rs = cf.data_loading.rng_seed
@@ -468,22 +484,24 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             if token_data[0] is None and token_data[1] is None:
                 continue
 
-            if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
-                    stream_info,
-                    rdata,
-                    token_data,
-                    (time_win_target.start, time_win_target.end),
-                    target_mask,
-                )
-                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
+            if "target_coords" in mode or "target_values" in mode:
+                stream_data.target_is_spoof[timestep_idx] = rdata.is_spoof
+                for name, (level, _) in self.stream_decoders[stream_info["stream_id"]].items():
+                    stream_data.decoder_targets[name][timestep_idx] = (
+                        self.tokenizer.get_decoder_targets(
+                            stream_info,
+                            rdata,
+                            token_data,
+                            (time_win_target.start, time_win_target.end),
+                            target_mask,
+                            level,
+                        )
+                    )
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
-                    stream_info,
                     rdata,
                     token_data,
-                    (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
 
@@ -535,6 +553,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             num_output_steps,
             num_cells,
         )
+        for name, (level, coord_dim) in self.stream_decoders[stream_info["stream_id"]].items():
+            stream_data.decoder_targets[name] = [
+                DecoderTargets.empty(len(self.domains[level]), coord_dim)
+                for _ in range(num_output_steps)
+            ]
 
         stream_data = self._build_stream_data_input(
             modes,

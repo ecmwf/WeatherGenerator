@@ -29,6 +29,7 @@ from joblib import Parallel, delayed
 from joblib.externals.loky import get_reusable_executor
 from numpy.typing import NDArray
 
+from weathergen.common.io import source_stream_name
 from weathergen.evaluate.io.data.dataarray_builders import (
     EnsembleSelect,
     Regridder,
@@ -476,6 +477,11 @@ def _assemble_substep(
         da_pred = add_lead_time_coord(da_pred)
         da_pred = scale_z_channels(da_pred, state.stream)
         da_tar = scale_z_channels(da_tar, state.stream)
+
+    for data in (da_tar, da_pred):
+        data.attrs.update(
+            output_stream=state.stream, source_stream=source_stream_name(state.stream)
+        )
 
     return da_tar, da_pred
 

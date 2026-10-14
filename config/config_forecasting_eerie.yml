@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-encoders: {default: {}}
+encoders: {default: {streams: [EERIE_ATMO, EERIE_OCEAN_ELEM, EERIE_OCEAN_NODE]}}
+decoders: {default: {streams: [EERIE_ATMO, EERIE_OCEAN_ELEM, EERIE_OCEAN_NODE], healpix_level: 5}}
 
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1

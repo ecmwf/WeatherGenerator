@@ -1,3 +1,6 @@
+encoders: {default: {streams: [IFS_ATMO, FESOM_ELEM, FESOM_NODE]}}
+decoders: {default: {streams: [IFS_ATMO, FESOM_ELEM, FESOM_NODE], healpix_level: 5}}
+
 streams_directory: "./config/streams/fesom/"
 
 ae_local_num_queries: 2

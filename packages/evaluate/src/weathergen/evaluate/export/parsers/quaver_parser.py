@@ -262,7 +262,8 @@ class QuaverParser(CfParser):
         # rank_label is the zero-padded rank of the source zarr file, e.g. "0000".
         rank_tag = f"_rank{rank_label}" if rank_label else ""
         return (
-            Path(self.output_dir) / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}"
+            Path(self.output_dir)
+            / f"{self.data_type}_{level_type}_{self.run_id}_{self.stream}_{self.expver}"
             f"{rank_tag}.{self.file_extension}"
         )
 

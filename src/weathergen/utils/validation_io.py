@@ -47,8 +47,21 @@ def write_output(
     assert len(outputs_physical) == 1
     target_aux_out = target_aux_out[outputs_physical[0]]
 
-    # collect all target / prediction-related information
-    fp32 = torch.float32
+    # The storage stream axis is decoder-qualified; metadata stays native-stream keyed.
+    outputs = [
+        (decoder, stream)
+        for decoder, settings in cf.decoders.items()
+        for stream in settings.streams
+    ]
+    stream_names = [io.physical_output_name(decoder, stream) for decoder, stream in outputs]
+    stream_infos = [cf.streams[stream] for _, stream in outputs]
+    requested = val_cfg.output.get("streams")
+    write_latents = requested is not None and io.LATENT_STREAM in requested
+    output_streams = {
+        name: i
+        for i, (name, (_, source)) in enumerate(zip(stream_names, outputs, strict=True))
+        if requested is None or name in requested or source in requested
+    }
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
@@ -62,48 +75,40 @@ def write_output(
         targets_coords_all += [[]]
         targets_times_all += [[]]
         targets_lens += [[]]
-        for sname in cf.streams.keys():
-            # handle spoof data: do not write since it might corrupt validation (spoofing invisible
-            # there)
-            if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                targets = target_aux_out.physical[t_idx][sname]["target"]
-                # for-loop to make sure we have a consistent number of samples
-                preds_s = [np.zeros((1, 0, t.shape[1])) for t in targets]
-                targets_s = [np.zeros((0, t.shape[1])) for t in targets]
-                t_coords_s = [np.zeros((0, 2)) for t in targets]
-                t_times_s = [np.array([]).astype("datetime64[ns]") for t in targets]
-
-            else:
-                preds = model_output.get_physical_prediction(t_idx, sname)
-                targets = target_aux_out.physical[t_idx][sname]["target"]
-
-                preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
-
-                # handle forcing streams or if sample is empty
-                if preds is None:
-                    # preds are empty so create copy of target and add ensemble dimension
-                    assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
-                    preds = [target.clone().unsqueeze(0) for target in targets]
-
-                for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
-                    target_data = target_aux_out.physical[t_idx][sname]
-                    t_coords = target_data["target_coords"][i_batch]
-                    t_times = target_data["target_times"][i_batch]
-
-                    idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
-                    if idxs_inv is not None:
-                        pred = pred[:, idxs_inv]
-                        target = target[idxs_inv]
-                        t_coords = t_coords[idxs_inv]
-                        t_times = t_times[idxs_inv]
-
-                    # denormalize data if requested and map to storage format
-                    preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-                    targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
-
-                    # extract original target coords and times from target data
-                    t_coords_s += [t_coords.cpu().numpy()]
-                    t_times_s += [t_times.astype("datetime64[ns]")]
+        for decoder, sname in outputs:
+            target_data = target_aux_out.physical[t_idx][sname]
+            targets = target_data["target"]
+            predictions = model_output.get_physical_prediction(t_idx, decoder, sname)
+            preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
+            for i_batch, native_target in enumerate(targets):
+                prediction = predictions[i_batch] if predictions is not None else None
+                if prediction is None:
+                    indices = torch.empty(0, dtype=torch.long, device=native_target.device)
+                    pred = native_target.new_empty(
+                        (cf.streams[sname].pred_head.ens_size, 0, native_target.shape[-1])
+                    )
+                else:
+                    indices, pred = prediction.indices, prediction.values
+                if target_data["is_spoof"][i_batch]:
+                    indices, pred = indices[:0], pred[:, :0]
+                native_indices = indices.detach().cpu().numpy()
+                idxs_inv = target_data["idxs_inv"][i_batch]
+                if idxs_inv is not None:
+                    # idxs_inv maps original -> native order. Rank selected native rows
+                    # by their original positions, rather than applying a full permutation
+                    # to a shorter decoder subset.
+                    original_positions = np.argsort(idxs_inv.detach().cpu().numpy())
+                    order = np.argsort(original_positions[native_indices])
+                    native_indices = native_indices[order]
+                    pred = pred[:, torch.as_tensor(order, device=pred.device)]
+                target = native_target[torch.as_tensor(native_indices, device=native_target.device)]
+                coords = target_data["target_coords"][i_batch]
+                coords = coords[torch.as_tensor(native_indices, device=coords.device)]
+                times = target_data["target_times"][i_batch][native_indices]
+                preds_s.append(dn_data(sname, pred.float()).detach().cpu().numpy())
+                targets_s.append(dn_data(sname, target.float()).detach().cpu().numpy())
+                t_coords_s.append(coords.cpu().numpy())
+                t_times_s.append(times.astype("datetime64[ns]"))
 
             targets_lens[-1] += [[]]
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
@@ -113,38 +118,20 @@ def write_output(
             targets_coords_all[-1] += [np.concatenate(t_coords_s)]
             targets_times_all[-1] += [np.concatenate(t_times_s)]
 
-    if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
+    if not write_latents and not any(p.shape[1] for step in preds_all for p in step):
         _logger.warning("Writing no data since predictions are empty.")
         return
 
     # collect source information
-    sources = []
-    for sample in batch.get_source_samples().get_samples():
-        sources += [[]]
-        for _, stream_data in sample.streams_data.items():
-            # TODO: support multiple input steps
-            sources[-1] += [stream_data.source_raw[0]]
+    sources = [
+        [sample.streams_data[stream].source_raw[0] for _, stream in outputs]
+        for sample in batch.get_source_samples().get_samples()
+    ]
 
     sample_idxs = [
         list(sample.streams_data.values())[0].sample_idx
         for sample in batch.get_source_samples().get_samples()
     ]
-
-    # more prep work
-
-    # output stream names to be written, use specified ones or all if nothing specified
-    stream_names = list(cf.streams.keys())
-    stream_infos = list(cf.streams.values())
-    if val_cfg.get("output").get("streams") is not None:
-        output_stream_names = val_cfg.output.streams
-    else:
-        output_stream_names = stream_names
-
-    write_latents = io.LATENT_STREAM in output_stream_names
-    output_streams: dict[str, int] = {
-        name: stream_names.index(name) for name in output_stream_names if name != io.LATENT_STREAM
-    }
-    _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
     source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in stream_infos]

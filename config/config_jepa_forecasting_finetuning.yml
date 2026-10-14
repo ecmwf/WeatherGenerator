@@ -7,6 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+encoders: {default: {streams: [ERA5]}}
+decoders: {default: {streams: [ERA5], healpix_level: 5}}
+
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
 fe_num_blocks: 16

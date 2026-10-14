@@ -324,18 +324,10 @@ def tokenize_apply_mask_source(
 
 
 def tokenize_apply_mask_target(
-    stream_id,
-    hl,
     idxs_cells,
-    idxs_cells_lens,
     mask_tokens,
     mask_channels,
     rdata,
-    time_win,
-    hpy_verts_rots,
-    hpy_verts_local,
-    hpy_nctrs,
-    enc_time,
 ):
     """
     Apply masking to the data.
@@ -346,34 +338,29 @@ def tokenize_apply_mask_target(
 
     """
 
-    def return_empty(rdata, idxs_cells_lens):
+    def return_empty(rdata):
         do = torch.zeros([0, rdata.data.shape[-1]])
         coords = torch.zeros([0, rdata.coords.shape[-1]])
         dt = np.array([], dtype=np.datetime64)
-        masked_points_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
-        # data, datetimes, coords, coords_local, masked_points_per_cell
-        return do, dt, coords, coords, masked_points_per_cell
+        return do, dt, coords
 
     # convert to token level, forgetting about cells
     idxs_tokens = [i for t in idxs_cells for i in t]
-    idxs_lens = [i for t in idxs_cells_lens for i in t]
 
     # apply spatial masking on a per token level
     if mask_tokens is None:
-        return return_empty(rdata, idxs_cells_lens)
+        return return_empty(rdata)
 
     # filter tokens using mask to obtain flat per data point index list
     idxs_data = [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
 
     if len(idxs_data) == 0:
-        return return_empty(rdata, idxs_cells_lens)
+        return return_empty(rdata)
 
     idxs_data = torch.cat(idxs_data)
 
     # apply mask
     datetimes = np.atleast_1d(rdata.datetimes[idxs_data])
-    datetimes_enc = enc_time(datetimes, time_win)
-    geoinfos = rdata.geoinfos[idxs_data]
     coords = rdata.coords[idxs_data]
     data = rdata.data[idxs_data]
 
@@ -381,33 +368,7 @@ def tokenize_apply_mask_target(
         assert False, "to be implemented"
         # data = data_padded[ : channel_mask]
 
-    num_tokens_per_cell = [len(idxs) for idxs in idxs_cells_lens]
-    mask_tokens_per_cell = torch.split(torch.from_numpy(mask_tokens), num_tokens_per_cell)
-    masked_points_per_cell = torch.tensor(
-        [
-            torch.tensor([len(t) for t, m in zip(tt, mm, strict=False) if m]).sum()
-            for tt, mm in zip(idxs_cells, mask_tokens_per_cell, strict=False)
-        ]
-    ).to(dtype=torch.int32)
-
-    # compute encoding of target coordinates used in prediction network
-    if torch.tensor(idxs_lens).sum() > 0:
-        coords_local = get_target_coords_local(
-            stream_id,
-            hl,
-            masked_points_per_cell,
-            coords,
-            geoinfos,
-            datetimes_enc,
-            hpy_verts_rots,
-            hpy_verts_local,
-            hpy_nctrs,
-        )
-        coords_local.requires_grad = False
-    else:
-        coords_local = torch.tensor([])
-
-    return data, datetimes, coords, coords_local, masked_points_per_cell
+    return data, datetimes, coords
 
 
 def get_source_coords_local(
@@ -449,15 +410,11 @@ def get_target_coords_local(
     and for healpix cell vertices themselves
     """
 
-    # target_coords_lens = [len(t) for t in target_coords]
-    # tcs, target_coords = tcs_optimized(target_coords)
     target_coords = s2tor3(*theta_phi_to_standard_coords(coords))
     tcs = torch.split(target_coords, masked_points_per_cell.tolist())
 
     if target_coords.shape[0] == 0:
         return torch.tensor([])
-    # target_geoinfos = torch.cat(target_geoinfos)
-    # target_times = torch.cat(target_times)
 
     verts00_rots, verts10_rots, verts11_rots, verts01_rots, vertsmm_rots = verts_rots
 

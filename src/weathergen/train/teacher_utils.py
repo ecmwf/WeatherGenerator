@@ -61,16 +61,14 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
     """Strip a model to encoder-only and create fresh SSL latent heads.
 
     Modifies model in-place:
-    1. Removes forecast_engine, decoders, pred_heads, embed_target_coords
+    1. Removes forecast_engine and named decoders
     2. Ensures latent_pre_norm exists
     3. Creates fresh latent_heads based on the student's SSL loss config
     """
     # Strip non-encoder components
     teacher_dim_embed = override_cfg.ae_global_dim_embed
     model.forecast_engine = None
-    model.embed_target_coords = nn.ModuleDict()
-    model.target_token_engines = nn.ModuleDict()
-    model.pred_heads = nn.ModuleDict()
+    model.decoders = nn.ModuleDict()
 
     # Ensure latent_pre_norm exists (teacher may not have had SSL training)
     if model.latent_pre_norm is None:

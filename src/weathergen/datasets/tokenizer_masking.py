@@ -15,9 +15,12 @@ from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.healpix_geometry import HealpixGeometry
 from weathergen.datasets.masking import Masker
+from weathergen.datasets.stream_data import DecoderTargets
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
     encode_times_target,
+    get_target_coords_local,
+    hpy_cell_splits,
     tokenize_apply_mask_source,
     tokenize_apply_mask_target,
     tokenize_space,
@@ -166,47 +169,52 @@ class TokenizerMasking:
 
         return (source_tokens_cells, source_tokens_lens)
 
-    def get_target_coords(
+    def get_decoder_targets(
         self,
         stream_info: dict,
         rdata: IOReaderData,
         token_data,
         time_win: tuple,
         cell_mask,
-    ):
-        # create tokenization index
-        (idxs_cells, idxs_cells_lens) = token_data
-
-        (mask_tokens, mask_channels) = self.cell_to_token_mask(
-            idxs_cells, idxs_cells_lens, cell_mask
-        )
-        healpix_level = stream_info["healpix_level"]
+        healpix_level: int,
+    ) -> DecoderTargets:
+        """Regroup retained native targets on a decoder grid, without changing native rows."""
         geometry = self.get_geometry(healpix_level)
-
-        # TODO: split up
-        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+        coord_dim = rdata.geoinfos.shape[-1] + self.size_time_embedding + 5 * (3 * 5) + 3 * 8
+        idxs_cells, idxs_cells_lens = token_data
+        mask_tokens, _ = self.cell_to_token_mask(idxs_cells, idxs_cells_lens, cell_mask)
+        if mask_tokens is None:
+            return DecoderTargets.empty(geometry.num_healpix_cells, coord_dim)
+        native_tokens = [indices for cell in idxs_cells for indices in cell]
+        retained = [
+            indices for indices, keep in zip(native_tokens, mask_tokens, strict=True) if keep
+        ]
+        if not retained:
+            return DecoderTargets.empty(geometry.num_healpix_cells, coord_dim)
+        native_indices = torch.cat(retained)
+        cells, _, _ = hpy_cell_splits(rdata.coords[native_indices], healpix_level, geometry.domain)
+        lengths = torch.tensor([len(cell) for cell in cells], dtype=torch.int32)
+        indices = torch.from_numpy(np.concatenate(cells))
+        if indices.numel() == 0:
+            return DecoderTargets.empty(geometry.num_healpix_cells, coord_dim)
+        raw_indices = native_indices[indices]
+        coords = get_target_coords_local(
             stream_info["stream_id"],
             healpix_level,
-            idxs_cells,
-            idxs_cells_lens,
-            mask_tokens,
-            mask_channels,
-            rdata,
-            time_win,
+            lengths,
+            rdata.coords[raw_indices],
+            rdata.geoinfos[raw_indices],
+            encode_times_target(np.atleast_1d(rdata.datetimes[raw_indices]), time_win),
             geometry.hpy_verts_rots,
             geometry.hpy_verts_local,
             geometry.hpy_nctrs,
-            encode_times_target,
         )
-
-        return (coords_local, coords_per_cell)
+        return DecoderTargets(coords, lengths, indices)
 
     def get_target_values(
         self,
-        stream_info: dict,
         rdata: IOReaderData,
         token_data,
-        time_win: tuple,
         cell_mask,
     ):
         # create tokenization index
@@ -215,22 +223,8 @@ class TokenizerMasking:
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
             idxs_cells, idxs_cells_lens, cell_mask
         )
-        healpix_level = stream_info["healpix_level"]
-        geometry = self.get_geometry(healpix_level)
-
-        data, datetimes, coords, _, _ = tokenize_apply_mask_target(
-            stream_info["stream_id"],
-            healpix_level,
-            idxs_cells,
-            idxs_cells_lens,
-            mask_tokens,
-            mask_channels,
-            rdata,
-            time_win,
-            geometry.hpy_verts_rots,
-            geometry.hpy_verts_local,
-            geometry.hpy_nctrs,
-            encode_times_target,
+        data, datetimes, coords = tokenize_apply_mask_target(
+            idxs_cells, mask_tokens, mask_channels, rdata
         )
 
         idxs_ord_inv = None

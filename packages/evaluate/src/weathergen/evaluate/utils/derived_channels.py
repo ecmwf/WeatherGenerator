@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import numpy as np
 import xarray as xr
 
+from weathergen.common.io import source_stream_name
+
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
@@ -191,7 +193,7 @@ def scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:
     -------
         DataArray with z_* channels divided by *g* (9.80665 m/s²).
     """
-    if stream is None or not str(stream).startswith("ERA5"):
+    if stream is None or not source_stream_name(str(stream)).startswith("ERA5"):
         return data
 
     channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]

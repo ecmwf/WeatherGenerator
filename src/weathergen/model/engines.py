@@ -12,7 +12,7 @@ import math
 
 import torch
 import torch.nn as nn
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config, get_healpix_levels
@@ -645,13 +645,6 @@ class MultiLevelForecastingEngine(torch.nn.Module):
         super().__init__()
         levels = get_healpix_levels(cf)
         overrides = cf.get("forecast_engines", {})
-        if not isinstance(overrides, dict | DictConfig):
-            raise ValueError("forecast_engines must be a mapping keyed by integer HEALPix level.")
-        for level, settings in overrides.items():
-            if type(level) is not int or level not in levels:
-                raise ValueError(f"Unknown forecast_engines HEALPix level: {level!r}.")
-            if not isinstance(settings, dict | DictConfig):
-                raise ValueError(f"forecast_engines[{level}] must contain engine settings.")
 
         self.num_aux = (cf.num_register_tokens + cf.num_class_tokens) * cf.ae_local_num_queries
         self.level_slices = {}
@@ -659,14 +652,6 @@ class MultiLevelForecastingEngine(torch.nn.Module):
         offset = self.num_aux
         for level in levels:
             child = OmegaConf.merge(cf, overrides.get(level, {}))
-            for key in (
-                "ae_global_dim_embed",
-                "ae_local_num_queries",
-                "num_register_tokens",
-                "num_class_tokens",
-            ):
-                if child.get(key) != cf.get(key):
-                    raise ValueError(f"forecast_engines[{level}] must use the model's {key}.")
             count = len(domains[level])
             self.level_slices[str(level)] = slice(offset, offset + count * cf.ae_local_num_queries)
             offset += count * cf.ae_local_num_queries
@@ -681,27 +666,27 @@ class MultiLevelForecastingEngine(torch.nn.Module):
         if len(self.engines) == 1:
             return next(iter(self.engines.values()))(tokens, fstep, rope_coords)
 
-        aux = tokens[..., : self.num_aux, :]
-        cell_tokens = []
+        aux_tokens = tokens[:, : self.num_aux]
+        forecast_grids = []
         aux_updates = []
         for level, engine in self.engines.items():
             section = self.level_slices[level]
-            local_tokens = torch.cat((aux, tokens[..., section, :]), dim=-2)
-            coords = (
-                torch.cat(
-                    (rope_coords[..., : self.num_aux, :], rope_coords[..., section, :]), dim=-2
+            grid_tokens = torch.cat([aux_tokens, tokens[:, section]], dim=1)
+            grid_coords = None
+            if rope_coords is not None:
+                grid_coords = torch.cat(
+                    [rope_coords[:, : self.num_aux], rope_coords[:, section]], dim=1
                 )
-                if rope_coords is not None
-                else None
-            )
-            updated = engine(local_tokens, fstep, coords)
-            cell_tokens.append(updated[..., self.num_aux :, :])
+
+            forecast = engine(grid_tokens, fstep, grid_coords)
+            forecast_grids.append(forecast[:, self.num_aux :])
             if self.num_aux:
-                aux_updates.append(updated[..., : self.num_aux, :] - aux)
+                aux_updates.append(forecast[:, : self.num_aux] - aux_tokens)
+
         if self.num_aux:
-            # Averaging deltas preserves an identity auxiliary state exactly across rollouts.
-            aux = aux + torch.stack(aux_updates).mean(dim=0)
-        return torch.cat((aux, *cell_tokens), dim=-2)
+            # Average updates so identity engines preserve auxiliary tokens exactly.
+            aux_tokens = aux_tokens + torch.stack(aux_updates).mean(dim=0)
+        return torch.cat([aux_tokens, *forecast_grids], dim=1)
 
 
 class EnsPredictionHead(torch.nn.Module):
@@ -875,7 +860,7 @@ class TargetPredictionEngine(nn.Module):
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
         softcap,
-        stream_name: str,
+        stream_config,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -898,7 +883,7 @@ class TargetPredictionEngine(nn.Module):
             LayerNorm that does not scale after the layer is applied
         """
         super(TargetPredictionEngine, self).__init__()
-        self.name = f"TargetPredictionEngine_{stream_name}"
+        self.name = f"TargetPredictionEngine_{stream_config['name']}"
 
         self.cf = cf
         self.dims_embed = dims_embed
@@ -920,7 +905,7 @@ class TargetPredictionEngine(nn.Module):
             "norm_type": self.cf.norm_type,
             "qk_norm_type": self.cf.qk_norm_type,
             "softcap": self.softcap,
-            "dim_aux": self.dim_coord_in,
+            "dim_aux": None,
             "norm_eps": self.cf.norm_eps,
             "attention_dtype": get_dtype(self.cf.attention_dtype),
         }
@@ -932,7 +917,7 @@ class TargetPredictionEngine(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
 
-        target_readout_num_heads = next(self.cf.streams.values())["target_readout"]["num_heads"]
+        target_readout_num_heads = stream_config["target_readout"]["num_heads"]
         for ith, dim in enumerate(self.dims_embed[:-1]):
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
@@ -945,6 +930,7 @@ class TargetPredictionEngine(nn.Module):
                         with_self_attn=False,
                         with_adanorm=False,
                         with_mlp=False,
+                        dropout_rate=0.1,
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -1008,11 +994,13 @@ class TargetPredictionEngine(nn.Module):
                 )
 
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
+        latent = latent.reshape(-1, 9, self.cf.ae_local_num_queries, latent.shape[-1])
         latent = (
-            self.dropout(self.latent_in_norm(latent + self.pos_embed))
+            self.dropout(self.latent_in_norm(latent + self.pos_embed.unsqueeze(2)))
             if self.cf.decoder_type != "PerceiverIOCoordConditioning"
             else latent
         )
+        latent = latent.flatten(1, 2)
         for layer in self.tte:
             if isinstance(layer, OriginalPredictionBlock):
                 output = checkpoint(

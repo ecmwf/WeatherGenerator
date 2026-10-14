@@ -25,7 +25,7 @@ from weathergen.common.config import (
     load_merge_configs,
     load_run_config,
 )
-from weathergen.common.io import zarrio_reader
+from weathergen.common.io import source_stream_name, zarrio_reader
 from weathergen.evaluate.io.data.dataarray_builders import EnsembleSelect
 from weathergen.evaluate.io.data.io_orchestration import (
     build_io_state,
@@ -138,7 +138,7 @@ class WeatherGenReader(Reader):
         streams = oc.OmegaConf.create(streams)
 
         try:
-            clim_fn = streams[stream].get("filenames")
+            clim_fn = streams[source_stream_name(stream)].get("filenames")
         except KeyError:
             clim_fn = None
 
@@ -327,6 +327,7 @@ class WeatherGenReader(Reader):
             The parameter value if found, otherwise the default.
         """
 
+        stream_name = source_stream_name(stream_name)
         streams = self.inference_cfg.get("streams", {})
         if isinstance(streams, list | oc.ListConfig):
             for stream in streams:

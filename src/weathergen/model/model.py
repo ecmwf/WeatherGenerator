@@ -9,17 +9,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
 import math
 import typing
 
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import (
     Config,
+    get_decoder_configs,
     get_encoder_configs,
     get_healpix_level,
     get_healpix_levels,
@@ -27,25 +26,18 @@ from weathergen.common.config import (
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.domain import Domain
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
+from weathergen.model.decoder import DecoderModule, PhysicalPrediction
 from weathergen.model.encoder import EncoderModule, MultiEncoder
 from weathergen.model.engines import (
-    BilinearDecoder,
-    EnsPredictionHead,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
     LatentState,
     MultiLevelForecastingEngine,
-    TargetPredictionEngine,
-    TargetPredictionEngineClassic,
 )
-from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.norms import AdaLayerNorm
 from weathergen.model.utils import get_num_parameters
-from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype, is_stream_forcing
-
-logger = logging.getLogger(__name__)
+from weathergen.utils.utils import get_dtype
 
 type StreamName = str
 
@@ -55,7 +47,7 @@ class ModelOutput:
     Representation of model output
     """
 
-    physical: list[dict[StreamName, torch.Tensor]]
+    physical: list[dict[str, dict[StreamName, tuple[PhysicalPrediction, ...]]]]
     latent: list[dict[str, torch.Tensor | LatentState]]
 
     def __init__(self, len_output: int) -> None:
@@ -63,17 +55,25 @@ class ModelOutput:
         self.latent = [{} for _ in range(len_output)]
 
     def add_physical_prediction(
-        self, fstep: int, stream_name: StreamName, pred: torch.Tensor
+        self,
+        fstep: int,
+        decoder_name: str,
+        stream_name: StreamName,
+        pred: tuple[PhysicalPrediction, ...],
     ) -> None:
-        self.physical[fstep][stream_name] = pred
+        self.physical[fstep].setdefault(decoder_name, {})[stream_name] = pred
 
     def add_latent_prediction(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
         self.latent[fstep][latent_name] = pred
 
     def get_physical_prediction(
-        self, fstep: int, stream_name: StreamName | None = None, sample_idx: int | None = None
+        self,
+        fstep: int,
+        decoder_name: str,
+        stream_name: StreamName | None = None,
+        sample_idx: int | None = None,
     ):
-        pred = self.physical[fstep]
+        pred = self.physical[fstep].get(decoder_name, {})
         if stream_name is not None:
             pred = pred.get(stream_name, None)
             if sample_idx is not None:
@@ -238,37 +238,19 @@ class ModelParams(torch.nn.Module):
                 self.register_buffer(
                     f"cascade_{name}_{coarse}_{fine}", torch.tensor(values, dtype=dtype)
                 )
-        self.decoder_keys = {}
-        for stream in cf.streams.values():
-            level = stream.healpix_level
-            decode_levels = tuple(
-                stream.get(
-                    "decode_levels", [value for value in self.healpix_levels if value <= level]
-                )
-            )
-            key = (level, decode_levels)
-            if key in self.decoder_keys:
-                continue
-            name = f"decode_{len(self.decoder_keys)}"
-            self.decoder_keys[key] = name
-            contexts = []
-            for context_level in decode_levels:
-                domain = self.domains[context_level]
-                parents = domain.to_compact[
-                    self.domains[level].active_cells // (4 ** (level - context_level))
-                ]
-                indices = neighbours[context_level][parents.clip(min=0)]
-                contexts.append(
-                    np.where(
-                        parents[:, None] >= 0, indices + self.level_slices[context_level].start, -1
-                    )
-                )
-            indices = np.concatenate(contexts, axis=1)
-            valid = indices >= 0
-            self.register_buffer(f"{name}_indices", torch.tensor(indices[valid], dtype=torch.int64))
+        for name, decoder_cf in get_decoder_configs(cf).items():
+            level = decoder_cf.healpix_level
+            indices = neighbours[level] + self.level_slices[level].start
             self.register_buffer(
-                f"{name}_lengths",
-                torch.tensor(valid.sum(axis=1) * cf.ae_local_num_queries, dtype=torch.int32),
+                f"decode_{name}_indices", torch.tensor(indices.reshape(-1), dtype=torch.int64)
+            )
+            self.register_buffer(
+                f"decode_{name}_lengths",
+                torch.full(
+                    (len(indices),),
+                    indices.shape[1] * decoder_cf.ae_local_num_queries,
+                    dtype=torch.int32,
+                ),
             )
 
     def create(self, cf: Config) -> "ModelParams":
@@ -304,20 +286,8 @@ class Model(torch.nn.Module):
     fe_blocks: Forecasting engine: Transformer network using the output of global attention to
         advance the latent representation in time.
 
-    embed_target_coords: Embedding networks for coordinates: Initializes embedding networks tailored
-        for metadata embedded target coordinates. The architecture is either a linear layer or a
-        multi-layer perceptron, determined by the configuration of the embedding target coordinate
-        networks.
-
-    pred_adapter_kv: Prediction adapter: Adapter to transform the global assimilation/forecasting
-        engine output to the prediction engine. Uses an MLP if `cf.pred_adapter_kv` is True,
-        otherwise it uses an identity function.
-
-    target_token_engines: Prediction engine: Transformer based prediction network that generates
-        output corresponding to target coordinates.
-
-    pred_heads: Prediction head: Final layers using target token engines output for mapping target
-        coordinates to its physical space.
+    decoders: Named physical readouts, each owning coordinate embeddings, target token engines,
+        and prediction heads for its selected streams.
     """
 
     def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
@@ -343,13 +313,11 @@ class Model(torch.nn.Module):
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
 
-        self.embed_target_coords = None
+        self.decoders = nn.ModuleDict()
         self.encoder: MultiEncoder | None = None
         self.forecast_engine: MultiLevelForecastingEngine | None = None
-        self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
-        self.target_token_engines = None
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
             "Local attention not adapted for register tokens"
@@ -404,13 +372,6 @@ class Model(torch.nn.Module):
 
         self.forecast_engine = MultiLevelForecastingEngine(cf, cf.training_config, self.domains)
 
-        # embed coordinates yielding one query token for each target token
-        dropout_rate = cf.embed_dropout_rate
-        self.embed_target_coords = torch.nn.ModuleDict()
-        self.target_token_engines = torch.nn.ModuleDict()
-        self.pred_heads = torch.nn.ModuleDict()
-
-        # determine stream names once so downstream components use consistent keys
         loss_terms = [
             v.type for _, v in cf.training_config.losses.items() if v.get("enabled", True)
         ]
@@ -420,144 +381,14 @@ class Model(torch.nn.Module):
             ]
 
         if "LossPhysical" in loss_terms:
-            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
-                # skip decoder if channels are empty
-                if is_stream_forcing(si):
-                    continue
-
-                # skip for the moment to ensure target embedding and tte exist (ordering of
-                # cf.streams is random)
-                if si.get("pred_spatial_shared") is None:
-                    # extract and setup relevant parameters
-                    etc = si["embed_target_coords"]
-                    tr = si["target_readout"]
-                    num_layers = tr["num_layers"]
-                    tr_mlp_hidden_factor = (
-                        tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
-                    )
-                    tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
-                    softcap = tr["softcap"] if "softcap" in tr else 0.0
-
-                    dims_embed = [
-                        si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
-                    ]
-
-                    if is_root():
-                        logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
-
-                    dim_coord_in = self.targets_coords_size[i_stream]
-
-                    # embedding network for coordinates
-                    if etc["net"] == "linear":
-                        self.embed_target_coords[stream_name] = NamedLinear(
-                            f"embed_target_coords_{stream_name}",
-                            in_features=dim_coord_in,
-                            out_features=dims_embed[0],
-                            bias=False,
-                        )
-                    elif etc["net"] == "mlp":
-                        self.embed_target_coords[stream_name] = MLP(
-                            dim_coord_in,
-                            dims_embed[0],
-                            hidden_factor=8,
-                            with_residual=False,
-                            dropout_rate=dropout_rate,
-                            norm_eps=self.cf.mlp_norm_eps,
-                            name=f"embed_target_coords_{stream_name}",
-                        )
-                    else:
-                        assert False
-
-                    if cf.decoder_type == "Linear":
-                        tte = BilinearDecoder(
-                            stream_name,
-                            dims_embed[0],
-                            cf.ae_global_dim_embed,
-                            self.targets_num_channels[i_stream],
-                        )
-                    else:
-                        # target prediction engines
-                        tte_version = (
-                            TargetPredictionEngine
-                            if cf.decoder_type != "PerceiverIOCoordConditioning"
-                            else TargetPredictionEngineClassic
-                        )
-                        tte = tte_version(
-                            cf,
-                            dims_embed,
-                            dim_coord_in,
-                            tr_dim_head_proj,
-                            tr_mlp_hidden_factor,
-                            softcap,
-                            stream_config=si,
-                        )
-
-                    self.target_token_engines[stream_name] = tte
-
-                    # ensemble prediction heads to provide probabilistic prediction
-                    final_activation = si["pred_head"].get("final_activation", "Identity")
-                    if is_root():
-                        logger.debug(
-                            f"{final_activation} activation of pred head of {si['name']} stream"
-                        )
-                    self.pred_heads[stream_name] = EnsPredictionHead(
-                        dims_embed[-1],
-                        self.targets_num_channels[i_stream],
-                        si["pred_head"]["num_layers"],
-                        si["pred_head"]["ens_size"],
-                        norm_type=cf.norm_type,
-                        final_activation=final_activation,
-                        stream_name=stream_name,
-                    )
-
-            # iterate again to setup shared spatial pred heads if specified in config
-            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
-                # skip decoder if channels are empty
-                if is_stream_forcing(si):
-                    continue
-
-                pred_spatial_shared = si.get("pred_spatial_shared")
-                if pred_spatial_shared is not None:
-                    if pred_spatial_shared not in self.streams.keys():
-                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
-                        msg += " but no stream with that name found."
-                        raise ValueError(msg)
-                    if pred_spatial_shared == stream_name:
-                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
-                        msg += "but cannot share with itself."
-                        raise ValueError(msg)
-                    logger.debug(
-                        f"{stream_name} shares spatial prediction head with {pred_spatial_shared}."
-                    )
-
-                    self.embed_target_coords[stream_name] = self.embed_target_coords[
-                        pred_spatial_shared
-                    ]
-                    self.target_token_engines[stream_name] = self.target_token_engines[
-                        pred_spatial_shared
-                    ]
-
-                    assert pred_spatial_shared in self.streams.keys()
-                    si_other = self.streams[pred_spatial_shared]
-                    dims_embed = [
-                        si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
-                    ]
-
-                    # ensemble prediction heads to provide probabilistic prediction
-                    final_activation = si["pred_head"].get("final_activation", "Identity")
-                    if is_root():
-                        logger.debug(
-                            f"{final_activation} activation of pred head of {si['name']} stream"
-                        )
-                    self.pred_heads[stream_name] = EnsPredictionHead(
-                        dims_embed[-1],
-                        self.targets_num_channels[i_stream],
-                        si["pred_head"]["num_layers"],
-                        si["pred_head"]["ens_size"],
-                        norm_type=cf.norm_type,
-                        final_activation=final_activation,
-                        stream_name=stream_name,
-                    )
+            target_channels = dict(zip(self.streams, self.targets_num_channels, strict=False))
+            target_coords = dict(zip(self.streams, self.targets_coords_size, strict=False))
+            self.decoders = nn.ModuleDict(
+                {
+                    name: DecoderModule(decoder_cf, target_channels, target_coords)
+                    for name, decoder_cf in get_decoder_configs(cf).items()
+                }
+            )
 
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
@@ -649,22 +480,6 @@ class Model(torch.nn.Module):
 
         num_params_fe = get_num_parameters(self.forecast_engine)
 
-        mdict = self.embed_target_coords
-        num_params_embed_tcs = [
-            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.streams.keys()
-        ]
-        mdict = self.target_token_engines
-        num_params_tte = [
-            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.streams.keys()
-        ]
-        mdict = self.pred_heads
-        num_params_preds = [
-            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.streams.keys()
-        ]
-
         print("-----------------")
         print(f"Total number of trainable parameters: {num_params_total:,}")
         print("Number of parameters:")
@@ -680,16 +495,9 @@ class Model(torch.nn.Module):
         print(f" Global assimilation engine: {num_params_ae_global:,}")
         print(f" Latent prediction heads and pre-norm: {num_params_latent_heads:,}")
         print(f" Forecast engine: {num_params_fe:,}")
-        print(" coordinate embedding, prediction networks and prediction heads:")
-        zps = zip(
-            self.streams.keys(),
-            num_params_embed_tcs,
-            num_params_tte,
-            num_params_preds,
-            strict=False,
-        )
-        for stream_name, np0, np1, np2 in zps:
-            print(f"   {stream_name} : {np0:,} / {np1:,} / {np2:,}")
+        print(" Named physical decoders:")
+        for name, decoder in self.decoders.items():
+            print(f"   {name}: {get_num_parameters(decoder):,}")
         print("-----------------")
 
     def tokens_to_latent_state(self, tokens_post_norm, tokens) -> LatentState:
@@ -774,113 +582,13 @@ class Model(torch.nn.Module):
         batch: BatchSamples,
         output: ModelOutput,
     ) -> ModelOutput:
-        """
-        Compute decoder-based predictions
-
-        Predict outputs at the specific target coordinates based on the input weather state and
-        pre-training task and projects the latent space representation back to physical space.
-
-        Args:
-            model_params : Query and embedding parameters
-            fstep : Number of forecast steps
-            tokens : Tokens from global assimilation engine
-            streams_data : Used to initialize target coordinates tokens and index information
-                List of StreamData len(streams_data) == batch_size_per_gpu
-            target_coords_idxs : Indices of target coordinates
-        Returns:
-            Prediction output tokens in physical representation for each target_coords.
-        """
-        # Empty dicts evaluate to False in python
-        if not self.pred_heads:
-            return output
-
-        # remove register  and class tokens
+        """Compute independent decoder- and stream-keyed physical predictions."""
         tokens = tokens[:, self.num_aux_tokens :]
-
-        batch_size = len(batch)
         cells = tokens.reshape(
-            batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]
+            len(batch), self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]
         )
-        neighborhoods = {}
-
-        # pair with tokens from assimilation engine to obtain target tokens
-        for stream_name in self.streams.keys():
-            # extract target coords for current stream and fstep and convert to one tensor
-            t_coords = [
-                batch.samples[i_b].streams_data[stream_name].target_coords[step]
-                for i_b in range(batch_size)
-            ]
-            t_coords_lens = [len(t) for t in t_coords]
-            t_coords = torch.cat(t_coords)
-
-            if len(t_coords) == 0:
-                continue
-
-            level = self.streams[stream_name].healpix_level
-            section = model_params.level_slices[level]
-            decode_levels = tuple(
-                self.streams[stream_name].get(
-                    "decode_levels", [value for value in self.healpix_levels if value <= level]
-                )
-            )
-            cache_key = (level, decode_levels)
-            if self.cf.decoder_type != "Linear" and cache_key not in neighborhoods:
-                name = model_params.decoder_keys[cache_key]
-                indices = getattr(model_params, f"{name}_indices")
-                # Ragged context omits ancestors outside their domain, never gathers -1.
-                neighbors = cells[:, indices].flatten(0, -2)
-                lengths = getattr(model_params, f"{name}_lengths").repeat(batch_size)
-                lengths = torch.cat([lengths.new_zeros(1), lengths])
-                neighborhoods[cache_key] = (neighbors, lengths)
-
-            # embed token coords
-            tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
-
-            # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
-            if torch.isnan(tc_tokens).any():
-                logger.warning(
-                    (
-                        f"Skipping prediction for {stream_name} because",
-                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
-                    )
-                )
-                pred = torch.tensor([], device=tc_tokens.device)
-
-            # skip empty lengths
-            elif tc_tokens.shape[0] == 0:
-                pred = torch.tensor([], device=tc_tokens.device)
-
-            else:
-                # lens for varlen attention
-                tcls = torch.cat(
-                    [
-                        sample.streams_data[stream_name].target_coords_lens[step]
-                        for sample in batch.samples
-                    ]
-                )
-                tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
-
-                if self.cf.decoder_type == "Linear":
-                    pred = self.target_token_engines[stream_name](
-                        tc_tokens,
-                        cells[:, section].mean(dim=2).reshape(-1, tokens.shape[-1]),
-                        tcs_lens,
-                    ).unsqueeze(0)  # add ensemble dim: shape is then [1, preds_per_coord, channels]
-                else:
-                    tc_tokens = self.target_token_engines[stream_name](
-                        latent=neighborhoods[cache_key][0],
-                        output=tc_tokens,
-                        latent_lens=neighborhoods[cache_key][1],
-                        output_lens=tcs_lens,
-                        coordinates=t_coords,
-                    )
-
-                    # final prediction head to map back to physical space
-                    pred = self.pred_heads[stream_name](tc_tokens)
-
-            # recover batch dimension (ragged, so as list)
-            pred = torch.split(pred, t_coords_lens, dim=1)
-            output.add_physical_prediction(step, stream_name, pred)
-
+        for name, decoder in self.decoders.items():
+            predictions = decoder(model_params, name, step, cells, batch)
+            for stream_name, pred in predictions.items():
+                output.add_physical_prediction(step, name, stream_name, pred)
         return output

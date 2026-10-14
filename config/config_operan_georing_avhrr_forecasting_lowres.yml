@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-encoders: {default: {}}
+encoders: {default: {streams: [ERA5_in, ERA5, METOP_ABC_AVHRR_IASI, METEOSAT_SEVIRI_IR, GOES_ABI_IR, HIMAWARI_AHI_IR, GOES_ABI_VIS, HIMAWARI_AHI_VIS, SurfaceCombined]}}
+decoders: {default: {streams: [ERA5_in, ERA5, METOP_ABC_AVHRR_IASI, METEOSAT_SEVIRI_IR, GOES_ABI_IR, HIMAWARI_AHI_IR, GOES_ABI_VIS, HIMAWARI_AHI_VIS, SurfaceCombined], healpix_level: 5}}
 
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1

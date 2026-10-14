@@ -7,8 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# Explicit encoder names are required; use {default: {}} for a single resolution.
+# Each named encoder explicitly selects streams.
 encoders: ???
+# Each named decoder selects streams and one existing latent HEALPix grid, including SSL profiles.
+decoders: ???
 
 # Optional bounding boxes keyed by stream HEALPix level; omitted/null levels stay global.
 domains: {}

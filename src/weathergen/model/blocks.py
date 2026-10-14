@@ -78,7 +78,7 @@ class SelfAttentionBlock(nn.Module):
         # we have aux_lens as arg to be consistent with the CrossAttentionBlock
         assert self.with_adanorm ^ (aux is None), "Conditioning is not being used"
         x = self.mhsa_block(x, aux, x_lens=x_lens)
-        x = self.mlp_block(x, aux)
+        x = self.mlp_block(x, aux, x_lens=x_lens)
         return x
 
 
@@ -104,7 +104,7 @@ class CrossAttentionBlock(nn.Module):
 
         self.with_adanorm = with_adanorm
         self.with_self_attn = with_self_attn
-        self.with_mlp = with_self_attn
+        self.with_mlp = with_mlp
 
         if with_self_attn:
             self.mhsa = MultiSelfAttentionHeadVarlen(
@@ -126,12 +126,17 @@ class CrossAttentionBlock(nn.Module):
             with_residual=False,
             **kwargs["attention_kwargs"],
         )
+        self.cross_attn_fn = lambda x, x_lens, **kwargs: self.cross_attn(
+            x, x_q_lens=x_lens, **kwargs
+        )
         if self.with_adanorm:
-            self.cross_attn_block = AdaLayerNormLayer(dim_q, dim_aux, self.cross_attn, dropout_rate)
+            self.cross_attn_block = AdaLayerNormLayer(
+                dim_q, dim_aux, self.cross_attn_fn, dropout_rate=dropout_rate
+            )
         else:
             self.ln_ca = nn.LayerNorm(dim_q, eps=kwargs["attention_kwargs"]["norm_eps"])
             self.cross_attn_block = (
-                lambda x, _, **kwargs: self.cross_attn(self.ln_ca(x), **kwargs) + x
+                lambda x, _, **kwargs: self.cross_attn_fn(self.ln_ca(x), **kwargs) + x
             )
 
         if self.with_mlp:

@@ -20,6 +20,7 @@ import numpy as np
 import yaml
 
 import weathergen.common.config as config
+from weathergen.common.io import physical_output_name
 from weathergen.train.utils import TRAIN
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
@@ -202,8 +203,9 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
     # return col names from training (should be identical to validation)
     cf = config.load_run_config(run_id, None, model_path=model_path)
     return [
-        stream_name.replace(",", "").replace("/", "_").replace(" ", "_")
-        for stream_name in cf.streams.keys()
+        physical_output_name(decoder, stream).replace(",", "").replace("/", "_").replace(" ", "_")
+        for decoder, settings in cf.decoders.items()
+        for stream in settings.streams
     ]
 
 

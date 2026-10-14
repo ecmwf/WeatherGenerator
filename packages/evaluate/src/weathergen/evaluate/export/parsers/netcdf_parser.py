@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
 
+from weathergen.common.io import source_stream_name
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_points
 
@@ -367,7 +368,9 @@ class NetcdfParser(CfParser):
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
-            wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
+            wg_unit = mapped_units.get(
+                source_stream_name(self.stream), mapped_units.get("DEFAULT", None)
+            )
             std_unit = mapped_info.get("std_unit", None)
             self.convert_units(ds, da, wg_unit, std_unit)
 
@@ -419,7 +422,9 @@ class NetcdfParser(CfParser):
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
-            wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
+            wg_unit = mapped_units.get(
+                source_stream_name(self.stream), mapped_units.get("DEFAULT", None)
+            )
             std_unit = mapped_info.get("std_unit", None)
             self.convert_units(ds, da, wg_unit, std_unit)
 

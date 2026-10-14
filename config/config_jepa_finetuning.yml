@@ -7,6 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+encoders: {default: {streams: [ERA5, METOPBIASI]}}
+decoders: {default: {streams: [ERA5, METOPBIASI], healpix_level: 5}}
+
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
 pred_self_attention: True
