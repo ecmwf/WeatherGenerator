@@ -1,2 +1,3 @@
 # The default configuration file for multi streams training.
+encoders: {default: {healpix_level: 5}}
 streams_directory: "./config/streams/streams_mixed/"
