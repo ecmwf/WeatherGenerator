@@ -12,10 +12,7 @@
 import logging
 import math
 import typing
-import warnings
 
-import astropy_healpix as hp
-import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
@@ -28,17 +25,17 @@ from weathergen.common.config import (
     get_healpix_levels,
 )
 from weathergen.datasets.batch import BatchSamples
-from weathergen.datasets.utils import healpix_verts_rots, hp_level_to_num_cells, r3tos2
+from weathergen.datasets.domain import Domain
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule, MultiEncoder
 from weathergen.model.engines import (
     BilinearDecoder,
     EnsPredictionHead,
-    ForecastingEngine,
-    IdentityEngine,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
     LatentState,
+    MultiLevelForecastingEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -92,7 +89,12 @@ def _rope_coordinates(cf: Config, device):
     if not cf.get("rope_2D", False):
         return None, None
 
-    verts = torch.cat([healpix_verts_rots(level, 0.5, 0.5)[0] for level in get_healpix_levels(cf)])
+    verts = torch.cat(
+        [
+            healpix_verts_rots(level, active_cells=Domain.from_config(cf, level).active_cells)[0]
+            for level in get_healpix_levels(cf)
+        ]
+    )
     cell_coords = r3tos2(verts.to(device)).to(get_dtype(cf.attention_dtype))
     num_queries = cf.ae_local_num_queries
     offset = (cf.num_register_tokens + cf.num_class_tokens) * num_queries
@@ -116,7 +118,8 @@ class _EncoderParams(torch.nn.Module):
     def __init__(self, cf: Config):
         super().__init__()
         self.cf = cf
-        self.num_healpix_cells = hp_level_to_num_cells(get_healpix_level(cf))
+        self.domain = Domain.from_config(cf, get_healpix_level(cf))
+        self.num_healpix_cells = len(self.domain)
         dtype = get_dtype(cf.attention_dtype)
         self.register_buffer(
             "pe_embed",
@@ -161,13 +164,12 @@ class _EncoderParams(torch.nn.Module):
         pe_global = self.pe_global
         dim_embed = cf.ae_global_dim_embed
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=pe_global.device) / dim_embed
+        cell_ids = torch.tensor(self.domain.active_cells, device=pe_global.device)
         pe_global[..., 0::2] = 0.5 * torch.sin(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=pe_global.device), xs)
         )
         pe_global[..., 0::2] += (
-            torch.sin(
-                torch.outer(torch.arange(self.num_healpix_cells, device=pe_global.device), xs)
-            )
+            torch.sin(torch.outer(cell_ids, xs))
             .unsqueeze(1)
             .repeat((1, cf.ae_local_num_queries, 1))
         )
@@ -175,9 +177,7 @@ class _EncoderParams(torch.nn.Module):
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=pe_global.device), xs)
         )
         pe_global[..., 1::2] += (
-            torch.cos(
-                torch.outer(torch.arange(self.num_healpix_cells, device=pe_global.device), xs)
-            )
+            torch.cos(torch.outer(cell_ids, xs))
             .unsqueeze(1)
             .repeat((1, cf.ae_local_num_queries, 1))
         )
@@ -198,15 +198,78 @@ class ModelParams(torch.nn.Module):
             {name: _EncoderParams(encoder_cf) for name, encoder_cf in encoder_configs.items()}
         )
         self.healpix_levels = get_healpix_levels(cf)
-        self.num_healpix_cells = sum(hp_level_to_num_cells(level) for level in self.healpix_levels)
+        self.domains = {level: Domain.from_config(cf, level) for level in self.healpix_levels}
+        self.num_healpix_cells = sum(map(len, self.domains.values()))
         self.level_slices = {}
         offset = 0
         for level in self.healpix_levels:
-            count = hp_level_to_num_cells(level)
+            count = len(self.domains[level])
             self.level_slices[level] = slice(offset, offset + count)
             offset += count
         self.register_buffer("rope_coords", None)
-        self.register_buffer("hp_nbours", torch.empty(self.num_healpix_cells, 9, dtype=torch.int32))
+        neighbours = {
+            level: np.column_stack([np.arange(len(domain)), domain.neighbours_compact()])
+            for level, domain in self.domains.items()
+        }
+        self.register_buffer(
+            "hp_nbours",
+            torch.tensor(
+                np.concatenate(
+                    [
+                        neighbours[level] + self.level_slices[level].start
+                        for level in self.healpix_levels
+                    ]
+                ),
+                dtype=torch.int64,
+            ),
+        )
+        # Only overlapping parent/child cells participate in cross-level attention.
+        for coarse, fine in zip(self.healpix_levels, self.healpix_levels[1:], strict=False):
+            parents = self.domains[coarse].to_compact[
+                self.domains[fine].active_cells // (4 ** (fine - coarse))
+            ]
+            fine_cells = np.flatnonzero(parents >= 0)
+            coarse_cells, counts = np.unique(parents[fine_cells], return_counts=True)
+            for name, values, dtype in (
+                ("fine", fine_cells, torch.int64),
+                ("coarse", coarse_cells, torch.int64),
+                ("counts", counts, torch.int32),
+            ):
+                self.register_buffer(
+                    f"cascade_{name}_{coarse}_{fine}", torch.tensor(values, dtype=dtype)
+                )
+        self.decoder_keys = {}
+        for stream in cf.streams.values():
+            level = stream.healpix_level
+            decode_levels = tuple(
+                stream.get(
+                    "decode_levels", [value for value in self.healpix_levels if value <= level]
+                )
+            )
+            key = (level, decode_levels)
+            if key in self.decoder_keys:
+                continue
+            name = f"decode_{len(self.decoder_keys)}"
+            self.decoder_keys[key] = name
+            contexts = []
+            for context_level in decode_levels:
+                domain = self.domains[context_level]
+                parents = domain.to_compact[
+                    self.domains[level].active_cells // (4 ** (level - context_level))
+                ]
+                indices = neighbours[context_level][parents.clip(min=0)]
+                contexts.append(
+                    np.where(
+                        parents[:, None] >= 0, indices + self.level_slices[context_level].start, -1
+                    )
+                )
+            indices = np.concatenate(contexts, axis=1)
+            valid = indices >= 0
+            self.register_buffer(f"{name}_indices", torch.tensor(indices[valid], dtype=torch.int64))
+            self.register_buffer(
+                f"{name}_lengths",
+                torch.tensor(valid.sum(axis=1) * cf.ae_local_num_queries, dtype=torch.int32),
+            )
 
     def create(self, cf: Config) -> "ModelParams":
         self.reset_parameters(cf)
@@ -216,19 +279,6 @@ class ModelParams(torch.nn.Module):
         for params in self.encoders.values():
             params.reset_parameters()
         self.rope_coords, _ = _rope_coordinates(cf, self.hp_nbours.device)
-
-        for level, section in self.level_slices.items():
-            count = section.stop - section.start
-            with warnings.catch_warnings(action="ignore"):
-                neighbours = hp.neighbours(np.arange(count), 2**level, order="nested").transpose()
-            for i, row in enumerate(neighbours):
-                row[row == -1] = i
-            self.hp_nbours[section, 0] = torch.arange(
-                section.start, section.stop, device=self.hp_nbours.device
-            )
-            self.hp_nbours[section, 1:] = (
-                torch.from_numpy(neighbours).to(self.hp_nbours.device) + section.start
-            )
 
 
 class Model(torch.nn.Module):
@@ -284,7 +334,8 @@ class Model(torch.nn.Module):
         self.encoder_configs = get_encoder_configs(cf)
 
         self.healpix_levels = get_healpix_levels(cf)
-        self.num_healpix_cells = sum(hp_level_to_num_cells(level) for level in self.healpix_levels)
+        self.domains = {level: Domain.from_config(cf, level) for level in self.healpix_levels}
+        self.num_healpix_cells = sum(map(len, self.domains.values()))
 
         self.cf = cf
         self.dtype = get_dtype(self.cf.attention_dtype)
@@ -294,7 +345,7 @@ class Model(torch.nn.Module):
 
         self.embed_target_coords = None
         self.encoder: MultiEncoder | None = None
-        self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
+        self.forecast_engine: MultiLevelForecastingEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
@@ -351,11 +402,7 @@ class Model(torch.nn.Module):
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
 
-        mode_cfg = cf.training_config
-        if cf.fe_num_blocks > 0:
-            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
-        else:
-            self.forecast_engine = IdentityEngine()
+        self.forecast_engine = MultiLevelForecastingEngine(cf, cf.training_config, self.domains)
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -600,7 +647,7 @@ class Model(torch.nn.Module):
         num_params_latent_heads = get_num_parameters(self.latent_heads)
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
+        num_params_fe = get_num_parameters(self.forecast_engine)
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
@@ -683,12 +730,12 @@ class Model(torch.nn.Module):
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
+            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            if self.forecast_engine.enabled:
+                tokens = self.encoder.couple(tokens, model_params)
             if without_grad:
-                # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
-                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
-            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
@@ -778,26 +825,12 @@ class Model(torch.nn.Module):
             )
             cache_key = (level, decode_levels)
             if self.cf.decoder_type != "Linear" and cache_key not in neighborhoods:
-                cell_ids = torch.arange(section.stop - section.start, device=tokens.device)
-                indices = torch.cat(
-                    [
-                        model_params.hp_nbours[
-                            cell_ids // (4 ** (level - context_level))
-                            + model_params.level_slices[context_level].start
-                        ]
-                        for context_level in decode_levels
-                    ],
-                    dim=1,
-                )
-                # Index before flattening so each sample reads its own latent grid.
+                name = model_params.decoder_keys[cache_key]
+                indices = getattr(model_params, f"{name}_indices")
+                # Ragged context omits ancestors outside their domain, never gathers -1.
                 neighbors = cells[:, indices].flatten(0, -2)
-                lengths = torch.full(
-                    (batch_size * len(cell_ids) + 1,),
-                    indices.shape[1] * self.cf.ae_local_num_queries,
-                    dtype=torch.int32,
-                    device=tokens.device,
-                )
-                lengths[0] = 0
+                lengths = getattr(model_params, f"{name}_lengths").repeat(batch_size)
+                lengths = torch.cat([lengths.new_zeros(1), lengths])
                 neighborhoods[cache_key] = (neighbors, lengths)
 
             # embed token coords

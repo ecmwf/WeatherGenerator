@@ -26,10 +26,11 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
 )
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.domain import Domain
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.utils import get_tokens_lens, hp_level_to_num_cells
+from weathergen.datasets.utils import get_tokens_lens
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
@@ -102,11 +103,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        get_healpix_levels(cf)
+        self.domains = {level: Domain.from_config(cf, level) for level in get_healpix_levels(cf)}
         self.encoder_streams = {
             name: list(encoder_cf.streams) for name, encoder_cf in get_encoder_configs(cf).items()
         }
-        self.masker = Masker(stage, cf.streams, self.mode_cfg)
+        self.masker = Masker(stage, cf.streams, self.mode_cfg, domains=self.domains)
         self.tokenizer = TokenizerMasking(self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
@@ -527,7 +528,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         num_output_steps = self._get_output_length(num_forecast_steps)
-        num_cells = hp_level_to_num_cells(stream_info["healpix_level"])
+        num_cells = len(self.domains[stream_info["healpix_level"]])
         stream_data = StreamData(
             base_idx,
             num_steps_input,
@@ -583,6 +584,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
+                    domain=self.domains[stream_info["healpix_level"]],
                 )
                 rdata.is_spoof = True
 
@@ -605,6 +607,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                    domain=self.domains[stream_info["healpix_level"]],
                 )
                 rdata.is_spoof = True
 

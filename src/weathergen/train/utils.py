@@ -130,16 +130,16 @@ def unflatten_dict(d, separator="."):
 def extract_sample_metadata(sample):
     """Combine visible-cell masks in coarse-to-fine latent order."""
     metadata = copy.copy(next(iter(sample.meta_info.values())))
-    masks_by_size = {}
+    masks_by_level = {}
     for info in sample.meta_info.values():
         if info.mask is not None:
-            size = info.mask.numel()
-            if size in masks_by_size:
-                masks_by_size[size] = masks_by_size[size] | info.mask
+            level = info.global_params["healpix_level"]
+            if level in masks_by_level:
+                masks_by_level[level] = masks_by_level[level] | info.mask
             else:
-                masks_by_size[size] = info.mask
-    if masks_by_size:
-        metadata.mask = torch.cat([masks_by_size[size] for size in sorted(masks_by_size)])
+                masks_by_level[level] = info.mask
+    if masks_by_level:
+        metadata.mask = torch.cat([masks_by_level[level] for level in sorted(masks_by_level)])
     return metadata
 
 

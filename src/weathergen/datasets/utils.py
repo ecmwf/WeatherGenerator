@@ -173,16 +173,13 @@ def healpix_verts(hl: int, dx=0.5, dy=0.5):
 
 
 ####################################################################################################
-def healpix_verts_rots(hl: int, dx=0.5, dy=0.5):
+def healpix_verts_rots(hl: int, dx=0.5, dy=0.5, active_cells=None):
     """
     healpix cell center
     """
 
-    # centroids of healpix cells
-    num_healpix_cells = 12 * 4**hl
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
-    )
+    cells = np.arange(12 * 4**hl) if active_cells is None else active_cells
+    lons, lats = hp.healpix_to_lonlat(cells, 2**hl, dx=dx, dy=dy, order="nested")
     verts = s2tor3(torch.from_numpy(np.pi / 2.0 - lats.value), torch.from_numpy(lons.value))
     verts_rot3 = vecs_to_rots(verts)
 

@@ -7,24 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import warnings
-
-import astropy_healpix as hp
-import numpy as np
 import torch
 
-from weathergen.datasets.utils import (
-    healpix_verts_rots,
-    hp_level_to_num_cells,
-)
+from weathergen.datasets.domain import Domain
+from weathergen.datasets.utils import healpix_verts_rots
 
 
 class HealpixGeometry:
     """Precomputed HEALPix geometry shared by source and target coordinate encoders."""
 
-    def __init__(self, healpix_level: int):
+    def __init__(self, healpix_level: int, domain: Domain | None = None):
         self.healpix_level = healpix_level
-        self.num_healpix_cells = hp_level_to_num_cells(healpix_level)
+        self.domain = domain if domain is not None else Domain(healpix_level)
+        self.num_healpix_cells = len(self.domain)
 
         vertices, rotations = self._compute_vertices_and_rotations()
         self.hpy_verts = [vertex.to(torch.float32) for vertex in vertices]
@@ -33,11 +28,12 @@ class HealpixGeometry:
         self.hpy_nctrs = self._compute_neighbor_centers(vertices[-1])
 
     def _compute_vertices_and_rotations(self) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-        verts00, verts00_rots = healpix_verts_rots(self.healpix_level, 0.0, 0.0)
-        verts10, verts10_rots = healpix_verts_rots(self.healpix_level, 1.0, 0.0)
-        verts11, verts11_rots = healpix_verts_rots(self.healpix_level, 1.0, 1.0)
-        verts01, verts01_rots = healpix_verts_rots(self.healpix_level, 0.0, 1.0)
-        vertsmm, vertsmm_rots = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+        cells = self.domain.active_cells
+        verts00, verts00_rots = healpix_verts_rots(self.healpix_level, 0.0, 0.0, cells)
+        verts10, verts10_rots = healpix_verts_rots(self.healpix_level, 1.0, 0.0, cells)
+        verts11, verts11_rots = healpix_verts_rots(self.healpix_level, 1.0, 1.0, cells)
+        verts01, verts01_rots = healpix_verts_rots(self.healpix_level, 0.0, 1.0, cells)
+        vertsmm, vertsmm_rots = healpix_verts_rots(self.healpix_level, 0.5, 0.5, cells)
         return (
             [verts00, verts10, verts11, verts01, vertsmm],
             [verts00_rots, verts10_rots, verts11_rots, verts01_rots, vertsmm_rots],
@@ -77,17 +73,10 @@ class HealpixGeometry:
     def _compute_neighbor_centers(self, vertsmm: torch.Tensor) -> torch.Tensor:
         # add local coords wrt to center of neighboring cells
         # (since the neighbors are used in the prediction)
-        num_healpix_cells = hp_level_to_num_cells(self.healpix_level)
-        with warnings.catch_warnings(action="ignore"):
-            temp = hp.neighbours(
-                np.arange(num_healpix_cells), 2**self.healpix_level, order="nested"
-            ).transpose()
-        # fix missing nbors with references to self
-        for i, row in enumerate(temp):
-            temp[i][row == -1] = i
+        temp = self.domain.neighbours_compact()
         return (
             vertsmm[temp.flatten()]
-            .reshape((num_healpix_cells, 8, 3))
+            .reshape((self.num_healpix_cells, 8, 3))
             .transpose(1, 0)
             .to(torch.float32)
         )

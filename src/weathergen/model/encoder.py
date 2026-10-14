@@ -13,7 +13,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
 from weathergen.datasets.batch import BatchSamples, MultiSamples
-from weathergen.datasets.utils import hp_level_to_num_cells
+from weathergen.datasets.domain import Domain
 from weathergen.model.attention import MultiCrossAttentionHeadVarlen
 from weathergen.model.engines import (
     EmbeddingEngine,
@@ -47,7 +47,8 @@ class EncoderModule(torch.nn.Module):
         self.encoder_name = name
 
         self.healpix_level = get_healpix_level(cf)
-        self.num_healpix_cells = hp_level_to_num_cells(self.healpix_level)
+        domain = Domain.from_config(cf, self.healpix_level)
+        self.num_healpix_cells = len(domain)
 
         self.cf = cf
         self.sources_size = sources_size
@@ -95,14 +96,15 @@ class EncoderModule(torch.nn.Module):
             q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
             # add meta data
             q_cells[:, :, -8:-6] = (
-                (torch.arange(self.num_healpix_cells) / self.num_healpix_cells)
+                (torch.tensor(domain.active_cells) / len(domain.to_compact))
                 .unsqueeze(1)
                 .unsqueeze(1)
                 .repeat((1, cf.ae_local_num_queries, 2))
             )
             theta, phi = healpy.pix2ang(
-                nside=2**self.healpix_level, ipix=torch.arange(self.num_healpix_cells)
+                nside=2**self.healpix_level, ipix=domain.active_cells, nest=True
             )
+            theta, phi = torch.as_tensor(theta), torch.as_tensor(phi)
             q_cells[:, :, -6:-3] = (
                 torch.cos(theta).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
             )
@@ -176,7 +178,7 @@ class EncoderModule(torch.nn.Module):
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
 
         # subdivision factor for required splitting
-        clen = self.num_healpix_cells // (2 if self.healpix_level <= 5 else 8)
+        clen = max(1, self.num_healpix_cells // (2 if self.healpix_level <= 5 else 8))
         tokens_global_unmasked = []
         posteriors = []
 
@@ -221,9 +223,9 @@ class EncoderModule(torch.nn.Module):
 
             tokens_global_unmasked += [toks_global_unmasked]
 
-        if len(tokens_global_unmasked) == 0:
-            assert False, "Not yet implemented"
-        tokens_global_unmasked = torch.cat(tokens_global_unmasked)
+        tokens_global_unmasked = (
+            torch.cat(tokens_global_unmasked) if tokens_global_unmasked else tokens_global[:0]
+        )
 
         return tokens_global_unmasked, posteriors
 
@@ -260,6 +262,8 @@ class EncoderModule(torch.nn.Module):
             ],
             dim=0,
         )
+        if tokens_global_unmasked.shape[0] == 0:
+            return tokens_global_unmasked.reshape(0, num_queries * self.cf.ae_global_dim_embed)
 
         # Build packed coords matching the interleaved token order
         if rope_cell_coords is not None:
@@ -404,45 +408,57 @@ class LatentCascade(torch.nn.Module):
                     )
                 )
 
-    def _exchange(self, block, queries, context):
-        q_lens = torch.full(
-            (queries.shape[0] + 1,), queries.shape[1], dtype=torch.int32, device=queries.device
-        )
-        kv_lens = torch.full_like(q_lens, context.shape[1])
-        q_lens[0] = kv_lens[0] = 0
-        result = block[0](queries.flatten(0, 1), context.flatten(0, 1), q_lens, kv_lens)
+    def _exchange(self, block, queries, context, q_counts, kv_counts):
+        q_lens = torch.cat([q_counts.new_zeros(1), q_counts.repeat(queries.shape[0])])
+        kv_lens = torch.cat([kv_counts.new_zeros(1), kv_counts.repeat(context.shape[0])])
+        result = block[0](queries.flatten(0, -2), context.flatten(0, -2), q_lens, kv_lens)
         return block[1](result).reshape_as(queries)
 
     def forward(self, grids, model_params):
         for _ in range(self.num_cycles):
-            for i, (coarse, fine) in enumerate(zip(self.levels, self.levels[1:], strict=False)):
-                section = model_params.level_slices[coarse]
-                neighbors = model_params.hp_nbours[section] - section.start
-                coarse_cells = grids[coarse][:, self.num_aux :].reshape(
-                    -1, hp_level_to_num_cells(coarse), self.num_queries, grids[coarse].shape[-1]
-                )
-                context = coarse_cells[:, neighbors].flatten(0, 1).flatten(1, 2)
-                fine_cells = grids[fine][:, self.num_aux :]
-                queries = fine_cells.reshape(context.shape[0], -1, fine_cells.shape[-1])
-                updated = checkpoint(
-                    self._exchange, self.down[i], queries, context, use_reentrant=False
-                )
-                grids[fine] = torch.cat(
-                    [grids[fine][:, : self.num_aux], updated.reshape_as(fine_cells)], dim=1
-                )
-            for i in reversed(range(len(self.levels) - 1)):
-                coarse, fine = self.levels[i : i + 2]
-                coarse_cells = grids[coarse][:, self.num_aux :]
-                queries = coarse_cells.reshape(-1, self.num_queries, coarse_cells.shape[-1])
-                context = grids[fine][:, self.num_aux :].reshape(
-                    queries.shape[0], -1, queries.shape[-1]
-                )
-                updated = checkpoint(
-                    self._exchange, self.up[i], queries, context, use_reentrant=False
-                )
-                grids[coarse] = torch.cat(
-                    [grids[coarse][:, : self.num_aux], updated.reshape_as(coarse_cells)], dim=1
-                )
+            for down in (True, False):
+                pairs = range(len(self.levels) - 1)
+                for i in pairs if down else reversed(pairs):
+                    coarse, fine = self.levels[i : i + 2]
+                    fine_ids = getattr(model_params, f"cascade_fine_{coarse}_{fine}")
+                    if fine_ids.numel() == 0:
+                        continue
+                    coarse_ids = getattr(model_params, f"cascade_coarse_{coarse}_{fine}")
+                    counts = (
+                        getattr(model_params, f"cascade_counts_{coarse}_{fine}") * self.num_queries
+                    )
+                    coarse_cells = grids[coarse][:, self.num_aux :].reshape(
+                        grids[coarse].shape[0], -1, self.num_queries, grids[coarse].shape[-1]
+                    )
+                    fine_cells = grids[fine][:, self.num_aux :].reshape(
+                        grids[fine].shape[0], -1, self.num_queries, grids[fine].shape[-1]
+                    )
+                    if down:
+                        section = model_params.level_slices[coarse]
+                        neighbors = (
+                            model_params.hp_nbours[coarse_ids + section.start] - section.start
+                        )
+                        queries = fine_cells[:, fine_ids]
+                        context = coarse_cells[:, neighbors].flatten(1, 2)
+                        q_counts, kv_counts = counts, torch.full_like(counts, 9 * self.num_queries)
+                        level, cells, ids, block = fine, fine_cells, fine_ids, self.down[i]
+                    else:
+                        queries, context = coarse_cells[:, coarse_ids], fine_cells[:, fine_ids]
+                        q_counts, kv_counts = torch.full_like(counts, self.num_queries), counts
+                        level, cells, ids, block = coarse, coarse_cells, coarse_ids, self.up[i]
+                    updated = checkpoint(
+                        self._exchange,
+                        block,
+                        queries,
+                        context,
+                        q_counts,
+                        kv_counts,
+                        use_reentrant=False,
+                    )
+                    cells = cells.index_copy(1, ids, updated.to(cells.dtype))
+                    grids[level] = torch.cat(
+                        [grids[level][:, : self.num_aux], cells.flatten(1, 2)], dim=1
+                    )
         return grids
 
 
@@ -491,3 +507,31 @@ class MultiEncoder(torch.nn.Module):
         return torch.cat(
             [auxiliary] + [grids[level][:, self.num_aux :] for level in self.levels], dim=1
         ), posteriors
+
+    def couple(self, tokens, model_params):
+        """Exchange forecast grid patches without duplicating the shared auxiliary state."""
+        if self.cascade is None:
+            return tokens
+        auxiliary = tokens[:, : self.num_aux]
+        grids = {
+            level: torch.cat(
+                [
+                    auxiliary,
+                    tokens[
+                        :,
+                        self.num_aux + section.start * self.cf.ae_local_num_queries : self.num_aux
+                        + section.stop * self.cf.ae_local_num_queries,
+                    ],
+                ],
+                dim=1,
+            )
+            for level, section in model_params.level_slices.items()
+        }
+        dtype = get_dtype(self.cf.attention_dtype)
+        with torch.autocast(
+            "cuda", dtype=dtype, enabled=self.cf.with_mixed_precision and dtype != torch.float32
+        ):
+            grids = self.cascade(grids, model_params)
+        return torch.cat(
+            [auxiliary] + [grids[level][:, self.num_aux :] for level in self.levels], dim=1
+        )

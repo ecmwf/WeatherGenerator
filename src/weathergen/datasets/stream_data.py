@@ -459,22 +459,17 @@ class StreamData:
         return len(self.target_tokens)
 
 
-def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderData:
+def spoof(healpix_level: int, datetime, geoinfo_size, num_channels, domain=None) -> IOReaderData:
     """
     Spoof an instance from data_reader_base.ReaderData instance.
     other should be such an instance.
     """
 
-    dx = 0.5
-    dy = 0.5
-    num_healpix_cells = 12 * 4**healpix_level
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
-    )
-
-    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
-    # spoof two tokens to avoid unnecessary computational load
-    coords = coords[np.random.choice(coords.shape[0], size=2, replace=False)]
+    # Generate only the two sampled cells, within the configured domain.
+    cells = domain.active_cells if domain is not None else np.arange(12 * 4**healpix_level)
+    selected = np.random.choice(cells, size=2, replace=len(cells) < 2)
+    lons, lats = hp.healpix_to_lonlat(selected, 2**healpix_level, order="nested")
+    coords = np.stack([lats.deg, lons.deg - 180.0], axis=-1, dtype=np.float32)
 
     geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
     data = np.zeros((coords.shape[0], num_channels), dtype=np.float32)

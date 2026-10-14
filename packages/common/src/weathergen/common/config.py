@@ -53,7 +53,10 @@ def get_healpix_levels(config: Config) -> list[int]:
         for stream in streams_without_level:
             stream["healpix_level"] = config.healpix_level
 
-    return sorted({stream.healpix_level for stream in streams})
+    levels = [stream.healpix_level for stream in streams]
+    if any(type(level) is not int or not 0 <= level <= 29 for level in levels):
+        raise ValueError("Stream healpix_level must be an integer between 0 and 29.")
+    return sorted(set(levels))
 
 
 def get_healpix_level(config: Config) -> int:
@@ -63,12 +66,48 @@ def get_healpix_level(config: Config) -> int:
     return levels[0]
 
 
+def validate_domains(cf: Config) -> None:
+    """Validate per-level bbox settings without constructing HEALPix geometry."""
+    domains = cf.get("domains", {})
+    if not isinstance(domains, dict | DictConfig):
+        raise ValueError("domains must be a mapping keyed by integer HEALPix levels.")
+    levels = get_healpix_levels(cf)
+    required = {"lon_min", "lon_max", "lat_min", "lat_max"}
+    for level, bbox in domains.items():
+        if type(level) is not int or level not in levels:
+            raise ValueError(f"Domain level {level!r} must be an existing integer stream level.")
+        if bbox is None:
+            continue
+        if (
+            not isinstance(bbox, dict | DictConfig)
+            or not required <= set(bbox)
+            or set(bbox) - required - {"pad_rings"}
+        ):
+            raise ValueError(f"Domain {level} requires lon_min, lon_max, lat_min, lat_max.")
+        for key in required:
+            value = bbox[key]
+            bound = 180 if key.startswith("lon") else 90
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not np.isfinite(value)
+                or not -bound <= value <= bound
+            ):
+                raise ValueError(f"Domain {level} {key} must be finite and within ±{bound}.")
+        if bbox["lat_min"] >= bbox["lat_max"] or bbox["lon_min"] == bbox["lon_max"]:
+            raise ValueError(f"Domain {level} must have nonzero longitude and latitude extent.")
+        pad = bbox.get("pad_rings", 0)
+        if type(pad) is not int or pad < 0:
+            raise ValueError(f"Domain {level} pad_rings must be a nonnegative integer.")
+
+
 def get_encoder_configs(cf: Config) -> dict[str, Config]:
     """Resolve explicitly named single-grid encoders without changing the model config."""
     if not cf.get("encoders"):
         raise ValueError("Configure named encoders explicitly, e.g. encoders: {default: {}}.")
     base = cf.copy()
     levels = get_healpix_levels(base)
+    validate_domains(base)
     for name, stream in base.streams.items():
         if "decode_levels" not in stream:
             continue
@@ -88,6 +127,8 @@ def get_encoder_configs(cf: Config) -> dict[str, Config]:
     represented_levels = set()
     for name, settings in settings_by_name.items():
         overrides = settings.copy()
+        if "domains" in overrides:
+            raise ValueError(f"Encoder {name!r} cannot override the model's domains.")
         stream_names = overrides.pop("streams", base.streams)
         unknown = set(stream_names) - set(base.streams)
         if unknown:
@@ -97,6 +138,9 @@ def get_encoder_configs(cf: Config) -> dict[str, Config]:
         child_levels = get_healpix_levels(child)
         if len(child_levels) != 1:
             raise ValueError(f"Encoder {name!r} streams must use the same healpix_level.")
+        child.domains = {
+            level: bbox for level, bbox in base.get("domains", {}).items() if level in child_levels
+        }
         for key in (
             "ae_global_dim_embed",
             "ae_local_num_queries",
@@ -213,12 +257,11 @@ def _strip_interpolation(conf: Config) -> Config:
     stripped = {}
     if OmegaConf.is_dict(conf):
         for key in list(conf.keys()):
-            key = str(key)
             if OmegaConf.is_missing(conf, key):
                 val = "???"
             elif OmegaConf.is_config(conf[key]):
                 val = _strip_interpolation(conf[key])
-            elif key.startswith("_"):
+            elif isinstance(key, str) and key.startswith("_"):
                 continue  # Skip hidden/backup keys
             elif OmegaConf.is_interpolation(conf, key):
                 raw_key = f"_{key}"
@@ -335,7 +378,12 @@ def load_run_config(
     with fname.open() as f:
         json_str = f.read()
 
-    config = OmegaConf.create(json.loads(json_str))
+    settings = json.loads(json_str)
+    # JSON object keys are strings, unlike the integer level keys in YAML.
+    for key in ("domains", "forecast_engines"):
+        if key in settings:
+            settings[key] = {int(level): value for level, value in settings[key].items()}
+    config = OmegaConf.create(settings)
 
     config = _apply_fixes(config)
     return config

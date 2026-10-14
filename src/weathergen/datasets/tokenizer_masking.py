@@ -53,7 +53,9 @@ class TokenizerMasking:
     def get_geometry(self, healpix_level: int) -> HealpixGeometry:
         """Return read-only geometry cached by level for this tokenizer."""
         if healpix_level not in self._geometries:
-            self._geometries[healpix_level] = HealpixGeometry(healpix_level)
+            self._geometries[healpix_level] = HealpixGeometry(
+                healpix_level, self.masker.domains.get(healpix_level)
+            )
         return self._geometries[healpix_level]
 
     def reset_rng(self, rng) -> None:
@@ -82,7 +84,11 @@ class TokenizerMasking:
                 continue
             # tokenize data
             idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, healpix_level, pad_tokens
+                readerdata_to_torch(rdata),
+                token_size,
+                healpix_level,
+                pad_tokens,
+                domain=self.masker.domains.get(healpix_level),
             )
             tokens += [(idxs_cells, idxs_cells_lens)]
 
@@ -229,8 +235,11 @@ class TokenizerMasking:
 
         idxs_ord_inv = None
         if data.numel() > 0:
-            # flatten per-token indices into one flat list
-            idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
+            # Invert only the retained tokens, matching the returned target rows.
+            tokens = [idxs for cell in idxs_cells for idxs in cell]
+            idxs_flat = torch.cat(
+                [idxs for idxs, keep in zip(tokens, mask_tokens, strict=True) if keep]
+            )
             # compute indices for inversion
             _, idxs_ord_inv = torch.sort(idxs_flat)
 

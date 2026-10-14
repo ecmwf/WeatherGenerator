@@ -12,10 +12,10 @@ import math
 
 import torch
 import torch.nn as nn
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, get_healpix_levels
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -85,6 +85,8 @@ class EmbeddingEngine(torch.nn.Module):
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
+        if num_tokens == 0:
+            return tokens_all
 
         # iterate over all streams
         x_embeds = []
@@ -634,6 +636,72 @@ class ForecastingEngine(torch.nn.Module):
             else:
                 tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
+
+
+class MultiLevelForecastingEngine(torch.nn.Module):
+    """Forecast each grid independently, sharing the mean auxiliary-token update."""
+
+    def __init__(self, cf: Config, mode_cfg, domains) -> None:
+        super().__init__()
+        levels = get_healpix_levels(cf)
+        overrides = cf.get("forecast_engines", {})
+        if not isinstance(overrides, dict | DictConfig):
+            raise ValueError("forecast_engines must be a mapping keyed by integer HEALPix level.")
+        for level, settings in overrides.items():
+            if type(level) is not int or level not in levels:
+                raise ValueError(f"Unknown forecast_engines HEALPix level: {level!r}.")
+            if not isinstance(settings, dict | DictConfig):
+                raise ValueError(f"forecast_engines[{level}] must contain engine settings.")
+
+        self.num_aux = (cf.num_register_tokens + cf.num_class_tokens) * cf.ae_local_num_queries
+        self.level_slices = {}
+        self.engines = torch.nn.ModuleDict()
+        offset = self.num_aux
+        for level in levels:
+            child = OmegaConf.merge(cf, overrides.get(level, {}))
+            for key in (
+                "ae_global_dim_embed",
+                "ae_local_num_queries",
+                "num_register_tokens",
+                "num_class_tokens",
+            ):
+                if child.get(key) != cf.get(key):
+                    raise ValueError(f"forecast_engines[{level}] must use the model's {key}.")
+            count = len(domains[level])
+            self.level_slices[str(level)] = slice(offset, offset + count * cf.ae_local_num_queries)
+            offset += count * cf.ae_local_num_queries
+            self.engines[str(level)] = (
+                ForecastingEngine(child, mode_cfg, count)
+                if child.fe_num_blocks > 0
+                else IdentityEngine()
+            )
+        self.enabled = any(len(engine.fe_blocks) > 0 for engine in self.engines.values())
+
+    def forward(self, tokens, fstep, rope_coords=None):
+        if len(self.engines) == 1:
+            return next(iter(self.engines.values()))(tokens, fstep, rope_coords)
+
+        aux = tokens[..., : self.num_aux, :]
+        cell_tokens = []
+        aux_updates = []
+        for level, engine in self.engines.items():
+            section = self.level_slices[level]
+            local_tokens = torch.cat((aux, tokens[..., section, :]), dim=-2)
+            coords = (
+                torch.cat(
+                    (rope_coords[..., : self.num_aux, :], rope_coords[..., section, :]), dim=-2
+                )
+                if rope_coords is not None
+                else None
+            )
+            updated = engine(local_tokens, fstep, coords)
+            cell_tokens.append(updated[..., self.num_aux :, :])
+            if self.num_aux:
+                aux_updates.append(updated[..., : self.num_aux, :] - aux)
+        if self.num_aux:
+            # Averaging deltas preserves an identity auxiliary state exactly across rollouts.
+            aux = aux + torch.stack(aux_updates).mean(dim=0)
+        return torch.cat((aux, *cell_tokens), dim=-2)
 
 
 class EnsPredictionHead(torch.nn.Module):

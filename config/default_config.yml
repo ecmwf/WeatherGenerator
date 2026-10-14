@@ -10,6 +10,9 @@
 # Explicit encoder names are required; use {default: {}} for a single resolution.
 encoders: ???
 
+# Optional bounding boxes keyed by stream HEALPix level; omitted/null levels stay global.
+domains: {}
+
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -48,7 +51,7 @@ ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
 # Named encoders each use one stream grid.
-# Adjacent grids exchange parent/child context after encoding; 0 disables this exchange.
+# Adjacent grids exchange context after encoding and forecast updates; 0 disables exchange.
 latent_cascade_num_cycles: 1
 
 decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
@@ -67,6 +70,8 @@ fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm 
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
+# Per-level overrides of the FE settings above; each stream level has independent weights.
+forecast_engines: {}
 
 num_class_tokens: 0
 num_register_tokens: 0

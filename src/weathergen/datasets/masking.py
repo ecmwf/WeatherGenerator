@@ -113,8 +113,9 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, stage: Stage, streams=None, mode_cfg=None):
+    def __init__(self, stage: Stage, streams=None, mode_cfg=None, domains=None):
         self.rng = None
+        self.domains = domains if domains is not None else {}
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -338,7 +339,8 @@ class Masker:
         """
 
         healpix_level = stream_info["healpix_level"]
-        num_cells = hp_level_to_num_cells(healpix_level)
+        domain = self.domains.get(healpix_level)
+        num_cells = len(domain) if domain is not None else hp_level_to_num_cells(healpix_level)
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
         # # target and source configs
@@ -439,6 +441,8 @@ class Masker:
                 i_source += 1
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
+        for metadata in target_masks.metadata + source_masks.metadata:
+            metadata.global_params["healpix_level"] = healpix_level
 
         return (target_masks, source_masks, source_target_mapping)
 
@@ -536,7 +540,9 @@ class Masker:
         # params describing the masking
         masking_params = {}
 
-        num_cells = hp_level_to_num_cells(healpix_level)
+        domain = self.domains.get(healpix_level)
+        num_cells = len(domain) if domain is not None else hp_level_to_num_cells(healpix_level)
+        active_cells = domain.active_cells if domain is not None else np.arange(num_cells)
 
         # generate cell mask
 
@@ -545,7 +551,7 @@ class Masker:
             mask = self.rng.uniform(0, 1, num_cells) < keep_rate
 
         elif "forecast" in strategy or strategy == "causal":
-            mask = np.ones(num_cells, dtype=np.bool)
+            mask = np.ones(num_cells, dtype=bool)
 
             if "diffusion_rn" in masking_strategy_config:
                 masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
@@ -553,30 +559,25 @@ class Masker:
         elif strategy == "healpix":
             # prepare healpix-based masking
             keep_rate = self._get_sampling_rate(masking_strategy_config)
-            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
+            hl_mask, parent_cells, num_children_per_parent, num_parents_to_keep = (
                 self._prepare_healpix_based_masking(
-                    healpix_level, masking_strategy_config, keep_rate
+                    healpix_level, masking_strategy_config, keep_rate, active_cells
                 )
             )
 
             if num_parents_to_keep == 0:
                 mask = np.zeros(num_cells, dtype=bool)
             else:
-                parent_ids = self.rng.choice(num_parent_cells, num_parents_to_keep, replace=False)
-                child_offsets = np.arange(num_children_per_parent)
-                child_indices = (
-                    parent_ids[:, None] * num_children_per_parent + child_offsets
-                ).reshape(-1)
-                mask = np.zeros(num_cells, dtype=bool)
-                mask[child_indices] = True
+                parent_ids = self.rng.choice(parent_cells, num_parents_to_keep, replace=False)
+                mask = np.isin(active_cells // num_children_per_parent, parent_ids)
 
         # Spatial healpix based cropping, select contiguous region
         elif strategy == "cropping_healpix":
             # prepare healpix-based masking
             keep_rate = self._get_sampling_rate(masking_strategy_config)
-            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
+            hl_mask, parent_cells, num_children_per_parent, num_parents_to_keep = (
                 self._prepare_healpix_based_masking(
-                    healpix_level, masking_strategy_config, keep_rate
+                    healpix_level, masking_strategy_config, keep_rate, active_cells
                 )
             )
 
@@ -594,6 +595,8 @@ class Masker:
                     num_children_per_parent=num_children_per_parent,
                     center_cell=None,
                     method=method,
+                    active_cells=active_cells,
+                    parent_cells=parent_cells,
                 )
 
         else:
@@ -613,6 +616,8 @@ class Masker:
         num_children_per_parent: int,
         center_cell: int | None = None,
         method: str = "geodesic_disk",
+        active_cells=None,
+        parent_cells=None,
     ) -> NDArray:
         """
         Select spatially contiguous cells on the sphere using neighbor relationships.
@@ -641,42 +646,45 @@ class Masker:
         num_total_cells = hp_level_to_num_cells(healpix_level)
         nside = 2**healpix_level
 
-        assert num_cells_to_select <= num_total_cells
+        if parent_cells is None:
+            parent_cells = np.arange(num_total_cells)
+        assert num_cells_to_select <= len(parent_cells)
 
         # Random starting point. Note we may want overlap here
         # for now we basically control with chosen masking rates
-        center_cell = self.rng.integers(0, num_total_cells)
+        center_cell = parent_cells[self.rng.integers(0, len(parent_cells))]
 
         if method == "disk":
-            selected = self._select_disk(center_cell, num_cells_to_select, nside)
+            selected = self._select_disk(center_cell, num_cells_to_select, nside, parent_cells)
         elif method == "random_walk":
-            selected = self._select_random_walk(center_cell, num_cells_to_select, nside)
+            selected = self._select_random_walk(
+                center_cell, num_cells_to_select, nside, parent_cells
+            )
         elif method == "geodesic_disk":
             selected = self._select_geodesic_disk(
-                center_cell, num_cells_to_select, nside, num_total_cells
+                center_cell, num_cells_to_select, nside, num_total_cells, parent_cells
             )
         else:
             raise ValueError(f"Unknown selection method: {method}")
 
         parent_ids = np.array(sorted(selected))
 
-        # Project to data level
-        child_offsets = np.arange(num_children_per_parent)
-        child_indices = (parent_ids[:, None] * num_children_per_parent + child_offsets).reshape(-1)
-
-        # Create mask: True = MASK (masked tokens), False = KEEP (kept tokens)
-        mask = np.zeros(num_cells, dtype=bool)
-        mask[child_indices] = True
+        # Project selected GLOBAL parents directly onto the compact active data cells.
+        cells = np.arange(num_cells) if active_cells is None else active_cells
+        mask = np.isin(cells // num_children_per_parent, parent_ids)
 
         return mask
 
     # separate functions for the different methods of producing spatially contiguous regions
-    def _select_disk(self, center_cell: int, num_cells_to_select: int, nside: int) -> set[int]:
+    def _select_disk(
+        self, center_cell: int, num_cells_to_select: int, nside: int, parent_cells=None
+    ) -> set[int]:
         """
         Select cells in a disk shape by expanding layer by layer.
         """
         selected = {center_cell}
         frontier = {center_cell}
+        available = None if parent_cells is None else set(parent_cells)
 
         while len(selected) < num_cells_to_select and frontier:
             # Expand frontier by one layer
@@ -685,7 +693,11 @@ class Masker:
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message="invalid value encountered")
                     neighbors = hp.neighbours(cell, nside, order="nested")
-                valid_neighbors = [n for n in neighbors if n != -1 and n not in selected]
+                valid_neighbors = [
+                    n
+                    for n in neighbors
+                    if n != -1 and n not in selected and (available is None or n in available)
+                ]
                 next_frontier.update(valid_neighbors)
 
             if not next_frontier:
@@ -701,13 +713,14 @@ class Masker:
         return selected
 
     def _select_random_walk(
-        self, center_cell: int, num_cells_to_select: int, nside: int
+        self, center_cell: int, num_cells_to_select: int, nside: int, parent_cells=None
     ) -> set[int]:
         """
         Random walk through neighbors, creates elongated irregular regions
         """
         selected = {center_cell}
         frontier = {center_cell}
+        available = None if parent_cells is None else set(parent_cells)
 
         while len(selected) < num_cells_to_select:
             # Get all neighbors of current frontier
@@ -716,7 +729,11 @@ class Masker:
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message="invalid value encountered")
                     cell_neighbors = hp.neighbours(cell, nside, order="nested")
-                valid = [n for n in cell_neighbors if n != -1 and n not in selected]
+                valid = [
+                    n
+                    for n in cell_neighbors
+                    if n != -1 and n not in selected and (available is None or n in available)
+                ]
                 neighbors.update(valid)
 
             if not neighbors:
@@ -730,7 +747,12 @@ class Masker:
         return selected
 
     def _select_geodesic_disk(
-        self, center_cell: int, num_cells_to_select: int, nside: int, num_total_cells: int
+        self,
+        center_cell: int,
+        num_cells_to_select: int,
+        nside: int,
+        num_total_cells: int,
+        parent_cells=None,
     ) -> set:
         """
         Angular distance selection, creates most uniform somewhat circular regions
@@ -753,7 +775,7 @@ class Masker:
         center_xyz = lonlat_to_xyz(center_lon, center_lat)
 
         # Get all cell coordinates
-        all_indices = np.arange(num_total_cells)
+        all_indices = np.arange(num_total_cells) if parent_cells is None else parent_cells
         all_lonlat = hp.healpix_to_lonlat(all_indices, nside, order="nested")
         all_lon = all_lonlat[0].value if hasattr(all_lonlat[0], "value") else all_lonlat[0]
         all_lat = all_lonlat[1].value if hasattr(all_lonlat[1], "value") else all_lonlat[1]
@@ -769,11 +791,11 @@ class Masker:
         # Compute angular distances and select closest cells
         dot_products = np.clip(np.dot(all_xyz, center_xyz), -1.0, 1.0)
         angular_distances = np.arccos(dot_products)
-        selected = np.argsort(angular_distances)[:num_cells_to_select]
+        selected = all_indices[np.argsort(angular_distances)[:num_cells_to_select]]
 
         return selected
 
-    def _prepare_healpix_based_masking(self, healpix_level, cfg, keep_rate):
+    def _prepare_healpix_based_masking(self, healpix_level, cfg, keep_rate, active_cells=None):
         """
         Prepare healpix masking related attributes.
         """
@@ -786,6 +808,11 @@ class Masker:
         level_diff = healpix_level - hl_mask
         num_children_per_parent = 4**level_diff
         # number of parents to keep
-        num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
+        parent_cells = (
+            np.arange(num_parent_cells)
+            if active_cells is None
+            else np.unique(active_cells // num_children_per_parent)
+        )
+        num_parents_to_keep = int(np.round(keep_rate * len(parent_cells)))
 
-        return hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep
+        return hl_mask, parent_cells, num_children_per_parent, num_parents_to_keep

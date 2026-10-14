@@ -9,7 +9,6 @@
 
 import logging
 
-import astropy_healpix as hp
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -18,6 +17,7 @@ import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.datasets.domain import Domain
 from weathergen.model.engines import LatentState
 
 _logger = logging.getLogger(__name__)
@@ -251,6 +251,9 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
                 group_attrs["healpix_levels"] = config.get_healpix_levels(cf)
                 group_attrs["queries_per_cell"] = int(cf.get("ae_local_num_queries", 1))
                 group_attrs["spatial_order"] = "level_cell_query"
+                group_attrs["cells_per_level"] = [
+                    len(Domain.from_config(cf, level)) for level in config.get_healpix_levels(cf)
+                ]
                 if npoints is not None:
                     group_attrs["total_points"] = int(npoints)
 
@@ -367,21 +370,12 @@ def _split_extra_tokens(
     return None, latent_array
 
 
-_HEALPIX_COORDS_CACHE: dict[int, tuple[npt.NDArray, npt.NDArray]] = {}
-
-
 def _get_healpix_coords(cf) -> tuple[npt.NDArray, npt.NDArray] | None:
     if cf is None or not hasattr(cf, "streams"):
         return None
-    coords = []
-    for level in config.get_healpix_levels(cf):
-        cached = _HEALPIX_COORDS_CACHE.get(level)
-        if cached is None:
-            ipix = np.arange(12 * 4**level)
-            lon, lat = hp.healpix_to_lonlat(ipix, 2**level, order="nested")
-            cached = (lon.to_value("deg"), lat.to_value("deg"))
-            _HEALPIX_COORDS_CACHE[level] = cached
-        coords.append(cached)
+    coords = [
+        Domain.from_config(cf, level).centres_lonlat() for level in config.get_healpix_levels(cf)
+    ]
     num_queries = int(cf.get("ae_local_num_queries", 1))
     return tuple(
         np.concatenate([grid[axis] for grid in coords]).repeat(num_queries) for axis in (0, 1)

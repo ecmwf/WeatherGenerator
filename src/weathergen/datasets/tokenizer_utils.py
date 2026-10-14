@@ -5,6 +5,7 @@ from astropy_healpix.healpy import ang2pix
 from torch import Tensor
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.domain import Domain
 from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
     locs_to_ctr_coords,
@@ -95,7 +96,7 @@ def encode_times_target(times, time_win) -> torch.tensor:
     return time_tensor + 0.5
 
 
-def hpy_cell_splits(coords: torch.tensor, hl: int):
+def hpy_cell_splits(coords: torch.tensor, hl: int, domain: Domain | None = None):
     """Compute healpix cell id for each coordinate on given level hl
 
     Returns
@@ -107,22 +108,28 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     # healpix cells for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
 
-    # extract information to split according to cells by first sorting and then finding split idxs
-    hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
-    splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
-
-    # extract per cell data
-    hpy_idxs_ord_temp = np.split(hpy_idxs_ord, splits + 1)
-    hpy_idxs_ord_split = [np.array([], dtype=np.int64) for _ in range(12 * 4**hl)]
-    # TODO: split smarter (with a augmented splits list?) so that this loop is not needed
-    for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
-        hpy_idxs_ord_split[b] = x
+    # Filter before grouping: -1 is never a compact cell index.
+    if domain is not None:
+        hpy_idxs = domain.to_compact[hpy_idxs]
+    valid = np.flatnonzero(hpy_idxs >= 0)
+    hpy_idxs_ord = valid[np.argsort(hpy_idxs[valid], **numpy_argsort_args)]
+    num_cells = len(domain) if domain is not None else 12 * 4**hl
+    hpy_idxs_ord_split = [np.array([], dtype=np.int64) for _ in range(num_cells)]
+    if len(hpy_idxs_ord):
+        splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord])) + 1
+        for indices in np.split(hpy_idxs_ord, splits):
+            hpy_idxs_ord_split[hpy_idxs[indices[0]]] = indices
 
     return (hpy_idxs_ord_split, thetas, phis)
 
 
 def hpy_splits(
-    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
+    coords: torch.Tensor,
+    hl: int,
+    token_size: int,
+    pad_tokens: bool,
+    offset_step: int = 0,
+    domain: Domain | None = None,
 ) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
     """Compute healpix cell for each data point and splitting information per cell;
        when the token_size is exceeded then splitting based on lat is used;
@@ -135,7 +142,7 @@ def hpy_splits(
     """
 
     # list of data points per healpix cell
-    (hpy_idxs_ord_split, thetas, phis) = hpy_cell_splits(coords, hl)
+    (hpy_idxs_ord_split, thetas, phis) = hpy_cell_splits(coords, hl, domain)
 
     # if token_size is exceeed split based on latitude
     # TODO: split by hierarchically traversing healpix scheme
@@ -179,11 +186,14 @@ def tokenize_space(
     hl,
     pad_tokens=True,
     offset_step=0,
+    domain=None,
 ):
     """Process one window into tokens"""
 
     # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens = hpy_splits(rdata.coords, hl, token_size, pad_tokens, offset_step)
+    idxs_ord, idxs_ord_lens = hpy_splits(
+        rdata.coords, hl, token_size, pad_tokens, offset_step, domain
+    )
 
     return idxs_ord, idxs_ord_lens
 
@@ -193,16 +203,16 @@ def tokenize_spacetime(
     token_size,
     hl,
     pad_tokens=True,
+    domain=None,
 ):
     """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
     separately
     """
 
-    num_healpix_cells = 12 * 4**hl
+    num_healpix_cells = len(domain) if domain is not None else 12 * 4**hl
     idxs_cells = [[] for _ in range(num_healpix_cells)]
     idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
 
-    offset_step = 0
     t_unique = np.unique(rdata.datetimes)
     for _, t in enumerate(t_unique):
         # data for current time step
@@ -210,12 +220,18 @@ def tokenize_spacetime(
         rdata_cur = IOReaderData(
             rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
         )
-        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
+        idxs_cur, idxs_cur_lens = tokenize_space(
+            rdata_cur, token_size, hl, pad_tokens, domain=domain
+        )
+        # Map time-local indices back to the original rows, preserving zero padding.
+        row_indices = torch.from_numpy(np.flatnonzero(mask))
+        if pad_tokens:
+            row_indices = torch.cat((torch.zeros(1, dtype=torch.int64), row_indices + 1))
+        idxs_cur = [[row_indices[token] for token in cell] for cell in idxs_cur]
 
         # collect data for all time steps
         idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
         idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
-        offset_step += mask.sum()
 
     return idxs_cells, idxs_cells_lens
 
