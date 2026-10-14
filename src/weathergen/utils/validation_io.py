@@ -18,6 +18,7 @@ import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.datasets.domain import Domain
 from weathergen.model.engines import LatentState
 
 _logger = logging.getLogger(__name__)
@@ -364,22 +365,24 @@ def _split_extra_tokens(
     return None, latent_array
 
 
-_HEALPIX_COORDS_CACHE: dict[int, tuple[npt.NDArray, npt.NDArray]] = {}
+_HEALPIX_COORDS_CACHE: dict[tuple, tuple[npt.NDArray, npt.NDArray]] = {}
 
 
 def _get_healpix_coords(cf) -> tuple[npt.NDArray, npt.NDArray] | None:
     if cf is None or not hasattr(cf, "healpix_level"):
         return None
     healpix_level = int(cf.healpix_level)
-    cached = _HEALPIX_COORDS_CACHE.get(healpix_level)
+    # latent tokens exist only for the cells of the (possibly regional) domain
+    domain = Domain.from_config(cf)
+    cache_key = (healpix_level, None if domain.is_global else domain.bbox, domain.pad_rings)
+    cached = _HEALPIX_COORDS_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    num_healpix_cells = 12 * 4**healpix_level
-    ipix = np.arange(num_healpix_cells)
+    ipix = domain.active_cells
     lon, lat = hp.healpix_to_lonlat(ipix, 2**healpix_level, order="nested")
     coords = (lon.to_value("deg"), lat.to_value("deg"))
-    _HEALPIX_COORDS_CACHE[healpix_level] = coords
+    _HEALPIX_COORDS_CACHE[cache_key] = coords
     return coords
 
 

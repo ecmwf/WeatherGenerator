@@ -7,12 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import warnings
-
-import astropy_healpix as hp
-import numpy as np
 import torch
 
+from weathergen.datasets.domain import Domain
 from weathergen.datasets.utils import (
     healpix_verts_rots,
     r3tos2,
@@ -24,15 +21,18 @@ class Tokenizer:
     Base class for tokenizers.
     """
 
-    def __init__(self, healpix_level: int):
+    def __init__(self, healpix_level: int, domain: Domain | None = None):
         ref = torch.tensor([1.0, 0.0, 0.0])
+
+        # cells that exist for this run; global unless a regional domain is configured
+        self.domain = domain if domain is not None else Domain.global_(healpix_level)
 
         self.healpix_level = healpix_level
         self.hl_source = healpix_level
         self.hl_target = healpix_level
 
-        self.num_healpix_cells_source = 12 * 4**self.hl_source
-        self.num_healpix_cells_target = 12 * 4**self.hl_target
+        self.num_healpix_cells_source = len(self.domain)
+        self.num_healpix_cells_target = len(self.domain)
 
         self.size_time_embedding = 6
 
@@ -41,6 +41,12 @@ class Tokenizer:
         verts11, verts11_rots = healpix_verts_rots(self.hl_source, 1.0, 1.0)
         verts01, verts01_rots = healpix_verts_rots(self.hl_source, 0.0, 1.0)
         vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_source, 0.5, 0.5)
+        # keep only the active cells of the domain (no-op for a global domain)
+        verts00, verts00_rots = self._subset(verts00), self._subset(verts00_rots)
+        verts10, verts10_rots = self._subset(verts10), self._subset(verts10_rots)
+        verts11, verts11_rots = self._subset(verts11), self._subset(verts11_rots)
+        verts01, verts01_rots = self._subset(verts01), self._subset(verts01_rots)
+        vertsmm, vertsmm_rots = self._subset(vertsmm), self._subset(vertsmm_rots)
         self.hpy_verts = [
             verts00.to(torch.float32),
             verts10.to(torch.float32),
@@ -61,6 +67,12 @@ class Tokenizer:
         verts11, verts11_rots = healpix_verts_rots(self.hl_target, 1.0, 1.0)
         verts01, verts01_rots = healpix_verts_rots(self.hl_target, 0.0, 1.0)
         vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_target, 0.5, 0.5)
+        # keep only the active cells of the domain (no-op for a global domain)
+        verts00, verts00_rots = self._subset(verts00), self._subset(verts00_rots)
+        verts10, verts10_rots = self._subset(verts10), self._subset(verts10_rots)
+        verts11, verts11_rots = self._subset(verts11), self._subset(verts11_rots)
+        verts01, verts01_rots = self._subset(verts01), self._subset(verts01_rots)
+        vertsmm, vertsmm_rots = self._subset(vertsmm), self._subset(vertsmm_rots)
         self.hpy_verts = [
             verts00.to(torch.float32),
             verts10.to(torch.float32),
@@ -101,20 +113,22 @@ class Tokenizer:
 
         # add local coords wrt to center of neighboring cells
         # (since the neighbors are used in the prediction)
-        num_healpix_cells = 12 * 4**self.hl_target
-        with warnings.catch_warnings(action="ignore"):
-            temp = hp.neighbours(
-                np.arange(num_healpix_cells), 2**self.hl_target, order="nested"
-            ).transpose()
-        # fix missing nbors with references to self
-        for i, row in enumerate(temp):
-            temp[i][row == -1] = i
+        # neighbour table in compact indexing; missing (healpix corner) and out-of-domain
+        # neighbours are replaced by the cell itself
+        num_healpix_cells = len(self.domain)
+        temp = self.domain.neighbours_compact()
         self.hpy_nctrs_target = (
             vertsmm[temp.flatten()]
             .reshape((num_healpix_cells, 8, 3))
             .transpose(1, 0)
             .to(torch.float32)
         )
+
+    def _subset(self, t: torch.Tensor) -> torch.Tensor:
+        """Rows of a per-cell table for the active cells of the domain."""
+        if self.domain.is_global:
+            return t
+        return t[torch.from_numpy(self.domain.active_cells)]
 
     def compute_source_centroids(self, source_tokens_cells: list[torch.Tensor]) -> torch.Tensor:
         source_means = [

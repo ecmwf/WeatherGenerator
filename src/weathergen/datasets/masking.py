@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
+from weathergen.datasets.domain import Domain
 from weathergen.train.utils import Stage
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
@@ -112,7 +113,7 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
+    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None, domain=None):
         self.rng = None
 
         self.mask_value = 0.0
@@ -120,7 +121,9 @@ class Masker:
 
         # number of healpix cells
         self.healpix_level_data = healpix_level
-        self.healpix_num_cells = 12 * (4**healpix_level)
+        # cells that exist for this run (all cells unless a regional domain is configured)
+        self.domain = domain if domain is not None else Domain.global_(healpix_level)
+        self.healpix_num_cells = len(self.domain)
 
         self.stage = stage
 
@@ -541,6 +544,13 @@ class Masker:
         assert num_cells == self.healpix_num_cells, (
             "num_cells inconsistent with configured healpix level."
         )
+
+        if not self.domain.is_global and strategy in ("healpix", "cropping_healpix"):
+            raise NotImplementedError(
+                f"Masking strategy '{strategy}' uses healpix nested-index parent/child "
+                "arithmetic, which does not hold for the compact cell indices of a regional "
+                "domain. Use 'random', 'forecast' or 'causal' with a regional domain."
+            )
 
         # generate cell mask
 

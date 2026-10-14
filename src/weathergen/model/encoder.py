@@ -13,6 +13,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.domain import Domain
 from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
@@ -42,7 +43,9 @@ class EncoderModule(torch.nn.Module):
         self.cf = cf
 
         self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        # healpix cells of the (possibly regional) domain
+        self.domain = Domain.from_config(cf)
+        self.num_healpix_cells = len(self.domain)
 
         self.cf = cf
         self.sources_size = sources_size
@@ -89,15 +92,15 @@ class EncoderModule(torch.nn.Module):
             s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
             q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
             # add meta data
+            # global nested ids of the cells (== arange(num_healpix_cells) for a global domain)
+            cell_ids = torch.from_numpy(self.domain.active_cells)
             q_cells[:, :, -8:-6] = (
-                (torch.arange(self.num_healpix_cells) / self.num_healpix_cells)
+                (cell_ids / self.domain.num_total_cells)
                 .unsqueeze(1)
                 .unsqueeze(1)
                 .repeat((1, cf.ae_local_num_queries, 2))
             )
-            theta, phi = healpy.pix2ang(
-                nside=2**self.healpix_level, ipix=torch.arange(self.num_healpix_cells)
-            )
+            theta, phi = healpy.pix2ang(nside=2**self.healpix_level, ipix=cell_ids)
             q_cells[:, :, -6:-3] = (
                 torch.cos(theta).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
             )
@@ -165,6 +168,8 @@ class EncoderModule(torch.nn.Module):
 
         # subdivision factor for required splitting
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
+        # a small regional domain can make clen 0, which would skip the loop below entirely
+        clen = max(1, clen)
         tokens_global_unmasked = []
         posteriors = []
 
