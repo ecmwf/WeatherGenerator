@@ -68,6 +68,9 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
     # Strip non-encoder components
     teacher_dim_embed = override_cfg.ae_global_dim_embed
     model.forecast_engine = None
+    if getattr(model, "_forecast_per_level", None) is not None:
+        # multi-resolution latent: forecast engines of the coarser levels
+        model._forecast_per_level = None
     model.embed_target_coords = nn.ModuleDict()
     model.target_token_engines = nn.ModuleDict()
     model.pred_heads = nn.ModuleDict()

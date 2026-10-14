@@ -15,7 +15,7 @@ from typing import Any
 import torch
 
 from weathergen.common.config import Config, load_run_config, merge_configs
-from weathergen.model.model import ModelParams
+from weathergen.model.model import build_model_params
 from weathergen.model.model_interface import get_model
 from weathergen.model.ssl_target_processing import (
     DINOTargetProcessing,
@@ -153,7 +153,7 @@ class FrozenTeacher(EncoderTeacher):
         prepare_encoder_teacher(teacher_model, cf.training_config, teacher_config)
 
         # Create model params matching teacher's architecture
-        teacher_model_params = ModelParams(teacher_config).create(teacher_config).to(device)
+        teacher_model_params = build_model_params(teacher_config).create(teacher_config).to(device)
 
         return cls(teacher_model, cf.training_config, teacher_model_params)
 

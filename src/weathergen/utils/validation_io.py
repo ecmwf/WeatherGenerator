@@ -18,7 +18,9 @@ import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.datasets.domain_pyramid import build_domain_pyramid, model_domain
 from weathergen.model.engines import LatentState
+from weathergen.model.model import latent_level_name
 
 _logger = logging.getLogger(__name__)
 
@@ -201,22 +203,56 @@ def write_output(
                 batch,
                 batch_idx,
                 batch_size,
+                **_latent_level_attrs(cf),
             )
+        # multi-resolution latent: every coarser level as its own stream "latent_hl<level>",
+        # with the same layout as the finest level (written as "latent" above)
+        if write_latents:
+            for lvl, latents_lvl in get_latent_output_levels(cf, batch, model_output).items():
+                _write_latent_data_to_zarr(
+                    zio,
+                    data,
+                    cf,
+                    batch,
+                    batch_idx,
+                    batch_size,
+                    latents=latents_lvl,
+                    stream_name=f"{io.LATENT_STREAM}_hl{lvl}",
+                    domain=build_domain_pyramid(cf).domain(lvl),
+                    extra_attrs={"healpix_level": int(lvl)},
+                )
 
 
-def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
+def _write_latent_data_to_zarr(
+    zio,
+    data,
+    cf,
+    batch,
+    batch_idx,
+    batch_size,
+    latents=None,
+    stream_name=io.LATENT_STREAM,
+    domain=None,
+    extra_attrs=None,
+):
     """Write latent data directly to zarr store.
 
     This bypasses OutputItem validation which incorrectly requires source datasets
     for latent-only items.
 
     Also writes coordinate and time metadata using config healpix coordinates.
+
+    Multi-resolution latent: `latents` (default data.latents), `stream_name`, `domain` (cells
+    of the latent, default: the finest level) and `extra_attrs` (added to the group
+    attributes) write one latent level.
     """
+    if latents is None:
+        latents = data.latents
     # Calculate sample start index for this batch
     sample_start = batch_idx * batch_size
 
     # Iterate over latent data
-    for t_idx, latents_in_step in enumerate(data.latents):
+    for t_idx, latents_in_step in enumerate(latents):
         for sample_idx_in_batch, latents_in_sample in enumerate(latents_in_step):
             if not latents_in_sample:
                 continue
@@ -225,7 +261,7 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
             global_sample_idx = sample_start + sample_idx_in_batch
 
             # Reserve latent step 0 for the initial encoded state.
-            group_path = f"{global_sample_idx}/{io.LATENT_STREAM}/{t_idx + 1}"
+            group_path = f"{global_sample_idx}/{stream_name}/{t_idx + 1}"
 
             npoints = _infer_latent_points_for_metadata(latents_in_sample)
             (
@@ -235,7 +271,7 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
                 coords_len,
                 num_register_tokens,
                 num_class_tokens,
-            ) = _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints)
+            ) = _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints, domain)
             # Collect all attributes upfront so they can be passed to
             # create_group in a single call.  Setting attrs individually
             # after creation causes duplicate zarr.json entries in ZipStore.
@@ -250,6 +286,8 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
                 }
                 if npoints is not None:
                     group_attrs["total_points"] = int(npoints)
+            if extra_attrs:
+                group_attrs.update(extra_attrs)
 
             # Create or get group (avoid duplicate entries in ZipStore)
             group = zio.data_root.get(group_path)
@@ -364,31 +402,35 @@ def _split_extra_tokens(
     return None, latent_array
 
 
-_HEALPIX_COORDS_CACHE: dict[int, tuple[npt.NDArray, npt.NDArray]] = {}
+_HEALPIX_COORDS_CACHE: dict[tuple, tuple[npt.NDArray, npt.NDArray]] = {}
 
 
-def _get_healpix_coords(cf) -> tuple[npt.NDArray, npt.NDArray] | None:
+def _get_healpix_coords(cf, domain=None) -> tuple[npt.NDArray, npt.NDArray] | None:
     if cf is None or not hasattr(cf, "healpix_level"):
         return None
-    healpix_level = int(cf.healpix_level)
-    cached = _HEALPIX_COORDS_CACHE.get(healpix_level)
+    # latent tokens exist only for the cells of the (possibly regional) domain; with a
+    # multi-resolution latent: `domain` of the level written, default the finest level
+    if domain is None:
+        domain = model_domain(cf)
+    healpix_level = domain.healpix_level
+    cache_key = (healpix_level, None if domain.is_global else domain.bbox, domain.pad_rings)
+    cached = _HEALPIX_COORDS_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    num_healpix_cells = 12 * 4**healpix_level
-    ipix = np.arange(num_healpix_cells)
+    ipix = domain.active_cells
     lon, lat = hp.healpix_to_lonlat(ipix, 2**healpix_level, order="nested")
     coords = (lon.to_value("deg"), lat.to_value("deg"))
-    _HEALPIX_COORDS_CACHE[healpix_level] = coords
+    _HEALPIX_COORDS_CACHE[cache_key] = coords
     return coords
 
 
-def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
+def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints, domain=None):
     num_register_tokens = int(cf.get("num_register_tokens", 0))
     num_class_tokens = int(cf.get("num_class_tokens", 0))
     num_extra_tokens = num_register_tokens + num_class_tokens
 
-    healpix_coords = _get_healpix_coords(cf)
+    healpix_coords = _get_healpix_coords(cf, domain)
     if healpix_coords is None or len(healpix_coords) != 2:
         return None, None, None, None, num_register_tokens, num_class_tokens
 
@@ -447,6 +489,9 @@ def get_latent_output(batch, model_output):
         for i_sample in range(n_samples):
             per_sample: dict = {}
             for lname, lval in latent_pred.items():
+                if lname.startswith(_LEVEL_PREFIX):
+                    # coarser levels of a multi-resolution latent: get_latent_output_levels
+                    continue
                 if isinstance(lval, LatentState):
                     fields = {
                         "tokens": lval.z_pre_norm,
@@ -462,3 +507,49 @@ def get_latent_output(batch, model_output):
             latents_all[-1].append(per_sample)
 
     return latents_all
+
+
+_LEVEL_PREFIX = latent_level_name(0)[:-1]  # "latent_state_hl"
+
+
+def _latent_level_attrs(cf) -> dict:
+    """Group attributes of the finest latent: its healpix level, multi-resolution only."""
+    pyramid = build_domain_pyramid(cf)
+    if pyramid.is_single:
+        return {}
+    return {"extra_attrs": {"healpix_level": int(pyramid.finest)}}
+
+
+def get_latent_output_levels(cf, batch, model_output) -> dict[int, list[list[dict]]]:
+    """
+    Multi-resolution latent: the latents of the coarser levels, {level: latents} with latents
+    in the layout of get_latent_output (per output step, per sample, {"tokens": ...}).
+    Empty for a single latent level.
+    """
+    pyramid = build_domain_pyramid(cf)
+    if pyramid.is_single:
+        return {}
+
+    fp32 = torch.float32
+    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+    n_samples = len(batch.get_source_samples().get_samples())
+
+    out: dict[int, list[list[dict]]] = {}
+    for lvl in pyramid.levels:
+        if lvl == pyramid.finest:
+            continue
+        name = latent_level_name(lvl)
+        latents_lvl: list[list[dict]] = []
+        for t_idx in timestep_idxs:
+            latent_pred = model_output.get_latent_prediction(t_idx)
+            state = latent_pred.get(name)
+            latents_lvl.append(
+                [
+                    {"tokens": state.z_pre_norm[i].detach().to(fp32).cpu().numpy()}
+                    if state is not None
+                    else {}
+                    for i in range(n_samples)
+                ]
+            )
+        out[lvl] = latents_lvl
+    return out

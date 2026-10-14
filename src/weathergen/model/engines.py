@@ -78,17 +78,29 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def forward(self, batch, pe_embed):
+    def forward(self, batch, pe_embed, tokens_lens=None, stream_names=None):
+        """
+        Embed the source tokens of all streams and order them by cell.
+
+        For the multi-resolution latent the encoder calls this once per latent level, with
+        that level's `tokens_lens` and the names of the streams encoded at that level
+        (in the order of the stream axis of `tokens_lens`). By default all streams and
+        `batch.tokens_lens` are used (single latent level).
+        """
+        if tokens_lens is None:
+            tokens_lens = batch.tokens_lens
+        if stream_names is None:
+            stream_names = list(self.streams.keys())
         num_steps_input = batch.get_num_source_steps()
 
-        num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
+        num_tokens = torch.sum(tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
         # iterate over all streams
         x_embeds = []
-        for stream_name in self.streams.keys():
+        for stream_name in stream_names:
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -110,33 +122,34 @@ class EmbeddingEngine(torch.nn.Module):
 
         # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
         max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
-        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+        assert tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
             "max number of tokens per cell for positional encoding exceeded."
         )
         " Increase ae_local_max_tokens_per_cell in config."
 
-        if batch.tokens_lens.shape[2] == 1:
+        if tokens_lens.shape[2] == 1:
             # trivial with one stream
             tokens_all = torch.cat(x_embeds)
 
         else:
-            scatter_idxs = self.get_scatter_idxs_vectorized(batch)
+            scatter_idxs = self.get_scatter_idxs_vectorized(batch, tokens_lens)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
             # actual scatter operation and apply per cell positional encoding
             tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
 
-        pe_idxs = self.get_pe_idxs_vectorized(batch)
+        pe_idxs = self.get_pe_idxs_vectorized(batch, tokens_lens)
         tokens_all = tokens_all + pe_embed[pe_idxs]
 
         return tokens_all
 
-    def get_pe_idxs_vectorized(self, batch):
+    def get_pe_idxs_vectorized(self, batch, tokens_lens=None):
         """
         Compute per cell indices into positional encoding
         """
 
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        tokens_lens = batch.tokens_lens if tokens_lens is None else tokens_lens
+        tok_counts = tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
         rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
         rows = rows.expand(tok_counts.shape[0], -1)
         pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
@@ -172,7 +185,7 @@ class EmbeddingEngine(torch.nn.Module):
 
         return scatter_idxs
 
-    def get_scatter_idxs_vectorized(self, batch):
+    def get_scatter_idxs_vectorized(self, batch, tokens_lens=None):
         """
         Compute reordering index so that tokens from different streams but same cell are
         continguous
@@ -181,9 +194,10 @@ class EmbeddingEngine(torch.nn.Module):
         """
 
         dev = batch.get_device()
+        tokens_lens = batch.tokens_lens if tokens_lens is None else tokens_lens
         # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+        tok_counts = tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
 
         # partial sums for per cell offsets
         pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)

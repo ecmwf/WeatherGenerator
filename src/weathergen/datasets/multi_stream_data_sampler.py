@@ -26,8 +26,11 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
 )
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.domain import Domain
+from weathergen.datasets.domain_pyramid import build_domain_pyramid
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
+from weathergen.datasets.stream_levels import assign_stream_levels
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     get_tokens_lens,
@@ -49,11 +52,15 @@ FORECAST_DEFAULTS = {
 }
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
+def collect_datasources(
+    stream_datasets: list, idx: int, type: str, rng, domain: Domain | None = None
+) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
 
-    rng and num_subset are used to drop data
+    rng and num_subset are used to drop data. If a regional `domain` is given, points
+    outside it are removed before any sub-sampling, so that `max_num_targets` counts
+    only points the model can actually see.
     """
 
     rdatas = []
@@ -76,7 +83,10 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
 
         # get source (of potentially multi-step length)
         rdata = (
-            get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
+            get_reader_data(idx)
+            .crop_to_domain(domain)
+            .shuffle(rng, shuffle, num_subset)
+            .remove_nan_coords_and_geoinfos()
         )
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
@@ -104,11 +114,34 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        # initialise healpic
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+        # initialise healpix
+        # The domain pyramid holds one domain per latent level. Without a `latent_levels`
+        # block it has a single level: cf.healpix_level with the domain of the optional
+        # `domain:` block (global if absent, then all mappings are the identity).
+        self.domain_pyramid = build_domain_pyramid(cf)
+        self.multi_level = not self.domain_pyramid.is_single
+        # per-stream latent level (single level: every stream at cf.healpix_level)
+        self.stream_encode_level, self.stream_decode_levels = assign_stream_levels(
+            cf, ladder=self.domain_pyramid.levels
+        )
+        # healpix_level / domain / num_healpix_cells refer to the finest latent level
+        self.healpix_level = self.domain_pyramid.finest
+        self.domain = self.domain_pyramid.domain(self.healpix_level)
+        self.num_healpix_cells = len(self.domain)
+
+        # one masker + tokenizer per latent level, each on that level's domain
+        self._maskers: dict[int, Masker] = {}
+        self._tokenizers: dict[int, TokenizerMasking] = {}
+        for lvl in self.domain_pyramid.levels:
+            dom_l = self.domain_pyramid.domain(lvl)
+            self._maskers[lvl] = Masker(lvl, stage, cf.streams, self.mode_cfg, domain=dom_l)
+            self._tokenizers[lvl] = TokenizerMasking(lvl, self._maskers[lvl], domain=dom_l)
+        self.masker = self._maskers[self.healpix_level]
+        self.tokenizer = self._tokenizers[self.healpix_level]
+        if self.multi_level and is_root():
+            for lvl in self.domain_pyramid.levels:
+                streams_l = [n for n, sl in self.stream_encode_level.items() if sl == lvl]
+                logger.info(f"latent level hl{lvl}: {len(self._domain_at(lvl))} cells, {streams_l}")
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -152,6 +185,22 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
         self.rng = None
+
+    def _domain_at(self, level: int) -> Domain:
+        return self.domain_pyramid.domain(level)
+
+    def _level(self, stream) -> int:
+        """Latent level a stream is encoded at (stream given by name or stream_info)."""
+        name = stream if isinstance(stream, str) else stream["name"]
+        return self.stream_encode_level[name]
+
+    def _tok(self, stream) -> TokenizerMasking:
+        """Tokenizer of the stream's latent level."""
+        return self._tokenizers[self._level(stream)]
+
+    def _stream_domain(self, stream) -> Domain:
+        """Domain of the stream's latent level (self.domain for a single-level run)."""
+        return self._domain_at(self._level(stream))
 
     def check_samples(self, fsm: int):
         """Check if samples_per_mini_epoch is suitable
@@ -235,6 +284,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     dataset = DataReaderObs
                 case "anemoi":
                     dataset = DataReaderAnemoi
+                    # static grid: pre-filter the grid points to the domain once, up front
+                    stream_domain = self._stream_domain(stream_name)
+                    if not stream_domain.is_global:
+                        kwargs["domain"] = stream_domain
                 case type_name:
                     dataset = get_extra_reader(type_name)
                     if dataset is None:
@@ -327,7 +380,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             raise ValueError(f"Unknown forecast policy {self.forecast_policy}")
 
         # reset tokenizer RNG
-        self.tokenizer.reset_rng(self.rng)
+        for tokenizer in self._tokenizers.values():
+            tokenizer.reset_rng(self.rng)
         return (perms, fs)
 
     def _get_fsm(self) -> int:
@@ -424,7 +478,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     continue
 
                 # preprocess data for model input
-                (source_cells, source_cells_lens) = self.tokenizer.get_source(
+                (source_cells, source_cells_lens) = self._tok(stream_info).get_source(
                     stream_info,
                     rdata,
                     token_data,
@@ -468,7 +522,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 continue
 
             if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+                (tc, tc_l) = self._tok(stream_info).get_target_coords(
                     stream_info,
                     rdata,
                     token_data,
@@ -478,7 +532,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
-                (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
+                (tt_cells, tt_t, tt_c, idxs_inv) = self._tok(stream_info).get_target_values(
                     stream_info,
                     rdata,
                     token_data,
@@ -531,7 +585,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             base_idx,
             num_steps_input,
             num_output_steps,
-            self.num_healpix_cells,
+            len(self._stream_domain(stream_info)),
         )
 
         stream_data = self._build_stream_data_input(
@@ -558,29 +612,38 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
+    def _get_data_windows(
+        self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds, stream_name=None
+    ):
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
 
         """
 
+        # crop / spoof on the domain of the stream's latent level
+        if stream_name is None:
+            healpix_level, domain = self.healpix_level, self.domain
+        else:
+            healpix_level, domain = self._level(stream_name), self._stream_domain(stream_name)
+
         # source data: iterate overall input steps
         input_data = []
         for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
-            rdata = collect_datasources(stream_ds, idx, "source", self.rng)
+            rdata = collect_datasources(stream_ds, idx, "source", self.rng, domain)
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
-                    self.healpix_level,
+                    healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
+                    domain=domain,
                 )
                 rdata.is_spoof = True
 
@@ -592,17 +655,18 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         for timestep_idx in range(self.output_offset, num_output_steps):
             step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-            rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+            rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng, domain)
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
-                    self.healpix_level,
+                    healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                    domain=domain,
                 )
                 rdata.is_spoof = True
 
@@ -618,9 +682,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         for stream_name, stream_data in self.streams_datasets.items():
             stream_info = stream_data.info
             # Build source and target sample masks
-            masks[stream_name] = self.tokenizer.build_samples_for_stream(
+            masks[stream_name] = self._tok(stream_name).build_samples_for_stream(
                 training_mode,
-                self.num_healpix_cells,
+                len(self._stream_domain(stream_name)),
                 stream_info,
             )
             # identical for all streams
@@ -640,11 +704,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         Perform necessary pre-processing of model batch
         """
         stream_names = list(self.streams_datasets.keys())
+        # multi-resolution latent: tokens_lens grouped per latent level
+        stream_level = self.stream_encode_level if self.multi_level else None
         batch.source_samples.tokens_lens = get_tokens_lens(
-            stream_names, batch.source_samples, source_input_steps
+            stream_names, batch.source_samples, source_input_steps, stream_level
         )
         batch.target_samples.tokens_lens = get_tokens_lens(
-            stream_names, batch.target_samples, target_input_steps
+            stream_names, batch.target_samples, target_input_steps, stream_level
         )
 
         return batch
@@ -698,13 +764,15 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds
+                idx, num_forecast_steps, i_max, stream_ds, stream_name
             )
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
-            output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+            input_tokens = self._tok(stream_info).get_tokens_windows(stream_info, input_data, True)
+            output_tokens = self._tok(stream_info).get_tokens_windows(
+                stream_info, output_data, False
+            )
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target

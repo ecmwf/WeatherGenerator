@@ -258,11 +258,28 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
 
 
 def get_tokens_lens(
-    streams_names: list[str], batch_data: BatchSamples, input_steps: int
-) -> torch.Tensor:
+    streams_names: list[str],
+    batch_data: BatchSamples,
+    input_steps: int,
+    stream_level: dict[str, int] | None = None,
+) -> torch.Tensor | dict[int, torch.Tensor]:
     """
     Extract tokens_lens for (num_steps, num_samples, num_streams)
+
+    With a multi-resolution latent (`stream_level` given: stream name -> encode level),
+    streams at different levels have different cell counts and cannot be stacked into one
+    tensor; the result is then a dict {level: tensor(num_steps, num_samples,
+    num_streams_at_level, num_cells_at_level)}, with streams in their original order.
     """
+    if stream_level is not None:
+        levels: dict[int, list[str]] = {}
+        for name in streams_names:
+            levels.setdefault(stream_level[name], []).append(name)
+        return {
+            lvl: get_tokens_lens(names_l, batch_data, input_steps)
+            for lvl, names_l in levels.items()
+        }
+
     # collect source_tokens_lens for all stream datas
     source_tokens_lens = torch.stack(
         [

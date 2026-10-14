@@ -12,10 +12,7 @@
 import logging
 import math
 import typing
-import warnings
 
-import astropy_healpix as hp
-import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
@@ -23,6 +20,8 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.domain import Domain
+from weathergen.datasets.domain_pyramid import build_domain_pyramid
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
@@ -37,6 +36,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
+from weathergen.model.latent_cascade import LatentCascade
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.norms import AdaLayerNorm
 from weathergen.model.utils import get_num_parameters
@@ -83,16 +83,30 @@ class ModelOutput:
         return self.latent[fstep]
 
 
+def latent_level_name(level: int) -> str:
+    """Name of a coarser latent level in the model's latent predictions."""
+    return f"latent_state_hl{level}"
+
+
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""
 
-    def __init__(self, cf) -> None:
+    def __init__(self, cf, level: int | None = None, domain: Domain | None = None) -> None:
+        """
+        Args:
+            cf : Configuration
+            level, domain : latent level and its domain (multi-resolution latent, see
+                ModelParamsPyramid). Default: cf.healpix_level and the `domain:` block.
+        """
         super(ModelParams, self).__init__()
 
         self.cf = cf
 
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**cf.healpix_level
+        self.healpix_level = cf.healpix_level if level is None else level
+        # healpix cells of the (possibly regional) domain
+        self.domain = Domain.from_config(cf) if domain is None else domain
+        assert self.domain.healpix_level == self.healpix_level
+        self.num_healpix_cells = len(self.domain)
         self.dtype = get_dtype(cf.attention_dtype)
 
         # Positional embeddings
@@ -138,15 +152,8 @@ class ModelParams(torch.nn.Module):
             self.rope_coords = None
             self.rope_cell_coords = None
 
-        # HEALPix neighbours
-        hlc = self.healpix_level
-        with warnings.catch_warnings(action="ignore"):
-            temp = hp.neighbours(
-                np.arange(self.num_healpix_cells), 2**hlc, order="nested"
-            ).transpose()
-        # fix missing nbors with references to self
-        for i, row in enumerate(temp):
-            temp[i][row == -1] = i
+        # HEALPix neighbours (compact indexing; missing and out-of-domain neighbours -> self)
+        temp = self.domain.neighbours_compact()
         self.hp_nbours = torch.nn.Parameter(
             torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32),
             requires_grad=False,
@@ -159,6 +166,11 @@ class ModelParams(torch.nn.Module):
 
     def create(self, cf: Config) -> "ModelParams":
         self.reset_parameters(cf)
+        return self
+
+    def params_for(self, level: int) -> "ModelParams":
+        """Parameters of a latent level (single latent level: this object)."""
+        assert level == self.healpix_level, f"no model parameters for latent level {level}"
         return self
 
     def reset_parameters(self, cf: Config) -> "ModelParams":
@@ -205,7 +217,15 @@ class ModelParams(torch.nn.Module):
             # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
             # Shape: (num_healpix_cells, ae_local_num_queries, 2)
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            if not self.domain.is_global:
+                verts = verts[torch.from_numpy(self.domain.active_cells)]
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            if not self.domain.is_global:
+                # r3tos2 returns the healpix azimuth in (-pi, pi]. Because of the +180 deg
+                # shift in theta_phi_to_standard_coords, that seam lies on the Greenwich
+                # meridian; move it to 180 deg geographic so that a regional domain
+                # crossing 0 deg (e.g. Scandinavia) has continuous RoPE coordinates.
+                coords[:, 1] = torch.remainder(coords[:, 1], 2 * torch.pi)
             # Per-cell coords for QueryAggregationEngine (no query expansion)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
@@ -241,15 +261,8 @@ class ModelParams(torch.nn.Module):
             .repeat((1, cf.ae_local_num_queries, 1))
         )
 
-        # healpix neighborhood structure
-
-        hlc = self.healpix_level
-        num_healpix_cells = self.num_healpix_cells
-        with warnings.catch_warnings(action="ignore"):
-            temp = hp.neighbours(np.arange(num_healpix_cells), 2**hlc, order="nested").transpose()
-        # fix missing nbors with references to self
-        for i, row in enumerate(temp):
-            temp[i][row == -1] = i
+        # healpix neighborhood structure (compact indexing, see __init__)
+        temp = self.domain.neighbours_compact()
         # nbors *and* self
         self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
         self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
@@ -261,6 +274,57 @@ class ModelParams(torch.nn.Module):
         # ensure all params have grad set to False
 
         return
+
+
+class ModelParamsPyramid(torch.nn.Module):
+    """
+    Model parameters of a multi-resolution latent: one `ModelParams` per latent level,
+    each sized to that level's domain (pe_global, rope coords, hp_nbours, q_cells_lens).
+
+    `params_for(level)` returns the tables of one level. Any other attribute is read from
+    the finest level (e.g. the level-independent `pe_embed`).
+    """
+
+    def __init__(self, cf) -> None:
+        super().__init__()
+        self.cf = cf
+        self.pyramid = build_domain_pyramid(cf)
+        self.levels = self.pyramid.levels
+        self._primary_level = self.pyramid.finest
+        self._params = torch.nn.ModuleDict(
+            {
+                str(lvl): ModelParams(cf, level=lvl, domain=self.pyramid.domain(lvl))
+                for lvl in self.levels
+            }
+        )
+
+    def params_for(self, level: int) -> ModelParams:
+        """The ModelParams tables of a latent level."""
+        return self._params[str(level)]
+
+    def create(self, cf: Config) -> "ModelParamsPyramid":
+        self.reset_parameters(cf)
+        return self
+
+    def reset_parameters(self, cf: Config) -> None:
+        for p in self._params.values():
+            p.reset_parameters(cf)
+
+    def __getattr__(self, name):
+        # nn.Module attributes (_params, cf, pyramid, ...) resolve normally; anything else
+        # is delegated to the finest level
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            params = super().__getattr__("_params")
+            return getattr(params[str(self.__dict__["_primary_level"])], name)
+
+
+def build_model_params(cf) -> ModelParams | ModelParamsPyramid:
+    """ModelParams for a single latent level, ModelParamsPyramid for `latent_levels`."""
+    if build_domain_pyramid(cf).is_single:
+        return ModelParams(cf)
+    return ModelParamsPyramid(cf)
 
 
 class Model(torch.nn.Module):
@@ -314,8 +378,11 @@ class Model(torch.nn.Module):
         """
         super(Model, self).__init__()
 
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        # latent levels (one unless `latent_levels` is configured); the single-level
+        # attributes refer to the finest level
+        self.domain_pyramid = build_domain_pyramid(cf)
+        self.healpix_level = self.domain_pyramid.finest
+        self.num_healpix_cells = len(self.domain_pyramid.domain(self.healpix_level))
 
         self.cf = cf
         self.dtype = get_dtype(self.cf.attention_dtype)
@@ -326,6 +393,9 @@ class Model(torch.nn.Module):
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
+        # multi-resolution latent: forecast engines of the coarser levels + level coupling
+        self._forecast_per_level: torch.nn.ModuleDict | None = None
+        self.forecast_cascade: LatentCascade | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
@@ -383,6 +453,23 @@ class Model(torch.nn.Module):
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
         else:
             self.forecast_engine = IdentityEngine()
+
+        # multi-resolution latent: one forecast engine per coarser level (own weights, the
+        # finest level uses forecast_engine) and a latent cascade after every forecast step
+        if not self.domain_pyramid.is_single:
+            if cf.fe_num_blocks > 0:
+                self._forecast_per_level = torch.nn.ModuleDict(
+                    {
+                        str(lvl): ForecastingEngine(
+                            cf, mode_cfg, len(self.domain_pyramid.domain(lvl))
+                        )
+                        for lvl in self.domain_pyramid.levels
+                        if lvl != self.healpix_level
+                    }
+                )
+            self.forecast_cascade = LatentCascade.from_config(
+                self.domain_pyramid, cf, "forecast_cascade"
+            )
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -590,6 +677,20 @@ class Model(torch.nn.Module):
 
         self.apply(_reset_params)
 
+        # learnable cell queries are plain Parameters (one bank per latent level), not
+        # covered by the line above: re-draw them (uninitialised memory after to_empty)
+        self.encoder.reset_q_cells()
+
+        # multi-resolution latent: the line above resets every Linear, including the
+        # zero-initialised last projections of the cascade blocks; re-apply those
+        for cascade in self.latent_cascades():
+            cascade.init_residual_branches()
+
+    def latent_cascades(self) -> list[LatentCascade]:
+        """The latent cascades of a multi-resolution latent (empty for one level)."""
+        cascades = [getattr(self.encoder, "latent_cascade", None), self.forecast_cascade]
+        return [c for c in cascades if c is not None]
+
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
@@ -656,6 +757,36 @@ class Model(torch.nn.Module):
         )
         for stream_name, np0, np1, np2 in zps:
             print(f"   {stream_name} : {np0:,} / {np1:,} / {np2:,}")
+
+        # multi-resolution latent: the lines above are the finest level; coarser levels and
+        # the cascades are listed here
+        if not self.domain_pyramid.is_single:
+            enc = self.encoder
+            print(f" Multi-resolution latent, finest level hl{self.healpix_level} listed above.")
+            for lvl in self.domain_pyramid.levels:
+                if lvl == self.healpix_level:
+                    continue
+                key = str(lvl)
+                print(f"  Level hl{lvl}:")
+                if not enc.share_local_assimilation:
+                    n_local = get_num_parameters(enc._ae_local_per_level[key])
+                    n_adapter = get_num_parameters(enc._ae_local_global_per_level[key])
+                    print(f"   Local assimilation engine: {n_local:,}")
+                    print(f"   Local-global adapter: {n_adapter:,}")
+                q = enc._q_cells_param_dict[key]
+                print(f"   Learnable queries: {(q.numel() if q.requires_grad else 0):,}")
+                n_agg = get_num_parameters(enc._ae_aggregation_per_level[key])
+                print(f"   Query Aggregation engine: {n_agg:,}")
+                n_global = get_num_parameters(enc._ae_global_per_level[key])
+                print(f"   Global assimilation engine: {n_global:,}")
+                if self._forecast_per_level is not None:
+                    n_fe = get_num_parameters(self._forecast_per_level[key])
+                    print(f"   Forecast engine: {n_fe:,}")
+            for name, cascade in (
+                ("Latent cascade", enc.latent_cascade),
+                ("Forecast cascade", self.forecast_cascade),
+            ):
+                print(f"  {name}: {get_num_parameters(cascade):,}")
         print("-----------------")
 
     def tokens_to_latent_state(self, tokens_post_norm, tokens) -> LatentState:
@@ -684,12 +815,27 @@ class Model(torch.nn.Module):
         output = ModelOutput(batch.get_output_len())
 
         tokens, posteriors = self.encoder(model_params, batch)
+
+        # multi-resolution latent: the encoder returns one latent per level. The finest
+        # level plays the role of the single latent (latent outputs, SSL heads); all levels
+        # are forecast and read by the decoders.
+        tokens_lvl = None
+        if isinstance(tokens, dict):
+            tokens_lvl, posteriors = tokens, posteriors[self.healpix_level]
+
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_source_steps(), *tokens.shape[1:])
-        # collapse along input step dimension
-        tokens = tokens.reshape(shape).sum(axis=1)
+        if tokens_lvl is None:
+            shape = (len(batch), batch.get_num_source_steps(), *tokens.shape[1:])
+            # collapse along input step dimension
+            tokens = tokens.reshape(shape).sum(axis=1)
+        else:
+            tokens_lvl = {
+                lvl: t.reshape((len(batch), batch.get_num_source_steps(), *t.shape[1:])).sum(axis=1)
+                for lvl, t in tokens_lvl.items()
+            }
+            tokens = tokens_lvl[self.healpix_level]
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
@@ -698,16 +844,42 @@ class Model(torch.nn.Module):
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
-                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                if tokens_lvl is None:
+                    tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                else:
+                    tokens_lvl = self.forecast_levels(model_params, tokens_lvl, step)
+                    tokens = tokens_lvl[self.healpix_level]
                 continue
 
-            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            if tokens_lvl is None:
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            else:
+                tokens_lvl = self.forecast_levels(model_params, tokens_lvl, step)
+                tokens = tokens_lvl[self.healpix_level]
             # decoder predictions
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
+            output = self.predict_decoders(
+                model_params, step, tokens, batch, output, tokens_lvl=tokens_lvl
+            )
             # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output)
+            output = self.predict_latent(
+                model_params, step, tokens, batch, output, tokens_lvl=tokens_lvl
+            )
 
         return output
+
+    def forecast_levels(self, model_params, tokens_lvl: dict, step: int) -> dict:
+        """
+        Multi-resolution latent: advance every level's latent with its own forecast engine,
+        then couple the levels with the forecast cascade (inert with num_cycles: 0).
+        """
+        out = {}
+        for lvl, t in tokens_lvl.items():
+            if lvl == self.healpix_level or self._forecast_per_level is None:
+                engine = self.forecast_engine
+            else:
+                engine = self._forecast_per_level[str(lvl)]
+            out[lvl] = engine(t, step, model_params.params_for(lvl).rope_coords)
+        return self.forecast_cascade(out)
 
     def predict_latent(
         self,
@@ -716,9 +888,14 @@ class Model(torch.nn.Module):
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
+        tokens_lvl: dict | None = None,
     ) -> ModelOutput:
         """
         Compute latent predictions
+
+        tokens_lvl : multi-resolution latent only: {level: tokens}. The finest level is the
+            latent_state above; every coarser level is also stored, as the raw latent
+            "latent_state_hl<level>" (no SSL heads), so that it can be written to the output.
         """
 
         # safe latent prediction
@@ -730,6 +907,13 @@ class Model(torch.nn.Module):
         for name, head in self.latent_heads.items():
             output.add_latent_prediction(step, name, head(latent_state))
 
+        if tokens_lvl is not None:
+            for lvl, tokens_l in tokens_lvl.items():
+                if lvl != self.healpix_level:
+                    output.add_latent_prediction(
+                        step, latent_level_name(lvl), self.tokens_to_latent_state(None, tokens_l)
+                    )
+
         return output
 
     def predict_decoders(
@@ -739,6 +923,7 @@ class Model(torch.nn.Module):
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
+        tokens_lvl: dict | None = None,
     ) -> ModelOutput:
         """
         Compute decoder-based predictions
@@ -753,6 +938,9 @@ class Model(torch.nn.Module):
             streams_data : Used to initialize target coordinates tokens and index information
                 List of StreamData len(streams_data) == batch_size_per_gpu
             target_coords_idxs : Indices of target coordinates
+            tokens_lvl : multi-resolution latent only: {level: tokens}; each stream then
+                reads the latent levels listed in its decode levels (see
+                `predict_decoders_kv_multi_level`)
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
@@ -773,9 +961,16 @@ class Model(torch.nn.Module):
             (s[0] * s[1] + 1,), fill_value=9, dtype=torch.int32, device=tokens_nbors.device
         )
         tokens_nbors_lens[0] = 0
+        tokens_flat = tokens.reshape(-1, s[-1])
 
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.streams.keys():
+            # multi-resolution latent: key/value pool of this stream's decoder
+            if tokens_lvl is not None:
+                tokens_nbors, tokens_nbors_lens, tokens_flat = self.predict_decoders_kv_multi_level(
+                    model_params, stream_name, tokens_lvl, batch_size
+                )
+
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
                 batch.samples[i_b].streams_data[stream_name].target_coords[step]
@@ -818,7 +1013,7 @@ class Model(torch.nn.Module):
                 if self.cf.decoder_type == "Linear":
                     pred = self.target_token_engines[stream_name](
                         tc_tokens,
-                        tokens.reshape(-1, s[-1]),  # collapse the batch and token dimensions
+                        tokens_flat,  # collapse the batch and token dimensions
                         tcs_lens,
                     ).unsqueeze(0)  # add ensemble dim: shape is then [1, preds_per_coord, channels]
                 else:
@@ -838,3 +1033,65 @@ class Model(torch.nn.Module):
             output.add_physical_prediction(step, stream_name, pred)
 
         return output
+
+    def predict_decoders_kv_multi_level(
+        self, model_params, stream_name: str, tokens_lvl: dict, batch_size: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Key/value pool of a stream's decoder for the multi-resolution latent.
+
+        The target coordinates of a stream are tokenized at its encode level `ls`, so the
+        decoder has one varlen segment per cell of that level (and batch sample). Each
+        segment holds, for every decode level `l` of the stream:
+          * l == ls : the cell's own 1-ring (cell + 8 neighbours);
+          * l <  ls : the 1-ring of the cell's ancestor at level l (exact HEALPix nested
+                      parent), i.e. the large-scale context. If the ancestor lies outside
+                      level l's domain, this part is left out of the segment (masked).
+        Default for a fine stream over levels [5, 8]: 9 + 9 = 18 keys per cell.
+
+        Returns (tokens_nbors, tokens_nbors_lens, tokens_flat) with the layout used by
+        the target prediction engines (and the Linear decoder).
+        """
+        ls = self.encoder.stream_encode_level[stream_name]
+        nq = self.cf.ae_local_num_queries
+        num_cells_s = len(self.domain_pyramid.domain(ls))
+
+        parts, valids = [], []
+        for lvl in self.encoder.stream_decode_levels[stream_name]:
+            toks_l = tokens_lvl[lvl][:, self.num_aux_tokens :]
+            dim = toks_l.shape[-1]
+            num_cells_l = len(self.domain_pyramid.domain(lvl))
+            hp_nbours = model_params.params_for(lvl).hp_nbours.to(torch.long)
+            dev = toks_l.device
+            # 1-ring of every cell of level lvl, with an offset per batch sample
+            b_off = (torch.arange(batch_size, device=dev) * num_cells_l).view(-1, 1, 1)
+            idxs = (hp_nbours.unsqueeze(0) + b_off).flatten()
+            ring = toks_l.reshape(batch_size * num_cells_l, nq, dim)[idxs]
+            ring = ring.reshape(batch_size * num_cells_l, hp_nbours.shape[1] * nq, dim)
+
+            if lvl == ls:
+                valid = torch.ones(batch_size * num_cells_s, dtype=torch.bool, device=dev)
+            else:
+                anc = torch.as_tensor(
+                    self.domain_pyramid.ancestor_of(ls, lvl), dtype=torch.long, device=dev
+                )
+                rows = anc.clamp(min=0).repeat(batch_size) + (
+                    torch.arange(batch_size, device=dev).repeat_interleave(num_cells_s)
+                    * num_cells_l
+                )
+                ring = ring[rows]
+                valid = (anc >= 0).repeat(batch_size)
+            parts.append(ring)
+            valids.append(valid.unsqueeze(1).expand(-1, ring.shape[1]))
+
+        kv = torch.cat(parts, dim=1)  # (batch_size * num_cells_s, keys per cell, dim)
+        mask = torch.cat(valids, dim=1)
+        tokens_nbors = kv[mask]
+        tokens_nbors_lens = torch.cat(
+            [
+                torch.zeros(1, dtype=torch.int32, device=kv.device),
+                mask.sum(dim=1).to(torch.int32),
+            ]
+        )
+        toks_s = tokens_lvl[ls][:, self.num_aux_tokens :]
+        return tokens_nbors, tokens_nbors_lens, toks_s.reshape(-1, toks_s.shape[-1])

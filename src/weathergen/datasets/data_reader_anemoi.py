@@ -35,12 +35,16 @@ _logger = logging.getLogger(__name__)
 class DataReaderAnemoi(DataReaderTimestep):
     "Wrapper for Anemoi datasets"
 
+    # indices of the grid points inside a regional domain (None: all points)
+    domain_idxs: NDArray[np.int64] | None = None
+
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
         stage: Stage,
+        domain=None,
     ) -> None:
         """
         Construct data reader for anemoi dataset
@@ -51,6 +55,8 @@ class DataReaderAnemoi(DataReaderTimestep):
             filename (and path) of dataset
         stream_info :
             information about stream
+        domain :
+            optional regional Domain; grid points outside it are dropped once here
 
         Returns
         -------
@@ -119,6 +125,23 @@ class DataReaderAnemoi(DataReaderTimestep):
         # caches lats and lons
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
+
+        # regional domain: the grid is static, so select the grid points inside the domain
+        # once; _get() then only returns those points
+        self.domain_idxs = None
+        if domain is not None and not domain.is_global:
+            mask = domain.point_mask(self.latitudes, self.longitudes)
+            self.domain_idxs = np.flatnonzero(mask)
+            self.latitudes = self.latitudes[self.domain_idxs]
+            self.longitudes = self.longitudes[self.domain_idxs]
+            _logger.info(
+                "%s: domain keeps %d of %d grid points",
+                stream_info["name"],
+                len(self.domain_idxs),
+                len(mask),
+            )
+            if len(self.domain_idxs) == 0:
+                _logger.warning(f"{stream_info['name']}: no grid points inside the domain.")
 
         # select/filter requested source channels
         if stream_info.get(str(stage) + "_source_channels") is None:
@@ -224,6 +247,10 @@ class DataReaderAnemoi(DataReaderTimestep):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
+
+        # keep only grid points inside the regional domain (data is time x channels x points)
+        if self.domain_idxs is not None:
+            data = data[:, :, self.domain_idxs]
 
         # coords-first representation and collapse multiple steps
         data = data.transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))

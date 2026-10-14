@@ -163,7 +163,7 @@ class BatchSamples:
     """
 
     samples: list[Sample]
-    tokens_lens: torch.Tensor | None
+    tokens_lens: torch.Tensor | dict[int, torch.Tensor] | None
     output_steps: int
     output_idxs: list[int]
     device: str | None
@@ -184,9 +184,17 @@ class BatchSamples:
         for sample in self.samples:
             sample.to_device(device)
 
-        self.tokens_lens = (
-            self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
-        )
+        if isinstance(self.tokens_lens, dict):
+            # multi-resolution latent: one tokens_lens tensor per latent level
+            self.tokens_lens = {
+                k: v.to(device, non_blocking=True) for k, v in self.tokens_lens.items()
+            }
+        else:
+            self.tokens_lens = (
+                self.tokens_lens.to(device, non_blocking=True)
+                if self.tokens_lens is not None
+                else None
+            )
 
         self.device = device
 
@@ -203,8 +211,17 @@ class BatchSamples:
             # create copy and then select subset for samples and tokens_lens
             bs = copy.deepcopy(self)
             bs.samples = [bs.samples[i] for i in subset]
-            torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
-            bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
+            if isinstance(bs.tokens_lens, dict):
+                # multi-resolution latent: one tokens_lens tensor per latent level
+                bs.tokens_lens = {
+                    k: torch.index_select(
+                        v, 1, torch.tensor(subset, dtype=torch.long, device=v.device)
+                    )
+                    for k, v in bs.tokens_lens.items()
+                }
+            else:
+                torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
+                bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
     def get_num_source_steps(self) -> int:
@@ -271,6 +288,8 @@ class BatchSamples:
         # pin source_tokens_lens
         if isinstance(self.tokens_lens, torch.Tensor):
             self.tokens_lens = self.tokens_lens.pin_memory()
+        elif isinstance(self.tokens_lens, dict):
+            self.tokens_lens = {k: v.pin_memory() for k, v in self.tokens_lens.items()}
 
         return self
 
