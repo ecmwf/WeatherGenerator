@@ -97,9 +97,14 @@ def _sanitize_start_end_time_keys(sub_conf):
         if key in sub_conf:
             sub_conf = _patch_time(key, sub_conf, _DATETIME_TYPE_NAME)
 
-    # Support for non-contiguous training: list of {start_date, end_date} dicts
+    # Support for non-contiguous training: list of {start_date, end_date} dicts.
+    # date_ranges may instead hold a flat list of single init dates (see
+    # weathergen.datasets.multi_stream_data_sampler); those entries are left untouched here
+    # and parsed directly where consumed.
     if "date_ranges" in sub_conf:
         for entry in sub_conf.date_ranges:
+            if not OmegaConf.is_dict(entry):
+                continue
             for key in time_keys:
                 if key in entry:
                     _patch_time(key, entry, _DATETIME_TYPE_NAME)
