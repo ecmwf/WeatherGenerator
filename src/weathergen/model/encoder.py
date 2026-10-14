@@ -30,7 +30,7 @@ class EncoderModule(torch.nn.Module):
     name: "EncoderModule"
 
     def __init__(
-        self, cf: Config, sources_size, targets_num_channels, targets_coords_size, name="default"
+        self, cf: Config, sources_size, name="default"
     ) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
@@ -48,8 +48,6 @@ class EncoderModule(torch.nn.Module):
 
         self.cf = cf
         self.sources_size = sources_size
-        self.targets_num_channels = targets_num_channels
-        self.targets_coords_size = targets_coords_size
 
         self.ae_aggregation_engine: QueryAggregationEngine | None = None
         self.ae_global_engine: GlobalAssimilationEngine | None = None
@@ -367,7 +365,7 @@ class EncoderModule(torch.nn.Module):
 class MultiEncoder(torch.nn.Module):
     """Independent named encoders with a shared latent grid, merged by addition."""
 
-    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
+    def __init__(self, cf: Config, sources_size):
         super().__init__()
         encoder_configs = get_encoder_configs(cf)
         if not encoder_configs:
@@ -378,8 +376,6 @@ class MultiEncoder(torch.nn.Module):
                 name: EncoderModule(
                     encoder_cf,
                     [sources_size[stream_idxs[stream]] for stream in encoder_cf.streams],
-                    [targets_num_channels[stream_idxs[stream]] for stream in encoder_cf.streams],
-                    [targets_coords_size[stream_idxs[stream]] for stream in encoder_cf.streams],
                     name=name,
                 )
                 for name, encoder_cf in encoder_configs.items()
