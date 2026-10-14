@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+encoders: {default: {healpix_level: 5}}
+
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
 pred_self_attention: True
