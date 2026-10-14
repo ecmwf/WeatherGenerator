@@ -24,7 +24,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.utils import healpix_verts_rots, hp_level_to_num_cells, r3tos2
-from weathergen.model.encoder import EncoderModule, MultiEncoder
+from weathergen.model.encoder import MultiEncoder
 from weathergen.model.engines import (
     BilinearDecoder,
     EnsPredictionHead,
@@ -83,11 +83,11 @@ class ModelOutput:
         return self.latent[fstep]
 
 
-def _rope_coordinates(cf: Config, device):
+def _rope_coordinates(cf: Config, healpix_level: int, device):
     if not cf.get("rope_2D", False):
         return None, None
 
-    verts, _ = healpix_verts_rots(get_healpix_level(cf), 0.5, 0.5)
+    verts, _ = healpix_verts_rots(healpix_level, 0.5, 0.5)
     cell_coords = r3tos2(verts.to(device)).to(get_dtype(cf.attention_dtype))
     num_queries = cf.ae_local_num_queries
     offset = (cf.num_register_tokens + cf.num_class_tokens) * num_queries
@@ -111,7 +111,7 @@ class _EncoderParams(torch.nn.Module):
     def __init__(self, cf: Config):
         super().__init__()
         self.cf = cf
-        self.num_healpix_cells = hp_level_to_num_cells(get_healpix_level(cf))
+        self.num_healpix_cells = hp_level_to_num_cells(cf.healpix_level)
         dtype = get_dtype(cf.attention_dtype)
         self.register_buffer(
             "pe_embed",
@@ -150,7 +150,9 @@ class _EncoderParams(torch.nn.Module):
         pe_embed[:, 0::2] = torch.sin(position * div[: pe_embed[:, 0::2].shape[1]])
         pe_embed[:, 1::2] = torch.cos(position * div[: pe_embed[:, 1::2].shape[1]])
 
-        self.rope_coords, self.rope_cell_coords = _rope_coordinates(cf, pe_embed.device)
+        self.rope_coords, self.rope_cell_coords = _rope_coordinates(
+            cf, cf.healpix_level, pe_embed.device
+        )
 
         # Preserve per-cell identity even when RoPE is disabled or a cell is masked.
         pe_global = self.pe_global
@@ -188,7 +190,7 @@ class ModelParams(torch.nn.Module):
     def __init__(self, cf: Config):
         super().__init__()
         self.cf = cf
-        encoder_configs = get_encoder_configs(cf) or {"default": cf}
+        encoder_configs = get_encoder_configs(cf)
         self.encoders = torch.nn.ModuleDict(
             {name: _EncoderParams(encoder_cf) for name, encoder_cf in encoder_configs.items()}
         )
@@ -204,7 +206,7 @@ class ModelParams(torch.nn.Module):
     def reset_parameters(self, cf: Config) -> None:
         for params in self.encoders.values():
             params.reset_parameters()
-        self.rope_coords, _ = _rope_coordinates(cf, self.hp_nbours.device)
+        self.rope_coords, _ = _rope_coordinates(cf, self.healpix_level, self.hp_nbours.device)
 
         with warnings.catch_warnings(action="ignore"):
             neighbours = hp.neighbours(
@@ -278,7 +280,7 @@ class Model(torch.nn.Module):
         self.targets_coords_size = targets_coords_size
 
         self.embed_target_coords = None
-        self.encoder: EncoderModule | MultiEncoder | None = None
+        self.encoder: MultiEncoder | None = None
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
@@ -328,10 +330,7 @@ class Model(torch.nn.Module):
         """Create each individual module of the model"""
         cf = self.cf
 
-        encoder_class = MultiEncoder if self.encoder_configs else EncoderModule
-        self.encoder = encoder_class(
-            cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
-        )
+        self.encoder = MultiEncoder(cf, self.sources_size)
 
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
@@ -548,9 +547,7 @@ class Model(torch.nn.Module):
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
-        encoders = [
-            module for module in self.encoder.modules() if isinstance(module, EncoderModule)
-        ]
+        encoders = self.encoder.encoders.values()
         num_params_embed = [
             sum(
                 get_num_parameters(encoder.embed_engine.embeds[name])
@@ -653,6 +650,7 @@ class Model(torch.nn.Module):
         output = ModelOutput(batch.get_output_len())
 
         tokens, posteriors = self.encoder(model_params, batch)
+        tokens = sum(tokens.values())
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
