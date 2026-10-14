@@ -71,7 +71,7 @@ class TokenizerMasking:
 
         tok_spacetime = stream_info.get("tokenize_spacetime", False)
         tok = tokenize_spacetime if tok_spacetime else tokenize_space
-        healpix_level = stream_info["tokenizer"]["healpix_level"]
+        healpix_level = self.masker.healpix_level
         token_size = stream_info["token_size"]
 
         tokens = []
@@ -144,7 +144,7 @@ class TokenizerMasking:
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
             idxs_cells, idxs_cells_lens, cell_mask
         )
-        geometry = self.get_geometry(stream_info["tokenizer"]["healpix_level"])
+        geometry = self.get_geometry(self.masker.healpix_level)
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
             idxs_cells,
@@ -174,7 +174,7 @@ class TokenizerMasking:
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
             idxs_cells, idxs_cells_lens, cell_mask
         )
-        healpix_level = stream_info["tokenizer"]["healpix_level"]
+        healpix_level = self.masker.healpix_level
         geometry = self.get_geometry(healpix_level)
 
         # TODO: split up
@@ -209,7 +209,7 @@ class TokenizerMasking:
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
             idxs_cells, idxs_cells_lens, cell_mask
         )
-        healpix_level = stream_info["tokenizer"]["healpix_level"]
+        healpix_level = self.masker.healpix_level
         geometry = self.get_geometry(healpix_level)
 
         data, datetimes, coords, _, _ = tokenize_apply_mask_target(
