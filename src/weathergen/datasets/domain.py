@@ -36,6 +36,7 @@ class Domain:
         self.to_compact[cells] = np.arange(len(cells), dtype=np.int64)
         self.active_cells.flags.writeable = False
         self.to_compact.flags.writeable = False
+        self._centres = None
 
     @classmethod
     def from_config(cls, cf, level):
@@ -66,11 +67,14 @@ class Domain:
         compact = self.to_compact[np.maximum(neighbours, 0)]
         return np.where((neighbours >= 0) & (compact >= 0), compact, np.arange(len(self))[:, None])
 
-    @lru_cache(maxsize=64)
     def centres_lonlat(self):
         """Return longitude, latitude degrees in the tokenizer's phi=(lon+180) convention."""
-        lon, lat = hp.healpix_to_lonlat(self.active_cells, 2**self.healpix_level, order="nested")
-        return lon.to_value("deg") - 180.0, lat.to_value("deg")
+        if self._centres is None:
+            lon, lat = hp.healpix_to_lonlat(
+                self.active_cells, 2**self.healpix_level, order="nested"
+            )
+            self._centres = lon.to_value("deg") - 180.0, lat.to_value("deg")
+        return self._centres
 
 
 @lru_cache(maxsize=64)
