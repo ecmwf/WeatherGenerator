@@ -54,8 +54,7 @@ def get_encoder_configs(cf: Config) -> dict[str, Config]:
     base.streams = {}
     resolved = {name: OmegaConf.merge(base, overrides) for name, overrides in settings.items()}
     for stream_name, stream in cf.streams.items():
-        for name in stream.get("encoders", ["default"]):
-            resolved[name].streams[stream_name] = stream
+        resolved[stream.get("encoder", "default")].streams[stream_name] = stream
     return resolved
 
 
