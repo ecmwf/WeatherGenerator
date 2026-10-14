@@ -27,7 +27,6 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
-from weathergen.model.encoder import EncoderModule
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
@@ -61,7 +60,7 @@ def init_model_and_shard(
         logger.info("Registering NVTX hooks for model.")
         register_nvtx_hooks(model)
 
-    encoders = [module for module in model.encoder.modules() if isinstance(module, EncoderModule)]
+    encoders = model.encoder.encoders.values()
 
     # freeze request model part
     apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
