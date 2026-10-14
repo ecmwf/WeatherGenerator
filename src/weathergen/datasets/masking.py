@@ -53,6 +53,31 @@ def get_num_samples(config) -> np.typing.NDArray:
     return np.array([s_cfg.get("num_samples", 1) for _, s_cfg in config.items()])
 
 
+def validate_correspondence_mode(correspondence_mode, target_cfgs, source_cfgs):
+    """
+    Validate that the configs are consistent with the correspondence mode
+    """
+
+    num_target_samples = np.array([t.get("num_samples", 1) for t in target_cfgs]).sum()
+    num_source_samples = np.array([s.get("num_samples", 1) for s in source_cfgs]).sum()
+
+    if correspondence_mode == "one-to-one":
+        assert len(target_cfgs) == len(source_cfgs), (
+            "With target_correspondence_mode mode one-to-one, number of source and target "
+            + "strategies has to match."
+        )
+        assert num_target_samples.item() == num_source_samples.item(), (
+            "With target_correspondence_mode mode one-to-one, number of source and target "
+            + "samples has to match."
+        )
+
+    if correspondence_mode == "equal-split-all":
+        assert num_source_samples.item() % num_target_samples.item() == 0, (
+            "With target_correspondence_mode mode equal-split-all, number of source samples "
+            + "has to be divisible by number of target samples."
+        )
+
+
 # Convert to torch.bool
 def to_bool_tensor(arr):
     return torch.from_numpy(np.asarray(arr)).to(torch.bool)

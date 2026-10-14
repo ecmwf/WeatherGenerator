@@ -360,6 +360,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             for ds in self.streams_datasets.values()
         ]
 
+    def get_sources_num_channels(self):
+        return [ds.readers[0].get_source_num_channels() for ds in self.streams_datasets.values()]
+
     def get_targets_num_channels(self):
         return [ds.readers[0].get_target_num_channels() for ds in self.streams_datasets.values()]
 
