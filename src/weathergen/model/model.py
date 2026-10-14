@@ -22,7 +22,7 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
-from weathergen.datasets.batch import BatchSamples
+from weathergen.datasets.batch import BatchSamples, MultiBatch
 from weathergen.datasets.utils import healpix_verts_rots, hp_level_to_num_cells, r3tos2
 from weathergen.model.encoder import MultiEncoder
 from weathergen.model.engines import (
@@ -636,33 +636,34 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
-    def forward(self, model_params: ModelParams, batch: BatchSamples) -> ModelOutput:
+    def forward(self, model_params: ModelParams, batch: MultiBatch) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
         Args:
             model_params : Query and embedding parameters
-            batch
+            batch : Shared data and encoder-named model batches
         Returns:
             A list containing all prediction results
         """
 
-        output = ModelOutput(batch.get_output_len())
+        samples = batch.batch.get_source_samples()
+        output = ModelOutput(samples.get_output_len())
 
         tokens, posteriors = self.encoder(model_params, batch)
         tokens = sum(tokens.values())
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_source_steps(), *tokens.shape[1:])
+        shape = (len(samples), samples.get_num_source_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
         # roll-out in latent space, iterate and generate output over requested output steps
-        for step in batch.get_output_idxs():
-            without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
+        for step in samples.get_output_idxs():
+            without_grad = p_fwd and self.training and step != max(samples.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
@@ -670,9 +671,9 @@ class Model(torch.nn.Module):
 
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
+            output = self.predict_decoders(model_params, step, tokens, samples, output)
             # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output)
+            output = self.predict_latent(model_params, step, tokens, samples, output)
 
         return output
 
