@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+encoders: {default: {}}
+
 embed_unembed_mode: "full" #"block"
 embed_dropout_rate: 0.1
 

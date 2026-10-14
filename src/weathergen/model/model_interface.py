@@ -27,7 +27,7 @@ from weathergen.model.attention import (
     MultiSelfAttentionHeadLocal,
     MultiSelfAttentionHeadVarlen,
 )
-from weathergen.model.encoder import EncoderModule, MultiEncoder
+from weathergen.model.encoder import EncoderModule
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
@@ -120,7 +120,7 @@ def init_model_and_shard(
                     if isinstance(module, modules_to_shard):
                         fully_shard(module, mp_policy=encoder_policy)
 
-        if isinstance(model.encoder, MultiEncoder) and model.encoder.cascade is not None:
+        if model.encoder.cascade is not None:
             for module in model.encoder.cascade.modules():
                 if isinstance(module, modules_to_shard):
                     fully_shard(module, **fsdp_kwargs)

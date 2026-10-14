@@ -33,7 +33,7 @@ class EncoderModule(torch.nn.Module):
     name: "EncoderModule"
 
     def __init__(
-        self, cf: Config, sources_size, targets_num_channels, targets_coords_size, name="default"
+        self, cf: Config, sources_size, targets_num_channels, targets_coords_size, name
     ) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.

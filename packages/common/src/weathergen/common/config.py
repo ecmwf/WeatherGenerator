@@ -64,7 +64,9 @@ def get_healpix_level(config: Config) -> int:
 
 
 def get_encoder_configs(cf: Config) -> dict[str, Config]:
-    """Resolve named single-grid encoders, grouping mixed-resolution streams if needed."""
+    """Resolve explicitly named single-grid encoders without changing the model config."""
+    if not cf.get("encoders"):
+        raise ValueError("Configure named encoders explicitly, e.g. encoders: {default: {}}.")
     base = cf.copy()
     levels = get_healpix_levels(base)
     for name, stream in base.streams.items():
@@ -81,18 +83,7 @@ def get_encoder_configs(cf: Config) -> dict[str, Config]:
                 f"Stream {name!r} decode_levels must be a nonempty list of unique existing "
                 "levels no finer than its healpix_level, including its own level."
             )
-    settings_by_name = base.pop("encoders", None)
-    if not settings_by_name:
-        if len(levels) <= 1:
-            return {}
-        settings_by_name = {
-            f"healpix_{level}": {
-                "streams": [
-                    name for name, stream in base.streams.items() if stream.healpix_level == level
-                ]
-            }
-            for level in levels
-        }
+    settings_by_name = base.pop("encoders")
     resolved = {}
     represented_levels = set()
     for name, settings in settings_by_name.items():

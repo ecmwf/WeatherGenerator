@@ -7,6 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# Explicit encoder names are required; use {default: {}} for a single resolution.
+encoders: ???
+
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -44,7 +47,7 @@ ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
-# Mixed stream healpix_level values reuse one encoder per grid (or explicit named encoders).
+# Named encoders each use one stream grid.
 # Adjacent grids exchange parent/child context after encoding; 0 disables this exchange.
 latent_cascade_num_cycles: 1
 

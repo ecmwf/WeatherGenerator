@@ -193,7 +193,7 @@ class ModelParams(torch.nn.Module):
     def __init__(self, cf: Config):
         super().__init__()
         self.cf = cf
-        encoder_configs = get_encoder_configs(cf) or {"default": cf}
+        encoder_configs = get_encoder_configs(cf)
         self.encoders = torch.nn.ModuleDict(
             {name: _EncoderParams(encoder_cf) for name, encoder_cf in encoder_configs.items()}
         )
@@ -293,7 +293,7 @@ class Model(torch.nn.Module):
         self.targets_coords_size = targets_coords_size
 
         self.embed_target_coords = None
-        self.encoder: EncoderModule | MultiEncoder | None = None
+        self.encoder: MultiEncoder | None = None
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
@@ -347,8 +347,7 @@ class Model(torch.nn.Module):
         """Create each individual module of the model"""
         cf = self.cf
 
-        encoder_class = MultiEncoder if self.encoder_configs else EncoderModule
-        self.encoder = encoder_class(
+        self.encoder = MultiEncoder(
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
 
