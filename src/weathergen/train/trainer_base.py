@@ -157,8 +157,6 @@ class TrainerBase:
             print(f"rank: {rank} has run_id: {cf.general.run_id}")
 
             # rng seed: use value from config if provided, otherwise derive from time.
-            # Resolved here rather than in init_seeds so that the time fallback, which
-            # differs per rank, is overwritten by rank 0's value in the all_reduce below.
             if cf.data_loading.get("rng_seed", None) is None:
                 cf.data_loading.rng_seed = int(time.time())
 
