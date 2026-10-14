@@ -262,9 +262,9 @@ torch = [
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
-# TODO: switch back to this branch, but this is a larger update and the tag name is incorrect
-# anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
-anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
+# Using a pinned release of anemoi-datasets until zarr3 is the official backend.
+# See https://github.com/ecmwf/anemoi-datasets/issues/485
+anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2+special.zarr3"}
 
 
 [tool.pytest.ini_options]
