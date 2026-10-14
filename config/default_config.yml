@@ -7,11 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
-mlp_type: mlp
-use_xsa: False
 
 ae_local_dim_embed: 1024
 ae_local_num_blocks: 2
@@ -59,7 +56,6 @@ fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_diffusion_model: False
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -130,17 +126,6 @@ train_logging:
   metrics: 20
   checkpoint: 250
   log_grad_norms: False
-
-  # Detect anomalous training losses and optionally skip those batches.
-  loss_spike_detection:
-    enabled: False
-    window_size: 50
-    min_history: 20
-    ratio_threshold: 5.0
-    loss_threshold: 0.0
-    skip_batch: True
-    max_unique_times_per_step: 8
-    file_name: "loss_spikes.jsonl"
 
 # parameters for data loading
 data_loading :
