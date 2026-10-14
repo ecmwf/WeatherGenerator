@@ -265,10 +265,16 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
 
 def get_tokens_lens(
     streams_names: list[str], batch_data: BatchSamples, input_steps: int
-) -> torch.Tensor:
-    """
-    Extract tokens_lens for (num_steps, num_samples, num_streams)
-    """
+) -> torch.Tensor | dict[str, torch.Tensor]:
+    """Collect (steps, samples, streams, cells), or per-stream lengths for mixed grids."""
+    if batch_data.samples:
+        streams = batch_data.samples[0].streams_data
+        cell_counts = {streams[name].healpix_cells for name in streams_names}
+        if len(cell_counts) > 1:
+            return {
+                name: get_tokens_lens([name], batch_data, input_steps).squeeze(2)
+                for name in streams_names
+            }
     # collect source_tokens_lens for all stream datas
     source_tokens_lens = torch.stack(
         [

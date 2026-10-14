@@ -127,12 +127,28 @@ def unflatten_dict(d, separator="."):
     return unflattened
 
 
+def extract_sample_metadata(sample):
+    """Combine visible-cell masks in coarse-to-fine latent order."""
+    metadata = copy.copy(next(iter(sample.meta_info.values())))
+    masks_by_size = {}
+    for info in sample.meta_info.values():
+        if info.mask is not None:
+            size = info.mask.numel()
+            if size in masks_by_size:
+                masks_by_size[size] = masks_by_size[size] | info.mask
+            else:
+                masks_by_size[size] = info.mask
+    if masks_by_size:
+        metadata.mask = torch.cat([masks_by_size[size] for size in sorted(masks_by_size)])
+    return metadata
+
+
 def extract_batch_metadata(batch):
     return (
         batch.source2target_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.source_samples.get_samples()],
+        [extract_sample_metadata(sample) for sample in batch.source_samples.get_samples()],
         batch.target2source_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.target_samples.get_samples()],
+        [extract_sample_metadata(sample) for sample in batch.target_samples.get_samples()],
     )
 
 

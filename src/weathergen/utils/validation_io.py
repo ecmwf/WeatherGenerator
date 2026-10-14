@@ -239,7 +239,7 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
             # Collect all attributes upfront so they can be passed to
             # create_group in a single call.  Setting attrs individually
             # after creation causes duplicate zarr.json entries in ZipStore.
-            group_attrs: dict[str, int | str] = {}
+            group_attrs: dict[str, int | str | list[int]] = {}
             if coords_array is not None and times_array is not None:
                 group_attrs = {
                     "num_extra_tokens": int(num_register_tokens + num_class_tokens),
@@ -248,6 +248,9 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
                     "spatial_points": int(coords_array.shape[0]),
                     "coords_order": "lat_lon",
                 }
+                group_attrs["healpix_levels"] = config.get_healpix_levels(cf)
+                group_attrs["queries_per_cell"] = int(cf.get("ae_local_num_queries", 1))
+                group_attrs["spatial_order"] = "level_cell_query"
                 if npoints is not None:
                     group_attrs["total_points"] = int(npoints)
 
@@ -370,22 +373,25 @@ _HEALPIX_COORDS_CACHE: dict[int, tuple[npt.NDArray, npt.NDArray]] = {}
 def _get_healpix_coords(cf) -> tuple[npt.NDArray, npt.NDArray] | None:
     if cf is None or not hasattr(cf, "streams"):
         return None
-    healpix_level = config.get_healpix_level(cf)
-    cached = _HEALPIX_COORDS_CACHE.get(healpix_level)
-    if cached is not None:
-        return cached
-
-    num_healpix_cells = 12 * 4**healpix_level
-    ipix = np.arange(num_healpix_cells)
-    lon, lat = hp.healpix_to_lonlat(ipix, 2**healpix_level, order="nested")
-    coords = (lon.to_value("deg"), lat.to_value("deg"))
-    _HEALPIX_COORDS_CACHE[healpix_level] = coords
-    return coords
+    coords = []
+    for level in config.get_healpix_levels(cf):
+        cached = _HEALPIX_COORDS_CACHE.get(level)
+        if cached is None:
+            ipix = np.arange(12 * 4**level)
+            lon, lat = hp.healpix_to_lonlat(ipix, 2**level, order="nested")
+            cached = (lon.to_value("deg"), lat.to_value("deg"))
+            _HEALPIX_COORDS_CACHE[level] = cached
+        coords.append(cached)
+    num_queries = int(cf.get("ae_local_num_queries", 1))
+    return tuple(
+        np.concatenate([grid[axis] for grid in coords]).repeat(num_queries) for axis in (0, 1)
+    )
 
 
 def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
-    num_register_tokens = int(cf.get("num_register_tokens", 0))
-    num_class_tokens = int(cf.get("num_class_tokens", 0))
+    num_queries = int(cf.get("ae_local_num_queries", 1))
+    num_register_tokens = int(cf.get("num_register_tokens", 0)) * num_queries
+    num_class_tokens = int(cf.get("num_class_tokens", 0)) * num_queries
     num_extra_tokens = num_register_tokens + num_class_tokens
 
     healpix_coords = _get_healpix_coords(cf)
@@ -395,7 +401,12 @@ def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
     lon, lat = healpix_coords
     coords_base = np.stack([lat, lon], axis=1)
 
-    if batch is not None and sample_idx_in_batch < len(batch.get_source_samples().get_samples()):
+    if (
+        npoints not in (len(coords_base), len(coords_base) + num_extra_tokens)
+        and len(config.get_healpix_levels(cf)) == 1
+        and batch is not None
+        and sample_idx_in_batch < len(batch.get_source_samples().get_samples())
+    ):
         sample = batch.get_source_samples().get_samples()[sample_idx_in_batch]
         mask = None
         for meta in sample.meta_info.values():
@@ -403,7 +414,7 @@ def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
                 mask = meta.mask
                 break
         if mask is not None:
-            mask_np = mask.detach().cpu().numpy().astype(bool)
+            mask_np = mask.detach().cpu().numpy().astype(bool).repeat(num_queries)
             if mask_np.shape[0] == coords_base.shape[0]:
                 coords_base = coords_base[mask_np]
 

@@ -163,7 +163,8 @@ class BatchSamples:
     """
 
     samples: list[Sample]
-    tokens_lens: torch.Tensor | None
+    # Tensor: (steps, samples, streams, cells); mixed grids: name -> (steps, samples, cells).
+    tokens_lens: torch.Tensor | dict[str, torch.Tensor] | None
     output_steps: int
     output_idxs: list[int]
     device: str | None
@@ -184,9 +185,12 @@ class BatchSamples:
         for sample in self.samples:
             sample.to_device(device)
 
-        self.tokens_lens = (
-            self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
-        )
+        if isinstance(self.tokens_lens, dict):
+            self.tokens_lens = {
+                name: lens.to(device, non_blocking=True) for name, lens in self.tokens_lens.items()
+            }
+        elif self.tokens_lens is not None:
+            self.tokens_lens = self.tokens_lens.to(device, non_blocking=True)
 
         self.device = device
 
@@ -203,12 +207,14 @@ class BatchSamples:
             # create copy and then select subset for samples and tokens_lens
             bs = copy.deepcopy(self)
             bs.samples = [bs.samples[i] for i in subset]
-            torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
-            bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
+            if isinstance(bs.tokens_lens, dict):
+                bs.tokens_lens = {name: lens[:, subset] for name, lens in bs.tokens_lens.items()}
+            elif bs.tokens_lens is not None:
+                bs.tokens_lens = bs.tokens_lens[:, subset]
             return bs
 
     def select_streams(self, stream_names: list[str]) -> "BatchSamples":
-        """Select streams without copying their observation data."""
+        """Select a single-resolution encoder view without copying observation data."""
         original_names = list(self.samples[0].streams_data)
         if stream_names == original_names:
             return self
@@ -220,8 +226,11 @@ class BatchSamples:
             sample.meta_info = {
                 name: sample.meta_info[name] for name in stream_names if name in sample.meta_info
             }
-        indices = [original_names.index(name) for name in stream_names]
-        selected.tokens_lens = self.tokens_lens[:, :, indices]
+        if isinstance(self.tokens_lens, dict):
+            selected.tokens_lens = torch.stack([self.tokens_lens[name] for name in stream_names], 2)
+        elif self.tokens_lens is not None:
+            indices = [original_names.index(name) for name in stream_names]
+            selected.tokens_lens = self.tokens_lens[:, :, indices]
         return selected
 
     def get_num_source_steps(self) -> int:
@@ -288,6 +297,8 @@ class BatchSamples:
         # pin source_tokens_lens
         if isinstance(self.tokens_lens, torch.Tensor):
             self.tokens_lens = self.tokens_lens.pin_memory()
+        elif isinstance(self.tokens_lens, dict):
+            self.tokens_lens = {name: lens.pin_memory() for name, lens in self.tokens_lens.items()}
 
         return self
 

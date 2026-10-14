@@ -44,6 +44,10 @@ ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
+# Mixed stream healpix_level values reuse one encoder per grid (or explicit named encoders).
+# Adjacent grids exchange parent/child context after encoding; 0 disables this exchange.
+latent_cascade_num_cycles: 1
+
 decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
 pred_adapter_kv: False
 pred_self_attention: True

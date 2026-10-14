@@ -40,8 +40,8 @@ _logger = logging.getLogger(__name__)
 Config = DictConfig
 
 
-def get_healpix_level(config: Config) -> int:
-    """Find the healpix level from stream config or the main config."""
+def get_healpix_levels(config: Config) -> list[int]:
+    """Return sorted distinct stream levels, applying the legacy top-level fallback."""
     streams = config.streams.values()
     streams_without_level = [stream for stream in streams if "healpix_level" not in stream]
 
@@ -53,25 +53,72 @@ def get_healpix_level(config: Config) -> int:
         for stream in streams_without_level:
             stream["healpix_level"] = config.healpix_level
 
-    # Encoders share one latent grid and downstream decoder.
-    levels = {stream.healpix_level for stream in streams}
-    assert len(levels) == 1, "All streams must use the same healpix_level."
+    return sorted({stream.healpix_level for stream in streams})
 
-    return levels.pop()
+
+def get_healpix_level(config: Config) -> int:
+    """Return the level of a single-grid encoder configuration."""
+    levels = get_healpix_levels(config)
+    assert len(levels) == 1, "All streams must use the same healpix_level."
+    return levels[0]
 
 
 def get_encoder_configs(cf: Config) -> dict[str, Config]:
-    """Merge encoder overrides and select streams without changing the model config."""
-    if not cf.get("encoders"):
-        return {}
+    """Resolve named single-grid encoders, grouping mixed-resolution streams if needed."""
     base = cf.copy()
+    levels = get_healpix_levels(base)
+    for name, stream in base.streams.items():
+        if "decode_levels" not in stream:
+            continue
+        decode_levels = stream.decode_levels
+        if (
+            not isinstance(decode_levels, list | ListConfig)
+            or any(level not in levels or level > stream.healpix_level for level in decode_levels)
+            or len(set(decode_levels)) != len(decode_levels)
+            or stream.healpix_level not in decode_levels
+        ):
+            raise ValueError(
+                f"Stream {name!r} decode_levels must be a nonempty list of unique existing "
+                "levels no finer than its healpix_level, including its own level."
+            )
+    settings_by_name = base.pop("encoders", None)
+    if not settings_by_name:
+        if len(levels) <= 1:
+            return {}
+        settings_by_name = {
+            f"healpix_{level}": {
+                "streams": [
+                    name for name, stream in base.streams.items() if stream.healpix_level == level
+                ]
+            }
+            for level in levels
+        }
     resolved = {}
-    for name, settings in base.pop("encoders").items():
+    represented_levels = set()
+    for name, settings in settings_by_name.items():
         overrides = settings.copy()
-        streams = {key: cf.streams[key] for key in overrides.pop("streams", cf.streams)}
+        stream_names = overrides.pop("streams", base.streams)
+        unknown = set(stream_names) - set(base.streams)
+        if unknown:
+            raise ValueError(f"Encoder {name!r} selects unknown streams: {sorted(unknown)}.")
         child = OmegaConf.merge(base, overrides)
-        child.streams = {key: streams[key] for key in cf.streams if key in streams}
+        child.streams = {key: base.streams[key] for key in base.streams if key in stream_names}
+        child_levels = get_healpix_levels(child)
+        if len(child_levels) != 1:
+            raise ValueError(f"Encoder {name!r} streams must use the same healpix_level.")
+        for key in (
+            "ae_global_dim_embed",
+            "ae_local_num_queries",
+            "num_register_tokens",
+            "num_class_tokens",
+        ):
+            if child.get(key) != cf.get(key):
+                raise ValueError(f"Encoder {name!r} must use the model's {key}.")
+        represented_levels.update(child_levels)
         resolved[name] = child
+    if represented_levels != set(levels):
+        missing = sorted(set(levels) - represented_levels)
+        raise ValueError(f"No encoder selects streams at healpix levels {missing}.")
     return resolved
 
 

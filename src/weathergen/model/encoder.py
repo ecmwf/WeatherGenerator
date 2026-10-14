@@ -14,6 +14,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
 from weathergen.datasets.batch import BatchSamples, MultiSamples
 from weathergen.datasets.utils import hp_level_to_num_cells
+from weathergen.model.attention import MultiCrossAttentionHeadVarlen
 from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
@@ -22,8 +23,10 @@ from weathergen.model.engines import (
     LocalAssimilationEngine,
     QueryAggregationEngine,
 )
+from weathergen.model.layers import MLP
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.positional_encoding import positional_encoding_harmonic
+from weathergen.utils.utils import get_dtype
 
 
 class EncoderModule(torch.nn.Module):
@@ -237,19 +240,18 @@ class EncoderModule(torch.nn.Module):
 
         zero_pad = torch.zeros(1, device=tokens_global_unmasked.device, dtype=torch.int32)
 
-        # permute to use ae_local_num_queries as the batchsize and no_of_tokens
-        # as seq len for flash attention
-        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+        num_queries = self.cf.ae_local_num_queries
+        tokens_global_unmasked = tokens_global_unmasked.flatten(0, 1)
 
         cell_lens_unflattened = torch.sum(tokens_lens, 2)
         cell_mask = cell_lens_unflattened.to(torch.bool)
         batch_lens = cell_mask.sum(dim=-1).flatten()
         expected_len = batch_lens.sum().item()
-        actual_len = tokens_global_unmasked.shape[1]
+        actual_len = tokens_global_unmasked.shape[0] // num_queries
         assert expected_len == actual_len, (
             f"Shape mismatch: expected {expected_len}, got {actual_len}"
         )
-        tokens_global_unmasked = torch.split(tokens_global_unmasked.squeeze(0), list(batch_lens))
+        tokens_global_unmasked = torch.split(tokens_global_unmasked, list(batch_lens * num_queries))
         tokens_global_unmasked = torch.cat(
             [
                 t
@@ -261,25 +263,25 @@ class EncoderModule(torch.nn.Module):
 
         # Build packed coords matching the interleaved token order
         if rope_cell_coords is not None:
-            num_extra = self.num_class_tokens + self.num_register_tokens
+            num_extra = (self.num_class_tokens + self.num_register_tokens) * num_queries
             zero_coords = torch.zeros(
                 num_extra, 2, device=rope_cell_coords.device, dtype=rope_cell_coords.dtype
             )
             packed_coords = []
             for mask_b in cell_mask.flatten(0, 1):
                 packed_coords.append(zero_coords)
-                packed_coords.append(rope_cell_coords[mask_b])
+                packed_coords.append(rope_cell_coords[mask_b].repeat_interleave(num_queries, 0))
             packed_coords = torch.cat(packed_coords, dim=0)
         else:
             packed_coords = None
 
-        batch_lens = batch_lens + (self.num_class_tokens + self.num_register_tokens)
+        batch_lens = (batch_lens + self.num_class_tokens + self.num_register_tokens) * num_queries
         batch_lens_patched = torch.cat([zero_pad, batch_lens], dim=0)
         tokens_global_unmasked = self.ae_aggregation_engine(
             tokens_global_unmasked, batch_lens_patched, use_reentrant=False, coords=packed_coords
         )
 
-        return tokens_global_unmasked
+        return tokens_global_unmasked.reshape(-1, num_queries * self.cf.ae_global_dim_embed)
 
     def assimilate_local(
         self, model_params, tokens: torch.Tensor, batch: BatchSamples
@@ -304,7 +306,7 @@ class EncoderModule(torch.nn.Module):
         # create register and latent tokens and prepend to latent spatial tokens
         num_extra_tokens = self.num_register_tokens + self.num_class_tokens
         pos_enc = positional_encoding_harmonic
-        tokens_global_register_class = pos_enc(self.q_cells.repeat(rs, num_extra_tokens, 1))
+        tokens_global_register_class = pos_enc(self.q_cells[:1].repeat(rs, num_extra_tokens, 1))
 
         # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:
@@ -329,12 +331,10 @@ class EncoderModule(torch.nn.Module):
 
         # final processing
 
-        tokens_global = (
-            torch.permute(tokens_global, [1, 0, 2])
-            .squeeze()
-            .reshape(rs, self.num_healpix_cells, -1)
+        tokens_global = tokens_global.reshape(rs, self.num_healpix_cells, -1)
+        tokens_global_register_class = tokens_global_register_class.reshape(
+            rs, num_extra_tokens, self.cf.ae_local_num_queries * self.cf.ae_global_dim_embed
         )
-        # TODO, TODO, TODO: do we need this
         tokens_global = torch.cat([tokens_global_register_class, tokens_global], dim=1)
 
         # create mask from cell lens
@@ -364,14 +364,94 @@ class EncoderModule(torch.nn.Module):
         return tokens_global, posteriors
 
 
+class LatentCascade(torch.nn.Module):
+    """Exchange information between adjacent NESTED grids using existing attention blocks."""
+
+    def __init__(self, cf, levels):
+        super().__init__()
+        self.levels = levels
+        self.num_queries = cf.ae_local_num_queries
+        self.num_aux = (cf.num_register_tokens + cf.num_class_tokens) * self.num_queries
+        self.num_cycles = cf.get("latent_cascade_num_cycles", 1)
+        if not isinstance(self.num_cycles, int) or self.num_cycles < 0:
+            raise ValueError("latent_cascade_num_cycles must be a nonnegative integer.")
+        self.down = torch.nn.ModuleList()
+        self.up = torch.nn.ModuleList()
+        for blocks in (self.down, self.up):
+            for _ in levels[1:] if self.num_cycles else []:
+                blocks.append(
+                    torch.nn.ModuleList(
+                        [
+                            MultiCrossAttentionHeadVarlen(
+                                cf.ae_global_dim_embed,
+                                cf.ae_global_dim_embed,
+                                cf.ae_global_num_heads,
+                                with_flash=cf.with_flash_attention,
+                                norm_type=cf.norm_type,
+                                qk_norm_type=cf.get("qk_norm_type", cf.norm_type),
+                                norm_eps=cf.norm_eps,
+                                attention_dtype=get_dtype(cf.attention_dtype),
+                            ),
+                            MLP(
+                                cf.ae_global_dim_embed,
+                                cf.ae_global_dim_embed,
+                                with_residual=True,
+                                hidden_factor=cf.ae_global_mlp_hidden_factor,
+                                norm_type=cf.norm_type,
+                                norm_eps=cf.mlp_norm_eps,
+                            ),
+                        ]
+                    )
+                )
+
+    def _exchange(self, block, queries, context):
+        q_lens = torch.full(
+            (queries.shape[0] + 1,), queries.shape[1], dtype=torch.int32, device=queries.device
+        )
+        kv_lens = torch.full_like(q_lens, context.shape[1])
+        q_lens[0] = kv_lens[0] = 0
+        result = block[0](queries.flatten(0, 1), context.flatten(0, 1), q_lens, kv_lens)
+        return block[1](result).reshape_as(queries)
+
+    def forward(self, grids, model_params):
+        for _ in range(self.num_cycles):
+            for i, (coarse, fine) in enumerate(zip(self.levels, self.levels[1:], strict=False)):
+                section = model_params.level_slices[coarse]
+                neighbors = model_params.hp_nbours[section] - section.start
+                coarse_cells = grids[coarse][:, self.num_aux :].reshape(
+                    -1, hp_level_to_num_cells(coarse), self.num_queries, grids[coarse].shape[-1]
+                )
+                context = coarse_cells[:, neighbors].flatten(0, 1).flatten(1, 2)
+                fine_cells = grids[fine][:, self.num_aux :]
+                queries = fine_cells.reshape(context.shape[0], -1, fine_cells.shape[-1])
+                updated = checkpoint(
+                    self._exchange, self.down[i], queries, context, use_reentrant=False
+                )
+                grids[fine] = torch.cat(
+                    [grids[fine][:, : self.num_aux], updated.reshape_as(fine_cells)], dim=1
+                )
+            for i in reversed(range(len(self.levels) - 1)):
+                coarse, fine = self.levels[i : i + 2]
+                coarse_cells = grids[coarse][:, self.num_aux :]
+                queries = coarse_cells.reshape(-1, self.num_queries, coarse_cells.shape[-1])
+                context = grids[fine][:, self.num_aux :].reshape(
+                    queries.shape[0], -1, queries.shape[-1]
+                )
+                updated = checkpoint(
+                    self._exchange, self.up[i], queries, context, use_reentrant=False
+                )
+                grids[coarse] = torch.cat(
+                    [grids[coarse][:, : self.num_aux], updated.reshape_as(coarse_cells)], dim=1
+                )
+        return grids
+
+
 class MultiEncoder(torch.nn.Module):
-    """Independent named encoders with a shared latent grid, merged by addition."""
+    """Sum encoders on each grid, then couple and concatenate distinct resolutions."""
 
     def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
         super().__init__()
         encoder_configs = get_encoder_configs(cf)
-        if not encoder_configs:
-            raise ValueError("MultiEncoder requires a nonempty encoders configuration.")
         stream_idxs = {name: idx for idx, name in enumerate(cf.streams)}
         self.encoders = torch.nn.ModuleDict(
             {
@@ -385,12 +465,29 @@ class MultiEncoder(torch.nn.Module):
                 for name, encoder_cf in encoder_configs.items()
             }
         )
+        self.levels = sorted({encoder.healpix_level for encoder in self.encoders.values()})
+        self.num_aux = (cf.num_register_tokens + cf.num_class_tokens) * cf.ae_local_num_queries
+        self.cascade = LatentCascade(cf, self.levels) if len(self.levels) > 1 else None
+        self.cf = cf
 
     def forward(self, model_params, batch: MultiSamples):
-        tokens = None
+        grids = {}
         posteriors = []
         for name, encoder in self.encoders.items():
             latents, encoder_posteriors = encoder(model_params, batch[name])
-            tokens = latents if tokens is None else tokens + latents
+            level = encoder.healpix_level
+            grids[level] = latents if level not in grids else grids[level] + latents
             posteriors.extend(encoder_posteriors)
-        return tokens, posteriors
+        if self.cascade is None:
+            return grids[self.levels[0]], posteriors
+        dtype = get_dtype(self.cf.attention_dtype)
+        with torch.autocast(
+            "cuda",
+            dtype=dtype,
+            enabled=self.cf.with_mixed_precision and dtype != torch.float32,
+        ):
+            grids = self.cascade(grids, model_params)
+        auxiliary = sum(grids[level][:, : self.num_aux] for level in self.levels)
+        return torch.cat(
+            [auxiliary] + [grids[level][:, self.num_aux :] for level in self.levels], dim=1
+        ), posteriors
