@@ -9,7 +9,6 @@
 
 ICONESMday :
   type : iconesm
-
   filenames : ['historical_r1i1p1f1_day.json']
   source_exclude: [] # ['mrso', 'snc', 'mrro', 'mrsos', 'snw']
   target_exclude: [] # ['mrso', 'snc', 'mrro', 'mrsos', 'snw']
