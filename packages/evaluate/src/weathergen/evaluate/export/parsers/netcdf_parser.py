@@ -363,8 +363,13 @@ class NetcdfParser(CfParser):
                     f"Variable '{var_name}' not found in mapping. Update relevant config."
                 ) from e
             mapped_name = mapped_info.get("var", var_name)
+            mapped_units = mapped_info.get("wg_unit", {})
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
+
+            wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
+            std_unit = mapped_info.get("std_unit", None)
+            self.convert_units(ds, da, wg_unit, std_unit)
 
             attributes = {
                 "standard_name": mapped_info.get("std", var_name),
@@ -406,11 +411,17 @@ class NetcdfParser(CfParser):
                     f"Variable '{var_name}' not found in mapping. Update relevant config."
                 ) from e
             mapped_name = mapped_info.get("var", var_name)
+            mapped_units = mapped_info.get("wg_unit", {})
+
             dims = dims_list.copy()
             if mapped_info.get("level_type") == "sfc":
                 dims.remove("pressure")
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
+
+            wg_unit = mapped_units.get(self.stream, mapped_units.get("DEFAULT", None))
+            std_unit = mapped_info.get("std_unit", None)
+            self.convert_units(ds, da, wg_unit, std_unit)
 
             attributes = {
                 "standard_name": mapped_info.get("std", var_name),
