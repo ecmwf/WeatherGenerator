@@ -41,40 +41,21 @@ Config = DictConfig
 
 
 def get_healpix_level(config: Config) -> int:
-    """Find the shared tokenizer.healpix_level, falling back to the main config."""
-    streams = config.streams.values()
-    streams_without_level = [
-        stream for stream in streams if "healpix_level" not in stream.get("tokenizer", {})
-    ]
-
-    if "healpix_level" in config and streams_without_level:
-        _logger.warning(
-            "Setting healpix level in the main config is going to be deprecated. "
-            "Please set tokenizer.healpix_level in each stream instead."
-        )
-        for stream in streams_without_level:
-            stream.setdefault("tokenizer", {})
-            stream.tokenizer.healpix_level = config.healpix_level
-
-    # Encoders share one latent grid and downstream decoder.
-    levels = {stream.tokenizer.healpix_level for stream in streams}
-    assert len(levels) == 1, "All streams must use the same healpix_level."
-
+    """Return the shared grid used by the named encoders and downstream model."""
+    levels = {encoder.healpix_level for encoder in config.encoders.values()}
+    assert len(levels) == 1, "All encoders must use the same healpix_level."
     return levels.pop()
 
 
 def get_encoder_configs(cf: Config) -> dict[str, Config]:
-    """Merge encoder overrides and select streams without changing the model config."""
-    if not cf.get("encoders"):
-        return {}
+    """Resolve encoder settings; streams without a selector use the default encoder."""
     base = cf.copy()
-    resolved = {}
-    for name, settings in base.pop("encoders").items():
-        overrides = settings.copy()
-        streams = {key: cf.streams[key] for key in overrides.pop("streams", cf.streams)}
-        child = OmegaConf.merge(base, overrides)
-        child.streams = {key: streams[key] for key in cf.streams if key in streams}
-        resolved[name] = child
+    settings = base.pop("encoders")
+    base.streams = {}
+    resolved = {name: OmegaConf.merge(base, overrides) for name, overrides in settings.items()}
+    for stream_name, stream in cf.streams.items():
+        for name in stream.get("encoders", ["default"]):
+            resolved[name].streams[stream_name] = stream
     return resolved
 
 

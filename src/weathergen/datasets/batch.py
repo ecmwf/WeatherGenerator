@@ -333,7 +333,7 @@ class ModelBatch:
         num_target_samples: int,
         output_offset,
         output_steps,
-        encoder_streams: dict[str, list[str]] | None = None,
+        encoder_streams: dict[str, list[str]],
     ) -> None:
         """ """
 
@@ -342,7 +342,6 @@ class ModelBatch:
         self.output_steps = output_steps
         self.output_idxs = list(range(output_offset, output_steps))
 
-        encoder_streams = encoder_streams or {"default": stream_names}
         self.source_samples = MultiSamples(
             stream_names, num_source_samples, output_steps, self.output_idxs, encoder_streams
         )

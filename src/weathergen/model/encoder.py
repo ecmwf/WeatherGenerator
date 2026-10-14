@@ -11,7 +11,7 @@ import torch
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
+from weathergen.common.config import Config, get_encoder_configs
 from weathergen.datasets.batch import BatchSamples, MultiSamples
 from weathergen.datasets.utils import hp_level_to_num_cells
 from weathergen.model.engines import (
@@ -29,21 +29,19 @@ from weathergen.model.positional_encoding import positional_encoding_harmonic
 class EncoderModule(torch.nn.Module):
     name: "EncoderModule"
 
-    def __init__(
-        self, cf: Config, sources_size, name="default"
-    ) -> None:
+    def __init__(self, cf: Config, sources_size, name: str) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param sources_size: List of source sizes for each stream.
-        :param stream_names: Ordered list of stream identifiers aligned with cf.streams.
+        :param name: Explicit encoder name used for batch routing and positional state.
         """
         super(EncoderModule, self).__init__()
         self.cf = cf
         self.encoder_name = name
 
-        self.healpix_level = get_healpix_level(cf)
+        self.healpix_level = cf.healpix_level
         self.num_healpix_cells = hp_level_to_num_cells(self.healpix_level)
 
         self.cf = cf
@@ -363,13 +361,11 @@ class EncoderModule(torch.nn.Module):
 
 
 class MultiEncoder(torch.nn.Module):
-    """Independent named encoders with a shared latent grid, merged by addition."""
+    """Return independent named encoder latents and posteriors on a shared grid."""
 
     def __init__(self, cf: Config, sources_size):
         super().__init__()
         encoder_configs = get_encoder_configs(cf)
-        if not encoder_configs:
-            raise ValueError("MultiEncoder requires a nonempty encoders configuration.")
         stream_idxs = {name: idx for idx, name in enumerate(cf.streams)}
         self.encoders = torch.nn.ModuleDict(
             {
@@ -383,10 +379,12 @@ class MultiEncoder(torch.nn.Module):
         )
 
     def forward(self, model_params, batch: MultiSamples):
-        tokens = None
-        posteriors = []
+        tokens = {}
+        posteriors = {}
+
         for name, encoder in self.encoders.items():
             latents, encoder_posteriors = encoder(model_params, batch[name])
-            tokens = latents if tokens is None else tokens + latents
-            posteriors.extend(encoder_posteriors)
+            tokens[name] = latents
+            posteriors[name] = encoder_posteriors
+
         return tokens, posteriors
