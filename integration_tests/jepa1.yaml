@@ -1,3 +1,5 @@
+encoders: {default: {}}
+
 streams_directory: "./integration_tests/streams/"
 run_path: "./results"
 model_path: "./models"
