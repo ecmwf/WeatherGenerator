@@ -719,6 +719,11 @@ def get_path_logs(config: Config) -> Path:
     return _get_path_output(config, "path_logs", "logs", get_run_id_from_config(config))
 
 
+def get_path_profiling_traces(config: Config) -> Path:
+    """Get the directory for profiling traces, inside the log directory."""
+    return get_path_logs(config) / "profiling_traces"
+
+
 def get_path_model(model_config: Config | None = None, run_id: str | None = None) -> Path:
     """Get full_model_path if set, otherwise the shared per-run checkpoint directory."""
     if model_config or run_id:
