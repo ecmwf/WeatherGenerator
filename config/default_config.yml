@@ -45,7 +45,6 @@ ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
 decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
-decoder_latent: common # common summed latent or each stream's encoder-owned latent
 pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
