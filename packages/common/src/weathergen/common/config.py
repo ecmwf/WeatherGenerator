@@ -291,12 +291,16 @@ def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
     return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list, results_path: None | Path) -> list[Path]:
+def get_model_results(
+    run_id: str, mini_epoch_list: list, rank_list: list, results_path: None | Path
+) -> list[Path]:
     """
     Find all model results zarr stores from a given run_id.
     """
     if results_path is None:
-        run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
+        run_results = (
+            Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
+        )
         if not run_results.exists():
             raise FileNotFoundError(
                 f"Results directory for run_id {run_id} does not exist: {run_results}"
@@ -331,7 +335,7 @@ def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list, resul
                 found_paths.extend(results_path.glob(f"*.{ext}"))
 
     if not found_paths:
-        raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {results_path  }")
+        raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {results_path}")
 
     return found_paths
 

@@ -327,7 +327,7 @@ def export_from_args(args: list) -> None:
     if args.results_path is not None:
         results_path = Path(args.results_path)
         assert results_path.exists(), "Results not found, check path provided"
-    
+
     for dtype in args.type:
         _logger.info(
             f"Starting processing {dtype} for run ID {kwargs['run_id']}. "
