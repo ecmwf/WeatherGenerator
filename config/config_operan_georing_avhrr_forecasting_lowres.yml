@@ -71,7 +71,12 @@ rope_2D: False
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: True
+distributed:
+  data_parallel:
+    with_ddp: False
+    with_fsdp: True
+  spatial_parallel:
+    size: 1
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -105,7 +110,6 @@ general:
   world_size: ???
 
   # local_rank, 
-  # with_ddp,
   # data_path_*, 
   # model_path, 
   # run_path, 
