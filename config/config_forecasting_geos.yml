@@ -9,12 +9,15 @@
 
 # Forecasting overlay for default_config.yml; shared model settings remain inherited.
 # Each named encoder inherits those settings and can override its own architecture.
-# All encoders must share healpix_level, ae_global_dim_embed and ae_local_num_queries.
+# Encoder grids may differ; latent widths, query counts and auxiliary-token counts must match.
 # Legacy configs without an encoders section are not migrated by this example.
 encoders:
   goes:
     healpix_level: 5
     ae_global_num_blocks: 4
+
+# Use the coarsest shared grid, or "encoder" for each stream's own encoder grid.
+decoder_latent: common
 
 streams_directory: "./config/streams/forecasting_geos/"
 
