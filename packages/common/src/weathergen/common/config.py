@@ -324,16 +324,16 @@ def get_model_results(
                 for ext in StoreType.extensions():
                     found_paths.extend(run_results.glob(f"{glob_str}.{ext}"))
     else:
-        results_path = Path(results_path)
-        if results_path.is_file():
-            found_paths = [results_path]
-        elif results_path.is_dir():
+        run_results = Path(results_path)
+        if run_results.is_file():
+            found_paths = [run_results]
+        elif run_results.is_dir():
             for ext in StoreType.extensions():
                 # will search for all .zarr/.zip files
-                found_paths.extend(results_path.glob(f"*.{ext}"))
+                found_paths.extend(run_results.glob(f"*.{ext}"))
 
     if not found_paths:
-        raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {results_path}")
+        raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {run_results}")
 
     return found_paths
 
