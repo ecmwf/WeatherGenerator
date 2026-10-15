@@ -25,10 +25,32 @@ class GribParser(NetcdfParser):
         # change pressure to isobaricInhPa for GRIB compliance
         if "pressure" in ds.coords:
             ds = ds.rename({"pressure": "isobaricInhPa"})
-        if "valid_time" in ds.coords:
-            ds = ds.rename({"valid_time": "time"})
+        if "forecast_reference_time" in ds.coords:
+            ds = ds.rename({"forecast_reference_time": "time"})
+            ds["time"].attrs = {
+                "long_name": "initial time of forecast",
+                "standard_name": "forecast_reference_time",
+            }
         if "forecast_period" in ds.coords:
+            # cfgrib expects `step` values as ns integers in this write path.
+            ds["forecast_period"] = ds["forecast_period"] * 3_600_000_000_000 * np.timedelta64(1, "ns")
             ds = ds.rename({"forecast_period": "step"})
+            #ds = ds.swap_dims({"valid_time": "step"})
+            #ds = ds.assign_coords(valid_time=ds["time"] + ds["step"])
+            ds["step"].attrs = {
+                "long_name": "time since forecast_reference_time",
+                "standard_name": "forecast_period",
+            }
+        print(ds["valid_time"].attrs)
+        print(ds["step"].attrs)
+        ds["valid_time"].attrs = {
+            "standard_name": "time",
+            "long_name": "time",
+        }
+
+        for var_name in ds.data_vars:
+            ds[var_name].attrs.setdefault("GRIB_stepType", "instant")
+
         return ds
 
     def _attrs_gaussian_grid(self, ds: xr.Dataset) -> xr.Dataset:
