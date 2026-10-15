@@ -110,14 +110,11 @@ class DataReaderAnemoiOperan(DataReaderAnemoi):
         ReaderData providing coords, geoinfos, data, datetimes
         """
 
-        dtr = self.time_window_handler.window(idx)
-        if self.ds is None or self.len == 0:
+        t_idxs, dtr = np.arange(self.len), self.time_window_handler.window(idx)
+        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
-
-        # consider all timesteps, the dataset starts lookback_hours before the window
-        t_idxs = np.arange(self.len)
 
         didx_start = t_idxs[0]
         didx_end = t_idxs[-1] + 1
