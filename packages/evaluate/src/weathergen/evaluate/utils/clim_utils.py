@@ -132,6 +132,13 @@ def align_clim_data(
                 ),
                 dims=["statistic"] + list(target_da.dims),
                 coords=all_stat_coords,
+            ).assign_coords(
+                # Keep the target's non-dimension coords (lat/lon) for region masking
+                {
+                    name: coord
+                    for name, coord in target_da.coords.items()
+                    if name not in all_stat_coords
+                }
             )
         else:
             aligned_clim[fstep] = xr.DataArray(

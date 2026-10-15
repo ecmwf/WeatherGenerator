@@ -21,7 +21,7 @@ from numpy.typing import NDArray
 
 # Local application / package
 from weathergen.common.config import (
-    get_path_run,
+    get_path_results,
     load_merge_configs,
     load_run_config,
 )
@@ -52,7 +52,7 @@ class WeatherGenReader(Reader):
         self.inference_cfg = self.get_inference_config()
 
         if not self.results_base_dir:
-            self.results_base_dir = get_path_run(self.inference_cfg)
+            self.results_base_dir = get_path_results(self.inference_cfg)
             _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
