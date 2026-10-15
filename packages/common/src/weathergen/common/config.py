@@ -48,13 +48,24 @@ def get_healpix_level(config: Config) -> int:
 
 
 def get_encoder_configs(cf: Config) -> dict[str, Config]:
-    """Resolve encoder settings; streams without a selector use the default encoder."""
+    """Resolve encoder settings and default stream tokenizer grids to their encoder grid."""
     base = cf.copy()
     settings = base.pop("encoders")
     base.streams = {}
     resolved = {name: OmegaConf.merge(base, overrides) for name, overrides in settings.items()}
     for stream_name, stream in cf.streams.items():
-        resolved[stream.get("encoder", "default")].streams[stream_name] = stream
+        name = stream.get("encoder", "default")
+        encoder = resolved[name]
+        encoder.streams[stream_name] = stream
+        encoder.streams[stream_name].setdefault("tokenizer", {})
+        tokenizer = encoder.streams[stream_name].tokenizer
+        level = tokenizer.setdefault("healpix_level", encoder.healpix_level)
+       #For now equal grids only, tokenizer and encoder to do.
+        if level != encoder.healpix_level:
+            raise ValueError(
+                f"Stream {stream_name!r} tokenizer.healpix_level ({level}) must match "
+                f"encoder {name!r} healpix_level ({encoder.healpix_level}); "
+            )
     return resolved
 
 
