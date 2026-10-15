@@ -321,6 +321,7 @@ def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list, resul
                 for ext in StoreType.extensions():
                     found_paths.extend(run_results.glob(f"{glob_str}.{ext}"))
     else:
+        results_path = Path(results_path)
         if results_path.is_file():
             found_paths = [results_path]
         elif results_path.is_dir():
