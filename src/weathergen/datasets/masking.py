@@ -112,15 +112,11 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
+    def __init__(self, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
-
-        # number of healpix cells
-        self.healpix_level_data = healpix_level
-        self.healpix_num_cells = 12 * (4**healpix_level)
 
         self.stage = stage
 
@@ -317,7 +313,6 @@ class Masker:
     def build_samples_for_stream(
         self,
         training_mode: str,
-        num_cells: int,
         stream_info: dict,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
@@ -325,6 +320,8 @@ class Masker:
         SampleMetaData is currently just a dict with the masking params used.
         """
 
+        healpix_level = stream_info["healpix_level"]
+        num_cells = 12 * 4**healpix_level
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
         # # target and source configs
@@ -357,7 +354,7 @@ class Masker:
                     masking_config = target_cfg.get("masking_strategy_config", {})
                     # targets are never randomly dropped
                     target_mask, mask_params = self._get_mask(
-                        num_cells=num_cells,
+                        healpix_level=healpix_level,
                         strategy=target_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=("independent", None),
@@ -410,7 +407,7 @@ class Masker:
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
                     source_mask, mask_params = self._get_mask(
-                        num_cells=num_cells,
+                        healpix_level=healpix_level,
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
@@ -430,7 +427,7 @@ class Masker:
 
     def _get_mask(
         self,
-        num_cells: int,
+        healpix_level: int,
         strategy: str,
         masking_strategy_config: dict,
         target_relationship_mask: (str, np.typing.NDArray),
@@ -439,8 +436,8 @@ class Masker:
 
         Parameters
         ----------
-        num_cells : int
-            Number of cells at data level (should equal 12 * 4**healpix_level).
+        healpix_level : int
+            HEALPix level of the current stream.
         strategy : str | None
             Cell selection strategy: currently supports 'random' and 'healpix'. Uses
             instance default if None.
@@ -478,7 +475,7 @@ class Masker:
             return mask, {}
 
         # get mask
-        mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
+        mask, params = self._generate_cell_mask(healpix_level, strategy, masking_strategy_config)
 
         # handle cases where mask needs to be combined with target_mask
         # without the assert we can fail silently
@@ -497,7 +494,7 @@ class Masker:
 
     def _generate_cell_mask(
         self,
-        num_cells: int,
+        healpix_level: int,
         strategy: str,
         masking_strategy_config: dict,
     ) -> (np.typing.NDArray, dict):
@@ -505,8 +502,8 @@ class Masker:
 
         Parameters
         ----------
-        num_cells : int
-            Number of cells at data level (should equal 12 * 4**healpix_level).
+        healpix_level : int
+            HEALPix level of the current stream.
         strategy : str | None
             Cell selection strategy: currently supports 'random' and 'healpix'. Uses
             instance default if None.
@@ -522,9 +519,7 @@ class Masker:
         # params describing the masking
         masking_params = {}
 
-        assert num_cells == self.healpix_num_cells, (
-            "num_cells inconsistent with configured healpix level."
-        )
+        num_cells = 12 * 4**healpix_level
 
         # generate cell mask
 
@@ -542,7 +537,9 @@ class Masker:
             # prepare healpix-based masking
             keep_rate = self._get_sampling_rate(masking_strategy_config)
             hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
-                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
+                self._prepare_healpix_based_masking(
+                    healpix_level, masking_strategy_config, keep_rate
+                )
             )
 
             if num_parents_to_keep == 0:
@@ -561,7 +558,9 @@ class Masker:
             # prepare healpix-based masking
             keep_rate = self._get_sampling_rate(masking_strategy_config)
             hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
-                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
+                self._prepare_healpix_based_masking(
+                    healpix_level, masking_strategy_config, keep_rate
+                )
             )
 
             if num_parents_to_keep == 0:
@@ -757,18 +756,17 @@ class Masker:
 
         return selected
 
-    def _prepare_healpix_based_masking(self, cfg, keep_rate):
+    def _prepare_healpix_based_masking(self, healpix_level, cfg, keep_rate):
         """
         Prepare healpix masking related attributes.
         """
 
-        hl_data = self.healpix_level_data
         hl_mask = cfg.get("hl_mask")
-        assert hl_mask is not None and hl_mask <= hl_data, (
+        assert hl_mask is not None and hl_mask <= healpix_level, (
             "For healpix keep mask generation, cfg['hl_mask'] must be set and <= data level."
         )
         num_parent_cells = 12 * (4**hl_mask)
-        level_diff = hl_data - hl_mask
+        level_diff = healpix_level - hl_mask
         num_children_per_parent = 4**level_diff
         # number of parents to keep
         num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
