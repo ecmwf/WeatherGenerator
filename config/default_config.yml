@@ -7,11 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# Models define named encoders and their HEALPix levels; each stream selects one via `encoder`.
-#
-# Omitting a stream's `encoder` selects `default`.
-encoders: ???
-
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
