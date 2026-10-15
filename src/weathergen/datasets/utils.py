@@ -12,8 +12,6 @@ import astropy_healpix as hp
 import numpy as np
 import torch
 
-from weathergen.datasets.batch import BatchSamples
-
 
 ####################################################################################################
 def vecs_to_rots(vecs):
@@ -175,32 +173,3 @@ def locs_to_cell_coords_ctrs(
 def hp_level_to_num_cells(hp_level: int) -> int:
     nside = 2**hp_level
     return 12 * nside * nside
-
-
-def get_tokens_lens(
-    streams_names: list[str], batch_data: BatchSamples, input_steps: int
-) -> torch.Tensor:
-    """
-    Extract tokens_lens for (num_steps, num_samples, num_streams)
-    """
-    # collect source_tokens_lens for all stream datas
-    source_tokens_lens = torch.stack(
-        [
-            torch.stack(
-                [
-                    torch.stack(
-                        [
-                            sample.streams_data[stream_name].source_tokens_lens[i]
-                            for stream_name in streams_names
-                        ]
-                    )
-                    for sample in batch_data.samples
-                ]
-                if len(batch_data.samples)
-                else [torch.zeros((0, 0))]
-            )
-            for i in range(input_steps)
-        ]
-    )
-
-    return source_tokens_lens

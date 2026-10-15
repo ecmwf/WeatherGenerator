@@ -15,7 +15,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from weathergen.common.config import get_path_model
+from weathergen.common.config import get_healpix_level, get_path_model
 from weathergen.model.engines import (
     IdentityEngine,
     LatentPredictionHeadIdentity,
@@ -58,6 +58,25 @@ def _create_teacher_heads(
         raise ValueError(f"Unknown latent prediction head type {head_type!r}")
 
 
+def check_teacher_grid_compatibility(student_cfg, teacher_cfg) -> None:
+    """Teachers reuse tokenized student observations, so their input grids must match."""
+    student_levels = {
+        name: student_cfg.encoders[stream.get("encoder", "default")].healpix_level
+        for name, stream in student_cfg.streams.items()
+    }
+    teacher_levels = {
+        name: teacher_cfg.encoders[stream.get("encoder", "default")].healpix_level
+        for name, stream in teacher_cfg.streams.items()
+    }
+    if (
+        get_healpix_level(student_cfg) != get_healpix_level(teacher_cfg)
+        or student_levels != teacher_levels
+    ):
+        raise ValueError(
+            "Teacher and student must use matching per-stream and common HEALPix levels."
+        )
+
+
 def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> None:
     """Strip a model to encoder-only and create fresh SSL latent heads.
 
@@ -68,7 +87,8 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
     """
     # Strip non-encoder components
     teacher_dim_embed = override_cfg.ae_global_dim_embed
-    model.forecast_engine = IdentityEngine()
+    for level in model.forecast_engines:
+        model.forecast_engines[level] = IdentityEngine()
     model.embed_target_coords = nn.ModuleDict()
     model.target_token_engines = nn.ModuleDict()
     model.pred_heads = nn.ModuleDict()
