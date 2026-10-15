@@ -1,0 +1,45 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Configuration for climate-index evaluation (e.g. NAM, SAM), used by the
+# `evaluation-indices` entry point (run_index_evaluation.py). Structurally
+# mirrors config/evaluate/eval_config.yml's default_streams/run_ids shape,
+# but each stream declares an `indices:` list instead of `metrics:`.
+
+# max_workers: 36  # hard cap on parallel workers (index computation, I/O)
+
+default_streams:
+  ERA5pl:
+    channels: ["z_50", "z_500", "z_850"]
+    # required: check_availability(mode="evaluation") skips the stream without this.
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+    indices:
+      - nam:
+          min_lat: 20.0             # domain: polar cap, |lat| >= 20 (hemisphere
+                                     # defaults per index, override via `hemisphere:`)
+          use_climatology: true     # anomaly vs climatology (day-of-year+hour
+                                     # matched); falls back to this sample's own
+                                     # forecast-lead-time mean if false or if no
+                                     # climatology file is found for the stream.
+                                     # Fallback values are NOT comparable across
+                                     # samples (each has its own baseline).
+          significance_level: 0.05  # p-value threshold for the spatial pattern
+      - sam:
+          min_lat: 20.0             # domain: polar cap, |lat| >= 20S
+          use_climatology: true
+          significance_level: 0.05
+
+run_ids:
+  n5lpzqsm:
+    label: "pretrained model n5lpzqsm"
+    results_base_dir: "./results/n5lpzqsm/"
+    # if "streams" is not specified, the default_streams above are used
