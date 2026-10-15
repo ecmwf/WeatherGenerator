@@ -119,6 +119,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         # caches lats and lons
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
+        self.n_latitudes = len(self.latitudes)
 
         # select/filter requested source channels
         if stream_info.get(str(stage) + "_source_channels") is None:
