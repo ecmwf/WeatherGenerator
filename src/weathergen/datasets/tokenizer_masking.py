@@ -12,7 +12,6 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
-from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.healpix_geometry import HealpixGeometry
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer_utils import (
@@ -63,7 +62,7 @@ class TokenizerMasking:
         self.masker.reset_rng(rng)
         self.rng = rng
 
-    def get_tokens_windows(self, stream_info, data, pad_tokens):
+    def get_tokens_windows(self, stream_info, data, pad_tokens, healpix_level):
         """
         Tokenize data (to amortize over the different views that are generated)
 
@@ -71,7 +70,6 @@ class TokenizerMasking:
 
         tok_spacetime = stream_info.get("tokenize_spacetime", False)
         tok = tokenize_spacetime if tok_spacetime else tokenize_space
-        healpix_level = self.masker.healpix_level
         token_size = stream_info["token_size"]
 
         tokens = []
@@ -87,16 +85,6 @@ class TokenizerMasking:
             tokens += [(idxs_cells, idxs_cells_lens)]
 
         return tokens
-
-    def build_samples_for_stream(
-        self,
-        training_mode: str,
-        stream_info: dict,
-    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
-        """
-        Create masks for samples
-        """
-        return self.masker.build_samples_for_stream(training_mode, stream_info)
 
     def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
         """ """
@@ -135,6 +123,7 @@ class TokenizerMasking:
         idxs_cells_data,
         time_win: tuple,
         cell_mask: torch.Tensor,
+        healpix_level: int,
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
@@ -144,7 +133,7 @@ class TokenizerMasking:
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
             idxs_cells, idxs_cells_lens, cell_mask
         )
-        geometry = self.get_geometry(self.masker.healpix_level)
+        geometry = self.get_geometry(healpix_level)
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
             idxs_cells,
@@ -160,13 +149,14 @@ class TokenizerMasking:
 
         return (source_tokens_cells, source_tokens_lens)
 
-    def get_target_coords(
+    def get_target(
         self,
         stream_info: dict,
         rdata: IOReaderData,
         token_data,
         time_win: tuple,
         cell_mask,
+        healpix_level: int,
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
@@ -174,64 +164,23 @@ class TokenizerMasking:
         (mask_tokens, mask_channels) = self.cell_to_token_mask(
             idxs_cells, idxs_cells_lens, cell_mask
         )
-        healpix_level = self.masker.healpix_level
         geometry = self.get_geometry(healpix_level)
 
-        # TODO: split up
-        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
-            stream_info["stream_id"],
-            healpix_level,
-            idxs_cells,
-            idxs_cells_lens,
-            mask_tokens,
-            mask_channels,
-            rdata,
-            time_win,
-            geometry.hpy_verts_rots,
-            geometry.hpy_verts_local,
-            geometry.hpy_nctrs,
-            encode_times_target,
+        data, datetimes, coords, coords_local, coords_per_cell, idxs_data = (
+            tokenize_apply_mask_target(
+                stream_info["stream_id"],
+                healpix_level,
+                idxs_cells,
+                idxs_cells_lens,
+                mask_tokens,
+                mask_channels,
+                rdata,
+                time_win,
+                geometry.hpy_verts_rots,
+                geometry.hpy_verts_local,
+                geometry.hpy_nctrs,
+                encode_times_target,
+            )
         )
 
-        return (coords_local, coords_per_cell)
-
-    def get_target_values(
-        self,
-        stream_info: dict,
-        rdata: IOReaderData,
-        token_data,
-        time_win: tuple,
-        cell_mask,
-    ):
-        # create tokenization index
-        (idxs_cells, idxs_cells_lens) = token_data
-
-        (mask_tokens, mask_channels) = self.cell_to_token_mask(
-            idxs_cells, idxs_cells_lens, cell_mask
-        )
-        healpix_level = self.masker.healpix_level
-        geometry = self.get_geometry(healpix_level)
-
-        data, datetimes, coords, _, _ = tokenize_apply_mask_target(
-            stream_info["stream_id"],
-            healpix_level,
-            idxs_cells,
-            idxs_cells_lens,
-            mask_tokens,
-            mask_channels,
-            rdata,
-            time_win,
-            geometry.hpy_verts_rots,
-            geometry.hpy_verts_local,
-            geometry.hpy_nctrs,
-            encode_times_target,
-        )
-
-        idxs_ord_inv = None
-        if data.numel() > 0:
-            # flatten per-token indices into one flat list
-            idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
-            # compute indices for inversion
-            _, idxs_ord_inv = torch.sort(idxs_flat)
-
-        return (data, datetimes, coords, idxs_ord_inv)
+        return (data, datetimes, coords, coords_local, coords_per_cell, idxs_data.argsort())
