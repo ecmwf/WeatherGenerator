@@ -54,6 +54,7 @@ class StreamData:
 
     def __init__(
         self,
+        stage: Stage,
         idx: int,
         input_steps: int,
         output_steps: int,
@@ -78,6 +79,8 @@ class StreamData:
         -------
         None
         """
+
+        self.stage = stage
 
         self.mask_value = 0.0
 
@@ -130,7 +133,14 @@ class StreamData:
 
         return self
 
-    def to_device(self, device: str) -> None:
+    def to_device(
+        self,
+        device: str,
+        target_steps: list[int] | None = None,
+        include_source: bool = True,
+        include_target_coords: bool = True,
+        include_target_tokens: bool = True,
+    ) -> None:
         """
         Move data to GPU
 
@@ -144,13 +154,19 @@ class StreamData:
         None
         """
 
+        target_steps = list(range(self.output_steps)) if target_steps is None else target_steps
         dv = device
-        self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
-        self.target_coords_lens = [t.to(dv, non_blocking=True) for t in self.target_coords_lens]
-        self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
+        for step in target_steps:
+            if include_target_coords:
+                self.target_coords[step] = self.target_coords[step].to(dv, non_blocking=True)
+                self.target_coords_lens[step] = self.target_coords_lens[step].to(
+                    dv, non_blocking=True
+                )
+            if include_target_tokens:
+                self.target_tokens[step] = self.target_tokens[step].to(dv, non_blocking=True)
 
         # move to device if source data is present
-        if not np.array([s is None for s in self.source_tokens_cells]).all():
+        if include_source and not np.array([s is None for s in self.source_tokens_cells]).all():
             self.source_tokens_cells = [
                 s.to(dv, non_blocking=True) for s in self.source_tokens_cells
             ]
@@ -160,9 +176,14 @@ class StreamData:
 
         return self
 
+    def clear_target_coordinates(self, target_steps: list[int]) -> None:
+        """Release decoder coordinates for forecast steps that have been processed."""
+        for step in target_steps:
+            self.target_coords[step] = torch.empty(0)
+            self.target_coords_lens[step] = torch.empty(0, dtype=torch.int32)
+
     def add_source(
         self,
-        stage: Stage,
         step: int,
         ss_raw: IOReaderData,
         ss_lens: torch.Tensor,
@@ -186,7 +207,7 @@ class StreamData:
 
         assert step < self.input_steps
 
-        if stage == TRAIN:
+        if self.stage == TRAIN:
             del ss_raw
             ss_raw = None
 
@@ -201,7 +222,6 @@ class StreamData:
 
     def add_target(
         self,
-        stage: Stage,
         fstep: int,
         targets: list,
         target_coords: torch.Tensor,
@@ -247,7 +267,6 @@ class StreamData:
 
     def add_target_values(
         self,
-        stage: Stage,
         fstep: int,
         targets: list,
         target_coords_raw: torch.Tensor,
@@ -281,7 +300,7 @@ class StreamData:
         None
         """
 
-        if stage == TRAIN:
+        if self.stage == TRAIN:
             del idxs_inv
             idxs_inv = None
 
@@ -294,7 +313,6 @@ class StreamData:
 
     def add_target_coords(
         self,
-        stage: Stage,
         fstep: int,
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
@@ -346,9 +364,10 @@ class StreamData:
         """
 
         # cat over forecast steps
-        target_coords_empty = torch.cat(self.target_coords_lens).sum() == 0
-        target_tokens_empty = torch.cat(self.target_tokens).sum() == 0
-        return target_coords_empty and target_tokens_empty
+        is_empty = torch.cat(self.target_coords_lens).sum() == 0
+        if self.stage == TRAIN:
+            is_empty = is_empty and torch.cat(self.target_tokens).sum() == 0
+        return is_empty
 
     def source_empty(self) -> bool:
         """
