@@ -7,9 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# Forecasting overlay for default_config.yml; model settings remain inherited.
-# The grid is set by tokenizer.healpix_level in the stream, not by this config.
-# Other configs retain their legacy top-level healpix_level fallback.
+# Forecasting overlay for default_config.yml; shared model settings remain inherited.
+# Each named encoder inherits those settings and can override its own architecture.
+# All encoders must share healpix_level, ae_global_dim_embed and ae_local_num_queries.
+# Legacy configs without an encoders section are not migrated by this example.
+encoders:
+  goes:
+    healpix_level: 5
+    ae_global_num_blocks: 4
+
 streams_directory: "./config/streams/forecasting_geos/"
 
 training_config:
