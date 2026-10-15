@@ -89,12 +89,14 @@ def flatten_dict(d, parent_key="", sep="."):
     return dict(items)
 
 
-def extract_batch_metadata(batch):
+def extract_batch_metadata(batch, cf):
+    """Return correspondence metadata with masks on the common latent grid."""
+    num_cells = 12 * 4 ** config.get_healpix_level(cf)
     return (
         batch.source2target_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.source_samples.get_samples()],
+        [sample.get_latent_meta_info(num_cells) for sample in batch.source_samples.get_samples()],
         batch.target2source_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.target_samples.get_samples()],
+        [sample.get_latent_meta_info(num_cells) for sample in batch.target_samples.get_samples()],
     )
 
 

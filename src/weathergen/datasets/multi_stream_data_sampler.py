@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
+from weathergen.common.config import Config, get_decoder_healpix_level, get_encoder_configs
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch, MultiBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
@@ -29,7 +29,7 @@ from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.utils import get_tokens_lens, hp_level_to_num_cells
+from weathergen.datasets.utils import hp_level_to_num_cells
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
@@ -102,12 +102,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        # Batch assembly still requires a common HEALPix level.
-        self.healpix_level = get_healpix_level(cf)
+        self.encoder_levels = {
+            name: cf.encoders[stream.get("encoder", "default")].healpix_level
+            for name, stream in cf.streams.items()
+        }
+        self.decoder_levels = {name: get_decoder_healpix_level(cf, name) for name in cf.streams}
         self.encoder_streams = {
             name: list(encoder_cf.streams) for name, encoder_cf in get_encoder_configs(cf).items()
         }
-        self.masker = Masker(stage, self.healpix_level, cf.streams, self.mode_cfg)
+        self.masker = Masker(stage, cf.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
@@ -431,6 +434,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     token_data,
                     (time_win_source.start, time_win_source.end),
                     mask,
+                    self.encoder_levels[stream_info["name"]],
                 )
 
                 stream_data.add_source(
@@ -468,25 +472,20 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             if token_data[0] is None and token_data[1] is None:
                 continue
 
-            if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+            if "target_coords" in mode or "target_values" in mode:
+                tt_cells, tt_t, tt_c, tc, tc_l, idxs_inv = self.tokenizer.get_target(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
+                    self.decoder_levels[stream_info["name"]],
                 )
+
+            if "target_coords" in mode:
                 stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
-                (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
-                    stream_info,
-                    rdata,
-                    token_data,
-                    (time_win_target.start, time_win_target.end),
-                    target_mask,
-                )
-
                 stream_data.add_target_values(
                     self._stage, timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
                 )
@@ -528,12 +527,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         num_output_steps = self._get_output_length(num_forecast_steps)
-        num_cells = hp_level_to_num_cells(self.healpix_level)
         stream_data = StreamData(
             base_idx,
             num_steps_input,
             num_output_steps,
-            num_cells,
+            hp_level_to_num_cells(self.encoder_levels[stream_info["name"]]),
+            hp_level_to_num_cells(self.decoder_levels[stream_info["name"]]),
         )
 
         stream_data = self._build_stream_data_input(
@@ -560,12 +559,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
+    def _get_data_windows(
+        self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds, healpix_level
+    ):
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
 
-        Empty windows use the shared encoder HEALPix level for spoofed data.
+        Empty windows use the stream's native encoder level for spoofed data.
         """
 
         # source data: iterate overall input steps
@@ -579,7 +580,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
-                    self.healpix_level,
+                    healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
@@ -601,7 +602,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
-                    self.healpix_level,
+                    healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),
@@ -620,9 +621,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         for stream_name, stream_data in self.streams_datasets.items():
             stream_info = stream_data.info
             # Build source and target sample masks
-            masks[stream_name] = self.tokenizer.build_samples_for_stream(
+            masks[stream_name] = self.masker.build_samples_for_stream(
                 training_mode,
                 stream_info,
+                self.encoder_levels[stream_name],
             )
             # identical for all streams
             num_target_samples = len(masks[stream_name][0])
@@ -634,22 +636,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # max(1, ...) : self.output_offset and num_forecast_steps are zero for pure masking
         return max(1, self.output_offset + num_forecast_steps)
 
-    def _preprocess_model_batch(
-        self, batch: ModelBatch, source_input_steps: int, target_input_steps: int
-    ):
-        """
-        Perform necessary pre-processing of model batch
-        """
-        stream_names = list(self.streams_datasets.keys())
-        batch.source_samples.tokens_lens = get_tokens_lens(
-            stream_names, batch.source_samples, source_input_steps
-        )
-        batch.target_samples.tokens_lens = get_tokens_lens(
-            stream_names, batch.target_samples, target_input_steps
-        )
-
-        return batch
-
     def _get_batch(self, idx: int, num_forecast_steps: int) -> MultiBatch:
         """
         Assemble a batch using the sample corresponding to idx
@@ -657,7 +643,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         mode = self.mode_cfg.get("training_mode")
         source_cfgs = self.mode_cfg.get("model_input")
-        target_cfgs = self.mode_cfg.get("target_input", {})
 
         # get/coordinate masks
         masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
@@ -699,13 +684,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds
+                idx, num_forecast_steps, i_max, stream_ds, self.encoder_levels[stream_name]
             )
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
-            output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+            input_tokens = self.tokenizer.get_tokens_windows(
+                stream_info, input_data, True, self.encoder_levels[stream_name]
+            )
+            output_tokens = self.tokenizer.get_tokens_windows(
+                stream_info, output_data, False, self.encoder_levels[stream_name]
+            )
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
@@ -751,11 +740,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx
                 ]
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
-
-        source_in_steps = input_steps.max().item()
-        target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
-        target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
-        batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
         return MultiBatch(batch, self.encoder_streams)
 

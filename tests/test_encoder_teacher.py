@@ -9,20 +9,25 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from copy import deepcopy
 
 import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
+from test_multi_resolution_data import make_model_and_batch, make_model_config
 
 # flash_attn is GPU-only; skip entire module if not available (e.g. macOS)
 pytest.importorskip("flash_attn", reason="flash_attn required (GPU-only)")
 
+from weathergen.datasets.batch import MultiBatch  # noqa: E402
+from weathergen.model.ema import EMAModel  # noqa: E402
 from weathergen.model.engines import (  # noqa: E402
+    IdentityEngine,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
 )
+from weathergen.model.model_interface import load_model  # noqa: E402
 from weathergen.model.ssl_target_processing import (  # noqa: E402
     DINOTargetProcessing,
     JEPATargetProcessing,
@@ -30,12 +35,12 @@ from weathergen.model.ssl_target_processing import (  # noqa: E402
 )
 from weathergen.train.target_and_aux_ssl_teacher import (  # noqa: E402
     EMATeacher,
-    EncoderTeacher,
     FrozenTeacher,
     get_target_postprocessing,
 )
 from weathergen.train.teacher_utils import (  # noqa: E402
     _create_teacher_heads,
+    check_teacher_grid_compatibility,
     load_encoder_from_checkpoint,
     prepare_encoder_teacher,
 )
@@ -66,168 +71,105 @@ def _make_training_cfg(loss_types: dict[str, dict] | None = None) -> OmegaConf:
     )
 
 
-def _make_mock_model(dim_embed: int = 64) -> nn.Module:
-    """Create a mock model with the attributes that prepare_encoder_teacher expects."""
-    model = nn.Module()
-    model.forecast_engine = nn.Linear(10, 10)
-    model.decoders = nn.ModuleDict({"physical": nn.Linear(5, 5)})
-    model.latent_pre_norm = None
-    model.latent_heads = nn.ModuleDict({"existing": nn.Linear(dim_embed, dim_embed)})
-    # Add a minimal encoder
-    model.encoder = nn.Linear(10, dim_embed)
-    return model
+@pytest.fixture
+def teacher_setup():
+    torch.manual_seed(42)
+    cf = make_model_config()
+    cf.training_config.losses = _make_training_cfg().losses
+    # Construct real forecast weights, then disable them through teacher preparation.
+    cf.fe_num_blocks = 1
+    model, params, batch = make_model_and_batch(cf, input_steps=2)
+    prepare_encoder_teacher(model, cf.training_config, override_cfg=cf)
+    return cf, model, params, batch
 
 
-def _make_mock_ema_model():
-    """Create a mock EMA model for EMATeacher tests."""
-    ema = MagicMock()
-    ema.is_model_sharded = False
-    ema.reset = MagicMock()
-    ema.update = MagicMock()
-    ema.forward_eval = MagicMock()
-    ema.get_current_beta = MagicMock(return_value=0.99)
-    return ema
+def _target_view(model, batch, indices):
+    return MultiBatch(
+        batch.batch.as_target_input(indices),
+        {name: list(config.streams) for name, config in model.encoder_configs.items()},
+    )
 
 
-# ---------------------------------------------------------------------------
-# Tests for prepare_encoder_teacher
-# ---------------------------------------------------------------------------
+def _common_reference(model, params, target_batch):
+    """Independently sum native states after time reduction and nested child pooling."""
+    native, _ = model.encoder(params, target_batch)
+    common = []
+    for name, tokens in native.items():
+        samples = target_batch.batches[name].get_source_samples()
+        tokens = tokens.reshape(
+            samples.get_num_source_steps(), len(samples), *tokens.shape[1:]
+        ).sum(0)
+        spatial = tokens[:, 2:].reshape(len(samples), 12, -1, 32).mean(2)
+        common.append(torch.cat((tokens[:, :2], spatial), dim=1))
+    return sum(common)
 
 
-class TestPrepareEncoderTeacher:
-    def test_creates_latent_pre_norm_if_missing(self):
-        model = _make_mock_model()
-        assert model.latent_pre_norm is None
+@pytest.mark.parametrize("indices", [[1], [1, 0]])
+def test_prepared_teacher_common_latents_and_metadata(teacher_setup, indices):
+    cf, model, params, batch = teacher_setup
+    assert set(model.forecast_engines) == {"0", "1"}
+    assert all(isinstance(engine, IdentityEngine) for engine in model.forecast_engines.values())
+    assert not model.pred_heads
+    teacher = FrozenTeacher(model, cf.training_config, params)
+    assert not model.training
+    assert all(not parameter.requires_grad for parameter in model.parameters())
 
-        training_cfg = _make_training_cfg()
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
+    # First-metadata semantics must project fine masks without mutating native masks.
+    fine_name = next(
+        name for name, stream in cf.streams.items() if stream.encoder == "observations"
+    )
+    originals = []
+    for index, sample in enumerate(batch.batch.target_samples.samples):
+        fine_meta = sample.meta_info.pop(fine_name)
+        fine_meta.mask = torch.arange(48) % (5 + index) == 0
+        fine_meta.global_params = {"sample": index}
+        sample.meta_info = {fine_name: fine_meta, **sample.meta_info}
+        originals.append(fine_meta.mask.clone())
 
-        assert isinstance(model.latent_pre_norm, nn.LayerNorm)
-        assert model.latent_pre_norm.normalized_shape == (64,)
-
-    def test_preserves_existing_latent_pre_norm(self):
-        model = _make_mock_model()
-        existing_norm = nn.LayerNorm(64)
-        model.latent_pre_norm = existing_norm
-
-        training_cfg = _make_training_cfg()
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
-
-        # Should keep the existing norm, not replace it
-        assert model.latent_pre_norm is existing_norm
-
-    def test_jepa_creates_identity_head(self):
-        model = _make_mock_model()
-        training_cfg = _make_training_cfg({"JEPA": {"head": "identity"}})
-
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
-
-        assert "JEPA" in model.latent_heads
-        assert isinstance(model.latent_heads["JEPA"], LatentPredictionHeadIdentity)
-
-    def test_ibot_creates_mlp_head_by_default(self):
-        model = _make_mock_model()
-        training_cfg = _make_training_cfg(
-            {
-                "iBOT": {
-                    "head": "mlp",
-                    "out_dim": 32,
-                    "num_layers": 2,
-                    "hidden_factor": 2,
-                    "center_momentum": 0.9,
-                    "teacher_temp": 0.04,
-                    "teacher_style": "softmax_center",
-                    "loss_extra_args": {"student_temp": 0.1},
-                }
-            }
+    selected = _target_view(model, batch, indices)
+    with torch.no_grad():
+        common = _common_reference(model, params, selected)
+        output = teacher.forward_teacher(None, batch, indices)
+        result = teacher.compute(0, batch, params, None, indices)
+    for step in (0, 1):
+        torch.testing.assert_close(
+            output.latent[step]["latent_state"].z_pre_norm, common, rtol=1e-5, atol=1e-4
         )
+    expected = model.latent_pre_norm(common)[:, 2:]
+    torch.testing.assert_close(result.latent["JEPA"], expected)
+    assert expected.shape == (len(indices), 12, 32)
+    for metadata, index in zip(result.aux_outputs, indices, strict=True):
+        torch.testing.assert_close(metadata.mask, originals[index].reshape(12, 4).any(1))
+        assert metadata.global_params == {"sample": index}
+        original = batch.batch.target_samples.samples[index].meta_info[fine_name]
+        assert metadata.params is original.params
+        torch.testing.assert_close(original.mask, originals[index])
 
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
 
-        assert "iBOT" in model.latent_heads
-        assert isinstance(model.latent_heads["iBOT"], LatentPredictionHeadMLP)
+def test_frozen_teacher_uses_own_parameters(teacher_setup):
+    cf, _, student_params, batch = teacher_setup
+    teacher_cf = deepcopy(cf)
+    teacher_cf.encoders.renamed = teacher_cf.encoders.pop("observations")
+    for stream in teacher_cf.streams.values():
+        if stream.encoder == "observations":
+            stream.encoder = "renamed"
+    model, own_params, _ = make_model_and_batch(teacher_cf, input_steps=2)
+    prepare_encoder_teacher(model, cf.training_config, override_cfg=teacher_cf)
+    teacher = FrozenTeacher(model, cf.training_config, own_params)
+    with torch.no_grad():
+        expected = model(own_params, _target_view(model, batch, [1]))
+        # Student params lack the renamed encoder; only the teacher's own params can work.
+        actual = teacher.forward_teacher(student_params, batch, [1])
+    torch.testing.assert_close(actual.latent[0]["JEPA"], expected.latent[0]["JEPA"])
 
-    def test_dino_creates_mlp_head_by_default(self):
-        model = _make_mock_model()
-        training_cfg = _make_training_cfg(
-            {
-                "DINO": {
-                    "head": "mlp",
-                    "out_dim": 32,
-                    "num_layers": 2,
-                    "hidden_factor": 2,
-                    "center_momentum": 0.9,
-                    "teacher_style": "softmax_center",
-                    "loss_extra_args": {"student_temp": 0.1},
-                }
-            }
-        )
 
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
-
-        assert "DINO" in model.latent_heads
-        assert isinstance(model.latent_heads["DINO"], LatentPredictionHeadMLP)
-
-    def test_replaces_existing_heads(self):
-        model = _make_mock_model()
-        assert "existing" in model.latent_heads
-
-        training_cfg = _make_training_cfg({"JEPA": {"head": "identity"}})
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
-
-        # Old heads should be gone, only new ones
-        assert "existing" not in model.latent_heads
-        assert "JEPA" in model.latent_heads
-
-    def test_multiple_ssl_losses(self):
-        model = _make_mock_model()
-        training_cfg = _make_training_cfg(
-            {
-                "JEPA": {"head": "identity"},
-                "iBOT": {
-                    "head": "mlp",
-                    "out_dim": 32,
-                    "num_layers": 2,
-                    "hidden_factor": 2,
-                    "center_momentum": 0.9,
-                    "teacher_temp": 0.04,
-                    "teacher_style": "softmax_center",
-                    "loss_extra_args": {"student_temp": 0.1},
-                },
-            }
-        )
-
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
-
-        assert "JEPA" in model.latent_heads
-        assert "iBOT" in model.latent_heads
-        assert isinstance(model.latent_heads["JEPA"], LatentPredictionHeadIdentity)
-        assert isinstance(model.latent_heads["iBOT"], LatentPredictionHeadMLP)
-
-    def test_no_ssl_losses(self):
-        model = _make_mock_model()
-        training_cfg = OmegaConf.create(
-            {
-                "losses": {
-                    "phys_loss": {
-                        "type": "LossPhysical",
-                    }
-                }
-            }
-        )
-
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
-
-        assert len(model.latent_heads) == 0
-
-    def test_encoder_preserved(self):
-        model = _make_mock_model()
-        original_encoder = model.encoder
-        training_cfg = _make_training_cfg()
-
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
-
-        assert model.encoder is original_encoder
+def test_frozen_teacher_falls_back_to_student_parameters(teacher_setup):
+    cf, model, params, batch = teacher_setup
+    teacher = FrozenTeacher(model, cf.training_config)
+    with torch.no_grad():
+        expected = model(params, _target_view(model, batch, [1, 0]))
+        actual = teacher.forward_teacher(params, batch, [1, 0])
+    torch.testing.assert_close(actual.latent[0]["JEPA"], expected.latent[0]["JEPA"])
 
 
 # ---------------------------------------------------------------------------
@@ -243,13 +185,16 @@ class TestLoadEncoderFromCheckpoint:
         model.encoder = nn.Linear(10, 20)
         model.latent_pre_norm = nn.LayerNorm(20)
         model.other_module = nn.Linear(20, 5)
+        original_other = {
+            name: value.clone() for name, value in model.other_module.state_dict().items()
+        }
 
         # Create checkpoint with encoder + non-encoder params
         checkpoint = {}
         for name, param in model.state_dict().items():
             checkpoint[name] = torch.randn_like(param)
         # Add some extra non-encoder params that should be ignored
-        checkpoint["forecast_engine.weight"] = torch.randn(10, 10)
+        checkpoint["forecast_engines.0.weight"] = torch.randn(10, 10)
         checkpoint["decoders.physical.pred_heads.stream1.weight"] = torch.randn(5, 5)
 
         # Save checkpoint
@@ -262,6 +207,12 @@ class TestLoadEncoderFromCheckpoint:
 
         # Load - should not raise despite extra keys
         load_encoder_from_checkpoint(model, cf, run_id, -1, "cpu")
+        for name, value in model.encoder.state_dict().items():
+            torch.testing.assert_close(value, checkpoint[f"encoder.{name}"])
+        for name, value in model.latent_pre_norm.state_dict().items():
+            torch.testing.assert_close(value, checkpoint[f"latent_pre_norm.{name}"])
+        for name, value in model.other_module.state_dict().items():
+            torch.testing.assert_close(value, original_other[name])
 
     def test_mini_epoch_filename(self, tmp_path):
         """Test that specific mini_epoch generates correct filename."""
@@ -424,185 +375,115 @@ class TestGetTargetPostprocessing:
             get_target_postprocessing(losses, training_cfg)
 
 
-# ---------------------------------------------------------------------------
-# Tests for EncoderTeacher interface
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("prefix", ["", "module."])
+def test_full_checkpoint_rejects_single_forecaster(tmp_path, prefix):
+    run_id = "legacy"
+    path = tmp_path / f"{run_id}_latest.chkpt"
+    torch.save({f"{prefix}forecast_engine.fe_blocks.weight": torch.ones(1)}, path)
+    cf = OmegaConf.create(
+        {
+            "full_model_path": str(tmp_path),
+            "with_ddp": False,
+            "with_fsdp": False,
+        }
+    )
+    with pytest.raises(ValueError) as error:
+        load_model(cf, nn.Linear(1, 1), "cpu", run_id)
+    assert str(error.value) == (
+        "Checkpoint uses a single forecast_engine; load encoder-only weights or use a "
+        "checkpoint with forecast_engines."
+    )
 
 
-class TestEncoderTeacher:
-    def test_forward_teacher_not_implemented(self):
-        teacher = EncoderTeacher.__new__(EncoderTeacher)
-        teacher.teacher_model = nn.Module()
-        teacher.postprocess_targets = {}
-
-        with pytest.raises(NotImplementedError):
-            teacher.forward_teacher(None, None, [0])
-
-    def test_update_state_pre_backward_is_noop(self):
-        teacher = EncoderTeacher.__new__(EncoderTeacher)
-        teacher.postprocess_targets = {}
-        # Should not raise
-        teacher.update_state_pre_backward(0, None, None)
-
-
-# ---------------------------------------------------------------------------
-# Tests for EMATeacher
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("mismatch", ["stream", "common"])
+def test_teacher_grid_compatibility(mismatch):
+    cf = make_model_config()
+    teacher_cf = deepcopy(cf)
+    if mismatch == "stream":
+        teacher_cf.encoders.observations.healpix_level = 2
+    else:
+        # Keep stream grids unchanged; an unused coarser encoder still sets the common grid.
+        cf.encoders.default.healpix_level = 1
+        teacher_cf = deepcopy(cf)
+        teacher_cf.encoders.unused = {"healpix_level": 0}
+    with pytest.raises(ValueError) as error:
+        check_teacher_grid_compatibility(cf, teacher_cf)
+    assert str(error.value) == (
+        "Teacher and student must use matching per-stream and common HEALPix levels."
+    )
 
 
-class TestEMATeacher:
-    def test_init_calls_reset(self):
-        ema = _make_mock_ema_model()
-        training_cfg = _make_training_cfg()
-        EMATeacher(nn.Module(), ema, batch_size=32, training_cfg=training_cfg)
-        ema.reset.assert_called_once()
-
-    def test_reset_updates_batch_size(self):
-        ema = _make_mock_ema_model()
-        training_cfg = _make_training_cfg()
-        teacher = EMATeacher(nn.Module(), ema, batch_size=32, training_cfg=training_cfg)
-
-        teacher.reset(batch_size=64)
-        assert teacher.batch_size == 64
-
-    def test_reset_without_batch_size(self):
-        ema = _make_mock_ema_model()
-        training_cfg = _make_training_cfg()
-        teacher = EMATeacher(nn.Module(), ema, batch_size=32, training_cfg=training_cfg)
-
-        teacher.reset()
-        assert teacher.batch_size == 32
-
-    def test_update_state_post_opt_step_calls_ema_update(self):
-        ema = _make_mock_ema_model()
-        training_cfg = _make_training_cfg()
-        teacher = EMATeacher(nn.Module(), ema, batch_size=32, training_cfg=training_cfg)
-
-        teacher.update_state_post_opt_step(istep=10, batch=None, model=None)
-        ema.update.assert_called_once_with(10, 32)
-
-    def test_get_current_beta(self):
-        ema = _make_mock_ema_model()
-        training_cfg = _make_training_cfg()
-        teacher = EMATeacher(nn.Module(), ema, batch_size=32, training_cfg=training_cfg)
-
-        teacher.get_current_beta(100)
-        ema.get_current_beta.assert_called_once_with(100, 32)
-
-    def test_has_required_methods(self):
-        """EMATeacher has all required TargetAndAuxModuleBase methods."""
-        assert hasattr(EMATeacher, "reset")
-        assert hasattr(EMATeacher, "compute")
-        assert hasattr(EMATeacher, "update_state_pre_backward")
-        assert hasattr(EMATeacher, "update_state_post_opt_step")
-        assert hasattr(EMATeacher, "to_device")
-
-    def test_to_device_moves_postprocessors(self):
-        ema = _make_mock_ema_model()
-        training_cfg = _make_training_cfg()
-        teacher = EMATeacher(nn.Module(), ema, batch_size=32, training_cfg=training_cfg)
-
-        # Should not raise
-        result = teacher.to_device("cpu")
-        assert result is teacher
+def test_teacher_grid_compatibility_allows_encoder_regrouping():
+    cf = make_model_config()
+    teacher_cf = deepcopy(cf)
+    teacher_cf.encoders.renamed = teacher_cf.encoders.pop("observations")
+    for stream in teacher_cf.streams.values():
+        if stream.encoder == "observations":
+            stream.encoder = "renamed"
+    check_teacher_grid_compatibility(cf, teacher_cf)
 
 
-# ---------------------------------------------------------------------------
-# Tests for FrozenTeacher
-# ---------------------------------------------------------------------------
+def test_ema_construction_rejects_changed_input_grid():
+    from weathergen.train.target_and_aux_utils import get_target_aux_calculator
+
+    cf = make_model_config()
+    loss_cfg = OmegaConf.create(
+        {
+            "target_and_aux_calc": {
+                "EMATeacher": {
+                    "model_param_overrides": {"encoders": {"observations": {"healpix_level": 2}}},
+                }
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="matching per-stream and common HEALPix levels"):
+        get_target_aux_calculator(cf, loss_cfg, None, None, "cpu", 2)
 
 
-class TestFrozenTeacher:
-    def test_freezes_all_params(self):
-        model = nn.Module()
-        model.encoder = nn.Linear(10, 20)
-        model.latent_heads = nn.ModuleDict()
-        model.latent_pre_norm = nn.LayerNorm(20)
-        training_cfg = _make_training_cfg()
-
-        teacher = FrozenTeacher(model, training_cfg)
-
-        for param in teacher.teacher_model.parameters():
-            assert not param.requires_grad
-
-    def test_eval_mode(self):
-        model = nn.Module()
-        model.encoder = nn.Linear(10, 20)
-        model.latent_heads = nn.ModuleDict()
-        model.latent_pre_norm = nn.LayerNorm(20)
-        training_cfg = _make_training_cfg()
-
-        teacher = FrozenTeacher(model, training_cfg)
-        assert not teacher.teacher_model.training
-
-    def test_reset_is_noop(self):
-        model = nn.Module()
-        model.encoder = nn.Linear(10, 20)
-        model.latent_heads = nn.ModuleDict()
-        model.latent_pre_norm = nn.LayerNorm(20)
-        training_cfg = _make_training_cfg()
-
-        teacher = FrozenTeacher(model, training_cfg)
-        teacher.reset()  # should not raise
-        teacher.reset(batch_size=64)  # should not raise
-
-    def test_update_state_post_opt_step_is_noop(self):
-        model = nn.Module()
-        model.encoder = nn.Linear(10, 20)
-        model.latent_heads = nn.ModuleDict()
-        model.latent_pre_norm = nn.LayerNorm(20)
-        training_cfg = _make_training_cfg()
-
-        teacher = FrozenTeacher(model, training_cfg)
-        teacher.update_state_post_opt_step(istep=0, batch=None, model=None)  # should not raise
-
-    def test_has_required_methods(self):
-        """FrozenTeacher has all required TargetAndAuxModuleBase methods."""
-        assert hasattr(FrozenTeacher, "reset")
-        assert hasattr(FrozenTeacher, "compute")
-        assert hasattr(FrozenTeacher, "update_state_pre_backward")
-        assert hasattr(FrozenTeacher, "update_state_post_opt_step")
-        assert hasattr(FrozenTeacher, "to_device")
-        assert hasattr(FrozenTeacher, "from_pretrained")
-
-    def test_from_pretrained_requires_teacher_run_id(self):
-        cf = OmegaConf.create({"model_path": "/tmp/claude/models"})
-        with pytest.raises(KeyError, match="teacher_run_id"):
-            FrozenTeacher.from_pretrained(cf, None, "cpu", {})
+def test_frozen_construction_rejects_changed_input_grid(monkeypatch):
+    cf = make_model_config()
+    teacher_cf = deepcopy(cf)
+    teacher_cf.encoders.observations.healpix_level = 2
+    monkeypatch.setattr(
+        "weathergen.train.target_and_aux_ssl_teacher.load_run_config",
+        lambda *args, **kwargs: teacher_cf,
+    )
+    with pytest.raises(ValueError, match="matching per-stream and common HEALPix levels"):
+        FrozenTeacher.from_pretrained(cf, None, "cpu", {"teacher_run_id": "different_grid"})
 
 
-# ---------------------------------------------------------------------------
-# Tests for EMAModel.get_current_beta
-# ---------------------------------------------------------------------------
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="EMA lifecycle requires CUDA")
+def test_real_ema_teacher_targets_and_update():
+    cf = make_model_config()
+    cf.training_config.losses = _make_training_cfg().losses
+    student, params, batch = make_model_and_batch(cf)
+    student, params, batch = student.cuda(), params.cuda(), batch.to_device("cuda")
+    teacher_model = deepcopy(student)
+    prepare_encoder_teacher(teacher_model, cf.training_config, override_cfg=cf)
+    ema = EMAModel(student, teacher_model, halflife_steps=100, rampup_ratio=None)
+    teacher = EMATeacher(student, ema, batch_size=2, training_cfg=cf.training_config)
+    output = teacher.compute(0, batch, params, student, [1])
+    with torch.no_grad():
+        expected = student(params, _target_view(student, batch, [1]))
+    torch.testing.assert_close(output.latent["JEPA"], expected.latent[0]["JEPA"])
+    name, target_parameter = next(
+        (name, value)
+        for name, value in teacher_model.named_parameters()
+        if "q_cells" not in name and "identity" not in name.lower()
+    )
+    original = target_parameter.clone()
+    with torch.no_grad():
+        dict(student.named_parameters())[name].add_(1)
+    teacher.update_state_post_opt_step(10, batch, student)
+    beta = teacher.get_current_beta(10)
+    torch.testing.assert_close(target_parameter, original + (1 - beta))
+    assert 0 < beta < 1
 
 
-class TestEMAModelBeta:
-    def test_get_current_beta(self):
-        from weathergen.model.ema import EMAModel
-
-        model = nn.Module()
-        model.p = nn.Parameter(torch.randn(3))
-        empty = nn.Module()
-        empty.p = nn.Parameter(torch.randn(3))
-
-        ema = EMAModel.__new__(EMAModel)
-        ema.halflife_steps = 1e-3
-        ema.rampup_ratio = 0.09
-
-        beta = ema.get_current_beta(100, 32)
-        assert 0.0 < beta < 1.0
-
-    def test_batch_size_stored_on_update(self):
-        """Verify that update() stores batch_size."""
-        from weathergen.model.ema import EMAModel
-
-        model = nn.Module()
-        model.p = nn.Parameter(torch.randn(3))
-        empty = nn.Module()
-        empty.p = nn.Parameter(torch.randn(3))
-
-        ema = EMAModel(model, empty)
-        assert ema.batch_size == 1
-
-        ema.update(cur_step=10, batch_size=64)
-        assert ema.batch_size == 64
+def test_ema_beta_uses_stored_batch_size():
+    # No model allocation or CUDA is needed to exercise the schedule.
+    ema = EMAModel.__new__(EMAModel)
+    ema.halflife_steps = 100
+    ema.rampup_ratio = None
+    ema.batch_size = 32
+    assert ema.get_current_beta(100) == pytest.approx(0.5 ** (32 / 100))

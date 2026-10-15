@@ -25,6 +25,7 @@ from weathergen.model.ssl_target_processing import (
 )
 from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, TargetAuxOutput
 from weathergen.train.teacher_utils import (
+    check_teacher_grid_compatibility,
     load_encoder_from_checkpoint,
     prepare_encoder_teacher,
 )
@@ -65,7 +66,10 @@ class EncoderTeacher(TargetAndAuxModuleBase):
                 targets[loss_name] = target_module(outputs[loss_name])
 
             # collect target meta-information for selected samples
-            aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
+            aux_outputs = [
+                sample.get_latent_meta_info(model_params.num_healpix_cells)
+                for sample in batch.get_samples()
+            ]
 
             targets_out = TargetAuxOutput(batch.get_output_len(), batch.get_output_idxs())
             targets_out.latent = targets
@@ -152,6 +156,7 @@ class FrozenTeacher(EncoderTeacher):
         # Load teacher's config, create model with teacher's architecture
         teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, model_path=None)
         teacher_config = merge_configs(teacher_config, {"with_ddp": False, "with_fsdp": False})
+        check_teacher_grid_compatibility(cf, teacher_config)
 
         teacher_model = get_model(teacher_config, "student", dataset, {})
 

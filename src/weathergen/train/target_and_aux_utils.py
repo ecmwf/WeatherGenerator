@@ -5,7 +5,11 @@ from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import init_model_and_shard
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher, FrozenTeacher
-from weathergen.train.teacher_utils import load_encoder_from_checkpoint, prepare_encoder_teacher
+from weathergen.train.teacher_utils import (
+    check_teacher_grid_compatibility,
+    load_encoder_from_checkpoint,
+    prepare_encoder_teacher,
+)
 
 
 def get_target_aux_calculator(
@@ -36,6 +40,10 @@ def get_target_aux_calculator(
     elif target_and_aux_calc == "EMATeacher":
         # work around for problems with FSDP2
         assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"
+        cf_overridden = merge_configs(
+            cf, target_and_aux_calc_params.get("model_param_overrides", {})
+        )
+        check_teacher_grid_compatibility(cf, cf_overridden)
 
         meta_ema_model, _ = init_model_and_shard(
             cf,
@@ -50,9 +58,6 @@ def get_target_aux_calculator(
         )
 
         # Strip to encoder + create fresh heads
-        cf_overridden = merge_configs(
-            cf, target_and_aux_calc_params.get("model_param_overrides", {})
-        )
         prepare_encoder_teacher(meta_ema_model, cf.training_config, cf_overridden)
 
         ema_model = EMAModel(
