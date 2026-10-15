@@ -41,10 +41,19 @@ Config = DictConfig
 
 
 def get_healpix_level(config: Config) -> int:
-    """Return the shared grid used by the named encoders and downstream model."""
-    levels = {encoder.healpix_level for encoder in config.encoders.values()}
-    assert len(levels) == 1, "All encoders must use the same healpix_level."
-    return levels.pop()
+    """Return the coarsest encoder grid used by common latent consumers."""
+    return min(encoder.healpix_level for encoder in config.encoders.values())
+
+
+def get_decoder_healpix_level(cf: Config, stream_name: str) -> int:
+    """Resolve the model-wide decoder routing to its matching target grid."""
+    mode = cf.get("decoder_latent", "common")
+    if mode not in ("common", "encoder"):
+        raise ValueError("decoder_latent must be 'common' or 'encoder'.")
+    if mode == "common":
+        return get_healpix_level(cf)
+    name = cf.streams[stream_name].get("encoder", "default")
+    return cf.encoders[name].healpix_level
 
 
 def get_encoder_configs(cf: Config) -> dict[str, Config]:
