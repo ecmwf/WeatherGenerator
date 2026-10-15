@@ -8,6 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 
+import hashlib
+import logging
+import os
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 
@@ -18,11 +23,14 @@ from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
     encode_times_target,
+    target_coords_from_template,
     tokenize_apply_mask_source,
     tokenize_apply_mask_target,
     tokenize_space,
     tokenize_spacetime,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
@@ -39,12 +47,143 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
     return rdata
 
 
+def grid_cache_enabled(option: bool | None = None) -> bool:
+    """
+    Grid caches are on by default. Switch them off with the config option
+    `data_loading.grid_cache=False` (or the environment variable WEATHERGEN_GRID_CACHE=0, which
+    is not forwarded to slurm jobs by the launcher) to restore the uncached behaviour.
+    """
+    if option is not None:
+        return bool(option)
+    return os.environ.get("WEATHERGEN_GRID_CACHE", "1") != "0"
+
+
+def grid_cache_verify(option: bool | None = None) -> bool:
+    """
+    `data_loading.grid_cache_verify=True` (or WEATHERGEN_GRID_CACHE_VERIFY=1): on every cache hit
+    also compute the regular result and raise if it is not bitwise identical. Slow; for validating
+    a run on real data.
+    """
+    if option is not None:
+        return bool(option)
+    return os.environ.get("WEATHERGEN_GRID_CACHE_VERIFY", "0") == "1"
+
+
+def _assert_identical(what: str, cached, regular) -> None:
+    """Raise AssertionError unless the two (nested) results are bitwise identical."""
+    if cached is None or regular is None:
+        assert cached is None and regular is None, f"grid cache mismatch in {what}: None"
+    elif isinstance(cached, torch.Tensor):
+        assert isinstance(regular, torch.Tensor), f"grid cache mismatch in {what}: type"
+        assert cached.dtype == regular.dtype and cached.shape == regular.shape, (
+            f"grid cache mismatch in {what}: dtype/shape {cached.dtype}{tuple(cached.shape)} vs "
+            f"{regular.dtype}{tuple(regular.shape)}"
+        )
+        assert torch.equal(cached, regular), f"grid cache mismatch in {what}: values"
+    elif isinstance(cached, (list, tuple)):
+        assert len(cached) == len(regular), f"grid cache mismatch in {what}: length"
+        for i, (c, r) in enumerate(zip(cached, regular, strict=True)):
+            _assert_identical(f"{what}[{i}]", c, r)
+    else:
+        c, r = np.asarray(cached), np.asarray(regular)
+        assert c.dtype == r.dtype and c.shape == r.shape and np.array_equal(c, r), (
+            f"grid cache mismatch in {what}: values"
+        )
+
+
+def _is_identical(cached, regular) -> bool:
+    try:
+        _assert_identical("confirm", cached, regular)
+    except AssertionError:
+        return False
+    return True
+
+
+def _geometry_digest(
+    coords: torch.Tensor,
+    coords_local: torch.Tensor,
+    coords_per_cell: torch.Tensor,
+    idxs_ord_inv: torch.Tensor,
+    n_times: int,
+    n_geoinfos: int,
+) -> bytes:
+    """
+    Hash of the cacheable part of get_target_coords: everything except the time and geoinfo
+    columns of coords_local, which are rewritten every step.
+    """
+    h = hashlib.sha256()
+    for tensor in (coords, coords_per_cell, idxs_ord_inv):
+        x = tensor.detach().contiguous().cpu().numpy()
+        h.update(x.dtype.str.encode())
+        h.update(np.asarray(x.shape, dtype=np.int64).tobytes())
+        h.update(x.tobytes())
+    cl = coords_local.detach().contiguous()
+    varying = slice(1, 1 + n_times + n_geoinfos)
+    keep = torch.cat([cl[..., :1], cl[..., varying.stop :]], dim=-1)
+    x = keep.cpu().numpy()
+    h.update(x.dtype.str.encode())
+    h.update(np.asarray(x.shape, dtype=np.int64).tobytes())
+    h.update(x.tobytes())
+    return h.digest()
+
+
+@dataclass
+class _TokensCacheEntry:
+    """Tokenization of the last window of a stream (valid for windows with equal coords)."""
+
+    coords: torch.Tensor
+    idxs_cells: list
+    idxs_cells_lens: list
+
+
+@dataclass
+class _TargetCoordsCacheEntry:
+    """
+    Geometry dependent part of the target coordinates of a stream. It is valid as long as the
+    tokenization (idxs_cells / idxs_cells_lens objects), the token mask and the coordinates are the
+    same; only datetimes and geoinfos can change between windows.
+    """
+
+    # inputs the entry is valid for
+    idxs_cells: list
+    idxs_cells_lens: list
+    mask_tokens: np.typing.NDArray
+    coords_raw: torch.Tensor
+    # outputs that only depend on the above
+    idxs_data: torch.Tensor | None = None
+    coords: torch.Tensor | None = None
+    masked_points_per_cell: torch.Tensor | None = None
+    idxs_ord_inv: torch.Tensor | None = None
+    # result of get_target_coords_local of an earlier window and the number of
+    # (geoinfo, time) columns it was built with
+    coords_local: torch.Tensor | None = None
+    num_geoinfos: int = -1
+    num_times: int = -1
+    # digest of the geometry of the first window; compared with the second matching window
+    geometry_digest: bytes | None = None
+
+
 class TokenizerMasking(Tokenizer):
-    def __init__(self, healpix_level: int, masker: Masker):
+    def __init__(
+        self,
+        healpix_level: int,
+        masker: Masker,
+        grid_cache_option: bool | None = None,
+        grid_cache_verify_option: bool | None = None,
+    ):
         super().__init__(healpix_level)
         self.masker = masker
         self.rng = None
         self.token_size = None
+        # caches for streams with a fixed grid, see get_tokens_windows and get_target_coords
+        self._grid_cache_enabled = grid_cache_enabled(grid_cache_option)
+        self._grid_cache_verify = grid_cache_verify(grid_cache_verify_option)
+        self._tokens_cache: dict[tuple, _TokensCacheEntry] = {}
+        self._target_coords_cache: dict[int, _TargetCoordsCacheEntry] = {}
+        # keys that passed the window-0 vs window-1 check; keys we will not cache again
+        self._tokens_confirmed: set[tuple] = set()
+        self._tokens_disabled: set[tuple] = set()
+        self._target_coords_disabled: set[int] = set()
 
     def reset_rng(self, rng) -> None:
         """
@@ -64,16 +203,55 @@ class TokenizerMasking(Tokenizer):
         hl = self.healpix_level
         token_size = stream_info["token_size"]
 
+        # Tokenizing in space only depends on the coordinates. For streams with a fixed grid (e.g.
+        # ERA5 targets) all windows therefore have the same tokenization and it is reused as long
+        # as the coordinates are bitwise identical. tokenize_spacetime also depends on the
+        # datetimes and is never cached.
+        stream_id = stream_info.get("stream_id", None)
+        use_cache = self._grid_cache_enabled and not tok_spacetime and stream_id is not None
+        cache_key = (stream_id, token_size, bool(pad_tokens), hl)
+
         tokens = []
         for rdata in data:
             # skip empty data
             if rdata.is_empty():
                 tokens += [(None, None)]
                 continue
+            rdata = readerdata_to_torch(rdata)
+            # reuse tokenization of previous window with identical coordinates
+            if use_cache and cache_key not in self._tokens_disabled:
+                entry = self._tokens_cache.get(cache_key)
+                if entry is not None and torch.equal(entry.coords, rdata.coords):
+                    # first coords-equal window: recompute and compare with window 0
+                    if cache_key not in self._tokens_confirmed:
+                        regular = tok(rdata, token_size, hl, pad_tokens)
+                        if not _is_identical(
+                            (entry.idxs_cells, entry.idxs_cells_lens), regular
+                        ):
+                            _logger.warning(
+                                "Grid cache dropped for tokenization stream_id=%s: HEALPix "
+                                "indices of window 1 differ from window 0 even though "
+                                "coordinates match. Using uncached tokenization from now on.",
+                                stream_id,
+                            )
+                            self._tokens_disabled.add(cache_key)
+                            self._tokens_cache.pop(cache_key, None)
+                            tokens += [regular]
+                            continue
+                        self._tokens_confirmed.add(cache_key)
+                    elif self._grid_cache_verify:
+                        regular = tok(rdata, token_size, hl, pad_tokens)
+                        _assert_identical(
+                            "tokenization", (entry.idxs_cells, entry.idxs_cells_lens), regular
+                        )
+                    tokens += [(entry.idxs_cells, entry.idxs_cells_lens)]
+                    continue
             # tokenize data
-            idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens
-            )
+            idxs_cells, idxs_cells_lens = tok(rdata, token_size, hl, pad_tokens)
+            if use_cache:
+                self._tokens_cache[cache_key] = _TokensCacheEntry(
+                    rdata.coords.clone(), idxs_cells, idxs_cells_lens
+                )
             tokens += [(idxs_cells, idxs_cells_lens)]
 
         return tokens
@@ -165,6 +343,58 @@ class TokenizerMasking(Tokenizer):
             idxs_cells, idxs_cells_lens, cell_mask
         )
 
+        # Streams with a fixed grid (e.g. ERA5 targets) have the same geometry in every window,
+        # only datetimes and geoinfos change. Reuse the geometry dependent part if tokenization,
+        # token mask and coordinates are identical to the cached ones.
+        cache_entry = None
+        stream_id = stream_info["stream_id"]
+        use_tc_cache = (
+            self._grid_cache_enabled
+            and stream_id not in self._target_coords_disabled
+            and mask_tokens is not None
+            and mask_channels is None
+        )
+        if use_tc_cache:
+            cache_entry = self._target_coords_cache.get(stream_id)
+            if cache_entry is not None and not self._target_coords_cache_matches(
+                cache_entry, idxs_cells, idxs_cells_lens, mask_tokens, rdata
+            ):
+                cache_entry = None
+            if cache_entry is not None and cache_entry.coords_local is not None:
+                cached = self._get_target_coords_cached(cache_entry, rdata, time_win)
+                if cached is not None:
+                    if self._grid_cache_verify:
+                        regular = self._get_target_coords_regular(
+                            stream_info,
+                            rdata,
+                            idxs_cells,
+                            idxs_cells_lens,
+                            mask_tokens,
+                            mask_channels,
+                            time_win,
+                        )
+                        _assert_identical("target_coords", cached, regular)
+                    return cached
+
+        result = self._get_target_coords_regular(
+            stream_info, rdata, idxs_cells, idxs_cells_lens, mask_tokens, mask_channels, time_win
+        )
+        datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv = result
+
+        if use_tc_cache:
+            self._update_target_coords_cache(
+                cache_entry,
+                stream_id,
+                (idxs_cells, idxs_cells_lens, mask_tokens, rdata, time_win),
+                (datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv),
+            )
+
+        return (datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
+
+    def _get_target_coords_regular(
+        self, stream_info, rdata, idxs_cells, idxs_cells_lens, mask_tokens, mask_channels, time_win
+    ):
+        """Uncached computation of the target coordinates (the original get_target_coords)."""
         # TODO: split up
         _, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
             stream_info["stream_id"],
@@ -189,6 +419,111 @@ class TokenizerMasking(Tokenizer):
             _, idxs_ord_inv = torch.sort(idxs_flat)
 
         return (datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
+
+    @staticmethod
+    def _target_coords_cache_matches(
+        entry: _TargetCoordsCacheEntry, idxs_cells, idxs_cells_lens, mask_tokens, rdata
+    ) -> bool:
+        """
+        True if the cached geometry is valid for the given window. The tokenization is compared by
+        identity: the objects are kept alive by the entry and are reused by get_tokens_windows only
+        if the coordinates of that window were identical. Mask and coordinates are compared by
+        value.
+        """
+        return (
+            entry.idxs_cells is idxs_cells
+            and entry.idxs_cells_lens is idxs_cells_lens
+            and isinstance(rdata.coords, torch.Tensor)
+            and np.array_equal(entry.mask_tokens, mask_tokens)
+            and torch.equal(entry.coords_raw, rdata.coords)
+        )
+
+    def _update_target_coords_cache(self, entry, stream_id, inputs, outputs) -> None:
+        """
+        Remember the geometry of a window computed the regular way. The first window of a geometry
+        only registers its key; the outputs are stored when the same geometry is seen a second time
+        so that streams with changing coordinates (observations) never pay for storing outputs.
+        """
+        idxs_cells, idxs_cells_lens, mask_tokens, rdata, time_win = inputs
+        datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv = outputs
+
+        regular = (
+            coords.numel() > 0
+            and coords_local.numel() > 0
+            and idxs_ord_inv is not None
+            and isinstance(rdata.coords, torch.Tensor)
+        )
+        if not regular:
+            self._target_coords_cache.pop(stream_id, None)
+            return
+
+        n_geoinfos = rdata.geoinfos.shape[1]
+        n_times = encode_times_target(datetimes[:1], time_win).shape[1]
+        digest = _geometry_digest(
+            coords, coords_local, coords_per_cell, idxs_ord_inv, n_times, n_geoinfos
+        )
+
+        if entry is None:
+            # new geometry: register key + digest of window 0; outputs stored on window 1
+            self._target_coords_cache[stream_id] = _TargetCoordsCacheEntry(
+                idxs_cells,
+                idxs_cells_lens,
+                mask_tokens.copy(),
+                rdata.coords.clone(),
+                num_geoinfos=n_geoinfos,
+                num_times=n_times,
+                geometry_digest=digest,
+            )
+        elif entry.coords_local is None:
+            if entry.geometry_digest is not None and digest != entry.geometry_digest:
+                _logger.warning(
+                    "Grid cache dropped for target coords stream_id=%s: geometry of window 1 "
+                    "differs from window 0 (coords/mask matched). Using uncached target coords "
+                    "from now on.",
+                    stream_id,
+                )
+                self._target_coords_disabled.add(stream_id)
+                self._target_coords_cache.pop(stream_id, None)
+                return
+            # same geometry as window 0: store the outputs (private copies)
+            idxs_tokens = [i for t in idxs_cells for i in t]
+            entry.idxs_data = torch.cat(
+                [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
+            )
+            entry.coords = coords.clone()
+            entry.masked_points_per_cell = coords_per_cell.clone()
+            entry.idxs_ord_inv = idxs_ord_inv.clone()
+            entry.num_geoinfos = rdata.geoinfos.shape[1]
+            entry.num_times = encode_times_target(datetimes[:1], time_win).shape[1]
+            entry.coords_local = coords_local.clone()
+
+    @staticmethod
+    def _get_target_coords_cached(entry: _TargetCoordsCacheEntry, rdata, time_win):
+        """
+        Same result as the regular path of get_target_coords for a window whose geometry equals the
+        cached one. Returns None if the window is not compatible (caller falls back).
+        """
+        if rdata.geoinfos.shape[1] != entry.num_geoinfos:
+            return None
+
+        # same expressions as in tokenize_apply_mask_target
+        datetimes = np.atleast_1d(rdata.datetimes[entry.idxs_data])
+        datetimes_enc = encode_times_target(datetimes, time_win)
+        if datetimes_enc.shape[1] != entry.num_times:
+            return None
+        geoinfos = rdata.geoinfos[entry.idxs_data]
+
+        coords_local = target_coords_from_template(entry.coords_local, geoinfos, datetimes_enc)
+        coords_local.requires_grad = False
+
+        # clones: the caller owns the returned tensors and must not be able to alter the cache
+        return (
+            datetimes,
+            entry.coords.clone(),
+            coords_local,
+            entry.masked_points_per_cell.clone(),
+            entry.idxs_ord_inv.clone(),
+        )
 
     def get_target_values(
         self,
