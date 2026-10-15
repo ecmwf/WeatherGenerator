@@ -9,8 +9,6 @@
 
 ICONESMOday :
   type : iconesm
-  tokenizer:
-    healpix_level: 5
   filenames : ['historical_r1i1p1f1_Oday.json']
   source_exclude: [] 
   target_exclude: [] 
