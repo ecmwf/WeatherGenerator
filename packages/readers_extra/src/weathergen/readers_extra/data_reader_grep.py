@@ -98,7 +98,7 @@ class DataReaderGREP(DataReaderTimestep):
         self.time_coord: NDArray | None = None
 
         # debug
-        self.log_debug = True
+        self.log_debug = False
 
         # Set empty defaults so the object is always in a valid state
         self.init_empty()
@@ -116,12 +116,16 @@ class DataReaderGREP(DataReaderTimestep):
         store = Path(self._filename)
         if (store / "zarr.json").exists():
             kwargs = {"zarr_format": 3}
-        elif (store / ".zgroup").exists() or (store / ".zarray").exists() or (store / ".zattrs").exists():
+        elif (
+            (store / ".zgroup").exists()
+            or (store / ".zarray").exists()
+            or (store / ".zattrs").exists()
+        ):
             kwargs = {"zarr_format": 2}
         else:
             raise ValueError(f"Cannot determine Zarr format for {self._filename}")
 
-        # Apriamo con chunking Dask invece di chunks=None.
+        # We open with Dask chunking instead of chunks=None.
         use_dask = self._stream_info.get("use_dask", True) and _HAS_DASK
 
         ds = xr.open_zarr(
@@ -132,9 +136,7 @@ class DataReaderGREP(DataReaderTimestep):
         )
 
         if use_dask:
-            _logger.info(
-                f"{self._stream_info.get('name', '?')}: dataset opened with Dask."
-            )
+            _logger.info(f"{self._stream_info.get('name', '?')}: dataset opened with Dask.")
         else:
             _logger.info(
                 f"{self._stream_info.get('name', '?')}: dataset opened without Dask chunking "
@@ -151,10 +153,11 @@ class DataReaderGREP(DataReaderTimestep):
         else:
             raise KeyError("Nessuna coordinata temporale trovata")
 
-        # Rechunk with 1 along time dimension cause we read one timestep at a time in _get() (or a small batch of timesteps),
-        # and we want to avoid reading multiple timesteps from the same chunk.
+        # Rechunk with 1 along time dimension cause we read one timestep at a time in _get()
         if use_dask:
-            ds=ds.chunk({self._time_coord_name: 1})  
+            ds = ds.chunk({self._time_coord_name: 1})
+
+        ds = ds.where(ds != 0)
 
         data_start_time = np.datetime64(time_coord[0])
         data_end_time = np.datetime64(time_coord[-1])
@@ -272,17 +275,17 @@ class DataReaderGREP(DataReaderTimestep):
             # ---- mask ---------------------------------------------------------
             mask = None
 
-            # case 1: # Maschera i punti dove punti sono nan o 0
+            # case 1: # Mask the points where values are NaN or 0
             if "time_counter" in ds.dims:
                 data_mask = ds[self.source_channels[0]].isel(time_counter=0)
                 mask = np.isnan(data_mask) | (data_mask == 0)
                 mask = mask.values.ravel()
 
-            # case 2: # Maschera i punti dove nav_lat == 0 AND nav_lon == 0
+            # case 2: # Mask the points where nav_lat == 0 AND nav_lon == 0
             elif "nav_lat" in ds.coords and "nav_lon" in ds.coords:
                 mask = (self._nav_lat_flat == 0.0) & (self._nav_lon_flat == 0.0)
 
-            # case 3: # Maschera i punti dove punti sono nan
+            # case 3: # Mask the points where values are NaN
             elif "TLAT" in ds.coords and "TLON" in ds.coords:
                 data_mask = ds[self.source_channels[0]].isel(time=0)
                 mask = np.isnan(data_mask).values.ravel()
@@ -341,20 +344,20 @@ class DataReaderGREP(DataReaderTimestep):
                 continue
             selected_names.append(var)
             selected_idxs.append(i)
-        
-        # --- ordina per profondità (e a parità di profondità per nome variabile) ---
-        def depth_key(name, no_depth_position='end'):
-            parts = name.rsplit('_', 1)
+
+        # --- sort by depth (and, for equal depth, by variable name) ---
+        def depth_key(name, no_depth_position="end"):
+            parts = name.rsplit("_", 1)
             if len(parts) == 2:
                 var, maybe_depth = parts
                 try:
                     depth = float(maybe_depth)
-                    return (0, depth, var)  # 0 = "ha profondità", ordina normalmente
+                    return (0, depth, var)  # 0 = "has depth", sorted normally
                 except ValueError:
                     pass
-            # nessuna profondità valida trovata
-            sentinel = float('inf') if no_depth_position == 'start' else float('-inf')
-            return (1, sentinel, name)  # 1 = "senza profondità", va in coda (o testa)
+            # no valid depth found
+            sentinel = float("inf") if no_depth_position == "start" else float("-inf")
+            return (1, sentinel, name)  # 1 = "no depth", goes to the end (or start)
 
         order = sorted(range(len(selected_names)), key=lambda k: depth_key(selected_names[k]))
         selected_names = [selected_names[k] for k in order]
@@ -457,7 +460,7 @@ class DataReaderGREP(DataReaderTimestep):
                 f"\n Selected time indices: {t_idxs} -- len={len(t_idxs)}"
             )
 
-        # Filtro vettoriale degli indici temporali validi
+        # Vectorised filter of the valid time indices
         t_idxs_arr = np.asarray(t_idxs)
         valid_mask = (t_idxs_arr >= 0) & (t_idxs_arr < n_time)
         valid_t_idxs = t_idxs_arr[valid_mask]
@@ -469,10 +472,10 @@ class DataReaderGREP(DataReaderTimestep):
                 num_geo_fields=0,
             )
 
-        # Dentro ogni batch, tutti i canali richiesti vengono letti con
-        # un'unica selezione xarray/Dask: se il dataset è chunkato con Dask, i
-        # chunk Zarr coinvolti (canali x timestep del batch) vengono scaricati e
-        # decompressi in parallelo su più thread in una singola .compute().
+        # Within each batch, all the requested channels are read with a
+        # single xarray/Dask selection: if the dataset is chunked with Dask, the
+        # Zarr chunks involved (channels x timesteps of the batch) are downloaded and
+        # decompressed in parallel on multiple threads in a single .compute().
         n_channels = len(selected_channels)
         n_valid_timesteps = len(valid_t_idxs)
         ds_sub = self.ds[selected_channels]
@@ -484,25 +487,27 @@ class DataReaderGREP(DataReaderTimestep):
             batch_t_idxs = valid_t_idxs[batch_start : batch_start + batch_size]
             ds_batch = ds_sub.isel({time_dim: batch_t_idxs})
 
-            # Forma canonica (time_dim, *dims_spaziali...) per ogni canale,
-            # preservando l'ordine relativo delle dimensioni spaziali (stesso
-            # ordine di flatten() usato per costruire coords_single). Il cast a
-            # float32 viene saltato se il dato è già in quel dtype, per evitare
-            # una copia inutile.
+            # Canonical shape (time_dim, *spatial_dims...) for each channel,
+            # preserving the relative order of the spatial dimensions (same
+            # order as the flatten() used to build coords_single). The cast to
+            # float32 is skipped if the data is already in that dtype, to avoid
+            # an unnecessary copy.
             channel_arrays = [
                 ds_batch[ch].transpose(time_dim, ...).data for ch in selected_channels
             ]
 
             if _HAS_DASK and isinstance(channel_arrays[0], dask_array.Array):
-                # Un'unica .compute(): Dask scarica/decomprime in parallelo tutti
-                # i chunk necessari per l'intero batch (tutti i canali e tutti i
-                # timestep del batch) invece di farlo in sequenza.
+                # A single .compute(): Dask downloads/decompresses in parallel all
+                # the chunks needed for the whole batch (all channels and all
+                # timesteps of the batch) instead of doing it sequentially.
                 arr = dask_array.stack(channel_arrays, axis=-1).compute()
             else:
                 arr = np.stack([np.asarray(a) for a in channel_arrays], axis=-1)
 
             # (batch_t, *spatial_dims, n_channels) -> (batch_t * n_points, n_channels)
-            arr = np.asarray(arr, dtype=np.float32).reshape(len(batch_t_idxs) * self.n_points, n_channels)
+            arr = np.asarray(arr, dtype=np.float32).reshape(
+                len(batch_t_idxs) * self.n_points, n_channels
+            )
 
             row_start = batch_start * self.n_points
             data[row_start : row_start + arr.shape[0]] = arr
@@ -510,10 +515,8 @@ class DataReaderGREP(DataReaderTimestep):
         coords = np.tile(self.coords_single, (n_valid_timesteps, 1))
         geoinfos = np.zeros((len(data), 0), dtype=np.float32)
 
-        # np.repeat vettoriale invece di costruire una lista Python
-        datetimes = np.repeat(
-            time_values[valid_t_idxs].astype("datetime64[s]"), self.n_points
-        )
+        # Vectorised np.repeat instead of building a Python list
+        datetimes = np.repeat(time_values[valid_t_idxs].astype("datetime64[s]"), self.n_points)
 
         rd = ReaderData(
             coords=coords,
