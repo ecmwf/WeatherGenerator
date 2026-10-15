@@ -10,7 +10,8 @@
 FESOM_ELEM :
   type : fesom
   stream_id : 2137
-  healpix_level: 5
+  tokenizer:
+    healpix_level: 5
   filenames : ['ocean_elem']
   loss_weight : 1.
   source : null
