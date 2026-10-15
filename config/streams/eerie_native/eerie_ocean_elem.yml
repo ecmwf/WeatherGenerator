@@ -1,7 +1,8 @@
 EERIE_OCEAN_ELEM:
   type: mesh
   stream_id: 2137
-  healpix_level: 5
+  tokenizer:
+    healpix_level: 5
   loss_weight: 1.0
   filenames:
   - /work/ab0995/a270225/data_transformation/eerie_ocean_3d_elements_daily.parq

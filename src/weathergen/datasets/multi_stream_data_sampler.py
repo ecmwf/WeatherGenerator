@@ -525,7 +525,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         num_output_steps = self._get_output_length(num_forecast_steps)
-        num_cells = hp_level_to_num_cells(stream_info["healpix_level"])
+        num_cells = hp_level_to_num_cells(stream_info["tokenizer"]["healpix_level"])
         stream_data = StreamData(
             base_idx,
             num_steps_input,
@@ -577,7 +577,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
-                    stream_info["healpix_level"],
+                    stream_info["tokenizer"]["healpix_level"],
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
@@ -599,7 +599,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
-                    stream_info["healpix_level"],
+                    stream_info["tokenizer"]["healpix_level"],
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),

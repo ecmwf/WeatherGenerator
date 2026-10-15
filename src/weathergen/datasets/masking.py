@@ -321,7 +321,7 @@ class Masker:
         SampleMetaData is currently just a dict with the masking params used.
         """
 
-        healpix_level = stream_info["healpix_level"]
+        healpix_level = stream_info["tokenizer"]["healpix_level"]
         num_cells = hp_level_to_num_cells(healpix_level)
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
