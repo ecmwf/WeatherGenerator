@@ -1,0 +1,40 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Adapted from streams/era5_georing_avhrr/geos.yml for GOES-only forecasting.
+GOES_ABI_IR:
+  type: obs
+  stream_id: 0
+  # New location for the tokenization grid; explicit stream settings take precedence.
+  # All streams in a run must still use the same level on this branch.
+  tokenizer:
+    healpix_level: 5
+  filenames: ['observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr']
+  geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
+  loss_weight: 1.0
+  token_size: 1024
+  tokenize_spacetime: False
+  max_num_targets: 262144
+  # Unlike the original forcing stream, predict future observations as targets.
+  forcing: False
+  embed:
+    net: transformer
+    num_tokens: 1
+    num_heads: 4
+    dim_embed: 512
+    num_blocks: 2
+  embed_target_coords:
+    net: linear
+    dim_embed: 512
+  target_readout:
+    num_layers: 2
+    num_heads: 4
+  pred_head:
+    ens_size: 1
+    num_layers: 1

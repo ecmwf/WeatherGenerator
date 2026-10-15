@@ -9,8 +9,6 @@
 
 IGRA :
   type : obs
-  tokenizer:
-    healpix_level: 5
   filenames : ['igra.zarr']
   base_datetime : '1750-01-01T00:00:00'
   loss_weight : 1.0
