@@ -9,8 +9,6 @@
 
 CAMSEAC4 :
   type : cams
-  tokenizer:
-    healpix_level: 5
   filenames : ['cams_eac4_2003_2024.zarr']
   source : []
   target : []
