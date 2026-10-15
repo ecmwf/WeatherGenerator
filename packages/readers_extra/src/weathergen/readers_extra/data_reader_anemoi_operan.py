@@ -81,7 +81,17 @@ class DataReaderAnemoiOperan(DataReaderAnemoi):
         None
         """
 
-        super().__init__(tw_handler, filename, stream_info, stage)
+        # open the dataset from t_start - lookback so the latest analysis before the window is
+        # found in real time; the lookback is also the maximum age of the analysis used
+        lookback = np.timedelta64(int(stream_info.get("lookback_hours", 18)), "h")
+        tw_lookback = TimeWindowHandler(
+            tw_handler.t_start - lookback,
+            tw_handler.t_end,
+            tw_handler.t_window_len,
+            tw_handler.t_window_step,
+        )
+        super().__init__(tw_lookback, filename, stream_info, stage)
+        self.time_window_handler = tw_handler
 
     @override
     def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
@@ -100,14 +110,14 @@ class DataReaderAnemoiOperan(DataReaderAnemoi):
         ReaderData providing coords, geoinfos, data, datetimes
         """
 
-        t_idxs, dtr = self._get_dataset_idxs(idx)
-        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+        dtr = self.time_window_handler.window(idx)
+        if self.ds is None or self.len == 0:
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # get additional timestep to ensure we have one valid timestep
-        t_idxs = np.insert(t_idxs, 0, t_idxs[0] - 1)
+        # consider all timesteps, the dataset starts lookback_hours before the window
+        t_idxs = np.arange(self.len)
 
         didx_start = t_idxs[0]
         didx_end = t_idxs[-1] + 1
