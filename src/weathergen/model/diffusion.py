@@ -182,7 +182,6 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
-        self._fixed_noise_level: float | None = None
 
         self._noise = None
 
@@ -302,24 +301,16 @@ class DiffusionForecastEngine(torch.nn.Module):
             # passes second-to-last here)
             c = meta_info["LATENT_CONDITIONING_TOKENS"]
 
-        if self.training:
-            noise_stream = self.cf.get("diffusion", {}).get("noise_stream", "ERA5")
-            noise_level_rn = torch.tensor(
-                [meta_info[noise_stream].params["noise_level_rn"]], device=tokens.device
-            )
-        else:
-            # During validation, use fixed noise level (default: 0.0)
-            noise_level_rn = torch.tensor(
-                [self._fixed_noise_level if self._fixed_noise_level is not None else 0.0],
-                device=tokens.device,
-            )
+        noise_stream = self.cf.get("diffusion", {}).get("noise_stream", "ERA5")
+        noise_level_rn = torch.tensor(
+            [meta_info[noise_stream].params["noise_level_rn"]], 
+            device=tokens.device
+        )
 
         # Compute sigma from noise_level_rn.
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
         # log_uniform: noise_level_rn is log_sigma directly; sigma = exp(noise_level_rn)
-        # during validation, noise_level_rn is set to a fixed value (default: 0.0),
-        # so sigma = exp(0) = 1.0 (no noise) by default
-        if self.noise_distribution == "log_uniform" or not self.training:
+        if self.noise_distribution == "log_uniform":
             sigma = noise_level_rn.exp()
         elif self.noise_distribution == "log_normal":
             sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
