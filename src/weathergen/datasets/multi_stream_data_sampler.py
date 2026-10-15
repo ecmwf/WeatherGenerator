@@ -317,7 +317,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
         worker_info = torch.utils.data.get_worker_info()
         worker_id = 0 if worker_info is None else worker_info.id
-        return np.random.SeedSequence([self.rng_base_seed, self.rank, worker_id, self.mini_epoch])
+        return np.random.SeedSequence(
+            [self.rng_base_seed, self.spatial_parallel.ddp_rank, worker_id, self.mini_epoch]
+        )
 
     def reset(self) -> tuple[Sequence[int], Sequence[int]]:
         """
