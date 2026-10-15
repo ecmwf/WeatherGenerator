@@ -297,6 +297,7 @@ def get_model_results(
     """
     Find all model results zarr stores from a given run_id.
     """
+    found_paths = []
     if results_path is None:
         run_results = (
             Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
@@ -305,8 +306,6 @@ def get_model_results(
             raise FileNotFoundError(
                 f"Results directory for run_id {run_id} does not exist: {run_results}"
             )
-
-        found_paths = []
 
         for rank in rank_list:
             if isinstance(rank, int):
@@ -329,7 +328,6 @@ def get_model_results(
         if results_path.is_file():
             found_paths = [results_path]
         elif results_path.is_dir():
-            found_paths = []
             for ext in StoreType.extensions():
                 # will search for all .zarr/.zip files
                 found_paths.extend(results_path.glob(f"*.{ext}"))
