@@ -198,6 +198,7 @@ class Trainer(TrainerBase):
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
+        [cf.streams[stream].update({"max_num_targets": -1}) for stream in cf.streams]
 
         # create data loader
         # only one needed since we only run the validation code path
