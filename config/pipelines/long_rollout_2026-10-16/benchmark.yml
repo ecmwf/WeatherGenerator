@@ -8,17 +8,21 @@
 #   bbptt40    : 40 steps, gradient through all 40, loss on the last 8
 #   bpf40crps  : bpf40 with CRPS, 2 MC-dropout members
 #   bbptt40crps: bbptt40 with CRPS, 2 MC-dropout members
+# The stages start fresh from nhv6tkln's config and weights (base_config + load_chkpt) instead of
+# from_run_id, because the launcher runs a from_run_id stage with the parent run's code snapshot,
+# which does not have the long-rollout code. Both give the same merged config otherwise.
 # Launch from the WeatherGenerator root:
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-16/benchmark.yml
 parallelize: true
 stages:
   - name: bref
     stage: train
-    from_run_id: nhv6tkln
-    mini_epoch: 8
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
     options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
       - training_config.num_mini_epochs=1
@@ -31,12 +35,13 @@ stages:
 
   - name: bpf40
     stage: train
-    from_run_id: nhv6tkln
-    mini_epoch: 8
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
       - ./config/config_long_rollout_pushforward.yml
     options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
       - training_config.num_mini_epochs=1
@@ -51,12 +56,13 @@ stages:
 
   - name: bbptt40
     stage: train
-    from_run_id: nhv6tkln
-    mini_epoch: 8
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
       - ./config/config_long_rollout_pushforward.yml
     options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
       - training_config.num_mini_epochs=1
@@ -72,13 +78,14 @@ stages:
 
   - name: bpf40crps
     stage: train
-    from_run_id: nhv6tkln
-    mini_epoch: 8
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
       - ./config/config_long_rollout_pushforward.yml
       - ./config/config_long_rollout_crps.yml
     options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
       - training_config.num_mini_epochs=1
@@ -93,13 +100,14 @@ stages:
 
   - name: bbptt40crps
     stage: train
-    from_run_id: nhv6tkln
-    mini_epoch: 8
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
       - ./config/config_long_rollout_pushforward.yml
       - ./config/config_long_rollout_crps.yml
     options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
       - training_config.num_mini_epochs=1
