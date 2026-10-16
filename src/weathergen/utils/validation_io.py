@@ -246,23 +246,17 @@ def write_output(
                 zio.write_zarr(subset)
         if has_latents:
             time_step = val_cfg.get("forecast", {}).get("time_step", np.timedelta64(0, "h"))
-            # Step 0 is emitted only for a chunk that encoded its input. With
-            # offset 0, shift forecast latents to reserve 0 for that initial state.
-            latent_steps = [step + int(forecast_offset == 0) for step in timestep_idxs_chunk]
-            if model_output.initial_latent is not None:
-                latent_steps.insert(0, 0)
-            for latent_step, latents_in_step in zip(latent_steps, latents_all, strict=True):
+            for latent_step, latents_in_step in enumerate(latents_all):
                 for sample_idx, latents_in_sample in enumerate(latents_in_step):
                     if latents_in_sample:
                         source_interval = source_intervals[sample_idx]
-                        forecast_step = max(0, latent_step - int(forecast_offset == 0))
                         zio.write_latent(
                             sample_start + sample_idx,
                             latent_step,
                             latents_in_sample,
                             coords=_get_latent_coords(cf, source_samples[sample_idx]),
                             source_interval=source_interval,
-                            valid_time=source_interval.end + forecast_step * time_step,
+                            valid_time=source_interval.end + latent_step * time_step,
                             num_register_tokens=int(cf.get("num_register_tokens", 0)),
                             num_class_tokens=int(cf.get("num_class_tokens", 0)),
                         )
@@ -291,18 +285,10 @@ def _get_latent_coords(cf, sample) -> npt.NDArray | None:
 
 
 def get_latent_output(batch, model_output):
-    """Collect per-sample arrays, prepending the encoded state when present."""
+    """Collect per-sample latent arrays, including an encoded state at step 0."""
     n_samples = len(batch.get_source_samples().get_samples())
-    latent_preds = [
-        model_output.get_latent_prediction(model_output.chunk_idx(step))
-        for step in model_output.forecast_steps
-        if step >= model_output.forecast_offset
-    ]
-    if model_output.initial_latent is not None:
-        latent_preds.insert(0, {"latent_state": model_output.initial_latent})
-
     latents_all = []
-    for latent_pred in latent_preds:
+    for latent_pred in model_output.latent:
         tensors = {}
         for name, value in latent_pred.items():
             if name == "posteriors":

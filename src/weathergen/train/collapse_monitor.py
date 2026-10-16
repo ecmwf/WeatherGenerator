@@ -673,9 +673,10 @@ class CollapseMonitor:
                     break
 
         # Extract student latents from predictions
-        if preds.latent and len(preds.latent) > 0:
+        computed_latents = [latent for latent in preds.latent[1:] if latent]
+        if computed_latents:
             # First, try SSL-specific keys (JEPA/DINO/iBOT) from first step
-            pred_latent_dict = preds.latent[0]
+            pred_latent_dict = computed_latents[0]
             for ssl_type in ["JEPA", "DINO", "iBOT"]:
                 if ssl_type in pred_latent_dict:
                     student_latent = extract_latent_tensor(pred_latent_dict[ssl_type])
@@ -685,7 +686,7 @@ class CollapseMonitor:
             # If no SSL keys found, extract from latent_state for all forecast steps
             if student_latent is None:
                 student_latents_list: list[torch.Tensor] = []
-                for step_latent_dict in preds.latent:
+                for step_latent_dict in computed_latents:
                     if "latent_state" in step_latent_dict:
                         step_tensor = extract_latent_tensor(step_latent_dict["latent_state"])
                         if step_tensor is not None:
