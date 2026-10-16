@@ -289,7 +289,7 @@ def get_latent_output(batch, model_output):
     n_samples = len(batch.get_source_samples().get_samples())
     latents_all = []
     for latent_pred in model_output.latent:
-        tensors = {}
+        arrays = {}
         for name, value in latent_pred.items():
             if name == "posteriors":
                 continue
@@ -301,14 +301,12 @@ def get_latent_output(batch, model_output):
                 }
             else:
                 fields = {name: value}
-            tensors.update({key: tensor for key, tensor in fields.items() if tensor is not None})
-        per_step = []
-        for sample in range(n_samples):
-            per_step.append(
-                {
-                    name: tensor[sample].detach().to(torch.float32).cpu().numpy()
-                    for name, tensor in tensors.items()
-                }
+            arrays.update(
+                (key, tensor.detach().to(torch.float32).cpu().numpy())
+                for key, tensor in fields.items()
+                if tensor is not None
             )
-        latents_all.append(per_step)
+        latents_all.append(
+            [{name: array[sample] for name, array in arrays.items()} for sample in range(n_samples)]
+        )
     return latents_all
