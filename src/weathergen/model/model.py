@@ -42,7 +42,7 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
-from weathergen.utils.rollout import RolloutPlan, get_rollout_plan
+from weathergen.utils.rollout import RolloutPlan, autocast_cache_disabled, get_rollout_plan
 from weathergen.utils.utils import get_dtype, is_stream_reconstructed
 
 logger = logging.getLogger(__name__)
@@ -852,8 +852,10 @@ class Model(torch.nn.Module):
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
             if step in rollout_plan.no_grad_steps:
-                # pushforward: advance the latent state without gradient and without decoding
-                with torch.no_grad():
+                # pushforward: advance the latent state without gradient and without decoding;
+                # casts of weights made without gradient must not be cached for the steps with
+                # gradient (see autocast_cache_disabled)
+                with torch.no_grad(), autocast_cache_disabled():
                     tokens = self.forecast_engine(
                         tokens,
                         step,

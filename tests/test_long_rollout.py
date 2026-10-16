@@ -265,6 +265,47 @@ def test_pushforward_matches_detached_rollout():
     assert torch.allclose(grad, model.forecast_engine.lin.weight.grad)
 
 
+DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("checkpoint_steps", [False, True])
+def test_pushforward_under_autocast(device, checkpoint_steps):
+    """
+    Under autocast (mixed precision training with fp32 weights, DDP), the steps without gradient
+    must not leave cached weight casts without autograd history for the steps with gradient.
+    """
+    cfg = {"pushforward": True, "rollout_grad_steps": 2, "checkpoint_steps": checkpoint_steps}
+    torch.manual_seed(0)
+    model = make_model(cfg).to(device)
+    batch = StubBatch(2, 4, get_rollout_plan(cfg, [1, 2, 3, 4], True))
+    batch.inputs = batch.inputs.to(device)
+    with torch.autocast(device, dtype=torch.bfloat16):
+        out = run(model, batch)
+        loss = loss_of(out)
+    loss.backward()
+    grad = model.forecast_engine.lin.weight.grad
+    assert grad is not None and grad.abs().sum() > 0
+
+    # reference: rollout with gradient everywhere, detached after the steps without gradient
+    grad = grad.clone()
+    model.zero_grad()
+    with torch.autocast(device, dtype=torch.bfloat16):
+        # sum over the input steps as in Model.forward (in fp32 under autocast on cuda)
+        tokens = model.encoder(None, batch)[0].detach().unsqueeze(1).sum(axis=1)
+        ref = ModelOutput(5)
+        for step in [1, 2, 3, 4]:
+            tokens = model.forecast_engine(tokens, step)
+            tokens = tokens.detach() if step < 3 else tokens
+            if step >= 3:
+                ref = stub_predict_decoders(None, step, tokens, batch, ref)
+        loss_ref = loss_of(ref)
+    loss_ref.backward()
+    assert torch.equal(loss.detach(), loss_ref.detach())
+    assert torch.equal(grad, model.forecast_engine.lin.weight.grad)
+    assert torch.is_autocast_cache_enabled()
+
+
 def test_checkpoint_steps_identical():
     """Step checkpointing gives identical outputs and gradients, including dropout and noise."""
     grads, losses = [], []

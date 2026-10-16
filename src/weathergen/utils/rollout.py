@@ -27,7 +27,10 @@ Rollout options for forecast training (all under `forecast` in the mode config):
         ensemble_size > 1.
 """
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+
+import torch
 
 ROLLOUT_DEFAULTS = {
     "pushforward": False,
@@ -86,3 +89,22 @@ def get_ensemble_size(forecast_cfg) -> int:
         f"ensemble_size must be a positive integer, got {ensemble_size}."
     )
     return ensemble_size
+
+
+@contextmanager
+def autocast_cache_disabled():
+    """
+    Disable the autocast cache of casted weights, for forward passes without gradient inside an
+    autocast region with gradient (pushforward).
+
+    Autocast caches the low precision cast of each fp32 weight for the whole autocast region,
+    also when the cast happens under torch.no_grad. Later forward passes with gradient then reuse
+    the cast without autograd history, so the weights get no gradient (or, with activation
+    checkpointing, the recomputation differs from the forward pass: CheckpointError).
+    """
+    enabled = torch.is_autocast_cache_enabled()
+    torch.set_autocast_cache_enabled(False)
+    try:
+        yield
+    finally:
+        torch.set_autocast_cache_enabled(enabled)
