@@ -734,6 +734,7 @@ def get_path_results(
     model_config: Config,
     mini_epoch: int | None = None,
     step: int | None = None,
+    zarr_store: str | None = None,
 ) -> Path:
     """Get the path for run results. Returns the results directory when mini_epoch is None."""
     base_path = _get_path_output(
@@ -742,7 +743,11 @@ def get_path_results(
     if mini_epoch is None:
         return base_path
 
-    ext = StoreType(model_config.zarr_store).value  # validate extension
+    output_config = model_config.get("test_config", {}).get("output", {})
+    store_type = zarr_store or output_config.get(
+        "zarr_store", model_config.get("zarr_store", "zip")
+    )
+    ext = StoreType(store_type).value  # validate extension
     default_name = f"validation_chkpt{mini_epoch:05d}_rank{model_config.rank:04d}.{ext}"
     fname_template = model_config.get("output_name")
     if fname_template is None:
