@@ -134,9 +134,13 @@ def init_model_and_shard(
             model_fe_blocks = model.forecast_engine.net.fe_blocks
         else:
             model_fe_blocks = model.forecast_engine.fe_blocks
+        # fe_reshard_after_forward=False keeps the forecast engine parameters unsharded during
+        # the rollout, so that they are not all-gathered again for every forecast step (long
+        # rollouts); costs the memory of the unsharded forecast engine
+        fe_reshard_after_forward = cf.get("fe_reshard_after_forward", True)
         for module in model_fe_blocks.modules():
             if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+                fully_shard(module, reshard_after_forward=fe_reshard_after_forward, **fsdp_kwargs)
 
         for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):

@@ -1,0 +1,114 @@
+# Memory and throughput benchmark for long-rollout forecast fine-tuning, before the real runs.
+# Short runs (1 node, 1 mini-epoch of 96 samples) from nhv6tkln (8-step fine-tune, mini-epoch 8),
+# all with the nhv6tkln recipe (config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml,
+# mnt_cw streams, fe_impute_latent_noise_std 1e-5). The rollout stages use a fixed K = 40
+# (10 days), the worst case of K in [8, 40]. Compare "s/sec" and "peak GPU memory" in the logs.
+#   bref       : nhv6tkln setup, 8 steps with gradient and loss (reference)
+#   bpf40      : 40 steps, gradient and loss on the last 8 (pushforward)
+#   bbptt40    : 40 steps, gradient through all 40, loss on the last 8
+#   bpf40crps  : bpf40 with CRPS, 2 MC-dropout members
+#   bbptt40crps: bbptt40 with CRPS, 2 MC-dropout members
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-16/benchmark.yml
+parallelize: true
+stages:
+  - name: bref
+    stage: train
+    from_run_id: nhv6tkln
+    mini_epoch: 8
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+    options:
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+
+  - name: bpf40
+    stage: train
+    from_run_id: nhv6tkln
+    mini_epoch: 8
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+    options:
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.policy=fixed
+      - training_config.forecast.num_steps=40
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+
+  - name: bbptt40
+    stage: train
+    from_run_id: nhv6tkln
+    mini_epoch: 8
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+    options:
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.policy=fixed
+      - training_config.forecast.num_steps=40
+      - training_config.forecast.rollout_grad_steps=-1
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+
+  - name: bpf40crps
+    stage: train
+    from_run_id: nhv6tkln
+    mini_epoch: 8
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_crps.yml
+    options:
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.policy=fixed
+      - training_config.forecast.num_steps=40
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+
+  - name: bbptt40crps
+    stage: train
+    from_run_id: nhv6tkln
+    mini_epoch: 8
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_crps.yml
+    options:
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.policy=fixed
+      - training_config.forecast.num_steps=40
+      - training_config.forecast.rollout_grad_steps=-1
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
