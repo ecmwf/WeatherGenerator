@@ -338,3 +338,165 @@ def test_ensemble_rejects_student_teacher():
     model = make_model({}, training_mode=("student_teacher",))
     with pytest.raises(AssertionError):
         run(model, StubBatch(1, 1, ensemble_size=2))
+
+
+# small forecast engine with the nhv6tkln settings (swiglu, XSA, qk norm, 2D RoPE, flash
+# attention, a LayerNorm between blocks)
+FE_CFG = {
+    "fe_diffusion_model": False,
+    "ae_global_dim_embed": 64,
+    "ae_local_num_queries": 1,
+    "ae_global_block_factor": 64,
+    "fe_num_blocks": 2,
+    "fe_num_heads": 4,
+    "fe_dropout_rate": 0.1,
+    "fe_with_qk_lnorm": True,
+    "fe_layer_norm_after_blocks": [0],
+    "fe_impute_latent_noise_std": 1e-5,
+    "forecast_att_dense_rate": 1.0,
+    "rope_2D": True,
+    "mlp_type": "swiglu",
+    "use_xsa": True,
+    "with_flash_attention": True,
+    "attention_dtype": "bf16",
+    "mlp_norm_eps": 1e-5,
+    "norm_eps": 1e-4,
+    "norm_type": "LayerNorm",
+    "qk_norm_type": "RMSNorm",
+}
+
+
+@pytest.fixture(scope="module")
+def single_rank_process_group():
+    import os
+    import socket
+
+    import torch.distributed as dist
+
+    if dist.is_initialized():
+        yield
+        return
+    with socket.socket() as s:
+        s.bind(("localhost", 0))
+        port = s.getsockname()[1]
+    os.environ.setdefault("MASTER_ADDR", "localhost")
+    os.environ["MASTER_PORT"] = str(port)
+    dist.init_process_group("nccl", rank=0, world_size=1)
+    yield
+    dist.destroy_process_group()
+
+
+def _fsdp_rollout(
+    no_grad_steps,
+    num_grad_steps,
+    checkpoint_steps,
+    step_checkpointing,
+    fe_cfg_overrides=None,
+    reshard_after_forward=False,
+):
+    """
+    Loss and gradients of a rollout of a small forecast engine sharded with FSDP2 as in
+    model_interface (with mixed precision), after an fp32 input layer (stand-in for the encoder)
+    and with the RoPE coordinates as in Model.forward.
+    """
+    from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
+
+    from weathergen.model.attention import MultiSelfAttentionHead, MultiSelfAttentionHeadLocal
+    from weathergen.model.engines import ForecastingEngine
+    from weathergen.model.layers import MLP
+    from weathergen.model.model_interface import shard_forecast_engine
+
+    cf = OmegaConf.create({**FE_CFG, **(fe_cfg_overrides or {})})
+    dim, num_cells = cf.ae_global_dim_embed, 256
+
+    class Root(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.inp = torch.nn.Linear(dim, dim)
+            self.norm = torch.nn.LayerNorm(dim)
+            mode_cfg = OmegaConf.create({"forecast": {"policy": "fixed"}})
+            self.forecast_engine = ForecastingEngine(cf, mode_cfg, num_cells)
+
+        def forward(self, x, coords):
+            # fp32 latent state, as the encoder output under autocast
+            tokens = self.norm(self.inp(x))
+            for step in range(no_grad_steps):
+                with torch.no_grad():
+                    tokens = self.forecast_engine(tokens, step, coords=coords)
+            loss = 0.0
+            for step in range(no_grad_steps, no_grad_steps + num_grad_steps):
+                if step_checkpointing:
+                    tokens = torch.utils.checkpoint.checkpoint(
+                        self.forecast_engine, tokens, step, coords=coords, use_reentrant=False
+                    )
+                else:
+                    tokens = self.forecast_engine(tokens, step, coords=coords)
+                loss = loss + tokens.float().pow(2).mean()
+            return loss
+
+    torch.manual_seed(0)
+    root = Root().cuda().train()
+    mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+    shard_forecast_engine(
+        root.forecast_engine,
+        root.forecast_engine.fe_blocks,
+        (MLP, MultiSelfAttentionHead, MultiSelfAttentionHeadLocal),
+        checkpoint_steps=checkpoint_steps,
+        reshard_after_forward=reshard_after_forward,
+        mp_policy=mp_policy,
+    )
+    fully_shard(root, mp_policy=mp_policy)
+
+    x = torch.randn(1, num_cells, dim, device="cuda")
+    coords = (torch.rand(1, num_cells, 2, device="cuda") * 3.0).to(torch.bfloat16)
+    torch.manual_seed(1)
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        loss = root(x, coords)
+    loss.backward()
+    # parameters before pushforward (no-grad) steps get no gradient
+    grads = {n: p.grad.full_tensor() for n, p in root.named_parameters() if p.grad is not None}
+    return loss.item(), grads
+
+
+def _rel_diff(grads, grads_ref):
+    diff = torch.cat([(grads[n] - grads_ref[n]).flatten() for n in grads_ref])
+    return (diff.norm() / torch.cat([g.flatten() for g in grads_ref.values()]).norm()).item()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="FSDP2 test needs a GPU")
+@pytest.mark.parametrize("reshard_after_forward", [False, True])
+def test_checkpoint_steps_fsdp_bitwise(single_rank_process_group, reshard_after_forward):
+    """
+    The forecast engine sharded for checkpoint_steps (one FSDP unit, inputs cast per block),
+    with and without step checkpointing, gives bitwise the same loss and gradients as the
+    default per-block FSDP units without step checkpointing (the standard fine-tuning setup),
+    here after a pushforward step and without blocks that get fp32 inputs (see below).
+    Per-block units with step checkpointing fail with a DTensor error or a CheckpointError.
+    """
+    no_ln = {"fe_layer_norm_after_blocks": []}
+    loss_ref, grads_ref = _fsdp_rollout(1, 3, False, False, no_ln, reshard_after_forward)
+    for step_checkpointing in [False, True]:
+        loss, grads = _fsdp_rollout(1, 3, True, step_checkpointing, no_ln, reshard_after_forward)
+        assert loss == loss_ref
+        assert grads.keys() == grads_ref.keys()
+        assert all(torch.equal(g, grads_ref[n]) for n, g in grads.items())
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="FSDP2 test needs a GPU")
+@pytest.mark.parametrize("no_grad_steps", [0, 2])
+def test_checkpoint_steps_fsdp(single_rank_process_group, no_grad_steps):
+    """
+    As test_checkpoint_steps_fsdp_bitwise, with blocks that get fp32 inputs: the first block
+    for the fp32 encoder output, and the block after a LayerNorm between blocks. With per-block
+    units, FSDP casts the inputs of such a block to bf16 in the forward pass but not in the
+    recomputation of its (per-block) activation checkpoint, so its gradients are computed from
+    slightly different activations; the single unit casts in both. The forward pass is identical
+    and step checkpointing itself is exact.
+    """
+    loss_ref, grads_ref = _fsdp_rollout(no_grad_steps, 3, False, False)
+    _, grads_unit = _fsdp_rollout(no_grad_steps, 3, True, False)
+    loss, grads = _fsdp_rollout(no_grad_steps, 3, True, True)
+    assert loss == loss_ref
+    assert grads.keys() == grads_ref.keys()
+    assert all(torch.equal(g, grads_unit[n]) for n, g in grads.items())
+    assert _rel_diff(grads, grads_ref) < 1e-4

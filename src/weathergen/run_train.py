@@ -170,7 +170,9 @@ def run_train(args):
         args.private_config, None, None, args.base_config, *args.config, cli_overwrite
     )
     cf = config.set_run_id(cf, args.run_id, False)
-    cf.data_loading.rng_seed = int(time.time())
+    # data_loading.fixed_rng_seed replays the data of an earlier run (its logged rng_seed)
+    fixed_rng_seed = cf.data_loading.get("fixed_rng_seed", None)
+    cf.data_loading.rng_seed = int(time.time()) if fixed_rng_seed is None else int(fixed_rng_seed)
     cf.stage = args.stage
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
