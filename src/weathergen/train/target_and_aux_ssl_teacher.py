@@ -55,7 +55,7 @@ class EncoderTeacher(TargetAndAuxModuleBase):
 
     def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
         with torch.no_grad():
-            outputs = self.forward_teacher(model_params, batch).get_latent_prediction(0)
+            outputs = self.forward_teacher(model_params, batch).get_latent_prediction(1)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
