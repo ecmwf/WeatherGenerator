@@ -11,11 +11,15 @@
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.datasets.multi_stream_data_sampler import (
+    MultiStreamDataSampler,
+    draw_random_forecast_steps,
+)
 from weathergen.model.model import Model, ModelOutput
 from weathergen.utils.rollout import get_ensemble_size, get_rollout_plan
 
@@ -98,6 +102,32 @@ def test_forecast_steps_seed_independent_of_rank(monkeypatch):
     # but differs between workers and mini epochs
     seed = MultiStreamDataSampler.get_forecast_steps_rng_seed
     assert seed(1234, 0, 2) != seed(1234, 1, 2) != seed(1234, 1, 3)
+
+
+def test_random_forecast_steps():
+    steps = np.array([8, 16, 24, 32, 40], dtype=np.int32)
+    # random_choice: only the listed values, all about equally often, reproducible
+    fs = draw_random_forecast_steps("random_choice", steps, 40, 50000, 1234)
+    assert fs.dtype == np.int64 and set(np.unique(fs)) == set(steps.tolist())
+    assert np.allclose(np.bincount(fs)[steps] / len(fs), 0.2, atol=0.01)
+    assert np.array_equal(fs, draw_random_forecast_steps("random_choice", steps, 40, 50000, 1234))
+    # random: unchanged, uniform in [min, fsm]
+    fs = draw_random_forecast_steps("random", np.array([8, 40]), 40, 1000, 1234)
+    ref = np.random.default_rng(1234).integers(low=8, high=41, size=1000, dtype=np.int64)
+    assert np.array_equal(fs, ref)
+
+
+def test_random_choice_lead_time_coverage():
+    """With K from [8, 16, 24, 32, 40] and the loss on the last 8 steps, every lead time is
+    scored equally often."""
+    steps = [8, 16, 24, 32, 40]
+    cfg = {"pushforward": True, "rollout_grad_steps": 8}
+    counts = np.zeros(41)
+    for k in steps:
+        plan = get_rollout_plan(cfg, list(range(1, k + 1)), True)
+        counts[sorted(plan.loss_steps)] += 1
+        assert plan.no_grad_steps == frozenset(range(1, k - 7))
+    assert np.all(counts[1:] == 1)
 
 
 class StubForecastEngine(torch.nn.Module):

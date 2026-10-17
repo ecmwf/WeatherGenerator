@@ -2,9 +2,11 @@
 # config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml (the nhv6tkln recipe).
 # See src/weathergen/utils/rollout.py for the options.
 #
-# Each batch rolls out K steps (6h each), K drawn uniformly from [8, 40] and identical on all
-# ranks. The first K - 8 steps run without gradient (pushforward); the last 8 get gradient and
-# loss, so K = 8 is exactly the nhv6tkln objective.
+# Each batch rolls out K steps (6h each), K drawn uniformly from [8, 16, 24, 32, 40] and
+# identical on all ranks. The first K - 8 steps run without gradient (pushforward); the last 8 get
+# gradient and loss, so K = 8 is exactly the nhv6tkln objective. The scored windows of 8 steps
+# tile 6h - 10 days, so every lead time is scored in 1/5 of the batches (K uniform in [8, 40]
+# would score the first and last lead times in only 1/33 of the batches).
 
 # keep the forecast engine unsharded during the rollout (no all-gather per step)
 fe_reshard_after_forward: false
@@ -12,9 +14,9 @@ fe_reshard_after_forward: false
 training_config:
   forecast:
     time_step: 06:00:00
-    num_steps: [8, 40]
+    num_steps: [8, 16, 24, 32, 40]
     offset: 1
-    policy: random
+    policy: random_choice
     pushforward: true
     # last steps with gradient (-1: all steps, i.e. full backpropagation through the rollout)
     rollout_grad_steps: 8

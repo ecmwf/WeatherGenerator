@@ -50,6 +50,23 @@ FORECAST_DEFAULTS = {
 }
 
 
+def draw_random_forecast_steps(
+    policy: str, list_num_forecast_steps: np.typing.NDArray, fsm: int, size: int, seed: int
+) -> np.typing.NDArray[np.int64]:
+    """
+    Number of forecast steps of each batch for the random forecast policies:
+        random, sequential_random : uniform in [min(num_steps), fsm]
+        random_choice : uniform over the values listed in num_steps, e.g. [8, 16, 24, 32, 40], so
+            that with pushforward the scored windows of 8 steps cover all lead times equally often
+    The RNG is seeded without rank dependence (see forecast_steps_rng_seed), so that all ranks
+    roll out the same number of steps.
+    """
+    rng = np.random.default_rng(seed)
+    if policy == "random_choice":
+        return rng.choice(np.asarray(list_num_forecast_steps, dtype=np.int64), size=size)
+    return rng.integers(low=list_num_forecast_steps.min(), high=fsm + 1, size=size, dtype=np.int64)
+
+
 def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
@@ -337,13 +354,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         elif self.forecast_policy in ("fixed", "sequential"):
             fs = fsm * np.ones(len_dt, dtype=np.int64)
 
-        elif self.forecast_policy in ("random", "sequential_random"):
-            # own RNG without rank dependence, see forecast_steps_rng_seed
-            fs = np.random.default_rng(self.forecast_steps_rng_seed).integers(
-                low=self.list_num_forecast_steps.min(),
-                high=fsm + 1,
-                size=len_dt,
-                dtype=np.int64,
+        elif self.forecast_policy in ("random", "sequential_random", "random_choice"):
+            fs = draw_random_forecast_steps(
+                self.forecast_policy,
+                self.list_num_forecast_steps,
+                fsm,
+                len_dt,
+                self.forecast_steps_rng_seed,
             )
         else:
             raise ValueError(f"Unknown forecast policy {self.forecast_policy}")
@@ -355,7 +372,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _get_fsm(self) -> int:
         """Obtain maximum number of forecast steps for current mini epoch."""
         # fixed number of forecast steps for this run
-        if self.forecast_policy != "random":
+        if self.forecast_policy not in ("random", "random_choice"):
             idx = min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
             fsm = self.list_num_forecast_steps[idx]
         else:
