@@ -3,12 +3,12 @@
 # config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml), lr_max 1e-4, fresh optimizer and
 # schedule, validation as nhv6tkln (8 steps, EMA weights). Code: autocast-cache fix 2af40f93 and
 # forecast policy random_choice.
-#   A_ctrl8 : 8-step MSE, as nhv6tkln, 8 mini-epochs (65536 samples, ~10.6 h on 8 nodes as
+#   ctrl8 (A)  : 8-step MSE, as nhv6tkln, 8 mini-epochs (65536 samples, ~10.6 h on 8 nodes as
 #             measured for nhv6tkln)
-#   B_pf    : pushforward, K uniform from [8, 16, 24, 32, 40] steps (every lead time 6h - 10 d
+#   pf (B)     : pushforward, K uniform from [8, 16, 24, 32, 40] steps (every lead time 6h - 10 d
 #             scored in 1/5 of the batches), gradient and loss on the last 8, MSE,
 #             step checkpointing; 5 mini-epochs (40960 samples, ~9.5 h estimated)
-#   C_pfcrps: B with fair kernel CRPS over 2 MC-dropout members (MSE logged with weight 0),
+#   pfcrps (C) : B with fair kernel CRPS over 2 MC-dropout members (MSE logged with weight 0),
 #             5 mini-epochs
 # B and C get fewer samples for about the same compute (~85 node hours each). chain_jobs 2 only
 # as a guard against the 12 h limit: a second part continues from the run's own checkpoint and
@@ -17,7 +17,7 @@
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-17/abc.yml
 parallelize: true
 stages:
-  - name: A_ctrl8
+  - name: ctrl8
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
@@ -31,7 +31,7 @@ stages:
     chain_jobs: 2
     nodes: 8
 
-  - name: B_pf
+  - name: pf
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
@@ -46,7 +46,7 @@ stages:
     chain_jobs: 2
     nodes: 8
 
-  - name: C_pfcrps
+  - name: pfcrps
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:

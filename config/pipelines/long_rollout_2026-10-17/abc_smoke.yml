@@ -6,7 +6,7 @@
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-17/abc_smoke.yml
 parallelize: true
 stages:
-  - name: smoke_A_ctrl8
+  - name: smokectrl8
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
@@ -24,7 +24,7 @@ stages:
     nodes: 1
     slurm_args: ["--time=01:00:00"]
 
-  - name: smoke_B_pf
+  - name: smokepf
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
@@ -43,7 +43,7 @@ stages:
     nodes: 1
     slurm_args: ["--time=01:00:00"]
 
-  - name: smoke_C_pfcrps
+  - name: smokepfcrps
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
