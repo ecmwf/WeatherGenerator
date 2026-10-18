@@ -196,7 +196,7 @@ def write_output(
         for stream_idx in output_streams.values()
     )
     if not has_physical and not has_latents:
-        _logger.warning("Writing no data since physical and requested latent outputs are empty.")
+        _logger.warning("Writing no data because no physical or latent output data is available.")
         return
 
     # calculate global sample indices for this batch by offsetting by sample_start
