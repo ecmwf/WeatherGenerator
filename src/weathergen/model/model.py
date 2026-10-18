@@ -845,10 +845,9 @@ class Model(torch.nn.Module):
             tokens = tokens.sum(axis=1)
 
         # MC-dropout ensemble in inference: the members are stacked along the batch dimension
-        # (member m of sample b at m * B + b, the modular indexing of predict_decoders) when the
-        # rollout starts; later chunks continue from the stacked latent state
+        # (member m of sample b at m * B + b) when the rollout starts; later chunks continue from
+        # the stacked latent state
         ensemble_size = self._get_inference_ensemble_size()
-        num_samples = len(source_samples)
         if ensemble_size > 1 and len(samples_or_output.latent) == 0:
             tokens = tokens.repeat(ensemble_size, *([1] * (tokens.dim() - 1)))
         # keep the stochasticity of the forecast engine (dropout, latent noise) as in training
@@ -976,10 +975,13 @@ class Model(torch.nn.Module):
                     "latent_state",
                     self.tokens_to_latent_state(None, tokens),
                 )
-                output = self.predict_decoders(model_params, step, tokens, source_samples, output)
                 if ensemble_size > 1:
-                    self._stack_ensemble_members(
-                        output, output.chunk_idx(step), num_samples, ensemble_size
+                    output = self._predict_decoders_ensemble(
+                        model_params, step, tokens, source_samples, output, ensemble_size
+                    )
+                else:
+                    output = self.predict_decoders(
+                        model_params, step, tokens, source_samples, output
                     )
 
             if "student_teacher" in self.cf.training_config.training_mode:
@@ -1015,20 +1017,34 @@ class Model(torch.nn.Module):
             )
         return ensemble_size
 
-    @staticmethod
-    def _stack_ensemble_members(
-        output: ModelOutput, chunk_idx: int, num_samples: int, ensemble_size: int
-    ) -> None:
+    def _predict_decoders_ensemble(
+        self,
+        model_params: ModelParams,
+        step: int,
+        tokens: torch.Tensor,
+        batch: BatchSamples,
+        output: ModelOutput,
+        ensemble_size: int,
+    ) -> ModelOutput:
         """
-        Turn the per-member predictions of predict_decoders (member m of sample b at m*B + b)
-        into one prediction per sample with the members along the ensemble dimension.
+        Decode the ensemble members (member m of sample b at m * B + b in tokens) one at a time,
+        so that the decoder's memory does not grow with the ensemble size, and store one
+        prediction per sample with the members along the ensemble dimension.
         """
-        for stream_name, preds in output.physical[chunk_idx].items():
-            assert len(preds) == num_samples * ensemble_size, (len(preds), num_samples)
+        num_samples = len(batch)
+        assert tokens.shape[0] == num_samples * ensemble_size, (tokens.shape, num_samples)
+        chunk_idx = output.chunk_idx(step)
+        member_preds = []
+        for m in range(ensemble_size):
+            member_tokens = tokens[m * num_samples : (m + 1) * num_samples]
+            output = self.predict_decoders(model_params, step, member_tokens, batch, output)
+            member_preds.append(dict(output.physical[chunk_idx]))
+        for stream_name in member_preds[0]:
             output.physical[chunk_idx][stream_name] = tuple(
-                torch.cat([preds[m * num_samples + b] for m in range(ensemble_size)], dim=0)
+                torch.cat([preds[stream_name][b] for preds in member_preds], dim=0)
                 for b in range(num_samples)
             )
+        return output
 
     @staticmethod
     def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
