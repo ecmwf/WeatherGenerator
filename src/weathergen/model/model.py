@@ -844,6 +844,19 @@ class Model(torch.nn.Module):
         else:
             tokens = tokens.sum(axis=1)
 
+        # MC-dropout ensemble in inference: the members are stacked along the batch dimension
+        # (member m of sample b at m * B + b, the modular indexing of predict_decoders) when the
+        # rollout starts; later chunks continue from the stacked latent state
+        ensemble_size = self._get_inference_ensemble_size()
+        num_samples = len(source_samples)
+        if ensemble_size > 1 and len(samples_or_output.latent) == 0:
+            tokens = tokens.repeat(ensemble_size, *([1] * (tokens.dim() - 1)))
+        # keep the stochasticity of the forecast engine (dropout, latent noise) as in training
+        fe_train_modes = None
+        if ensemble_size > 1:
+            fe_train_modes = {m: m.training for m in self.forecast_engine.modules()}
+            self.forecast_engine.train()
+
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
         if posteriors is not None:
@@ -964,6 +977,10 @@ class Model(torch.nn.Module):
                     self.tokens_to_latent_state(None, tokens),
                 )
                 output = self.predict_decoders(model_params, step, tokens, source_samples, output)
+                if ensemble_size > 1:
+                    self._stack_ensemble_members(
+                        output, output.chunk_idx(step), num_samples, ensemble_size
+                    )
 
             if "student_teacher" in self.cf.training_config.training_mode:
                 # latent predictions (raw and with SSL heads)
@@ -971,7 +988,47 @@ class Model(torch.nn.Module):
                     model_params, step, tokens, source_samples, output, intermediates
                 )
 
+        if fe_train_modes is not None:
+            for m, mode in fe_train_modes.items():
+                m.training = mode
+
         return output
+
+    def _get_inference_ensemble_size(self) -> int:
+        """
+        Number of MC-dropout ensemble members, test_config.forecast.ensemble_size, in inference
+        only (1 otherwise).
+        """
+        if self.training or self.cf.get("stage", None) != "inference":
+            return 1
+        test_cfg = self.cf.get("test_config", None) or {}
+        ensemble_size = (test_cfg.get("forecast", None) or {}).get("ensemble_size", 1)
+        assert isinstance(ensemble_size, int) and ensemble_size >= 1, (
+            f"test_config.forecast.ensemble_size must be a positive integer, got {ensemble_size}."
+        )
+        if ensemble_size > 1:
+            assert not self.cf.get("fe_diffusion_model", False), (
+                "MC-dropout ensembles are not supported for diffusion forecast engines."
+            )
+            assert "student_teacher" not in self.cf.training_config.training_mode, (
+                "MC-dropout ensembles are only supported for forecasting (masking) models."
+            )
+        return ensemble_size
+
+    @staticmethod
+    def _stack_ensemble_members(
+        output: ModelOutput, chunk_idx: int, num_samples: int, ensemble_size: int
+    ) -> None:
+        """
+        Turn the per-member predictions of predict_decoders (member m of sample b at m*B + b)
+        into one prediction per sample with the members along the ensemble dimension.
+        """
+        for stream_name, preds in output.physical[chunk_idx].items():
+            assert len(preds) == num_samples * ensemble_size, (len(preds), num_samples)
+            output.physical[chunk_idx][stream_name] = tuple(
+                torch.cat([preds[m * num_samples + b] for m in range(ensemble_size)], dim=0)
+                for b in range(num_samples)
+            )
 
     @staticmethod
     def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
