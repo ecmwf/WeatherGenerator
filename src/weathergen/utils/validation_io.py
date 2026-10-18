@@ -121,9 +121,9 @@ def write_output(
     output_streams = {
         name: stream_names.index(name) for name in output_stream_names if name != io.LATENT_STREAM
     }
-    latents_all = (
-        get_latent_output(batch, model_output) if io.LATENT_STREAM in output_stream_names else []
-    )
+    latents_requested = io.LATENT_STREAM in output_stream_names
+    latents_all = get_latent_output(batch, model_output) if latents_requested else []
+    # Requested latent outputs may still contain no data to write.
     has_latents = any(sample for step in latents_all for sample in step)
 
     if output_streams:
