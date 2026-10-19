@@ -85,17 +85,18 @@ class WeatherGenReader(Reader):
             Configuration file from the inference run
         """
         config = {}
+        run_id = self.run_id.removesuffix("_persistence")  # "<run>_persistence" -> "<run>"
 
         if self.private_paths:
             _logger.info(
-                f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
+                f"Loading config for run {run_id} from private paths: {self.private_paths}"
             )
-            config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
+            config = load_merge_configs(self.private_paths, run_id, self.mini_epoch)
         else:
             _logger.info(
-                f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
+                f"Loading config for run {run_id} from model directory: {self.model_base_dir}"
             )
-            config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
+            config = load_run_config(run_id, self.mini_epoch, self.model_base_dir)
 
         if not isinstance(config, dict | oc.DictConfig):
             _logger.warning("Model config not found. inference config will be empty.")

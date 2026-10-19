@@ -324,6 +324,7 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
+    run_id: str | None = None,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -341,6 +342,7 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
+        run_id=run_id,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -555,6 +557,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             is_zip=state.is_zip,
             need_coords=not state.is_gridded,
             is_gridded=state.is_gridded,
+            run_id=state.run_id,
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
@@ -631,6 +634,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
+        run_id=state.run_id,
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
