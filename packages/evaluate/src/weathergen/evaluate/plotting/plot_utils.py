@@ -37,6 +37,7 @@ class PlotSubdir(str, Enum):
     score_cards = "score_cards"
     bar_plots = "bar_plots"
     qq_plots = "qq_plots"
+    rank_histogram_plots = "rank_histogram_plots"
 
 
 # Shared helpers
@@ -1077,6 +1078,93 @@ def psd_plot_metric_region(
             f"No PSD plots were produced for metric={metric!r} region={region!r}: "
             "no run had usable PSD attrs (frequencies/psd_prediction) for any channel."
         )
+
+
+def _extract_rank_histogram_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> dict | None:
+    """Extract raw rank histogram counts from DataArray attrs for a given fstep/channel.
+
+    Returns a dict with ``rank_counts`` (unnormalized) / ``n_bins`` ready for pooling, or
+    None if the keys are missing (e.g. metric skipped for this fstep/channel).
+    """
+    attrs = data_ch.attrs
+    fp = f"fstep_{fstep}/"
+    n_bins = attrs.get(f"{fp}n_bins", attrs.get("n_bins"))
+
+    for prefix in (f"{fp}{ch}/", fp):
+        if f"{prefix}rank_counts" in attrs and n_bins is not None:
+            return {
+                "rank_counts": np.array(attrs[f"{prefix}rank_counts"]),
+                "n_bins": int(n_bins),
+            }
+    return None
+
+
+def rank_histogram_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+) -> None:
+    """Create rank histogram (Talagrand diagram) bar plots for all streams and channels.
+
+    If the metric's ``pool_n_fsteps`` parameter is set, counts from that many consecutive
+    forecast steps are pooled into one bar chart instead of plotting each fstep separately.
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        for ch in channels_set:
+            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+                if ch not in np.atleast_1d(data.channel.values):
+                    continue
+
+                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
+                if data_ch.isnull().all():
+                    continue
+
+                attr_fsteps = sorted(data_ch.attrs.get("attr_fsteps", []))
+                if not attr_fsteps:
+                    _logger.warning(
+                        f"Rank histogram attrs missing for {run_id}/{stream}/{ch}. Skipping."
+                    )
+                    continue
+
+                label = runs[run_id].get("label", run_id)
+                pool_n_fsteps = data_ch.attrs.get("pool_n_fsteps") or 1
+
+                for i in range(0, len(attr_fsteps), pool_n_fsteps):
+                    group = attr_fsteps[i : i + pool_n_fsteps]
+                    group_datasets = [
+                        d
+                        for fstep in group
+                        if (d := _extract_rank_histogram_attrs(data_ch, fstep, ch)) is not None
+                    ]
+                    if not group_datasets:
+                        continue
+
+                    pooled_counts = np.sum([d["rank_counts"] for d in group_datasets], axis=0)
+                    total = pooled_counts.sum()
+                    rank_hist_dataset = {
+                        "rank_counts": pooled_counts / total if total > 0 else pooled_counts,
+                        "n_bins": group_datasets[0]["n_bins"],
+                    }
+
+                    fstep_tag = str(group[0]) if len(group) == 1 else f"{group[0]}-{group[-1]}"
+                    name = create_filename(
+                        prefix=[metric, region],
+                        middle=[run_id],
+                        suffix=[stream, ch, f"fstep{fstep_tag}"],
+                    )
+                    title = f"{metric.upper()} | {stream} | {ch} | fstep {fstep_tag}"
+                    plotter.rank_histogram_plot(
+                        [rank_hist_dataset],
+                        [label],
+                        tag=name,
+                        title=title,
+                    )
+    _logger.info(f"Rank histogram plots saved successfully into: {plotter.out_plot_dir_rank_hist}")
 
 
 def create_filename(
