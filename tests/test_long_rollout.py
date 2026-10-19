@@ -51,6 +51,21 @@ STREAM = "ERA5"
             [1],
             [2, 3, 4],
         ),
+        # anchored: the first steps also get gradient and loss
+        (
+            {"pushforward": True, "rollout_grad_steps": 1, "rollout_anchor_steps": 1},
+            True,
+            [2, 3],
+            [1, 4],
+        ),
+        # anchor and final steps overlap: nothing without gradient, every step scored once
+        (
+            {"pushforward": True, "rollout_grad_steps": 2, "rollout_anchor_steps": 3},
+            True,
+            [],
+            [1, 2, 3, 4],
+        ),
+        ({"pushforward": True, "rollout_anchor_steps": 2}, False, [], [1, 2, 3, 4]),
     ],
 )
 def test_rollout_plan(forecast_cfg, training, no_grad, loss):
@@ -65,7 +80,13 @@ def test_rollout_plan_masking():
     assert plan.no_grad_steps == frozenset() and plan.loss_steps == frozenset([0])
 
 
-@pytest.mark.parametrize("cfg", [{"pushforward": True, "rollout_grad_steps": 0}])
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        {"pushforward": True, "rollout_grad_steps": 0},
+        {"pushforward": True, "rollout_anchor_steps": -1},
+    ],
+)
 def test_rollout_plan_invalid(cfg):
     with pytest.raises(AssertionError):
         get_rollout_plan(cfg, [1, 2], True)
@@ -128,6 +149,19 @@ def test_random_choice_lead_time_coverage():
         counts[sorted(plan.loss_steps)] += 1
         assert plan.no_grad_steps == frozenset(range(1, k - 7))
     assert np.all(counts[1:] == 1)
+
+
+def test_anchored_lead_time_coverage():
+    """With an anchor of 8 steps, leads 1-8 are scored in every batch, later leads as before."""
+    steps = [8, 16, 24, 32, 40]
+    cfg = {"pushforward": True, "rollout_grad_steps": 8, "rollout_anchor_steps": 8}
+    counts = np.zeros(41)
+    for k in steps:
+        plan = get_rollout_plan(cfg, list(range(1, k + 1)), True)
+        counts[sorted(plan.loss_steps)] += 1
+        assert plan.no_grad_steps == frozenset(range(9, k - 7))
+        assert len(plan.loss_steps) == (8 if k == 8 else 16)
+    assert np.all(counts[1:9] == 5) and np.all(counts[9:] == 1)
 
 
 class StubForecastEngine(torch.nn.Module):
@@ -329,6 +363,51 @@ def test_pushforward_under_autocast(device, checkpoint_steps):
             tokens = tokens.detach() if step < 3 else tokens
             if step >= 3:
                 ref = stub_predict_decoders(None, step, tokens, batch, ref)
+        loss_ref = loss_of(ref)
+    loss_ref.backward()
+    assert torch.equal(loss.detach(), loss_ref.detach())
+    assert torch.equal(grad, model.forecast_engine.lin.weight.grad)
+    assert torch.is_autocast_cache_enabled()
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("checkpoint_steps", [False, True])
+def test_anchored_pushforward(device, checkpoint_steps):
+    """
+    Anchored pushforward (gradient and loss on the first and the last steps, the steps between
+    without gradient) gives the values and gradients of an explicitly detached rollout, also
+    under autocast, where steps with gradient come both before and after the ones without.
+    """
+    cfg = {
+        "pushforward": True,
+        "rollout_grad_steps": 1,
+        "rollout_anchor_steps": 1,
+        "checkpoint_steps": checkpoint_steps,
+    }
+    torch.manual_seed(0)
+    model = make_model(cfg).to(device)
+    batch = StubBatch(2, 4, get_rollout_plan(cfg, [1, 2, 3, 4], True))
+    batch.inputs = batch.inputs.to(device)
+    with torch.autocast(device, dtype=torch.bfloat16):
+        out = run(model, batch)
+        loss = loss_of(out)
+    # (before backward, which recomputes the checkpointed steps)
+    assert [c[1] for c in model.forecast_engine.calls] == [True, False, False, True]
+    assert [s for s in range(len(out.physical)) if STREAM in out.physical[s]] == [1, 4]
+    loss.backward()
+    grad = model.forecast_engine.lin.weight.grad.clone()
+
+    # reference: rollout with gradient everywhere, detached after the steps without gradient
+    model.zero_grad()
+    with torch.autocast(device, dtype=torch.bfloat16):
+        tokens = model.encoder(None, batch)[0].detach().unsqueeze(1).sum(axis=1)
+        ref = ModelOutput(5)
+        for step in [1, 2, 3, 4]:
+            tokens = model.forecast_engine(tokens, step)
+            if step in (1, 4):
+                ref = stub_predict_decoders(None, step, tokens, batch, ref)
+            else:
+                tokens = tokens.detach()
         loss_ref = loss_of(ref)
     loss_ref.backward()
     assert torch.equal(loss.detach(), loss_ref.detach())

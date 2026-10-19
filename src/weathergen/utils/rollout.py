@@ -18,6 +18,10 @@ Rollout options for forecast training (all under `forecast` in the mode config):
     rollout_loss_steps : int, default rollout_grad_steps
         With pushforward, number of final rollout steps that are decoded and scored; at most
         rollout_grad_steps. Targets are only loaded for these steps.
+    rollout_anchor_steps : int, default 0
+        With pushforward, number of first rollout steps (from the analysis) that also get
+        gradient and loss, so that the short range stays anchored while the final steps train
+        long lead times. Steps that are both first and final steps are scored once.
     checkpoint_steps : bool, default False
         Activation checkpointing of whole forecast steps (on top of the per-block checkpointing
         in the forecast engine), so memory grows with the latent state per step only.
@@ -36,6 +40,7 @@ ROLLOUT_DEFAULTS = {
     "pushforward": False,
     "rollout_grad_steps": 1,
     "rollout_loss_steps": None,
+    "rollout_anchor_steps": 0,
     "checkpoint_steps": False,
     "ensemble_size": 1,
 }
@@ -77,9 +82,15 @@ def get_rollout_plan(forecast_cfg, output_idxs: list[int], training: bool) -> Ro
     )
     num_loss = min(num_loss, num_grad)
 
+    num_anchor = forecast_cfg.get("rollout_anchor_steps", ROLLOUT_DEFAULTS["rollout_anchor_steps"])
+    assert isinstance(num_anchor, int) and num_anchor >= 0, (
+        f"rollout_anchor_steps must be a non-negative integer, got {num_anchor}."
+    )
+    anchor_steps = frozenset(steps[:num_anchor])
+
     return RolloutPlan(
-        no_grad_steps=frozenset(steps[: num_steps - num_grad]),
-        loss_steps=frozenset(steps[num_steps - num_loss :]),
+        no_grad_steps=frozenset(steps[: num_steps - num_grad]) - anchor_steps,
+        loss_steps=frozenset(steps[num_steps - num_loss :]) | anchor_steps,
     )
 
 
