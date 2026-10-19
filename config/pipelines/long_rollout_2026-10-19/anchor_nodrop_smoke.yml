@@ -3,7 +3,7 @@
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-19/anchor_nodrop_smoke.yml
 parallelize: true
 stages:
-  - name: smokectrl8nodrop
+  - name: smokectrl8nd
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
@@ -22,7 +22,7 @@ stages:
     nodes: 1
     slurm_args: ["--time=01:00:00"]
 
-  - name: smokepfanchornodrop
+  - name: smokepfanchnd
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:

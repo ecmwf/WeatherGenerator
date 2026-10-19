@@ -1,9 +1,9 @@
 # Long-rollout forecast training, follow-up of A-C (long_rollout_2026-10-17/abc.yml), same recipe:
 # from nhv6tkln (mini-epoch 8), only the forecast engine trains, lr_max 1e-4, fresh optimizer and
 # schedule, validation as nhv6tkln. Both runs without dropout in the forecast engine.
-#   ctrl8nodrop (A')    : A without forecast-engine dropout, 8 mini-epochs; isolates the effect of
+#   ctrl8nd (A')  : A without forecast-engine dropout, 8 mini-epochs; isolates the effect of
 #                         dropout (A' vs A) and is the control for B'
-#   pfanchornodrop (B') : B (pushforward, K from [8, 16, 24, 32, 40], last 8 scored) plus the first
+#   pfanchnd (B') : B (pushforward, K from [8, 16, 24, 32, 40], last 8 scored) plus the first
 #                         8 steps scored in every batch (rollout_anchor_steps), without
 #                         forecast-engine dropout, 5 mini-epochs; B' vs A' = anchored pushforward
 # chain_jobs 2 as a guard against the 12 h limit (B' does up to 16 steps with gradient).
@@ -11,7 +11,7 @@
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-19/anchor_nodrop.yml
 parallelize: true
 stages:
-  - name: ctrl8nodrop
+  - name: ctrl8nd
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
@@ -26,7 +26,7 @@ stages:
     chain_jobs: 2
     nodes: 8
 
-  - name: pfanchornodrop
+  - name: pfanchnd
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
