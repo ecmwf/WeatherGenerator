@@ -1,12 +1,3 @@
-# (C) Copyright 2025 WeatherGenerator contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation
-# nor does it submit to any jurisdiction.
-
 """Module-level loky worker functions and direct zarr I/O helpers.
 
 These are module-level (not class-bound) so they are pickable and can be
@@ -15,14 +6,46 @@ dispatched to loky / ProcessPoolExecutor workers.
 
 import contextlib
 import logging
+from functools import cache
 
 import numpy as np
 import zarr
 from numpy.typing import NDArray
 
+import weathergen.common.config as wg_config
+from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.evaluate.utils.derived_channels import is_derivable_channel
+from weathergen.train.utils import VAL
 
 _logger = logging.getLogger(__name__)
+
+
+@cache
+def _get_reader(run_id: str, stream: str):
+    """Data reader of `stream` (it owns mean/stdev), built once per worker process.
+
+    `run_id` is the inference run: its saved config stores the training run in
+    `from_run_id`, and that is the config we load (streams, data_paths, dates of
+    the training).
+    """
+    run_id = run_id.removesuffix("_persistence")  # "<run>_persistence" -> "<run>"
+    try:  # raw load: load_merge_configs would overwrite from_run_id
+        train_run_id = wg_config.load_run_config(run_id, -1, None).get("from_run_id") or run_id
+    except FileNotFoundError:  # inference config not saved: assume it is the training id
+        train_run_id = run_id
+    model_dir = wg_config.get_path_model(None, run_id=train_run_id)
+    ckpts = sorted(model_dir.glob(f"model_{train_run_id}_chkpt*.json"))
+    mini_epoch = int(ckpts[-1].stem.rsplit("chkpt", 1)[-1]) if ckpts else -1
+    cf = wg_config.load_merge_configs(None, train_run_id, mini_epoch)
+    cf.streams = {stream: cf.streams[stream]}  # open only the needed dataset
+    m = cf.validation_config
+    sampler = MultiStreamDataSampler.__new__(MultiStreamDataSampler)
+    sampler._stage = VAL
+    sampler.time_window_handler = TimeWindowHandler(
+        m.start_date, m.end_date, m.time_window_len, m.time_window_step
+    )
+    return sampler._init_stream_datasets(cf)[stream].readers[0]
 
 
 def _compute_early_channel_selection(
@@ -114,6 +137,7 @@ def _read_sample(
     read_coords: bool = False,
     is_gridded: bool = True,
     read_target: bool = True,
+    run_id: str = "",
 ) -> tuple[list[NDArray], list[NDArray | None], list[NDArray], dict]:
     """
     Read all forecast steps for one sample via direct zarr array access.
@@ -146,6 +170,9 @@ def _read_sample(
     read_target : bool
         If False, skip the zarr ``target`` group; targets are ``None`` and
         filled later by an :class:`AnemoiTargetSource`.
+    run_id : str
+        Run being evaluated. If it ends with ``_persistence`` the "prediction" is the
+        de-normalised source (persistence baseline) instead of the model prediction.
 
     Returns
     -------
@@ -200,9 +227,14 @@ def _read_sample(
     for fs in fsteps:
         base = f"{sample}/{stream}/{fs}"
 
-        # Direct array access — bypasses OutputDataset/as_xarray/dask entirely.
-        # Channels are selected in the zarr read so unneeded chunks are never decoded.
-        pred_data = _read_channels(ds[f"{base}/prediction/data"], channel_idxs)
+        # Direct array access — bypasses OutputDataset/as_xarray/dask entirely
+        if run_id.endswith("_persistence"):
+            pred_data = _get_reader(run_id, stream).denormalize_source_channels(
+                np.asarray(ds[f"{sample}/{stream}/0/source/data"])
+            )
+        else:
+            pred_data = _read_channels(ds[f"{base}/prediction/data"], channel_idxs)
+            
         target_data = (
             _read_channels(ds[f"{base}/target/data"], channel_idxs) if read_target else None
         )
