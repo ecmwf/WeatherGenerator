@@ -19,7 +19,7 @@
 # AFTER merging diffusion_member_mean (phase 2), since it overwrites the same cache.
 
 #SBATCH --account=e-ext-2025e01-128
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -72,11 +72,12 @@ RUN_IDS=(
 task_id=${SLURM_ARRAY_TASK_ID:?This script must run as a Slurm array task.}
 RUN_ID="${RUN_IDS[$task_id]}"
 ENSEMBLE="${ENSEMBLE:-all}"
+CONFIG="${CONFIG:-config/config_eval_diffusion_ens.yml}"
 
 weathergen_home=${SLURM_SUBMIT_DIR:?Submit this script from the WeatherGenerator root.}
 cd "$weathergen_home"
 
-echo "Caching per-case scores for run_id: $RUN_ID (ensemble=$ENSEMBLE)"
-uv run --offline evaluate --config config/config_eval_diffusion_ens.yml \
+echo "Caching per-case scores for run_id: $RUN_ID (ensemble=$ENSEMBLE, config=$CONFIG)"
+uv run --offline evaluate --config "$CONFIG" \
     --run-ids "$RUN_ID" \
     --options "default_streams.ERA5.evaluation.ensemble=$ENSEMBLE"

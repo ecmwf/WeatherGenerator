@@ -1,0 +1,1086 @@
+train : 
+  plot : 
+
+    # nfqepm9c:
+    #   slurm_id: 0
+    #   description: "z500 HL3 lr 1e-4"
+
+    # defu5ksb:
+    #   slurm_id: 0
+    #   description: "z500 HL3 lr 5e-5"
+    
+    # fsiph91d:
+    #   slurm_id: 0
+    #   description: "z500 HL3 lr 1e-5"
+
+    # zzbjo4xn:
+    #   slurm_id: 0
+    #   description: "z500 HL3 lr 5e-6"
+
+    # yv2nq8kp:
+    #   slurm_id: 0
+    #   description: "z500 HL3 cond lr 1e-5"
+
+    # jj1hmgtb:
+    #   slurm_id: 0
+    #   description: "z500 HL3 cond lr 5e-6"
+
+    # p2cu4xri:
+    #   slurm_id: 0
+    #   description: "z500 HL3 cond p_mean=0.0 lr 1e-5"
+
+    # ht7yacle:
+    #   slurm_id: 0
+    #   description: "z500 HL3 cond p_mean=0.0 lr 5e-6"
+
+    # ancthq6d:
+    #   slurm_id: 0
+    #   description: "z500 HL3 cond U(-1,5) lr 1e-5"
+
+    # bh30mpbr:
+    #   slurm_id: 0
+    #   description: "z500 HL3 cond U(-1,5) lr 5e-6"
+
+    # zdrfjp9i:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf lr 1e-4"
+
+    # wlfyab7w:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf lr 5e-5"
+
+    # u27y41hg:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf lr 1e-5"
+
+    # eg2csrit:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf direct lr 1e-4"
+
+    # uds0htwu:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf direct lr 5e-5"
+
+    # uaetmd35:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf direct lr 1e-5"
+
+    # pa79bivw:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf zero-in lr 5e-5"
+    
+    # q975mt32:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf zero-in mlp lr 5e-5"
+
+    # nk0n9ibr:
+    #   slurm_id: 0
+    #   description: "z500 HL3 conf zero-in mlp lr 5e-5"
+
+    # cjo5dh9n:
+    #   slurm_id: 0
+    #   description: "mlp12 lr5e-5"
+
+    # # yog2hdmy:
+    # #   slurm_id: 0
+    # #   description: "mlp12 lr1e-5"
+
+    # # q3mqdjv9:
+    # #   slurm_id: 0
+    # #   description: "mlp12 residual lr5e-5"
+
+    # j9v8w14j:
+    #   slurm_id: 0
+    #   description: "mlp2 lr5e-5"
+
+    # # ynrhv3b1:
+    # #   slurm_id: 0
+    # #   description: "mlp2 residual lr5e-5"
+
+    # # rkpe27aw:
+    # #   slurm_id: 0
+    # #   description: "mlp4 residual lr5e-5"
+
+    # vs7lhj9t:
+    #   slurm_id: 0
+    #   description: "Moritz' fix lr1e-4"
+
+    # # huns1im0:
+    # #   slurm_id: 0
+    # #   description: "Moritz' fix lr5e-5"
+
+    # # bgzxt72h:
+    # #   slurm_id: 0
+    # #   description: "Moritz' fix lr1e-5"
+
+    
+
+    # v8x4cs32:
+    #   slurm_id: 0
+    #   description: "verify lr 1e-4"
+
+    # # ridhc37u:
+    # #   slurm_id: 0
+    # #   description: "verify lr 5e-5"
+
+    # clth9r63:
+    #   slurm_id: 0
+    #   description: "verify nopos lr1e-4"
+
+    # # vogs0w5d:
+    # #   slurm_id: 0
+    # #   description: "verify nopos lr5e-5"
+
+    # d57e4kpx:
+    #   slurm_id: 0
+    #   description: "verify nopos c_in lr1e-4"
+
+    # wn3rb9sy:
+    #   slurm_id: 0
+    #   description: "verify nopos c_in lr5e-5"
+
+    # mz16xk9h:
+    #   slurm_id: 0
+    #   description: "verify c_in lr1e-4"
+
+    # lcdqhsuy:
+    #   slurm_id: 0
+    #   description: "verify c_in lr5e-5"
+
+
+
+    ### Verify z500 normal input
+    # n1aghb86:
+    #   slurm_id: 0
+    #   description: "c_in, sigma_data=0.7855, lr1e-4"
+
+    # l41j5cx8:
+    #   slurm_id: 0
+    #   description: "c_in, sigma_data=0.7855, lr5e-5"
+
+    # vyp4oxti:
+    #   slurm_id: 0
+    #   description: "c_in, sigma_data=0.7855, lr1e-5"
+
+    # wqzn08ra:
+    #   slurm_id: 0
+    #   description: "c_in, sigma_data=0.7855, nopos, lr5e-5"
+
+    # jotkj8a5:
+    #   slurm_id: 0
+    #   description: "c_in, sigma_data=0.5, lr5e-5"
+
+    # at8gd7zk:
+    #   slurm_id: 0
+    #   description: "direct, sigma_data=0.7855, lr5e-5"
+
+    # xr4wmbpj:
+    #   slurm_id: 0
+    #   description: "direct, sigma_data=0.7855, nopos, lr5e-5"
+    
+
+
+    # ### Verify multi-var model normal input
+    # # sg487dhk:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=0.5, lr1e-4"
+
+    # # fqfrkptu:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=0.5, lr5e-5"
+
+    # # crvfq3j8:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=0.5, nopos, lr1e-4"
+    
+    # # oo4qsxjt:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=0.5, nopos, lr5e-5"
+
+    # # evcpey17:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=1.7, lr1e-4"
+
+    # n8fsd7ej:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, lr5e-5"
+    # o976d05i:
+    #   slurm_id: 0
+    #   description: "cont'd n8fsd7ej, p_mean=-1.0"
+    # # lrvjnhze:
+    # #   slurm_id: 0
+    # #   description: "cont'd n8fsd7ej, p_mean=-0.5"
+    # # akpxdm0v:
+    # #   slurm_id: 0
+    # #   description: "cont'd n8fsd7ej, p_mean=0.0"
+    
+    # # aw4hatqy:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=1.7, lr1e-5"
+    # # zab3pvq6:
+    # #   slurm_id: 0
+    # #   description: "cont'd aw4hatqy, p_mean=-1.2 (no change)"
+    # # le3rk4h7:
+    # #   slurm_id: 0
+    # #   description: "cont'd aw4hatqy, p_mean=-1.0"
+    # # c4penrg2:
+    # #   slurm_id: 0
+    # #   description: "cont'd aw4hatqy, p_mean=-0.5"
+    # # yt09egdj:
+    # #   slurm_id: 0
+    # #   description: "cont'd aw4hatqy, p_mean=0.0"
+
+    # # gge7fstj:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=1.7, nopos, lr1e-4"
+
+    # # fy8inpdo:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=1.7, nopos, lr5e-5"
+
+    # # w793r65z:
+    # #   slurm_id: 0
+    # #   description: "large, direct, sigma_data=1.7, lr1e-4"
+    
+    # # wiha7oy5:
+    # #   slurm_id: 0
+    # #   description: "large, direct, sigma_data=1.7, lr5e-5"
+
+    # # wg7fwirn:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=1.7, p_mean=-1.0, lr1e-5"
+    # # zsdvzxce:
+    # #   slurm_id: 0
+    # #   description: "cont'd wg7fwirn, p_mean=-1.0"
+    
+    # # cv1t68ul:
+    # #   slurm_id: 0
+    # #   description: "large, c_in, sigma_data=1.7, p_mean=-0.5, lr1e-5"
+    
+    # usrip205:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, lr7e-6"
+    # du3aef21:
+    #   slurm_id: 0
+    #   description: "cont'd usrip205"
+    # m48tyoh1:
+    #   slurm_id: 0
+    #   description: "cont'd usrip205, lr5e-6"
+    
+    # byociz6f:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, lr5e-6"
+    
+    # un7dxtg2:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, p_mean=-1.5, lr1e-5"
+
+    # wbf3rnac:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, p_mean=-2.0, lr1e-5"
+    
+    # tuylvdbk:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, p_mean=-2.0, lr7e-6"
+
+    # ix0libca:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, p_mean=-2.5, lr7e-6"
+    # sutd3m5i:
+    #   slurm_id: 0
+    #   description: "cont'd ix0libca, lr5e-6"
+    # z5es8gwo:
+    #   slurm_id: 0
+    #   description: "cont'd ix0libca, p_mean=-2.0, lr5e-6"
+    # wdo9sw81:
+    #   slurm_id: 0
+    #   description: "cont'd ix0libca, p_mean=-1.5, lr5e-6"
+    
+    # flkqfipn:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, p_mean=-3.0, lr7e-6"
+
+    # d8c70x5f:
+    #   slurm_id: 0
+    #   description: "large, c_in, sigma_data=1.7, p_mean=-3.0, lr5e-6"
+
+
+
+
+    # verify z500 large
+    # d76uzvke:
+    #   slurm_id: 0
+    #   description: "50%, lr1e-4"
+    # cbtuef9h:
+    #   slurm_id: 0
+    #   description: "50%, lr5e-5"
+    # i9z0cd7g:
+    #   slurm_id: 0
+    #   description: "50%, lr1e-5"
+    # kz8t4el6:
+    #   slurm_id: 0
+    #   description: "50%, sigma_data=157.38, lr5e-5"
+    # ybqk0r1u:
+    #   slurm_id: 0
+    #   description: "lr1e-4"
+    # mlipw0ut:
+    #   slurm_id: 0
+    #   description: "lr5e-5"
+    # r1vsqk29:
+    #   slurm_id: 0
+    #   description: "lr1e-5"
+    # pwt5qz3l:
+    #   slurm_id: 0
+    #   description: "sigma_data=157.38, lr5e-5"
+
+
+    # # verify multi-var small
+    # ipva6r0l:
+    #   slurm_id: 0
+    #   description: "50%, lr1e-4"
+    # al327wme:
+    #   slurm_id: 0
+    #   description: "50%, lr5e-5"
+    # x8ynh6tv:
+    #   slurm_id: 0
+    #   description: "50%, lr1e-5"
+    # e9236d5v:
+    #   slurm_id: 0
+    #   description: "50%, sigma_data=0.4165, lr5e-5"
+    # kylsmf6g:
+    #   slurm_id: 0
+    #   description: "lr1e-4"
+    # ha0sunwh:
+    #   slurm_id: 0
+    #   description: "lr5e-5"
+    # r2ywecx8:
+    #   slurm_id: 0
+    #   description: "lr1e-5"
+    # mjnwxlfz:
+    #   slurm_id: 0
+    #   description: "sigma_data=0.4165, lr5e-5, v0"
+    # gxgam7wy:
+    #   slurm_id: 0
+    #   description: "multi-var, d128, hl3, sigma_data=0.4165, lr5e-5, v1"
+
+    
+    # # z500 d2048 hl3 enc-lnorm
+    # uajezdib:
+    #   slurm_id: 0
+    #   description: "z500 d2048 hl3 enc-lnorm, sigma_data=1.0, lr1e-4"
+    # d2qyfenm:
+    #   slurm_id: 0
+    #   description: "z500 d2048 hl3 enc-lnorm, sigma_data=1.0, lr5e-5"
+    # zxl3k69w:
+    #   slurm_id: 0
+    #   description: "z500 d2048 hl3 enc-lnorm, sigma_data=1.0, lr1e-5"
+
+
+    # # z500 d2048 hl3
+    # ohe8nsqb:
+    #   slurm_id: 0
+    #   description: "z500 d2048 hl3, sigma_data=39.29, lr1e-4"
+    # du0yr1ho:
+    #   slurm_id: 0
+    #   description: "z500 d2048 hl3, sigma_data=39.29, lr5e-5"
+    # w6vlg2kh:
+    #   slurm_id: 0
+    #   description: "z500 d2048 hl3, sigma_data=39.29, lr1e-5"
+
+    
+    # # multi-var d2048 hl3 enc-lnorm
+    # v90b7dkn:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl3 enc-lnorm, sigma_data=1.0, lr1e-4"
+    # qs0o16l5:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl3 enc-lnorm, sigma_data=1.0, lr5e-5"
+    # xs4k5w6z:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl3 enc-lnorm, sigma_data=1.0, lr1e-5"
+
+    
+    # # multi-var d2048 hl3
+    # rp5hyfzq:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl3, sigma_data=2.7047, lr1e-4"
+    # blpm5k8s:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl3, sigma_data=2.7047, lr5e-5"
+    # nyb918zj:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl3, sigma_data=2.7047, lr1e-5"
+
+
+    # # # multi-var d128 hl5
+    # xs72tmix:
+    #   slurm_id: 0
+    #   description: "multi-var d128 hl5, sigma_data=0.2415, lr5e-5"
+    # hzuspb6o:
+    #   slurm_id: 0
+    #   description: "multi-var d128 hl5, sigma_data=0.2415, lr1e-5"
+    
+    # eyt92aem:
+    #   slurm_id: 0
+    #   description: "multi-var d128 hl5, nopos, sigma_data=0.2507, lr5e-5"
+    # rcxabfjy:
+    #   slurm_id: 0
+    #   description: "multi-var d128 hl5, nopos, sigma_data=0.2507, lr1e-5"
+
+
+    # # multi-var d512 hl3
+    # kc4gxkv9:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl3, sigma_data=1.1785, lr5e-5"
+    # j451u0xh:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl3, sigma_data=1.1785, lr1e-5"
+    
+    # # multi-var d512 hl4
+    # hezo31n7:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl4, sigma_data=0.827, lr5e-5"
+    # x45d91xl:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl4, sigma_data=0.827, lr1e-5"
+
+    # # multi-var d512 hl5
+    # nxkztywb:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl5, sigma_data=0.5789, lr5e-5"
+    # hh98utal:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl5, sigma_data=0.5789, lr1e-5"
+    
+    # t7kfn6so:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl5, nopos, sigma_data=0.6481, lr5e-5"
+    # ml5owrjp:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl5, nopos, sigma_data=0.6481, lr1e-5"
+    
+    # rj2xksg0:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl5, enc-lnorm, sigma_data=1.0, lr5e-5"
+    # xqgy519d:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl5, enc-lnorm, sigma_data=1.0, lr1e-5, 1k samples/epoch"
+    # fzxtlnbp:
+    #   slurm_id: 0
+    #   description: "multi-var d512 hl5, enc-lnorm, sigma_data=1.0, lr1e-5, 4k samples/epoch"
+
+
+    # # multi-var d2048 hl5
+    # jnqp2014:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl5, sigma_data=1.832, lr5e-5"
+
+    # yu4exvfo:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl5, sigma_data=1.832, lr1e-5"
+
+    # inkvz5se:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl5, sigma_data=1.832, lr7e-6"
+
+    # # u5q6y1g4:
+    # #   slurm_id: 0
+    # #   description: "multi-var d2048 hl5, sigma_data=1.832, p_mean=-2.0, lr7e-6"
+
+    # # twlixv8d:
+    # #   slurm_id: 0
+    # #   description: "multi-var d2048 hl5, sigma_data=1.832, p_mean=-2.5, lr7e-6"
+    
+    # # y2ern49h:
+    # #   slurm_id: 0
+    # #   description: "multi-var d2048 hl5, sigma_data=1.832, p_mean=-3.0, lr7e-6"
+    
+    # multi-var d2048 hl5, enc-lnorm
+    # g43moe8v:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl5, enc-lnorm, lr5e-5"
+
+    # ip5jx6sg:
+    #   slurm_id: 0
+    #   description: "multi-var d2048 hl5, enc-lnorm, lr1e-5"
+
+    # y0l8egdr:
+    #   slurm_id: 0
+    #   # description: "multi-var d2048 hl5, enc-lnorm, lr7e-6"
+    #   description: "single-sample baseline"
+
+    # # wgclyizw:
+    # #   slurm_id: 0
+    # #   description: "multi-var d2048 hl5, enc-lnorm, p_mean=-2.0, lr7e-6"
+
+    # # zcgvenal:
+    # #   slurm_id: 0
+    # #   description: "multi-var d2048 hl5, enc-lnorm, p_mean=-2.5, lr7e-6"
+    
+    # # e4h7qlpw:
+    # #   slurm_id: 0
+    # #   description: "multi-var d2048 hl5, enc-lnorm, p_mean=-3.0, lr7e-6"
+
+
+    # ### JEPAv2 pre-training and temporal model, single sample
+    # q7snk98g:
+    #   slurm_id: 0
+    #   description: "JEPAv2, sophie's model (c9bgfa31-pretrain) at epoch 64, sigma_data=2.1921, lr1e-5"
+    # ejtspx0h:
+    #   slurm_id: 0
+    #   description: "JEPAv2, sophie's model (c9bgfa31-pretrain) at epoch 64, sigma_data=2.1921, lr7e-6"
+    
+    # byo0bvcr:
+    #   slurm_id: 0
+    #   description: "JEPAv2, seb's model (op8wojf6-stage1) at epoch 64, sigma_data=3.2621, lr1e-5"
+    # zn093cl8:
+    #   slurm_id: 0
+    #   description: "JEPAv2, seb's model (op8wojf6-stage1) at epoch 64, sigma_data=3.2621, lr7e-6"
+    # u8xwjpuo:
+    #   slurm_id: 0
+    #   description: "JEPAv2, seb's model (op8wojf6-stage1) at epoch 160, sigma_data=3.2621, lr1e-5"
+    # ok7bldft:
+    #   slurm_id: 0
+    #   description: "JEPAv2, seb's model (op8wojf6-stage1) at epoch 160, sigma_data=3.2621, lr7e-6"
+    
+    ### Multi-sample d512 hl5
+    # b7pebcgn:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=0.63, lr1e-5"
+    # vrb4ojwn:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=0.63, lr7e-6"
+    # bbosl5wy:
+    #   slurm_id: 0
+    #   # description: "multi-sample, d512 hl5, sigma_data=1.0, lr1e-5"
+    #   description: "Former best model"
+    # hgjbdal6:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=1.0, lr7e-6"
+
+    # m17ar62q:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=0.66, lr1e-5, REPLICATION"
+    # p41upvkf:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=0.66, lr7e-6, REPLICATION"
+    # s8l5fj4z:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=1.0, lr1e-5, REPLICATION"
+    # usqrzolj:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=1.0, lr7e-6, REPLICATION"
+
+    # e6bincg5:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=0.63, \\w LN, lr1e-5, REPLICATION2"
+    # z8bysfo1:
+    #   slurm_id: 0
+    #   description: "multi-sample, d512 hl5, sigma_data=0.63, \\w LN, lr7e-6, REPLICATION2"
+
+    # yjmxdn09:
+    #   slurm_id: 0
+    #   description: "from-run-id lr7e-6, sigma=0.63, full-pipeline branch"
+    # dengsfbc:
+    #   slurm_id: 0
+    #   description: "load-chkpt lr7e-6, sigma=0.63, full-pipeline branch"
+    # h3mrs4zu:
+    #   slurm_id: 0
+    #   description: "load-chkpt lr7e-6, sigma=1, full-pipeline branch"
+    # pvtcz84y:
+    #   slurm_id: 0
+    #   description: "p-mean=-1.5, full-pipeline branch"
+    # yo30yc9v:
+    #   slurm_id: 0
+    #   description: "p-mean=-1.2 (default) full-pipeline branch"
+    # vl3jyb2w:
+    #   slurm_id: 0
+    #   description: "p-mean=-1.0, full-pipeline branch"
+    # g13dutf2:
+    #   slurm_id: 0
+    #   description: "p-mean=-0.5, full-pipeline branch"
+    # lymb421h:
+    #   slurm_id: 0
+    #   description: "p-mean=0.0, full-pipeline branch"
+    # stsmlrej:
+    #   slurm_id: 0
+    #   description: "p-mean=0.5, full-pipeline branch"
+
+    # fgv9yh65:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=1.5"
+    # x26dfawj:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=1.5, c_skip=0, c_out=1"
+    # vyo20vm7:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=1.5, p(cls_free_guid)=0.15"
+    # i5vk8rh3:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=1.5, residual"
+    # p2yl9daq:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=-2.5, residual"
+    # btuczr1p:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=-1.5, residual"
+    # b8t7rbg6:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=-0.5, residual"
+    # hymrq78h:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=0.5, residual"
+    # ashdva06:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=-1.5, residual, hist2"    
+    # kwiyd5e9:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=-1.5, residual, p(cls_free_guid)=0.15"
+    # jijalb2f:
+    #   slurm_id: 0
+    #   description: "d512, p-mean=-1.5, residual, c_skip=0, c_out=1"
+
+    # lgicqlm0:
+    #   slurm_id: 0
+    #   description: "d2048, p-mean=1.5"
+    # h0godrfk:
+    #   slurm_id: 0
+    #   description: "d2048, p-mean=1.5, c_skip=0, c_out=1"
+
+    # akp3o2s6:
+    #   slurm_id: 0
+    #   description: "multi-stream input; ERA5 and SYNOP decoder"
+    # # dmw41dkg:
+    # #   slurm_id: 0
+    # #   description: "multi-stream input; ERA5 only decoder"
+    # h0yq5ev8:
+    #   slurm_id: 0
+    #   description: "baseline, ERA5 only"
+
+    # de672g3m:
+    #   slurm_id: 0
+    #   description: "core-training u[0.002,80], 64-epoch backbone"
+    # xz1m6a3g:
+    #   slurm_id: 0
+    #   description: "core-training u[0.4,50], 64-epoch backbone"
+    # b7aqgjhk:
+    #   slurm_id: 0
+    #   description: "cont'd xz1m6a3g"
+    # ltv865ur:
+    #   slurm_id: 0
+    #   description: "core-training u[0.4,50], uninitialised encoder"
+    # i80pbywz:
+    #   slurm_id: 0
+    #   description: "core-training p_mean=3.5, 64-epoch backbone"
+    # lzkf43hm:
+    #   slurm_id: 0
+    #   description: "core-training u[0.4,50], concat, 64-epoch backbone"
+    # syacjofd:
+    #   slurm_id: 0
+    #   description: "cont'd lzkf43hm"
+    # jyx72jmq:
+    #   slurm_id: 0
+    #   description: "core-training u[0.4,50], concat, uninitialised encoder"
+    # h1rfw756:
+    #   slurm_id: 0
+    #   description: "core-training u[0.4,50], concat, p(cfg)=0.05"
+    # ysy4tc1m:
+    #   slurm_id: 0
+    #   description: "core-training u[0.4,50], concat, p(cfg)=0.15"
+
+    # qegtincx:
+    #   slurm_id: 0
+    #   description: "decoder fine-tuning u[0.002,80]"
+    # ggvq3ect:
+    #   slurm_id: 0
+    #   description: "decoder fine-tuning u[0.4,50]"
+    # rswal1b0:
+    #   slurm_id: 0
+    #   description: "decoder fine-tuning p_mean=3.5"
+    # d6w8k3yt:
+    #   slurm_id: 0
+    #   description: "decoder fine-tuning u[0.4,50], concat"
+    # e8r50w19:
+    #   slurm_id: 0
+    #   description: "decoder fine-tuning u[0.4,50], concat, p(cfg)=0.05"
+    # tk9xedcp:
+    #   slurm_id: 0
+    #   description: "decoder fine-tuning u[0.4,50], concat, p(cfg)=0.15"
+
+    # tj39ht60:
+    #   slurm_id: 0
+    #   description: "core-training u[0.002,80], 128-epoch backbone"
+    # htogxu4l:
+    #   slurm_id: 0
+    #   description: "core-training u[0.4,50], 128-epoch backbone"
+    # wuie7y31:
+    #   slurm_id: 0
+    #   description: "core-training p_mean=3.5, 128-epoch backbone"
+    
+    # bm360age:
+    #   slurm_id: 0
+    #   description: "core-training n(0.5,0.5), 128-epoch backbone"
+    # d9ocq6k7:
+    #   slurm_id: 0
+    #   description: "core-training n(0.5,0.5), 128-epoch backbone, lr7e-6"
+    # b6cx4sv0:
+    #   slurm_id: 0
+    #   description: "core-training n(0.5,0.7), 128-epoch backbone"
+    # gzfoxp4s:
+    #   slurm_id: 0
+    #   description: "core-training u(0.6,4.5), 128-epoch backbone"
+    # alqdx2mu:
+    #   slurm_id: 0
+    #   description: "core-training u(0.4,6.7), 128-epoch backbone"
+    
+    ## Julian's models
+    # lzkf43hm:
+    #   slurm_id: 0
+    #   description: "O96 baseline"
+    # # t2b00vd3:
+    # #   slurm_id: 0
+    # #   description: "N320 6h in, 6h out"
+    # # imqmpzj9:
+    # #   slurm_id: 0
+    # #   description: "N320 6h in, 1h out"
+    # # dhzgdwnh:
+    # #   slurm_id: 0
+    # #   description: "O96+obs, temp JEPA encoder, br"
+    # mydxb9f9: # inf hithl1gx (fc12, s12)
+    #   slurm_id: 0
+    #   description: "O96+obs, temp JEPA encoder, ph"
+    # # qqqufkus: # inf hithl1gx (fc12, s12)
+    # #   slurm_id: 0
+    # #   description: "O96+obs, temp JEPA encoder, ph, replication matze"
+    # # tb4l9yu8:
+    # #   slurm_id: 0
+    # #   description: "N320+obs FAILED"
+    # umzefp4d:
+    #   slurm_id: 0
+    #   description: "N320+obs, space JEPA, encoder"
+    # # gxi9jux3:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, space JEPA, encoder, replication matze"
+    # m2oljw68:
+    #   slurm_id: 0
+    #   description: "N320+obs, space JEPA, forecast fine-tuned"
+    # # wteiwasd:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, space JEPA, forecast fine-tuned, replication matze"
+
+    # ## Pre-print
+    # # ni41n7gy:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Christian's skkbxfya, forecasting, v1"
+    # # j4vz1fdn:
+    # #   slurm_id: 0
+    # #   description: "cont'd ni41n7gy"
+    # mx7k88dy:
+    #   slurm_id: 0
+    #   description: "N320+obs, Christian's skkbxfya, forecasting, v2"
+    # # istjbk3d:
+    # #   slurm_id: 0
+    # #   description: "cont'd mx7k88dy"
+    # # # q6eia99f:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Christian's model, 2 nodes, u[0.4,50], lr1e-4, d2560, cfg=0.15"
+    # # # kqqeni2a:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Christian's skkbxfya, 2 nodes, u[0.002,20], lr1e-4, d2048"
+    # # # xxoplye6:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Christian's skkbxfya, 8 nodes, u[0.4,50], lr2e-4, d2560"
+    # # # zuqeo1qu:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Christian's model, 8 nodes, lr6e-5"
+    # # # euddtjay:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Christian's model, 8 nodes, lr4e-5"
+    # # # ajajeemc:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Christian's model, 8 nodes, lr3e-5"
+    # # # qadjp1xy:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Seb's fx276yn3 t-JEPA \\w SwiGLU/XSA, 2 nodes, u[0.4,50], lr1e-4, d2560"
+    # # # c3nvsqu8:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Matze, wrong"
+    # # # pgfp50c2:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 4/2 workers"
+    # bwmk4ktc:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 8/4 workers"
+    # # # l0irmtt2:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 8/4 workers, EMA600"
+    # # # dn06zo23:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 8/4 workers, u[0.002,20]"
+    # # # pgfp50c2:
+    # # #   slurm_id: 0
+    # # #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 4/2 workers"
+    # # rx8x7966:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze"
+    # # qkcxcs6y:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze, u[0.002,20]"
+    # lwitv0aa:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Moritz"
+    # # xplitm7d:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze, lr5e-5"
+    # # zyv3j2cv:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze, lr1e-5"
+    # # wqk4gw21:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze, cross_attn"
+    # r10vvlcm:
+    #   slurm_id: 0
+    #   description: "N320+obs, Sophie's oqkez8qs s-JEPA, 2 nodes"
+    # # na8qg82i:
+    # #   slurm_id: 0
+    # #   description: "cont'd r10vvlcm"
+    # zfo9fy71:
+    #   slurm_id: 0
+    #   description: "N320+obs, Sophie's v7tq6cxh s-JEPA, Matze, lr1e-4"
+
+    # bwmk4ktc:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 8/4 workers"
+    # rx8x7966:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze"
+    # qkcxcs6y:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze, u[0.002,20]"
+    # lwitv0aa:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Moritz"
+    # wqk4gw21:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze, cross_attn"
+    # xplitm7d:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze, lr5e-5"
+    # zyv3j2cv:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's nhv6tkln t-JEPA, Matze, lr1e-5"
+
+    # mx7k88dy:
+    #   slurm_id: 0
+    #   description: "N320+obs, Christian's skkbxfya, forecasting, v2"
+    # bwmk4ktc:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 8/4 workers"
+    # f3u63n81:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, Matze, n1e-3"
+    # gnfqfjzf:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, Matze, n5e-4"
+    # px75wz2q:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, Matze, n1e-4"
+    # iojoq1zg:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, Matze, n5e-5"
+    # bmwauo2j:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, Matze, n1e-4, u[0.002,20]"
+    # hdonptbc:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, Matze, n1e-4, cross_attn"
+    # dnvjrsh4:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, Matze, n1e-4, fe16"
+
+    mx7k88dy:
+      slurm_id: 0
+      description: "N320+obs, Christian's skkbxfya, forecasting, v2"
+    # bwmk4ktc:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 8/4 workers"
+    # nmxshdp1:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-3, fe16"
+    # tpagxnog:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n5e-4, fe16"
+    # tbmj4bqe:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-4, fe16"
+    # mt5zb5g2:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n5e-5, fe16"
+    # z7kl500t:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-4, u[0.002,20], fe16"
+    # r9dmfnkp:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-4, cross_attn"
+    # sffxs2f3:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX-forcing, n1e-3, fe16"
+    wssjz73k:
+      slurm_id: 0
+      description: "N320+obs, Seb's sdnbfpve t-JEPA, n1e-3, fe16"
+    # oxz3bl5m:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, n1e-3, fe16, v2"
+    # bz3eyqt9:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, n1e-4, fe16"
+    # ypl7jnlf:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, n1e-4, u[0.002,20], fe16"
+    # :
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, n1e-4, u[0.002,20], fe16, min_snr_gamma"
+    # :
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, n1e-4, u[0.002,20], fe16, edm precond"
+    # gn9bczai:
+    #   slurm_id: 0
+    #   description: "cont'd wssjz73k, u[0.4,50]->u[0.002,50], min_snr_gamma"
+    # r1jeu6fm:
+    #   slurm_id: 0
+    #   description: "cont'd wssjz73k, u[0.4,50]->u[0.002,50], edm precond"
+    # j5lovz3l:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, n1e-4, cross_attn, fe16"
+
+    # u6gfibop:
+    #   slurm_id: 0
+    #   description: "ERA5, Sophie's zf381x9n s-JEPA"
+    # sn239i5c:
+    #   slurm_id: 0
+    #   description: "ERA5, Sophie's zf381x9n s-JEPA, fe16"
+    # hpg9dufc:
+    #   slurm_id: 0
+    #   description: "ERA5, Sophie's zf381x9n s-JEPA, u[0.002,20] edm-precond"
+    # s1p23eke:
+    #   slurm_id: 0
+    #   description: "ERA5, Sophie's zf381x9n s-JEPA, u[0.002,20] edm-precond, cross-attn"
+    # abfn0bkd:
+    #   slurm_id: 0
+    #   description: "ERA5, Sophie's zf381x9n s-JEPA, u[0.002,20] diff-loss-wghtng, cross-attn"
+
+    fanvbb7n:
+      slurm_id: 0
+      description: "Christian's qyehik8n forecast, oper-an"
+
+    # ## Decoder ftuning
+    # # mapw62ot:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Christian's skkbxfya, diff ni41n7gy, mnt=542080"
+    # # b5s5su0b:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Christian's skkbxfya, diff ni41n7gy, mnt=271040"
+    # # m30itrl8:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Christian's skkbxfya, diff mx7k88dy, mnt=542080"
+    # # fn8ezp23:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Christian's skkbxfya, diff mx7k88dy, mnt=271040"
+    # # hzsc0c1m:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Christian's skkbxfya, diff xxoplye6, mnt=542080"
+    # # numplcy4:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Christian's skkbxfya, diff xxoplye6, mnt=271040"
+    # # oqr95jhw:
+    # #   slurm_id: 0
+    # #   description: "N320+obs, Sophie's oqkez8qs s-JEPA, diff r10vvlcm, mnt=542080"
+    # qtbn8vgb:
+    #   slurm_id: 0
+    #   description: "Christian's skkbxfya forecast, 128 epochs diffusion, v1"
+    # # st0zq9m3:
+    # #   slurm_id: 0
+    # #   description: "Christian's skkbxfya, 256 epochs diffusion, v1"
+    # kz2n1t60:
+    #   slurm_id: 0
+    #   description: "Christian's skkbxfya forecast, 128 epochs diffusion, v2"
+    # # z6qtgtsc:
+    # #   slurm_id: 0
+    # #   description: "Christian's skkbxfya, 256 epochs diffusion, v2"
+    # nu2d0ew0:
+    #   slurm_id: 0
+    #   description: "Seb's cw6a4szu t-JEPA, 128 epochs diffusion"
+    # pka6qzrh:
+    #   slurm_id: 0
+    #   description: "Sophie's oqkez8qs s-JEPA, 128 epochs diffusion"
+    
+    # kz2n1t60:
+    #   slurm_id: 0
+    #   description: "N320+obs, Christian's skkbxfya, forecasting, v2"
+    # vr8ycerd:
+    #   slurm_id: 0
+    #   description: "N320+obs, Christian's skkbxfya, forecasting, v1, duplicate"
+    # nu2d0ew0:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's cw6a4szu t-JEPA, Moritz, 8/4 workers"
+    # ptf8foxc:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-3, fe16"
+    # z056asd8:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-3, fe16, dec-fix"
+    # l93r24ot:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-3, fe16, dec-fix, lr1e-5"
+    # lyh1ag6v:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-3, fe16, dec-fix, lr5e-4"
+    # azi3wsfn:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-3, fe16, dec-fix, lr1e-3"
+    # gp8hslq7:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX-forcing"
+    # mqnh8znm:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-3, fe16, lr5e-5"
+    # qj9b85dq:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-3, fe16, mk/jk/kt"
+    # ydesr0zv:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n5e-4, fe16"
+    # apkng5mo:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-4, fe16"
+    # dzw0wlus:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n5e-5, fe16"
+    # j4xz2yxg:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-4, u[0.002,20], fe16"
+    # :
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpve t-JEPA, FIX, n1e-4, cross_attn"
+
+    d3p3t9k9:
+      slurm_id: 0
+      description: "Christian's qyehik8n forecast, oper-an"
+
+    # raf7g44r:
+    #   slurm_id: 0
+    #   description: "Moritz' decoder fine-tuning"
+    # ffoo1idm:
+    #   slurm_id: 0
+    #   # description: "N320+obs, Seb's sdnbfpye t-JEPA, FIX2, Moritz' branch"
+    #   description: "Matze's decoder fine-tuning"
+    # g9gf93l8:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's sdnbfpye t-JEPA, FIX2, develop-ssl-diffusion-v1"
+    # b2el5kjn:
+    #   slurm_id: 0
+    #   description: "N320+obs, Seb's nhv6tkln t-JEPA"
+    
+    
+    
+    

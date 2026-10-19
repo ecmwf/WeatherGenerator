@@ -1,0 +1,17 @@
+train : 
+  plot : 
+
+    w1bd3ofz:
+      slurm_id: 0
+      description: "6h 3-step pre-train"
+    izu35lvf:
+      slurm_id: 0
+      description: "6h 8-step fine-tune"
+
+    wzft7m96:
+      slurm_id: 0
+      description: "6x1h 3-step pre-train"
+    im96wylr:
+      slurm_id: 0
+      description: "6x1h 8-step fine-tune"
+    

@@ -1,0 +1,614 @@
+
+# #optional: if commented out all is taken care of by the default settings
+# # NB. global options apply to all run_ids
+# max_workers: 4  # limit parallel IO workers; prevents OOM when loading multiple zarr members
+
+global_plotting_options:
+#  regions: ["europe", "global"]
+  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+  dpi_val : 300
+  fps: 2
+  animation_format: "mp4"
+  # ERA5:
+  #   marker_size: 3
+  #   scale_marker_size: 1
+  #   marker: "o"
+  #   alpha: 0.5
+  #   add_healpix_grid: false
+  #   healpix_nside: 4
+  #   2t: 
+  #     vmin: 205
+  #     vmax: 315
+  #   10u:
+  #     vmin: -23
+  #     vmax: 23
+  #   10v:
+  #     vmin: -23
+  #     vmax: 23
+  #   z_500:
+  #     vmin: 4700
+  #     vmax: 6000
+  #   t_850:
+  #     vmin: 230
+  #     vmax: 310
+  #   u_850:
+  #     vmin: -40
+  #     vmax: 40
+  #   v_850:
+  #     vmin: -40
+  #     vmax: 40
+  #   q_850:
+  #     vmin: 0
+  #     vmax: 0.02
+  
+
+evaluation:
+  # metrics: ["rmse", "acc", "froct", "spread", "ssr", "ssr_adj", "crps"]
+  # metrics: ["rmse", "acc", "froct"]
+  # metrics: ["rmse"]
+  metrics: ["rmse", "ssr"]
+  # regions: ["global", "nhem"]
+  regions: ["global"]
+  summary_plots : true
+  ratio_plots : false
+  heat_maps : false
+  summary_dir: "./plots/"
+  plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: true
+  score_cards: false
+  bar_plots: false
+
+
+default_streams:
+  ERA5:
+    climatology_path: "/e/scratch/weatherai/shared_work/assets/climatology/aifs-ea-an-oper-0001-mars-o96-1980-2020-6h-v6_climatology.zarr"
+    channels: ["2t", "10u", "10v", "z_500", "t_850", "u_850", "v_850", "q_850"]
+    # channels: ["2t", "z_500", "q_850"]
+    # channels: ["10u"]
+    evaluation:
+      forecast_step: "all"
+      # forecast_step: [1, 2, 3, 4]
+      # forecast_step: [1]
+      sample: "all"
+      # sample: "1-16"
+      # sample: [0]
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
+      # ensemble: "mean"
+    plotting:
+      sample: [0]
+      forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      # forecast_step: [0]
+      # forecast_step: "0-2"
+      plot_maps: true
+      plot_histograms: false
+      plot_animations: true
+      # ensemble: "mean"  #supported: "all", "mean", [0,1,2]
+
+run_ids :
+  # tq60natw:
+  #   type: "json"
+  #   label: "atmofs03, deterministic"
+  # wuc8xgth:
+  #   # type: "json"
+  #   label: "lr1e-5, sigma 0.63"
+  #   epoch: 0
+  #   rank: 0
+  # ui2u4gzq:
+  #   # type: "json"
+  #   label: "lr7e-6, sigma 0.63"
+  #   epoch: 0
+  #   rank: 0
+  # u3ce60ba:
+  #   # type: "json"
+  #   label: "lr1e-5, sigma 1.0"
+  #   epoch: 0
+  #   rank: 0
+  # b2fwt8c5:
+  #   # type: "json"
+  #   label: "lr7e-6, sigma 1.0"
+  #   epoch: 0
+  #   rank: 0
+
+  # c0ckub48:
+  #   # type: "json"
+  #   label: "lr1e-5, sigma 0.63"
+  #   epoch: 0
+  #   rank: 0
+  # ztw84lc6:
+  #   # type: "json"
+  #   label: "wagga"
+  #   epoch: 0
+  #   rank: 0
+  # ey4m2ect:
+  #   # type: "json"
+  #   label: "wagga"
+  #   epoch: 0
+  #   rank: 0
+  # snk2el1a:
+  #   # type: "json"
+  #   label: "wagga"
+  #   epoch: 0
+  #   rank: 0
+  # x752ztus:
+  #   # type: "json"
+  #   label: "wagga"
+  #   epoch: 0
+  #   rank: 0
+  # mzvk6n4g:
+  #   # type: "json"
+  #   label: "wagga"
+  #   epoch: 0
+  #   rank: 0
+  # kq6v5exg:
+  #   # type: "json"
+  #   label: "wagga"
+  #   epoch: 0
+  #   rank: 0
+  # cm9vntow:
+  #   # type: "json"
+  #   label: "wagga"
+  #   epoch: 0
+  #   rank: 0
+  # mhpdmbj2:
+  #   # type: "json"
+  #   label: "wagga"
+  #   epoch: 0
+  #   rank: 0
+
+  # myotfc5v:
+  #   # type: "json"
+  #   label: "lr1e-5, sigma 0.63"
+  #   epoch: 0
+  #   rank: 0
+  
+  # jsbk6cgh:
+  #   # type: "json"
+  #   label: "lr7e-6, sigma 0.63"
+  #   epoch: 0
+  #   rank: 0
+
+  # ivygqdtc:
+  #   # type: "json"
+  #   label: "ln12, n1e-3, cross-attn, sigma_max=80"
+  # vl56h3s9:
+  #   # type: "json"
+  #   label: "ln12, n1e-3, cross-attn, sigma_max=88"
+
+  # qehwm0c8:
+  #   type: "json"
+  #   label: "u[0.002,80], concatenate"
+  # hz7esq0y:
+  #   # type: "json"
+  #   label: "u[0.002,80], concatenate, sigma_max=88"
+
+  # lyjnzkwl:
+  #   type: "json"
+  #   label: "u[0.4,50], concatenate"
+  # q9bqkjnh:
+  #   type: "json"
+  #   label: "u[0.4,50], concatenate, single run, sigma_max=240"
+
+  # adrpl9iy:
+  #   type: "json"
+  #   label: "p_mean=1.5, cross-attn, ln12, n1e-3"  # sigma_max=80
+  # mwnpoib4:
+  #   type: "json"
+  #   label: "ln12, n1e-3, cross-attn, single run, sigma_max=240"
+
+
+  # # qgwiqlxa:
+  # #   type: "json"
+  # #   label: "64 epoch backbone, u[0.002,80], cross-attn, layernorm, n1e-3, cskip0"
+  # # jia7v430:
+  # #   type: "json"
+  # #   label: "u[0.4,50], cross-attn, layernorm, n1e-3, cskip0, uninitialised encoder"
+  # ipl4yvwt:
+  #   type: "json"
+  #   label: "64 epoch backbone, u[0.4,50], cross-attn, layernorm, n1e-3, cskip0"
+  # jhrfkbxp:
+  #   type: "json"
+  #   label: "64 epoch backbone, p_mean=3.5, cross-attn, layernorm, n1e-3, cskip0"
+  # yia5efo9:
+  #   type: "json"
+  #   label: "256 epoch diffusion training, u[0.4,50], cross-attn, layernorm, n1e-3, cskip0"
+  # l205ceaf:
+  #   type: "json"
+  #   label: "128 epoch diffusion training, 16 samples, ens 4, u[0.4,50], cross-attn, layernorm, n1e-3, cskip0, p(cfg)=0.15"
+  # kreg9401:
+  #   type: "json"
+  #   label: "u[0.4,50], concatenate, layernorm, n1e-3, cskip0, log-uniform inference noise schedule"
+  # h73dr5yw:
+  #   type: "json"
+  #   label: "u[0.4,50], concatenate, layernorm, n1e-3, cskip0"
+  # h73dr5yw2:
+  #   type: "json"
+  #   label: "u[0.4,50], concatenate, layernorm, n1e-3, cskip0, ensemble mean"
+  # k3wymxkf:
+  #   type: "json"
+  #   label: "u[0.4,50], concatenate, layernorm, n1e-3, cskip0, p(cfg)=0.05"
+  # eipkaunr:
+  #   type: "json"
+  #   label: "u[0.4,50], concatenate, layernorm, n1e-3, cskip0, p(cfg)=0.15"
+
+  # xbokv5ca:
+  #   type: "json"
+  #   label: "128 epoch backbone, n(3.5,1.2), cross-attn, layernorm, n1e-3, cskip0"
+  # vh8p497m:
+  #   type: "json"
+  #   label: "128 epoch backbone, u(0.002,80), cross-attn, layernorm, n1e-3, cskip0"
+  # sf7dtvmc:
+  #   type: "json"
+  #   label: "128 epoch backbone, u(0.4,50), cross-attn, layernorm, n1e-3, cskip0"
+  # sf7dtvmc2:
+  #   type: "json"
+  #   label: "ensemble mean?"
+  # bdxrh2o5:
+  #   type: "json"
+  #   label: "128 epoch backbone, u(0.4,50), cross-attn, layernorm, n1e-3, cskip0"
+  # ads0w6ur:
+  #   type: "json"
+  #   label: "128 epoch backbone, n[0.5,0.5], cross-attn, layernorm, n1e-3, cskip0"
+  # lpanzwe3:
+  #   type: "json"
+  #   label: "128 epoch backbone, n[0.5,0.7], cross-attn, layernorm, n1e-3, cskip0"
+  # a5mj2pyr:
+  #   type: "json"
+  #   label: "128 epoch backbone, u[0.6,4.5], cross-attn, layernorm, n1e-3, cskip0"
+  # ryn751o6:
+  #   type: "json"
+  #   label: "128 epoch backbone, u[0.4,6.7], cross-attn, layernorm, n1e-3, cskip0"
+  
+  # sf7dtvmc:
+  #   type: "json"
+  #   label: "256 epoch backbone, u(0.4,50), cross-attn, layernorm, n1e-3, cskip0"
+
+
+  # ### 128 samples
+  # wcb4fjae:
+  #   type: "json"
+  #   label: "64-ep backbone, 128-ep diffusion training, 128 samples, cross-attn"
+  # mh19dj0x:
+  #   type: "json"
+  #   label: "64-ep backbone, 256-ep diffusion training, 128 samples, cross-attn"
+  # ro0lzbkt:
+  #   # type: "json"
+  #   label: "128-ep backbone, 128-ep diffusion training, 128 samples, cross-attn"
+  # # ???: # TODO
+  # #   # type: "json"
+  # #   label: "128-ep backbone, 256-ep diffusion training, 128 samples, cross-attn"
+  # lunzl4d5:
+  #   type: "json"
+  #   label: "256-ep backbone, 128-ep diffusion training, 128 samples, cross-attn"
+  
+  # udwi0ymx:
+  #   type: "json"
+  #   label: "64-ep backbone, 128-ep diffusion training, 128 samples, concatenate"
+  # ap3kl2bs:
+  #   type: "json"
+  #   label: "64-ep backbone, 128-ep diffusion training, 128 samples, concatenate"
+  # # m0k61di8: # inference not yet finished
+  # #   # type: "json"
+  # #   label: "256-ep backbone, 128-ep diffusion training, 128 samples, concatenate"
+  # # ???: # TODO
+  # #   # type: "json"
+  # #   label: "256-ep backbone, 256-ep diffusion training, 128 samples, concatenate"
+
+
+
+  ### 120 steps rollout
+  # p37ubpxr:
+  #   type: "json"
+  #   label: "64-epoch backbone, 128-epoch diffusion training, ens4"
+  # eh8guzw6:
+  #   type: "json"
+  #   label: "64-epoch backbone, 256-epoch diffusion training, ens4"
+  # e9m0i4f2:
+  #   type: "json"
+  #   label: "128-epoch backbone, 128-epoch diffusion training"
+  
+  
+  # wm74stc9:
+  #   type: "json"
+  #   label: "256-epoch backbone, 128-epoch diffusion training, u[0.4,50], cross-attn, layernorm, n1e-3, cskip0"
+
+
+  # ntq6rfso:
+  #   label: "stuff"
+  # ts6c5zwe:
+  #   label: "stuff"
+  # b93wmqsb:
+  #   label: "stuff"
+  # h1lm0ou4:
+  #   label: "stuff"
+  # wpbvdsom:
+  #   label: "stuff"
+  # pfsxe78p:
+  #   label: "stuff"
+  # wlt9sajp:
+  #   label: "stuff"
+
+  # x0nv27te:
+  #   label: "256-epoch backbone, 128-epoch diffusion training, u[0.4,50], cross-attn, layernorm, n1e-3, cskip0"
+  # m0k61di8:
+  #   label: "256-epoch backbone, 128-epoch diffusion training, u[0.4,50], concatenate, layernorm, n1e-3, cskip0"
+  # i4h8gx9e:
+  #   label: "256-epoch backbone, 128-epoch diffusion training, u[0.4,50], cross-attn, layernorm, n1e-3, cskip0, p(cfg)=0.15"
+
+  # ap3kl2bs:
+  #   label: "64-epoch backbone, 128-epoch diffusion training, 128 samples, concatenate"
+  # jkcgbfo6:
+  #   label: "64-epoch backbone, 128-epoch diffusion training, 128 samples, cross-attn"
+
+  # v9rfedyc:
+  #   label: "u[0.1,50] latent diffusion, u[0.1,0.11] decoder"
+  # i4kujyr7:
+  #   label: "u[0.002,50] latent diffusion, u[0.002,0.0023] decoder"
+  # wh7v2c4i:
+  #   label: "u[0.002,20] latent diffusion, u[0.002,0.0023] decoder"
+  
+  # wlc6z7ys:
+  #   label: "u[0.1,50] latent diffusion, u[0.1,0.11] decoder"
+  # rw23fp15:
+  #   label: "u[0.002,50] latent diffusion, u[0.002,0.0023] decoder"
+  # l7vhzrws:
+  #   label: "u[0.002,20] latent diffusion, u[0.002,0.0023] decoder"
+
+  # # a00aaaaa:
+  # #   # type: "json"
+  # #   label: "Trying1"
+  # # a000aaaa:
+  # #   # type: "json"
+  # #   label: "Trying2"
+  # # zjyxu2nt:
+  # #   type: "json"
+  # #   label: "Christian's skk, 128 epoch diffusion training, v1"
+  # g39vlcqb:
+  #   type: "json"
+  #   label: "Christian's skkbxfya, 128 epoch diffusion training, v2"
+  # # u7xrsq01:
+  # #   type: "json"
+  # #   label: "Christian's skk, v2, 16 samples"
+  # lqknasuu: # TODO! run inference and eval
+  #   type: "json"
+  #   label: "Christian's skkbxfya, 128 epoch diffusion training, p(cfg)=0.15"
+  # # ra0bh12n:
+  # #   type: "json"
+  # #   label: "Christian's skk, 256 epoch diffusion training, v1"
+  # # g1qwt6f9:
+  # #   type: "json"
+  # #   label: "Christian's skk, 256 epoch diffusion training, v2"
+  # eklg96hu:
+  #   type: "json"
+  #   label: "Seb's cw6a4szu, 128 epoch diffusion training"
+  # guljdg94: # TODO! run inference and eval
+  #   # type: "json"
+  #   label: "Sophie's oqkez8qs, 128 epoch diffusion training"
+
+  # txbm8adf:
+  #   # type: "json"
+  #   label: "Christian's skkbxfya, 128 epoch diffusion training, v1"
+  # o7ohzklw:
+  #   # type: "json"
+  #   label: "Christian's skkbxfya, 128 epoch diffusion training, p(cfg)=0.15"
+  # lgry3hbu:
+  #   # type: "json"
+  #   label: "Seb's cw6a4szu, 128 epoch diffusion training"
+  # hhmqdv05:
+  #   # type: "json"
+  #   label: "Sophie's oqkez8qs, 128 epoch diffusion training"
+
+  # xfi1c2ju:
+  #   type: "json"
+  #   label: "Without decoder fine-tuning"
+  # ncu41foe:
+  #   type: "json"
+  #   label: "With decoder fine-tuning, max_num_targets=542080"
+  # h3hfljnc:
+  #   type: "json"
+  #   label: "With decoder fine-tuning, max_num_targets=271040"
+  # pf91y6h3:
+  #   # type: "json"
+  #   label: "With decoder fine-tuning, max_num_targets=542080, 128 samples"
+
+  # hrlv5sne_e0:
+  #   type: "json"
+  #   label: "Member 0, 16 samples"
+  # # hrlv5sne_e1:
+  # #   type: "json"
+  # #   label: "Member 1, 16 samples"
+  # hrlv5sne_e2:
+  #   type: "json"
+  #   label: "Member 2, 16 samples"
+  # hrlv5sne_e3:
+  #   type: "json"
+  #   label: "Member 3, 16 samples"
+  # # a0aaaaaa:
+  # #   # type: "json"
+  # #   label: "16 fsteps, 4 samples"
+
+  # hrlv5sne_merged:
+  #   type: "merge"              # reads zarr predictions; required to compute metric(ensemble_mean)
+  #   # type: "json"
+  #   merge_run_ids:             # individual zarr runs to stack over ens dimension
+  #     - hrlv5sne_e0
+  #     # - hrlv5sne_e1
+  #     - hrlv5sne_e2
+  #     - hrlv5sne_e3
+  #   merge_metrics_dir: "./results/hrlv5sne_merged"
+  #   label: "hrlv5sne, ensemble mean"
+  #   streams:
+  #     ERA5:
+  #       climatology_path: "/e/scratch/weatherai/shared_work/assets/climatology/aifs-ea-an-oper-0001-mars-o96-1980-2020-6h-v6_climatology.zarr"
+  #       channels: ["2t", "z_500", "q_850"]
+  #       evaluation:
+  #         # forecast_step: "all"
+  #         forecast_step: [1, 2]
+  #         # sample: "all"
+  #         sample: [0]
+  #         ensemble: "all"    # all ensemble members required for probabilistic scores (e.g. ssr)
+  #       # plotting:
+  #       #   sample: [0]
+  #       #   forecast_step: "all"
+  #       #   plot_maps: true
+  #       #   plot_histograms: false
+  #       #   plot_animations: true
+  #       #   ensemble: "mean"    # plot the ensemble-mean field
+
+  # ku6i70v3:
+  #   type: "json"
+  #   label: "Christian's dy0jlrmw deterministic"
+
+  # um1js4xy:
+  #   type: "json"
+  #   label: "Matze's branch, interactive"
+
+  # zdltxc8y:
+  #   type: "json"
+  #   label: "Julian's/Kerem's branch, interactive, w/o decoder loading"
+
+  # vdew3nar:
+  #   type: "json"
+  #   label: "Julian's/Kerem's branch, interactive, w/ decoder loading"
+
+  # yv89zm5f:
+  #   type: "json"
+  #   label: "Julian's/Kerem's branch, interactive, 16 samples"
+
+
+  # lqknasuu:
+  #   type: "json"
+  #   label: "Julian's/Kerem's branch, launch-slurm"
+
+  # yk8ir20f:
+  #   type: "json"
+  #   label: "Trying"
+
+  # grxvkh24:
+  #   # type: "json"
+  #   label: "Julian's/Kerem's branch, interactive, 40 steps, 4 samples, 4 members"
+
+  
+  # rz6cuo1d:
+  #   # type: "json"
+  #   label: "Christian's skkbxfya, p(cfg)=0.15, 128 epoch diffusion training, 80 steps"
+  
+  # o7ohzklw:
+  #   type: "json"
+  #   label: "Christian's skkbxfya, p(cfg)=0.15, 128 epoch diffusion training"
+  # h9am64o5:
+  #   type: "json"
+  #   label: "Christian's skkbxfya, 128 epoch diffusion training, v2"
+  # hfbmpoge:
+  #   type: "json"
+  #   label: "Seb's cw6a4szu, 128 epoch diffusion training"
+  # # c2h9361i:
+  # #   type: "json"
+  # #   label: "Seb's cw6a4szu, 128 epoch diffusion training, EMA600"
+  # # w0gc4qby:
+  # #   type: "json"
+  # #   label: "Seb's cw6a4szu, 128 epoch diffusion training, u[0.002,20]"
+  # lgry3hbu:
+  #   type: "json"
+  #   label: "Sophie's oqkez8qs, 128 epoch diffusion training"
+
+  # u8tefd0l:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpye oper-an, 61 epoch diffusion training"
+  # buihwr3b:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpye oper-an, 61 epoch diffusion training, no decoder f-tuning"
+  # c60drf9m:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpye oper-an, fixed"
+  # kkyqhlie:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpye oper-an, fixed"
+  # nuzl0eyw:
+  #   # type: "json"
+  #   label: "Seb's  oper-an, cw6q4szu, epoch -1"
+  # a5zpf8qj:
+  #   # type: "json"
+  #   label: "Seb's  oper-an, cw6q4szu, epoch 1"
+  # otaixwr2:
+  #   # type: "json"
+  #   label: "Seb's  oper-an, nhv6tkln, epoch 2"
+  # kh1d0gwi:
+  #   # type: "json"
+  #   label: "Seb's oper-an, nhv6tkln"
+  # hl52sk1d:
+  #   # type: "json"
+  #   label: "Seb's oper-an, sdnbfpve"
+  # cruevb9m:
+  #   # type: "json"
+  #   label: "Seb's oper-an, nhv6tkln, epoch -1"
+  # jblvfz7o:
+  #   # type: "json"
+  #   label: "Seb's oper-an, sdnbfpve, epoch -1"
+  # lacgobhv:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpye oper-an, fixed"
+  # kfibwsv3:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpve oper-an, fixed"
+  # c2chur3x:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpve oper-an, fixed"
+  # aa64gdsw:
+  #   type: "json"
+  #   label: "Christian's skkbxfya"
+  # un8ur92g:
+  #   type: "json"
+  #   label: "Seb's sdnbfpve oper-an"
+  # ktyzli5e:
+  #   # type: "json"
+  #   label: "forecast model deterministic"
+  # w0o2ipz9:
+  #   # type: "json"
+  #   label: "t-jepa model deterministic"
+  # lwpi6l1y:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpve oper-an"
+  # be97vkry:
+  #   # type: "json"
+  #   label: "Christian's skkbxfya"
+  # x357vd2s:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpve oper-an"
+  # n5j31qc8:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpve oper-an"
+  # igivecmw:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpve oper-an"
+
+  # yw1hskgx:
+  #   # type: "json"
+  #   label: "Sophies's zf381x9n"
+  # zyzuow2h:
+  #   # type: "json"
+  #   label: "Sophie's zf381x9n"
+  # k1ltf2ig:
+  #   # type: "json"
+  #   label: "Sophie's zf381x9n"
+
+  # kz2n0222:
+  #   # type: "json"
+  #   label: "Seb's sdnbfpve oper-an"
+
+  # zz060500:
+  #   # type: "json"
+  #   label: "Kerem's forecast diffusion"
+
+  # kuwj5mkb:
+  #   # type: "json"
+  #   label: "Christian's qyehik8n oper-an"
+
+
+
+  # qbp8sgy7:
+  #   # type: "json"
+  #   label: "Christian's skkbxfya ERA5"
+  

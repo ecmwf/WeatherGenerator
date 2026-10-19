@@ -56,10 +56,11 @@ set -euo pipefail
 RUN_IDS=(deterministic_mean diffusion_ensemble_mean diffusion_member_mean)
 task_id=${SLURM_ARRAY_TASK_ID:?This script must run as a Slurm array task.}
 RUN_ID="${RUN_IDS[$task_id]}"
+CONFIG="${CONFIG:-config/config_eval_diffusion_ens.yml}"
 
 weathergen_home=${SLURM_SUBMIT_DIR:?Submit this script from the WeatherGenerator root.}
 cd "$weathergen_home"
 
-echo "Evaluating merged run_id: $RUN_ID"
+echo "Evaluating merged run_id: $RUN_ID (config=$CONFIG)"
 # --offline: compute nodes have no internet access, so uv must not try to resolve/download packages
-uv run --offline evaluate --config config/config_eval_diffusion_ens.yml --run-ids "$RUN_ID"
+uv run --offline evaluate --config "$CONFIG" --run-ids "$RUN_ID"
