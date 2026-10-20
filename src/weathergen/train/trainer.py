@@ -437,6 +437,7 @@ class Trainer(TrainerBase):
             cf.with_ddp,
             cf.with_fsdp,
         )
+        self.reseed_per_rank(cf)
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.test_cfg)
@@ -517,6 +518,9 @@ class Trainer(TrainerBase):
                 rampup_ratio=validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
+
+        # model (and EMA model) are initialized: let the ranks' RNGs diverge from here
+        self.reseed_per_rank(cf)
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)

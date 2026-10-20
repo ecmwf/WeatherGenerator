@@ -482,12 +482,6 @@ def spoof(
     )
     coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
     # spoof two tokens to avoid unnecessary computational load
-    coords = coords[np.random.choice(coords.shape[0], size=2, replace=False)]
-
-    geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
-
-    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
-    # spoof two tokens to avoid unnecessary computational load
     coords = coords[rng.choice(coords.shape[0], size=2, replace=False)]
 
     geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
