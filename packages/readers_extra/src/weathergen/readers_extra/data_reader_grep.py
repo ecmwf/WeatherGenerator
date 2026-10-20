@@ -15,7 +15,17 @@ import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
-from weathergen.datasets.data_reader_base import (
+# Dask is optional: if it is not installed we transparently fall back to the
+# original eager (non-chunked) behaviour, so functionality never depends on it.
+try:
+    import dask.array as dask_array
+
+    _HAS_DASK = True
+except ImportError:  # pragma: no cover - dask is an optional speed-up dependency
+    dask_array = None
+    _HAS_DASK = False
+
+from weathergen.datasets.data_reader_base import (  # type: ignore
     DataReaderTimestep,
     ReaderData,
     TimeWindowHandler,
@@ -33,13 +43,18 @@ class DataReaderGREP(DataReaderTimestep):
     This reader handles datasets stored as Zarr with dimensions (time, latitude, longitude)
         beta: handling  dimensions (time_centered, nav_lat, nav_lon)
     Converts the gridded data to ReaderData format.
+
+    PERFORMANCE NOTES
+    ------------------
+    This version batches all (channel, timestep) reads for a given window into a single
+    xarray/Dask read instead of issuing one Zarr read per channel per timestep. When Dask
+    is available, the dataset is opened with chunking enabled so that the underlying Zarr
+    chunks can be fetched/decompressed concurrently (multi-threaded) via Dask's scheduler.
+    None of this changes the values, shapes, dtypes or ordering returned by `_get`.
     """
 
     def __init__(
-        self,
-        tw_handler: TimeWindowHandler,
-        filename: Path,
-        stream_info: dict,
+        self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict, stage: str
     ) -> None:
         """
         Construct data reader for Zarr GREP dataset
@@ -50,6 +65,8 @@ class DataReaderGREP(DataReaderTimestep):
             filename (and path) of dataset
         stream_info :
             information about stream
+        stage :
+            training stage
 
         Returns
         -------
@@ -60,6 +77,7 @@ class DataReaderGREP(DataReaderTimestep):
         self._filename = filename
         self._tw_handler = tw_handler
         self._stream_info = stream_info
+        self._stage = stage
         self._initialized = False
 
         # Call super() with placeholder period; will be overwritten after lazy init sets the real
@@ -72,6 +90,12 @@ class DataReaderGREP(DataReaderTimestep):
         self.n_lat: int = 0
         self.n_lon: int = 0
         self.n_points: int = 0
+
+        # Cached time coordinate/dimension info (populated during lazy init, reused by _get
+        # on every call instead of being re-resolved each time).
+        self._time_coord_name: str | None = None
+        self._time_dim_name: str | None = None
+        self.time_coord: NDArray | None = None
 
         # debug
         self.log_debug = False
@@ -88,22 +112,52 @@ class DataReaderGREP(DataReaderTimestep):
             return
         self._initialized = True
 
-        try:
-            ds: xr.Dataset = xr.open_zarr(
-                self._filename, consolidated=True, chunks=None, zarr_format=2
+        kwargs = {}
+        store = Path(self._filename)
+        if (store / "zarr.json").exists():
+            kwargs = {"zarr_format": 3}
+        elif (
+            (store / ".zgroup").exists()
+            or (store / ".zarray").exists()
+            or (store / ".zattrs").exists()
+        ):
+            kwargs = {"zarr_format": 2}
+        else:
+            raise ValueError(f"Cannot determine Zarr format for {self._filename}")
+
+        # We open with Dask chunking instead of chunks=None.
+        use_dask = self._stream_info.get("use_dask", True) and _HAS_DASK
+
+        ds = xr.open_zarr(
+            self._filename,
+            consolidated=True,
+            chunks=None,
+            **kwargs,
+        )
+
+        if use_dask:
+            _logger.info(f"{self._stream_info.get('name', '?')}: dataset opened with Dask.")
+        else:
+            _logger.info(
+                f"{self._stream_info.get('name', '?')}: dataset opened without Dask chunking "
+                "(eager reads, same as original behaviour)."
             )
-        except Exception as e:
-            name = self._stream_info["name"]
-            _logger.error(f"Failed to open {name} at {self._filename}: {e}")
-            return  # leave in empty state
 
         # ---- Time axis -------------------------------------------------------
 
-        # TODO remove try/except
-        try:
-            time_coord: NDArray = ds.coords["time"].values
-        except KeyError:
-            time_coord: NDArray = ds.coords["time_centered"].values
+        for coord_name in ["time", "time_centered", "time_counter"]:
+            if coord_name in ds.coords:
+                time_coord: NDArray = ds.coords[coord_name].values
+                self._time_coord_name = coord_name
+                break
+        else:
+            raise KeyError("Nessuna coordinata temporale trovata")
+
+        # Rechunk with 1 along time dimension cause we read one timestep at a time in _get()
+        if use_dask:
+            ds = ds.chunk({self._time_coord_name: 1})
+
+        ds = ds.where(ds != 0)
 
         data_start_time = np.datetime64(time_coord[0])
         data_end_time = np.datetime64(time_coord[-1])
@@ -123,68 +177,56 @@ class DataReaderGREP(DataReaderTimestep):
             # The base module exposes no str_to_timedelta, so we parse manually.
             period = _str_to_timedelta(self._stream_info["frequency"])
 
-        # Patch the instance attributes that DataReaderTimestep._get_dataset_idxs reads.
-        # This is equivalent to what super().__init__(..., data_start_time, data_end_time, period)
-        # would set, but without the side-effects of calling __init__ a second time.
         self.data_start_time = data_start_time
         self.data_end_time = data_end_time
         self.period = period
+        self.time_coord = time_coord
 
         # ---- Spatial grid ----------------------------------------------------
-        if "latitude" in ds.coords and "longitude" in ds.coords:
-            # Regular 1-D grid (e.g. E-OBS): latitude(lat,) longitude(lon,)
-            self._curvilinear = False
-            self.latitudes = ds.coords["latitude"].values.astype(np.float32)
-            self.longitudes = ds.coords["longitude"].values.astype(np.float32)
+        grid_defs = [
+            ("latitude", "longitude", False),  # regular grid
+            ("nav_lat", "nav_lon", True),  # curvilinear
+            ("TLAT", "TLON", True),  # curvilinear (alt)
+        ]
 
-            if np.any(self.latitudes < -90) or np.any(self.latitudes > 90):
-                _logger.warning(
-                    f"Latitude values outside [-90, 90] in '{self._stream_info['name']}'; clipping."
-                )
-                self.latitudes = np.clip(self.latitudes, -90.0, 90.0)
+        for lat_key, lon_key, _is_curvi in grid_defs:
+            if lat_key in ds.coords and lon_key in ds.coords:
+                break
+        else:
+            raise KeyError("No recognized grid found")
 
-            if np.any(self.longitudes < -180) or np.any(self.longitudes > 180):
-                _logger.warning(
-                    f"Longitude values outside [-180, 180] in '{self._stream_info['name']}'; "
-                    "converting from [0, 360]."
-                )
-                self.longitudes = ((self.longitudes + 180.0) % 360.0 - 180.0).astype(np.float32)
+        _logger.info(
+            f"Dataset '{self._stream_info['name']}' uses "
+            f"{'curvilinear' if _is_curvi else 'regular'} grid ({lat_key}/{lon_key})."
+        )
 
-            self.n_lat = len(self.latitudes)
-            self.n_lon = len(self.longitudes)
+        self._curvilinear = _is_curvi
+
+        lat = ds.coords[lat_key].values.astype(np.float32)
+        lon = ds.coords[lon_key].values.astype(np.float32)
+
+        lat = np.clip(lat, -90.0, 90.0)
+        lon = ((lon + 180.0) % 360.0 - 180.0).astype(np.float32)
+
+        if _is_curvi:
+            self._nav_lat_flat = lat.ravel()
+            self._nav_lon_flat = lon.ravel()
+
+            self.n_lat, self.n_lon = lat.shape
             self.n_points = self.n_lat * self.n_lon
 
-        elif "nav_lat" in ds.coords and "nav_lon" in ds.coords:
-            # Curvilinear 2-D grid (e.g. C-GLORS): nav_lat(y, x), nav_lon(y, x)
-            _logger.info(
-                f"Dataset '{self._stream_info['name']}' uses curvilinear grid (nav_lat/nav_lon)."
-            )
-            self._curvilinear = True
-            nav_lat = ds.coords["nav_lat"].values.astype(np.float32)  # (y, x)
-            nav_lon = ds.coords["nav_lon"].values.astype(np.float32)  # (y, x)
-
-            nav_lat = np.clip(nav_lat, -90.0, 90.0)
-            nav_lon = ((nav_lon + 180.0) % 360.0 - 180.0).astype(np.float32)
-
-            # Store flat point lists — used directly to build coords in _get()
-            self._nav_lat_flat = nav_lat.flatten()  # (n_points,)
-            self._nav_lon_flat = nav_lon.flatten()  # (n_points,)
-
-            self.n_lat, self.n_lon = nav_lat.shape
-            self.n_points = self.n_lat * self.n_lon
-
-            # Provide sorted unique 1-D views for callers that inspect .latitudes/.longitudes
             self.latitudes = np.unique(self._nav_lat_flat)
             self.longitudes = np.unique(self._nav_lon_flat)
-
         else:
-            raise ValueError(
-                f"Dataset '{self._stream_info['name']}' has neither "
-                "'latitude'/'longitude' nor 'nav_lat'/'nav_lon' coordinates."
-            )
+            self.latitudes = lat
+            self.longitudes = lon
+
+            self.n_lat = len(lat)
+            self.n_lon = len(lon)
+            self.n_points = self.n_lat * self.n_lon
 
         # ---- Available variables (non-stat, time-varying) --------------------
-        time_variants = {"time", "time_centered"}
+        time_variants = {"time", "time_centered", "time_counter"}
         available_vars: list[str] = [
             var
             for var in ds.data_vars
@@ -223,6 +265,39 @@ class DataReaderGREP(DataReaderTimestep):
         self.stdev_geoinfo = np.ones(0, dtype=np.float32)
 
         self.target_channel_weights = self.parse_target_channel_weights()
+
+        # Coordinate grid — handle both regular and curvilinear grids
+        if self._curvilinear:
+            self.coords_single = np.stack([self._nav_lat_flat, self._nav_lon_flat], axis=1).astype(
+                np.float32
+            )
+
+            # ---- mask ---------------------------------------------------------
+            mask = None
+
+            # case 1: # Mask the points where values are NaN or 0
+            if "time_counter" in ds.dims:
+                data_mask = ds[self.source_channels[0]].isel(time_counter=0)
+                mask = np.isnan(data_mask) | (data_mask == 0)
+                mask = mask.values.ravel()
+
+            # case 2: # Mask the points where nav_lat == 0 AND nav_lon == 0
+            elif "nav_lat" in ds.coords and "nav_lon" in ds.coords:
+                mask = (self._nav_lat_flat == 0.0) & (self._nav_lon_flat == 0.0)
+
+            # case 3: # Mask the points where values are NaN
+            elif "TLAT" in ds.coords and "TLON" in ds.coords:
+                data_mask = ds[self.source_channels[0]].isel(time=0)
+                mask = np.isnan(data_mask).values.ravel()
+
+            if mask is not None:
+                self.coords_single[mask] = np.nan
+
+        else:
+            lon_grid, lat_grid = np.meshgrid(self.longitudes, self.latitudes)
+            self.coords_single = np.stack([lat_grid.ravel(), lon_grid.ravel()], axis=1).astype(
+                np.float32
+            )
 
         # ---- Statistics ------------------------------------------------------
         # mean/stdev must be arrays of length == len(available_vars) so that
@@ -269,6 +344,24 @@ class DataReaderGREP(DataReaderTimestep):
                 continue
             selected_names.append(var)
             selected_idxs.append(i)
+
+        # --- sort by depth (and, for equal depth, by variable name) ---
+        def depth_key(name, no_depth_position="end"):
+            parts = name.rsplit("_", 1)
+            if len(parts) == 2:
+                var, maybe_depth = parts
+                try:
+                    depth = float(maybe_depth)
+                    return (0, depth, var)  # 0 = "has depth", sorted normally
+                except ValueError:
+                    pass
+            # no valid depth found
+            sentinel = float("inf") if no_depth_position == "start" else float("-inf")
+            return (1, sentinel, name)  # 1 = "no depth", goes to the end (or start)
+
+        order = sorted(range(len(selected_names)), key=lambda k: depth_key(selected_names[k]))
+        selected_names = [selected_names[k] for k in order]
+        selected_idxs = [selected_idxs[k] for k in order]
 
         return selected_names, np.array(selected_idxs, dtype=np.int64)
 
@@ -330,7 +423,7 @@ class DataReaderGREP(DataReaderTimestep):
             Indices of channels to return, expressed as indices into *available_vars*
             (i.e. what base class stores as source_idx / target_idx).
         """
-        self._lazy_init()
+        # self._lazy_init()
 
         if not channels_idx:
             return ReaderData.empty(
@@ -352,19 +445,11 @@ class DataReaderGREP(DataReaderTimestep):
 
         # Map channel indices → variable names
         selected_channels = [self.available_vars[i] for i in channels_idx]
-        # selected_channels = self.available_vars
 
-        data_arrays: list[NDArray] = []
-        datetimes_list: list[np.datetime64] = []
-
-        # TODO remove try/except
-        try:
-            # EOBS uses 'time'
-            time_values = self.ds.coords["time"].values
-        except KeyError:
-            # C-GLORS uses 'time_centered'
-            time_values = self.ds.coords["time_centered"].values
-
+        # Time coord/dim were resolved once in _lazy_init; reuse them instead of
+        # re-searching ds.coords / ds.dims on every call.
+        time_values = self.time_coord
+        time_dim = self._time_coord_name
         n_time = len(time_values)
 
         if self.log_debug:
@@ -375,73 +460,63 @@ class DataReaderGREP(DataReaderTimestep):
                 f"\n Selected time indices: {t_idxs} -- len={len(t_idxs)}"
             )
 
-        for t_idx in t_idxs:
-            if t_idx < 0 or t_idx >= n_time:
-                continue
+        # Vectorised filter of the valid time indices
+        t_idxs_arr = np.asarray(t_idxs)
+        valid_mask = (t_idxs_arr >= 0) & (t_idxs_arr < n_time)
+        valid_t_idxs = t_idxs_arr[valid_mask]
 
-            # (n_points, n_channels)
-            # TODO remove try/except: should be able to just use time or time_centered
-            # depending on dataset, without needing to guess per-timestep.
-            try:
-                timestep_data = np.stack(
-                    [
-                        self.ds[ch].isel(time=int(t_idx)).values.astype(np.float32).flatten()
-                        for ch in selected_channels
-                    ],
-                    axis=1,
-                )
-            except ValueError:
-                timestep_data = np.stack(
-                    [
-                        self.ds[ch]
-                        .isel(time_centered=int(t_idx))
-                        .values.astype(np.float32)
-                        .flatten()
-                        for ch in selected_channels
-                    ],
-                    axis=1,
-                )
-
-            data_arrays.append(timestep_data)
-            dt = np.datetime64(time_values[t_idx])
-            datetimes_list.extend([dt] * self.n_points)
-
-        if not data_arrays:
+        if len(valid_t_idxs) == 0:
             _logger.info(f"No valid time indices found for idx={idx}; returning empty data.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx),
                 num_geo_fields=0,
             )
 
-        # (n_timesteps * n_points, n_channels)
-        data = np.vstack(data_arrays)
+        # Within each batch, all the requested channels are read with a
+        # single xarray/Dask selection: if the dataset is chunked with Dask, the
+        # Zarr chunks involved (channels x timesteps of the batch) are downloaded and
+        # decompressed in parallel on multiple threads in a single .compute().
+        n_channels = len(selected_channels)
+        n_valid_timesteps = len(valid_t_idxs)
+        ds_sub = self.ds[selected_channels]
+        batch_size = max(1, n_valid_timesteps)
 
-        # use actual count, not len(t_idxs)
-        n_valid_timesteps = len(data_arrays)
+        data = np.empty((n_valid_timesteps * self.n_points, n_channels), dtype=np.float32)
 
-        # Coordinate grid — handle both regular and curvilinear grids
-        if self._curvilinear:
-            # nav_lat/nav_lon are already flattened (n_points,)
-            coords_single = np.stack([self._nav_lat_flat, self._nav_lon_flat], axis=1).astype(
-                np.float32
+        for batch_start in range(0, n_valid_timesteps, batch_size):
+            batch_t_idxs = valid_t_idxs[batch_start : batch_start + batch_size]
+            ds_batch = ds_sub.isel({time_dim: batch_t_idxs})
+
+            # Canonical shape (time_dim, *spatial_dims...) for each channel,
+            # preserving the relative order of the spatial dimensions (same
+            # order as the flatten() used to build coords_single). The cast to
+            # float32 is skipped if the data is already in that dtype, to avoid
+            # an unnecessary copy.
+            channel_arrays = [
+                ds_batch[ch].transpose(time_dim, ...).data for ch in selected_channels
+            ]
+
+            if _HAS_DASK and isinstance(channel_arrays[0], dask_array.Array):
+                # A single .compute(): Dask downloads/decompresses in parallel all
+                # the chunks needed for the whole batch (all channels and all
+                # timesteps of the batch) instead of doing it sequentially.
+                arr = dask_array.stack(channel_arrays, axis=-1).compute()
+            else:
+                arr = np.stack([np.asarray(a) for a in channel_arrays], axis=-1)
+
+            # (batch_t, *spatial_dims, n_channels) -> (batch_t * n_points, n_channels)
+            arr = np.asarray(arr, dtype=np.float32).reshape(
+                len(batch_t_idxs) * self.n_points, n_channels
             )
-            # Maschera i punti dove nav_lat == 0 AND nav_lon == 0
-            masked = (self._nav_lat_flat == 0.0) & (self._nav_lon_flat == 0.0)
-            coords_single[masked] = np.nan
-        else:
-            lon_grid, lat_grid = np.meshgrid(self.longitudes, self.latitudes)
-            coords_single = np.stack([lat_grid.flatten(), lon_grid.flatten()], axis=1).astype(
-                np.float32
-            )
 
-        # NOTE tmp: prima era len(t_idxs) ma se ci sono t_idxs invalidi
-        # (es. fuori range del dataset) allora data_arrays sarà più corto di len(t_idxs).
-        # Meglio usare n_valid_timesteps che è il numero reale di timesteps validi
-        # che abbiamo effettivamente caricato.
-        coords = np.tile(coords_single, (n_valid_timesteps, 1))
+            row_start = batch_start * self.n_points
+            data[row_start : row_start + arr.shape[0]] = arr
 
+        coords = np.tile(self.coords_single, (n_valid_timesteps, 1))
         geoinfos = np.zeros((len(data), 0), dtype=np.float32)
-        datetimes = np.array(datetimes_list, dtype="datetime64[s]")
+
+        # Vectorised np.repeat instead of building a Python list
+        datetimes = np.repeat(time_values[valid_t_idxs].astype("datetime64[s]"), self.n_points)
 
         rd = ReaderData(
             coords=coords,
@@ -456,8 +531,8 @@ class DataReaderGREP(DataReaderTimestep):
                 f"datetimes shape {datetimes.shape}"
             )
             _logger.info(
-                f"  Sample coords: {coords[:5]}, sample data: {data[:5]}, "
-                f"geoinfos: {geoinfos[:5]}, sample datetimes: {datetimes[:5]}"
+                f"  Sample coords: {coords[1000:1005]}, sample data: {data[1000:1005]}, "
+                f"geoinfos: {geoinfos[1000:1005]}, sample datetimes: {datetimes[1000:1005]}"
             )
             _logger.info(f"  Channels in data: {selected_channels}")
             _logger.info(
