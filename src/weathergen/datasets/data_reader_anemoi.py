@@ -88,6 +88,17 @@ class DataReaderAnemoi(DataReaderTimestep):
                 kwargs["frequency"] = frequency
         if "statistics" in stream_info:
             kwargs["statistics"] = stream_info["statistics"]
+            # anemoi needs every variable of the data in the statistics dataset; a newer
+            # store can hold extra variables (e.g. cl, urban) the pinned one lacks, so read
+            # only the variables both have
+            stats_vars = set(anemoi_datasets.open_dataset(stream_info["statistics"]).variables)
+            shared = [v for v in ds0.variables if v in stats_vars]
+            if len(shared) < len(ds0.variables):
+                _logger.info(
+                    f"{stream_info['name']}: reading the {len(shared)} variables shared with "
+                    f"the statistics dataset (of {len(ds0.variables)})"
+                )
+                kwargs["select"] = shared
         if "subsampling_rate" in stream_info:
             name = stream_info["name"]
             _logger.warning(
@@ -163,13 +174,27 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
 
+        # Channels a checkpoint expects but this dataset lacks (e.g. q_10 in the operational
+        # analysis) become all-NaN columns, indexed past the dataset's own variables, when the
+        # stream sets fill_missing_channels; NaN targets are masked in the loss. Otherwise a
+        # missing channel raises, as before.
+        num_vars = len(ds.variables)
+        self.missing_channels = []
+
+        def channel_index(ch: str) -> int:
+            if ch in ds.variables or not stream_info.get("fill_missing_channels", False):
+                return ds.variables.index(ch)
+            if ch not in self.missing_channels:
+                self.missing_channels.append(ch)
+            return num_vars + self.missing_channels.index(ch)
+
         # select/filter requested source channels
         if stream_info.get(str(stage) + "_source_channels") is None:
             self.source_idx = self.select_channels(ds, "source")
             self.source_channels = [ds.variables[i] for i in self.source_idx]
         else:
             self.source_channels = stream_info.get(str(stage) + "_source_channels")
-            self.source_idx = [ds.variables.index(ch) for ch in self.source_channels]
+            self.source_idx = [channel_index(ch) for ch in self.source_channels]
 
         # select/filter requested target channels
         if stream_info.get(str(stage) + "_target_channels") is None:
@@ -177,7 +202,7 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.target_channels = [ds.variables[i] for i in self.target_idx]
         else:
             self.target_channels = stream_info.get(str(stage) + "_target_channels")
-            self.target_idx = [ds.variables.index(ch) for ch in self.target_channels]
+            self.target_idx = [channel_index(ch) for ch in self.target_channels]
 
         # get target channel weights from stream config
         if stream_info.get("target_channel_weights") is None:
@@ -211,6 +236,13 @@ class DataReaderAnemoi(DataReaderTimestep):
         }
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
+        if self.missing_channels:
+            # placeholder statistics for the all-NaN columns (NaN stays NaN either way)
+            n = len(self.missing_channels)
+            self.mean = np.concatenate([self.mean, np.zeros(n, dtype=self.mean.dtype)])
+            self.stdev = np.concatenate([self.stdev, np.ones(n, dtype=self.stdev.dtype)])
+            _logger.warning(f"{ds_name}: channels missing from dataset, filled with NaN: "
+                            f"{self.missing_channels}")
 
     @override
     def init_empty(self) -> None:
@@ -268,8 +300,15 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         # extract geoinfo channels (can be time-varying, so read from dataset)
         geoinfos = data[:, list(self.geoinfo_idx)]
-        # extract channels
-        data = data[:, list(channels_idx)]
+        # extract channels; indices past the dataset's variables are missing channels (NaN)
+        if getattr(self, "missing_channels", None):
+            idx = np.asarray(channels_idx, dtype=np.int64)
+            present = idx < data.shape[1]
+            filled = np.full((data.shape[0], len(idx)), np.nan, dtype=data.dtype)
+            filled[:, present] = data[:, idx[present]]
+            data = filled
+        else:
+            data = data[:, list(channels_idx)]
 
         # construct lat/lon coords
         latlon = np.concatenate(
