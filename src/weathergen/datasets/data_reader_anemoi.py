@@ -15,6 +15,7 @@ import anemoi.datasets as anemoi_datasets
 import numpy as np
 from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
+from anemoi.utils.dates import frequency_to_timedelta
 from numpy.typing import NDArray
 
 from weathergen.common.config import timedelta_to_str
@@ -110,7 +111,11 @@ class DataReaderAnemoi(DataReaderTimestep):
                 ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
             )
 
-        period = np.timedelta64(ds.frequency)
+        # force_frequency overrides the frequency the dataset reports
+        if stream_info.get("force_frequency") is None:
+            period = np.timedelta64(ds.frequency)
+        else:
+            period = np.timedelta64(frequency_to_timedelta(stream_info.get("force_frequency")))
         data_start_time = ds.dates[0]
         data_end_time = ds.dates[-1]
         assert data_start_time is not None and data_end_time is not None, (
