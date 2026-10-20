@@ -650,3 +650,44 @@ def test_checkpoint_steps_fsdp(single_rank_process_group, no_grad_steps):
     assert grads.keys() == grads_ref.keys()
     assert all(torch.equal(g, grads_unit[n]) for n, g in grads.items())
     assert _rel_diff(grads, grads_ref) < 1e-4
+
+
+def _prepare_losses_worker(rank: int, world_size: int, init_file: str):
+    import datetime
+
+    from weathergen.utils.train_logger import prepare_losses_for_logging
+
+    torch.distributed.init_process_group(
+        "gloo",
+        init_method=f"file://{init_file}",
+        rank=rank,
+        world_size=world_size,
+        timeout=datetime.timedelta(seconds=60),
+    )
+    try:
+        # anchored pushforward: rank 1 scores step 9 in addition to step 1, rank 0 does not
+        losses = []
+        for _ in range(2):
+            steps = {"1": {"mse": float(rank)}} | ({"9": {"mse": 5.0}} if rank == 1 else {})
+            losses.append({"ERA5": steps | {"loss_avg": torch.tensor(10.0 + rank)}})
+        stddev = [{"ERA5": {"stddev_avg": 0.0 if rank == 0 else 3.0}}] * 2
+        _, losses_all, stddev_all = prepare_losses_for_logging([], losses, stddev)
+        assert dict(losses_all) == {
+            "ERA5.1.mse": [0.0, 0.0, 1.0, 1.0],
+            "ERA5.9.mse": [5.0, 5.0],
+            "ERA5.loss_avg": [10.0, 10.0, 11.0, 11.0],
+        }
+        assert dict(stddev_all) == {"ERA5.stddev_avg": [3.0, 3.0]}
+    finally:
+        torch.distributed.destroy_process_group()
+
+
+def test_prepare_losses_for_logging_different_keys_per_rank(tmp_path):
+    """
+    Ranks that log different loss keys (different numbers of scored steps with anchored
+    pushforward) must not deadlock, and the values are pooled by key over ranks and batches.
+    """
+    world_size = 2
+    torch.multiprocessing.spawn(
+        _prepare_losses_worker, args=(world_size, str(tmp_path / "pg")), nprocs=world_size
+    )
