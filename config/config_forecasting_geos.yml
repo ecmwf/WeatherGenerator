@@ -1,0 +1,32 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Forecasting overlay for default_config.yml; model settings remain inherited.
+# The grid is set by tokenizer.healpix_level in the stream, not by this config.
+# Other configs retain their legacy top-level healpix_level fallback.
+streams_directory: "./config/streams/forecasting_geos/"
+
+training_config:
+  # GOES-16 ABI data covers 2017-2024; reserve 2023 for validation.
+  start_date: 2018-01-01T00:00
+  end_date: 2022-12-31T00:00
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+  model_input:
+    forecasting:
+      masking_strategy: forecast
+  forecast:
+    time_step: 06:00:00
+    offset: 1
+    num_steps: 3
+    policy: fixed
+
+validation_config:
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
