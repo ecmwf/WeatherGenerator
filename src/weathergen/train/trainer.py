@@ -383,6 +383,9 @@ class Trainer(TrainerBase):
                 )
             )
 
+        # align the sampler, which starts at mini_epoch 0 in every process, with the resumed one
+        self.dataset.mini_epoch = mini_epoch_base
+
         if is_root():
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
