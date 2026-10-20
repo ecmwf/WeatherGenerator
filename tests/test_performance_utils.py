@@ -20,14 +20,16 @@ import pytest
 import torch
 
 from weathergen.utils.performance import (
+    MemoryTracker,
+    NullMemoryTracker,
     ThroughputTracker,
     compute_source_bytes,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def _no_cuda_sync():
@@ -206,3 +208,90 @@ def test_step_does_not_log_on_non_root(tracker):
         tracker.step(batch, istep=2, log_fn=lambda m: logged.update(m))
 
     assert logged == {}
+
+
+# ---------------------------------------------------------------------------
+# MemoryTracker
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _mock_cuda_memory():
+    """Mock CUDA allocator peak counters — tests run on CPU."""
+    with (
+        patch(
+            "weathergen.utils.performance.torch.cuda.max_memory_allocated",
+            return_value=2 * 1024**3,
+        ),
+        patch(
+            "weathergen.utils.performance.torch.cuda.max_memory_reserved",
+            return_value=3 * 1024**3,
+        ),
+        patch("weathergen.utils.performance.torch.cuda.reset_peak_memory_stats") as reset_mock,
+    ):
+        yield reset_mock
+
+
+def test_memory_tracker_returns_global_peaks():
+    """collect() returns allocated and reserved peaks in GiB."""
+    tracker = MemoryTracker(device=torch.device("cpu"))
+
+    metrics = tracker.collect()
+
+    assert metrics["performance.memory.step.max_allocated_gib"] == pytest.approx(2.0)
+    assert metrics["performance.memory.step.max_reserved_gib"] == pytest.approx(3.0)
+
+
+def test_memory_tracker_window_label_in_metric_keys():
+    """The window label is woven into the metric keys."""
+    tracker = MemoryTracker(device=torch.device("cpu"))
+
+    metrics = tracker.collect(window="save_model")
+
+    assert set(metrics) == {
+        "performance.memory.save_model.max_allocated_gib",
+        "performance.memory.save_model.max_reserved_gib",
+    }
+
+
+def test_memory_tracker_reads_peaks_before_resetting():
+    """Each collect() reads the peak counters before resetting the stats.
+
+    Resetting first would zero the high-water marks and report ~0 values; the
+    reset at the end is what makes the next collect report its own window.
+    """
+    calls = []
+
+    with (
+        patch(
+            "weathergen.utils.performance.torch.cuda.max_memory_allocated",
+            side_effect=lambda device: calls.append("read_allocated") or 0,
+        ),
+        patch(
+            "weathergen.utils.performance.torch.cuda.max_memory_reserved",
+            side_effect=lambda device: calls.append("read_reserved") or 0,
+        ),
+        patch(
+            "weathergen.utils.performance.torch.cuda.reset_peak_memory_stats",
+            side_effect=lambda device: calls.append("reset"),
+        ),
+    ):
+        tracker = MemoryTracker(device=torch.device("cpu"))
+        tracker.collect()
+        tracker.collect()
+
+    assert calls == [
+        "reset",  # construction starts a clean window
+        "read_allocated",
+        "read_reserved",
+        "reset",
+        "read_allocated",
+        "read_reserved",
+        "reset",
+    ]
+
+
+def test_null_memory_tracker_is_noop():
+    """NullMemoryTracker.collect() accepts the same call signature and returns no metrics."""
+    assert NullMemoryTracker().collect() == {}
+    assert NullMemoryTracker().collect(window="train") == {}
