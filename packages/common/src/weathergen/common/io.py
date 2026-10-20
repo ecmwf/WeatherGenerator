@@ -96,9 +96,7 @@ class ZarrWriteConfig:
 _DEFAULT_WRITE_CONFIG = ZarrWriteConfig()
 
 
-def _get_shards(
-    shard_nsamples: int, chunks: tuple[int, ...], scale_factor: int
-) -> tuple[tuple[int, ...], *tuple[int, ...]]:
+def _get_shards(shard_nsamples: int, chunks: tuple[int, ...], scale_factor: int) -> tuple[int, ...]:
     """Helper function to find number of shards from chunks and predefined size of shards"""
     shards = (shard_nsamples, *((scale_factor + 1) * x for x in chunks[1:]))
     return shards
@@ -106,7 +104,7 @@ def _get_shards(
 
 def _get_chunks(
     chunk_nsamples: int, data_shape: tuple[int, ...], scale_factor: int
-) -> tuple[tuple[int, ...], *tuple[int, ...]]:
+) -> tuple[int, ...]:
     """Helper function to find chunks from shape of data and predefined size of chunks"""
     chunks = (chunk_nsamples, *(max(x // scale_factor, 1) for x in data_shape[1:]))
     return chunks
