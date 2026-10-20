@@ -835,6 +835,14 @@ class Trainer(TrainerBase):
         """
         yield from enumerate(dataset_iter)
 
+    def validation_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
+        """
+        Yield the (index, batch) pairs that validate() steps over.
+
+        Subclass seam, like train_batches: the validation step itself stays in validate().
+        """
+        yield from enumerate(dataset_iter)
+
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
         Perform validation / test computation as specified by mode_cfg.
@@ -888,7 +896,7 @@ class Trainer(TrainerBase):
                     total=len(self.data_loader_validation) * self.cf.world_size,
                     disable=self.cf.rank > 0,
                 ) as pbar:
-                    for bidx, batch in enumerate(dataset_val_iter):
+                    for bidx, batch in self.validation_batches(dataset_val_iter):
                         compute_full_loss = self._keeps_full_validation_output(mode_cfg)
                         if compute_full_loss or is_diffusion:
                             batch.to_device(self.device)

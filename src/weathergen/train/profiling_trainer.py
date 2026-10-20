@@ -21,6 +21,7 @@ from itertools import islice
 
 import torch
 
+import weathergen.train.trainer as trainer_module
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.train.trainer import Trainer
@@ -55,8 +56,10 @@ class ProfilingTrainer(Trainer):
     training step is the same as in a normal run. Measurement happens in `train_batches`,
     which regains control after each yielded batch has been trained on. The nvtx ranges of
     the phases of a step are added by wrapping the objects the step calls (see
-    `_annotate_step_phases`), not by annotating `Trainer.train`. In inference only the memory
-    snapshot and the peak-memory logging apply, both around `validate`.
+    `_annotate_step_phases`), not by annotating `Trainer.train`; the same holds for
+    validation (`validation_batches`, `_annotate_validation_phases`). Inference is a single
+    `validate`, so only the memory snapshot, the peak-memory logging and the nvtx ranges of
+    validation apply to it.
 
     Traces are collected on the root rank only; the other ranks run the same steps untraced
     so collectives stay matched.
@@ -71,6 +74,8 @@ class ProfilingTrainer(Trainer):
         self.nsys_windows: NsysWindows | None = None
         self.profiling_done: bool = False
         self.step_phases_annotated: bool = False
+        # (id(obj), method) already in an nvtx range, as training and validation share some
+        self.nvtx_wrapped: set[tuple[int, str]] = set()
         # `profiling.nvtx_annotate` without the master switch is a no-op
         self.annotate = nvtx_annotator(profiling_cfg.annotates_nvtx)
 
@@ -240,7 +245,7 @@ class ProfilingTrainer(Trainer):
             wraps += [(self, method, "log")]
 
         for obj, method, name in wraps:
-            nvtx_wrap(obj, method, name)
+            self._nvtx_wrap_once(obj, method, name)
 
         # backward runs on the scaled loss, a new tensor every step
         scale = self.grad_scaler.scale
@@ -251,6 +256,49 @@ class ProfilingTrainer(Trainer):
             return scaled
 
         self.grad_scaler.scale = scale_and_annotate_backward
+
+    def validation_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
+        """Put each validation step, and the wait for its batch, into an nvtx range."""
+        if not self.profiling_cfg.annotates_nvtx:
+            yield from super().validation_batches(dataset_iter)
+            return
+
+        batches = super().validation_batches(nvtx_next(dataset_iter, "next_batch"))
+        for bidx, batch in nvtx_batches(batches):
+            # the batch's methods, since there is a new batch each step
+            for method in (
+                "to_device",
+                "to_device_for_chunked_inference",
+                "to_device_for_output_chunk",
+            ):
+                nvtx_wrap(batch, method, method)
+            yield bidx, batch
+
+    def _annotate_validation_phases(self) -> None:
+        """
+        Put each phase of the validation step into its own nvtx range.
+
+        Like `_annotate_step_phases`. The rollout runs one forward per chunk of forecast steps
+        (`forecast.chunk_size`), so each chunk is a `forward` range. `write_output` is a module
+        function, patched in `validate`.
+        """
+        wraps: list[tuple[object, str, str]] = [(self.model, "forward", "forward")]
+        if self.ema_model is not None:
+            wraps += [(self.ema_model, "forward_eval", "forward")]
+        if self.loss_calculator_val is not None:
+            wraps += [(self.loss_calculator_val, "compute_loss", "loss")]
+        for name, target_aux in self.target_and_aux_calculators_val.items():
+            wraps += [(target_aux, "compute", f"target_aux:{name}")]
+
+        for obj, method, name in wraps:
+            self._nvtx_wrap_once(obj, method, name)
+
+    def _nvtx_wrap_once(self, obj: object, method: str, name: str) -> None:
+        """`nvtx_wrap`, unless `obj.<method>` is already wrapped."""
+        key = (id(obj), method)
+        if key not in self.nvtx_wrapped:
+            self.nvtx_wrapped.add(key)
+            nvtx_wrap(obj, method, name)
 
     def _with_throughput(
         self, batches: Iterator[tuple[int, ModelBatch]]
@@ -356,6 +404,11 @@ class ProfilingTrainer(Trainer):
         with contextlib.ExitStack() as stack:
             if inference and self.profiling_cfg.enabled and self.profiling_cfg.memory_snapshot:
                 stack.enter_context(memory_snapshot_session(self.cf))
+            if self.profiling_cfg.annotates_nvtx:
+                self._annotate_validation_phases()
+                # a module function, so patched only while validating
+                stack.enter_context(nvtx_patched(trainer_module, "write_output", "write_output"))
+                stack.enter_context(self.annotate("validation"))
             super().validate(mini_epoch, mode_cfg, batch_size)
         self._log_peak_memory(VAL, "validation")
 
