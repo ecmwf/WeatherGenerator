@@ -1,0 +1,45 @@
+# Fine-tune sdnbfpve towards the operational analysis, stage 2 of 2: encoder and
+# forecast engine with the 8-step rollout sdnbfpve was trained with, decoder frozen
+# again (as adapted in stage 1). Run with --from-run-id <stage-1 run>, stage
+# train_continue. See README.md.
+
+streams_directory: /hpcperm/ecm8347/work/sdnbfpve-finetune/WeatherGenerator/config/finetune_analysis/streams
+
+# A fresh run, not a continuation of stage 1's schedule: the checkpoint's istep
+# would advance the LR schedule past warmup and skip mini-epochs, and would load
+# stage 1's optimizer state (which belongs to a different set of trainable weights).
+general:
+  istep: 0
+
+# sdnbfpve's own freeze_modules: decoder, latent heads and encoder norms/queries frozen
+freeze_modules: "latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\\.ln.*|encoder\\.q_cells.*|encoder\\.q_aux.*"
+# the encoder's and forecast engine's layers train in eval mode, as they run in inference
+# (see stage1_decoder.yml): no dropout (0.1 in every block). The forecast engine itself
+# stays in train mode, so its latent noise (fe_impute_latent_noise_std, for rollout
+# stability, as sdnbfpve was trained) stays on; "encoder|forecast_engine" would turn it off
+eval_modules: "encoder|forecast_engine\\..*"
+
+training_config:
+  start_date: "2024-07-01T00:00"
+  end_date: "2026-04-30T18:00"
+  num_mini_epochs: 8
+  samples_per_mini_epoch: 2048
+  learning_rate_scheduling:
+    # sdnbfpve's checkpoint says 'const', which this code rejects ('constant')
+    parallel_scaling_policy: "constant"
+    lr_start: 1.0e-07
+    lr_max: 5.0e-06
+    lr_final_decay: 1.0e-06
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
+  forecast:
+    time_step: "06:00:00"
+    num_steps: 8
+    offset: 1
+    policy: fixed
+
+validation_config:
+  start_date: "2026-05-06T00:00"
+  end_date: "2026-07-31T18:00"
+  samples_per_mini_epoch: 256
+  validate_before_training: true

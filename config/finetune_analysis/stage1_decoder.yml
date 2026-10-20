@@ -1,0 +1,58 @@
+# Fine-tune sdnbfpve towards the operational analysis, stage 1 of 2: the ERA5 decoder only.
+#
+# The decoder has no lead-time input, so training it on long leads would push it to
+# smooth every lead. Here it learns the new target (the analysis's climate, orography,
+# detail) from short-lead latents only; encoder, forecast engine and latent heads stay
+# frozen. Run with --from-run-id sdnbfpve, stage train_continue. See README.md.
+
+streams_directory: /hpcperm/ecm8347/work/sdnbfpve-finetune/WeatherGenerator/config/finetune_analysis/streams
+
+# A fresh run, not a continuation of sdnbfpve's schedule: the checkpoint's istep (1168)
+# would advance the LR schedule past warmup and skip mini-epochs, and would load
+# sdnbfpve's optimizer state (which belongs to a different set of trainable weights).
+general:
+  istep: 0
+
+# everything except the decoder (embed_target_coords, target_token_engines, pred_heads);
+# freeze_modules is fullmatched against module names, and freezing a module freezes
+# all its parameters
+freeze_modules: "encoder|forecast_engine|latent.*|deep_ssl.*"
+# the decoder trains in eval mode, as it runs in inference: its dropout (0.1, hardcoded)
+# shifts its output by ~0.03 sigma in every channel between train and eval mode, so a
+# decoder fitted with dropout on loses the gain in eval (pathtests avauz837 vs ka65d7vu:
+# same weights and window, training-path z_500 3.0 m with the decoder in train mode,
+# 8.4-8.9 m in eval mode, validation 8.5 m)
+eval_modules: "embed_target_coords|target_token_engines|pred_heads"
+
+training_config:
+  # 2024-07..2024-12 keeps old-style inputs (ERA5-feedback IASI, original geostationary
+  # stores) in the mix, ~27% of samples; then live-like inputs
+  start_date: "2024-07-01T00:00"
+  end_date: "2026-04-30T18:00"
+  # short, validated often: the decoder's gain comes within tens of steps (1-GPU smoke
+  # runs: z_500 9.1 -> 6.6 m after 16 samples) and longer runs gave it back (gdv8da6d,
+  # 4 x 2048 samples: 9.2 m), so pick the best of 8 mini-epochs by validation
+  num_mini_epochs: 8
+  samples_per_mini_epoch: 256
+  learning_rate_scheduling:
+    # sdnbfpve's checkpoint says 'const', which this code rejects ('constant')
+    parallel_scaling_policy: "constant"
+    lr_start: 1.0e-07
+    lr_max: 1.0e-05
+    lr_final_decay: 1.0e-06
+    # in steps per GPU: 8 x 256 samples on 4 GPUs is 512 steps
+    num_steps_warmup: 16
+    num_steps_cooldown: 32
+  forecast:
+    time_step: "06:00:00"
+    num_steps: 2
+    offset: 1
+    policy: fixed
+
+validation_config:
+  # ~5-day buffer after training; ends with the surface observations (ERA5 feedback
+  # for August 2026 is not in MARS yet)
+  start_date: "2026-05-06T00:00"
+  end_date: "2026-07-31T18:00"
+  samples_per_mini_epoch: 256
+  validate_before_training: true
