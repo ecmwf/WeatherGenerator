@@ -844,11 +844,13 @@ class ForecastingEngine(torch.nn.Module):
 
     def lead_time_embedding(self, fstep: int, device) -> torch.Tensor:
         """
-        Sinusoidal embedding of the lead time (in hours) of the state predicted at forecast step
-        fstep, shape [1, 1, fe_lead_time_cond_dim]
+        Sinusoidal embedding of the lead time of the state predicted at forecast step fstep,
+        shape [1, 1, fe_lead_time_cond_dim]. The lead time is in days with angular frequencies
+        from 1 to 1/100 per day, so that none aliases at 6 h steps and all vary over 0-15 days.
         """
-        lead_time_hours = torch.tensor([fstep * self.step_hours], device=device)
-        return time_offset_embedding(lead_time_hours, self.lead_time_cond_dim).unsqueeze(1)
+        lead_time_days = torch.tensor([fstep * self.step_hours / 24.0], device=device)
+        emb = time_offset_embedding(lead_time_days, self.lead_time_cond_dim, max_period=100.0)
+        return emb.unsqueeze(1)
 
 
 def time_offset_embedding(time_offset_hours: torch.Tensor, dim: int, max_period: float = 10000.0):
