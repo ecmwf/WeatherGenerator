@@ -135,7 +135,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 64
+  num_mini_epochs: 256
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -151,7 +151,7 @@ training_config:
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256
-    num_steps_cooldown: 512
+    num_steps_cooldown: 65536  # 16 epochs
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
