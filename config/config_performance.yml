@@ -16,6 +16,7 @@ profiling:
   memory_snapshot:
     enabled: True
   # nvtx_annotate: True
+  # nvtx_module_ranges: True
 
 # cheap whole-run metrics, safe to leave on for a full run
 performance_logging:

@@ -96,6 +96,7 @@ class ProfilingTrainer(Trainer):
         if profiling_cfg.enabled and not (
             profiling_cfg.collects_traces
             or profiling_cfg.annotates_nvtx
+            or profiling_cfg.annotates_nvtx_modules
             or self.nsys_windows is not None
         ):
             logger.warning("Profiling is enabled, but no collector, nsys window or nvtx is.")
@@ -200,7 +201,8 @@ class ProfilingTrainer(Trainer):
 
         Wraps the methods of the objects that `Trainer.train` calls (instances only, once
         per run), so the step itself needs no annotations. Module forward/backward ranges
-        come from `register_nvtx_hooks`, the per-loss-term ranges from `LossCalculator`.
+        come from `register_nvtx_hooks` (`nvtx_module_ranges`), the per-loss-term ranges from
+        `LossCalculator`.
         """
         if self.step_phases_annotated:
             return

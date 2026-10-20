@@ -78,7 +78,7 @@ def init_model_and_shard(
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
-    if ProfilingConfig.from_config(cf).annotates_nvtx:
+    if ProfilingConfig.from_config(cf).annotates_nvtx_modules:
         logger.info("Registering NVTX hooks for model.")
         register_nvtx_hooks(model)
 

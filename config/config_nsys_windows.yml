@@ -14,6 +14,9 @@ profiling:
   enabled: True
   # nvtx ranges per training step and per phase of it (forward, loss, backward, ...)
   nvtx_annotate: True
+  # nvtx ranges per module forward/backward: a breakdown by module, but tens of microseconds
+  # of CPU time per module call, which slows down the captured steps
+  # nvtx_module_ranges: True
   nsys_windows:
     enabled: True
     # data reading + preprocessing until the first model forward pass is done

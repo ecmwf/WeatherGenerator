@@ -56,6 +56,17 @@ def test_collecting_traces_needs_profiling_enabled():
     assert not ProfilingConfig.from_config(cfg).collects_traces
 
 
+def test_nvtx_module_ranges_are_separate_and_need_profiling_enabled():
+    cfg = OmegaConf.create({"profiling": {"enabled": True, "nvtx_annotate": True}})
+    assert not ProfilingConfig.from_config(cfg).annotates_nvtx_modules, "off by default"
+
+    cfg.profiling.nvtx_module_ranges = True
+    assert ProfilingConfig.from_config(cfg).annotates_nvtx_modules
+
+    cfg.profiling.enabled = False
+    assert not ProfilingConfig.from_config(cfg).annotates_nvtx_modules
+
+
 def test_nvtx_annotation_needs_profiling_enabled():
     cfg = OmegaConf.create({"profiling": {"enabled": False, "nvtx_annotate": True}})
     assert not ProfilingConfig.from_config(cfg).annotates_nvtx

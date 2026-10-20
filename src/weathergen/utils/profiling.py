@@ -86,14 +86,18 @@ class ProfilingConfig:
     `config/config_performance.yml`. Traces go to `config.get_path_profiling_traces`.
 
     Attributes:
-        enabled: master switch for the section, including `nvtx_annotate`.
+        enabled: master switch for the section, including the nvtx options.
         stop_after_profiling: end the run after the profiled stretch, skipping validation
             and checkpointing.
         schedule: length and wait/warmup/active split of the profiled stretch.
         pytorch_profiler: chrome trace and memory timeline per cycle (root rank).
         memory_snapshot: CUDA memory history from the first active step (root rank); view
             at https://pytorch.org/memory_viz.
-        nvtx_annotate: nvtx ranges around batches and model blocks, for nsys.
+        nvtx_annotate: nvtx ranges around each training step and its phases (forward,
+            loss, backward, optimizer step, ...), for nsys. A few dozen ranges per step.
+        nvtx_module_ranges: nvtx ranges around the forward and backward of every module, via
+            global module hooks. These cost tens of microseconds of CPU time per module call
+            and stay registered for the whole run, so they slow down the steps they show.
     """
 
     enabled: bool = False
@@ -102,6 +106,7 @@ class ProfilingConfig:
     pytorch_profiler: bool = False
     memory_snapshot: bool = False
     nvtx_annotate: bool = False
+    nvtx_module_ranges: bool = False
 
     @classmethod
     def from_config(cls, cf: Config) -> "ProfilingConfig":
@@ -117,6 +122,7 @@ class ProfilingConfig:
             pytorch_profiler=pytorch_profiler_cfg.get("enabled", defaults.pytorch_profiler),
             memory_snapshot=memory_snapshot_cfg.get("enabled", defaults.memory_snapshot),
             nvtx_annotate=cfg.get("nvtx_annotate", defaults.nvtx_annotate),
+            nvtx_module_ranges=cfg.get("nvtx_module_ranges", defaults.nvtx_module_ranges),
         )
 
     @property
@@ -126,8 +132,13 @@ class ProfilingConfig:
 
     @property
     def annotates_nvtx(self) -> bool:
-        """Whether batches and model blocks get nvtx ranges."""
+        """Whether training steps and their phases get nvtx ranges."""
         return self.enabled and self.nvtx_annotate
+
+    @property
+    def annotates_nvtx_modules(self) -> bool:
+        """Whether the forward and backward of every module get nvtx ranges."""
+        return self.enabled and self.nvtx_module_ranges
 
 
 @contextlib.contextmanager
