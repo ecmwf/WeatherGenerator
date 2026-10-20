@@ -44,6 +44,17 @@ def set_to_eval(block):
     block.eval()
 
 
+def _block_name(name, module):
+    """
+    Name a block is matched by: its own name if it has one, else its path in the model,
+    without the "module." prefix DDP adds when it wraps the model (so a pattern matches
+    the same blocks before and after wrapping)
+    """
+    if hasattr(module, "name"):
+        return module.name
+    return name.removeprefix("module.")
+
+
 def apply_fct_to_blocks(model, blocks, fct):
     """
     Apply a function to specific blocks of a model.
@@ -54,7 +65,7 @@ def apply_fct_to_blocks(model, blocks, fct):
     """
 
     for name, module in model.named_modules():
-        name = module.name if hasattr(module, "name") else name
+        name = _block_name(name, module)
         # avoid the whole model element which has name ''
         if (re.fullmatch(blocks, name) is not None) and (name != ""):
             fct(module)
@@ -80,7 +91,7 @@ def broadcast_matching_params(model, blocks, src=0):
     seen = set()
     tensors = []
     for name, module in model.named_modules():
-        name = module.name if hasattr(module, "name") else name
+        name = _block_name(name, module)
         if (re.fullmatch(blocks, name) is not None) and (name != ""):
             for t in list(module.parameters()) + list(module.buffers()):
                 if id(t) not in seen:

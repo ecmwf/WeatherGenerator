@@ -671,6 +671,24 @@ class Trainer(TrainerBase):
         self.model.train()
 
         apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
+        # trainable blocks to train in eval mode (no dropout), as they run in inference
+        eval_modules = cf.get("eval_modules", "")
+        if eval_modules:
+            apply_fct_to_blocks(self.model, eval_modules, set_to_eval)
+        # top-level blocks with layers still in train mode (dropout on); set_to_eval only
+        # logs blocks with a name, which the top-level containers do not have
+        in_train = sorted(
+            {
+                name.removeprefix("module.").split(".")[0]
+                for name, module in self.model.named_modules()
+                if module.training and next(module.children(), None) is None
+            }
+        )
+        logger.info(f"Blocks in train mode: {', '.join(in_train) or 'none'}")
+        # the forecast engine adds its latent noise when it is itself in train mode
+        fe = getattr(getattr(self.model, "module", self.model), "forecast_engine", None)
+        if fe is not None and cf.get("fe_impute_latent_noise_std", 0.0) > 0.0:
+            logger.info(f"Forecast engine latent noise: {'on' if fe.training else 'off'}")
 
         dataset_iter = iter(self.data_loader)
 
