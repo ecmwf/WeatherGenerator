@@ -1,6 +1,7 @@
 site_name: WeatherGenerator-FastEvaluation
 site_url: https://wgen-fasteval.readthedocs.io/
 repo_url: https://github.com/ecmwf/WeatherGenerator/tree/develop/packages/evaluate
+edit_uri: ./docs/
 site_author: WeatherGenerator contributors
 copyright: "2025 - 2026, WeatherGenerator contributors"
 
