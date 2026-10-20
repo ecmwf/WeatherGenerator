@@ -129,7 +129,7 @@ def run_inference(args):
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_logging)
+    trainer = get_trainer(cf)
     try:
         trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
     except Exception:
