@@ -23,5 +23,7 @@ stages:
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
       - training_config.num_mini_epochs=5
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
     chain_jobs: 2
     nodes: 8
