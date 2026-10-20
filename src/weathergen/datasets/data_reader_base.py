@@ -17,6 +17,7 @@ from numpy.typing import NDArray
 
 from weathergen.common.config import timedelta_to_str
 from weathergen.utils.better_abc import ABCMeta, abstract_attribute
+from weathergen.utils.io_timing import io_timer
 
 _logger = logging.getLogger(__name__)
 
@@ -385,7 +386,8 @@ class DataReaderBase(metaclass=ABCMeta):
         source data (coords, geoinfos, data, datetimes)
         """
 
-        rdata = self._get(idx, self.source_idx)
+        with io_timer(self.stream_info["name"], "reader get_source"):
+            rdata = self._get(idx, self.source_idx)
 
         return rdata
 
@@ -403,7 +405,8 @@ class DataReaderBase(metaclass=ABCMeta):
         target data (coords, geoinfos, data, datetimes)
         """
 
-        rdata = self._get(idx, self.target_idx)
+        with io_timer(self.stream_info["name"], "reader get_target"):
+            rdata = self._get(idx, self.target_idx)
 
         return rdata
 

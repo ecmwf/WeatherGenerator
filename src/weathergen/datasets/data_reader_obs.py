@@ -23,6 +23,7 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 from weathergen.train.utils import Stage
+from weathergen.utils.io_timing import io_timer
 
 _logger = logging.getLogger(__name__)
 
@@ -54,9 +55,11 @@ class DataReaderObs(DataReaderBase):
         super().__init__(tw_handler, stream_info)
 
         self.filename = filename
-        self.z = zarr.open(filename, mode="r")
-        self.data = self.z["data"]
-        self.dt = self.z["dates"]  # datetime only
+        sname = stream_info["name"]
+        with io_timer(sname, "obs init : zarr.open"):
+            self.z = zarr.open(filename, mode="r")
+            self.data = self.z["data"]
+            self.dt = self.z["dates"]  # datetime only
         base_dt_raw = stream_info.get("base_datetime", "1970-01-01T00:00:00")
         format_str = "%Y-%m-%dT%H:%M:%S"
 
@@ -68,8 +71,9 @@ class DataReaderObs(DataReaderBase):
 
         # To read idx convert to a string, format e.g.: 197001010000
         base_date_str = dt_obj.strftime("%Y%m%d%H%M")
-        self.hrly_index = self.z[f"idx_{base_date_str}_1"]
-        self.colnames = list(self.data.attrs["colnames"])
+        with io_timer(sname, "obs init : open hourly index + colnames"):
+            self.hrly_index = self.z[f"idx_{base_date_str}_1"]
+            self.colnames = list(self.data.attrs["colnames"])
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
         data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
@@ -111,7 +115,6 @@ class DataReaderObs(DataReaderBase):
         self.coords_idx = [self.colnames.index(lat_name), self.colnames.index(lon_name)]
 
         # geoinfo channels
-        sname = stream_info["name"]
         if stream_info.get("geoinfo_channels") is not None:
             self.geoinfo_idx, self.geoinfo_channels = [], []
             for c in stream_info.get("geoinfo_channels"):
@@ -126,14 +129,16 @@ class DataReaderObs(DataReaderBase):
         _logger.info(f"{stream_info['name']} geoinfos : {self.geoinfo_channels}")
 
         # load additional properties (mean, var)
-        self._load_properties()
+        with io_timer(sname, "obs init : load properties"):
+            self._load_properties()
         self.mean = np.array(self.properties["means"])  # [data_idx]
         self.stdev = np.sqrt(np.array(self.properties["vars"]))  # [data_idx])
         self.mean_geoinfo = np.array(self.properties["means"])[self.geoinfo_idx]
         self.stdev_geoinfo = np.sqrt(np.array(self.properties["vars"])[self.geoinfo_idx])
 
         # Create index for samples
-        self._setup_sample_index()
+        with io_timer(sname, "obs init : setup sample index"):
+            self._setup_sample_index()
 
         self.len = min(len(self.indices_start), len(self.indices_end))
 
@@ -295,11 +300,15 @@ class DataReaderObs(DataReaderBase):
 
         # One row slice: chunks are (nrows, all_columns), so three oindex calls
         # would decompress the same chunks three times. Values match oindex.
-        block = np.asarray(self.data[start_row:end_row])
-        coords, geoinfos, data = _columns_from_block(
-            block, self.coords_idx, self.geoinfo_idx, channels_idx
-        )
-        datetimes = self.dt[start_row:end_row][:, 0]
+        sname = self.stream_info["name"]
+        with io_timer(sname, "obs _get : read block"):
+            block = np.asarray(self.data[start_row:end_row])
+        with io_timer(sname, "obs _get : split columns"):
+            coords, geoinfos, data = _columns_from_block(
+                block, self.coords_idx, self.geoinfo_idx, channels_idx
+            )
+        with io_timer(sname, "obs _get : read dates"):
+            datetimes = self.dt[start_row:end_row][:, 0]
 
         # indices_start, indices_end above work with [t_start, t_end] and violate
         # our convention [t_start, t_end) where endpoint is excluded

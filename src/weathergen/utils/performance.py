@@ -15,9 +15,10 @@ Tracing a bounded stretch of training lives in `weathergen.utils.profiling`. Bot
 driven by `weathergen.train.profiling_trainer.ProfilingTrainer`.
 """
 
+import functools
 import logging
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Generator, Iterable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 
 import torch
 
@@ -233,6 +234,53 @@ def nvtx_batches[T](batches: Iterable[tuple[int, T]]) -> Iterator[tuple[int, T]]
         # the range stays open while the consumer runs the step on the yielded batch
         with nvtx_range(f"batch_{bidx}"):
             yield bidx, batch
+
+
+def nvtx_next[T](iterable: Iterable[T], name: str) -> Iterator[T]:
+    """Yield the items of `iterable`, each `next()` call inside an nvtx range `name`.
+
+    Makes the time the training loop waits for the data loader visible as a range.
+    """
+    it = iter(iterable)
+    while True:
+        with nvtx_range(name):
+            try:
+                item = next(it)
+            except StopIteration:
+                return
+        yield item
+
+
+def nvtx_annotator(enabled: bool) -> Callable[[str], AbstractContextManager]:
+    """`nvtx_range` if `enabled`, else a no-op context with the same signature."""
+    return nvtx_range if enabled else lambda name: nullcontext()
+
+
+def nvtx_wrap(obj: object, method: str, name: str) -> None:
+    """Run every call of `obj.<method>` inside an nvtx range `name`.
+
+    Patches the instance (not its class), so only use it on objects of a run that is
+    being profiled.
+    """
+    original = getattr(obj, method)
+
+    @functools.wraps(original)
+    def wrapped(*args, **kwargs):
+        with nvtx_range(name):
+            return original(*args, **kwargs)
+
+    setattr(obj, method, wrapped)
+
+
+@contextmanager
+def nvtx_patched(obj: object, method: str, name: str) -> Generator[None]:
+    """Like `nvtx_wrap`, for the duration of the `with` block only (e.g. on a module)."""
+    original = getattr(obj, method)
+    nvtx_wrap(obj, method, name)
+    try:
+        yield
+    finally:
+        setattr(obj, method, original)
 
 
 def _nvtx_push(name: str):

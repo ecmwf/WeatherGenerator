@@ -1,0 +1,26 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Overwrite config: several separate nsys reports from one run. Launch with
+#   nsys profile --capture-range=cudaProfilerApi --capture-range-end=repeat:2 -o trace_%n ...
+# (repeat:N = number of enabled windows). See src/weathergen/utils/nsys_windows.py.
+profiling:
+  enabled: True
+  # nvtx ranges per training step and per phase of it (forward, loss, backward, ...)
+  nvtx_annotate: True
+  nsys_windows:
+    enabled: True
+    # data reading + preprocessing until the first model forward pass is done
+    startup: True
+    # `steady_steps` training steps after `warmup_steps` untraced steps
+    steady: True
+    warmup_steps: 2
+    steady_steps: 4
+    # end the run after the last window (skips validation/checkpointing); False to train on
+    stop_after_capture: True

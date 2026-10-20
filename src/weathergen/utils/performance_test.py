@@ -12,7 +12,15 @@ from unittest.mock import patch
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.utils.performance import MemoryTracker, ThroughputTracker, nvtx_batches
+from weathergen.utils.performance import (
+    MemoryTracker,
+    ThroughputTracker,
+    nvtx_annotator,
+    nvtx_batches,
+    nvtx_next,
+    nvtx_patched,
+    nvtx_wrap,
+)
 from weathergen.utils.profiling import ProfilingConfig
 
 _DEVICE = torch.device("cpu")
@@ -62,3 +70,61 @@ def test_memory_tracker_from_config():
         patch("torch.cuda.reset_peak_memory_stats"),
     ):
         assert MemoryTracker.from_config(cfg, _DEVICE) is not None
+
+
+def test_nvtx_annotator_is_a_noop_unless_enabled():
+    calls = []
+    with (
+        patch("torch.cuda.nvtx.range_push", side_effect=lambda n: calls.append(n)),
+        patch("torch.cuda.nvtx.range_pop", side_effect=lambda: calls.append("pop")),
+    ):
+        with nvtx_annotator(False)("off"):
+            pass
+        with nvtx_annotator(True)("on"):
+            pass
+
+    assert calls == ["on", "pop"]
+
+
+def test_nvtx_next_wraps_each_fetch_but_not_the_loop_body():
+    calls = []
+    with (
+        patch("torch.cuda.nvtx.range_push", side_effect=lambda n: calls.append(f"push {n}")),
+        patch("torch.cuda.nvtx.range_pop", side_effect=lambda: calls.append("pop")),
+    ):
+        for item in nvtx_next([1, 2], "next"):
+            calls.append(f"body {item}")
+
+    # the final fetch, which ends the iteration, is closed too
+    fetch = ["push next", "pop"]
+    assert calls == [*fetch, "body 1", *fetch, "body 2", *fetch]
+
+
+def test_nvtx_wrap_patches_only_the_instance():
+    class Optimizer:
+        def zero_grad(self, set_to_none: bool = True) -> str:
+            return f"zeroed {set_to_none}"
+
+    calls = []
+    wrapped, untouched = Optimizer(), Optimizer()
+    with (
+        patch("torch.cuda.nvtx.range_push", side_effect=lambda n: calls.append(f"push {n}")),
+        patch("torch.cuda.nvtx.range_pop", side_effect=lambda: calls.append("pop")),
+    ):
+        nvtx_wrap(wrapped, "zero_grad", "zero_grad")
+        assert wrapped.zero_grad(set_to_none=False) == "zeroed False"
+        assert untouched.zero_grad() == "zeroed True"
+
+    assert calls == ["push zero_grad", "pop"]
+
+
+def test_nvtx_patched_restores_the_original():
+    original = torch.nn.utils.clip_grad_norm_
+    with (
+        patch("torch.cuda.nvtx.range_push"),
+        patch("torch.cuda.nvtx.range_pop"),
+        nvtx_patched(torch.nn.utils, "clip_grad_norm_", "clip_grad_norm"),
+    ):
+        assert torch.nn.utils.clip_grad_norm_ is not original
+
+    assert torch.nn.utils.clip_grad_norm_ is original

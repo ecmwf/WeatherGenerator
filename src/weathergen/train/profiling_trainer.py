@@ -26,7 +26,16 @@ from weathergen.datasets.batch import ModelBatch
 from weathergen.train.trainer import Trainer
 from weathergen.train.utils import TRAIN, VAL, Stage
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import MemoryTracker, ThroughputTracker, nvtx_batches
+from weathergen.utils.nsys_windows import NsysWindows
+from weathergen.utils.performance import (
+    MemoryTracker,
+    ThroughputTracker,
+    nvtx_annotator,
+    nvtx_batches,
+    nvtx_next,
+    nvtx_patched,
+    nvtx_wrap,
+)
 from weathergen.utils.profiling import (
     ProfilingConfig,
     memory_snapshot_session,
@@ -39,12 +48,14 @@ logger = logging.getLogger(__name__)
 
 class ProfilingTrainer(Trainer):
     """
-    Trainer that measures the training loop (see `ProfilingConfig`, `ThroughputTracker`,
-    `MemoryTracker`).
+    Trainer that measures the training loop (see `ProfilingConfig`, `NsysWindows`,
+    `ThroughputTracker`, `MemoryTracker`).
 
     Only the iteration seams (`mini_epochs`, `train_batches`) are overridden, so the
     training step is the same as in a normal run. Measurement happens in `train_batches`,
-    which regains control after each yielded batch has been trained on.
+    which regains control after each yielded batch has been trained on. The nvtx ranges of
+    the phases of a step are added by wrapping the objects the step calls (see
+    `_annotate_step_phases`), not by annotating `Trainer.train`.
 
     Traces are collected on the root rank only; the other ranks run the same steps untraced
     so collectives stay matched.
@@ -56,7 +67,11 @@ class ProfilingTrainer(Trainer):
         self.profiling_cfg = profiling_cfg
         self.throughput_tracker: ThroughputTracker | None = None
         self.memory_tracker: MemoryTracker | None = None
+        self.nsys_windows: NsysWindows | None = None
         self.profiling_done: bool = False
+        self.step_phases_annotated: bool = False
+        # `profiling.nvtx_annotate` without the master switch is a no-op
+        self.annotate = nvtx_annotator(profiling_cfg.annotates_nvtx)
 
     def init(self, cf: Config, devices: list) -> None:
         super().init(cf, devices)
@@ -69,22 +84,40 @@ class ProfilingTrainer(Trainer):
         self.memory_tracker = MemoryTracker.from_config(
             self.cf, device=torch.device(self.devices[0])
         )
+        self.nsys_windows = NsysWindows.from_config(self.cf)
         logger.info(
             f"Profiling run: {self.profiling_cfg}, "
+            f"nsys windows: {vars(self.nsys_windows) if self.nsys_windows else None}, "
             f"throughput logging: {self.throughput_tracker is not None}, "
             f"peak-memory logging: {self.memory_tracker is not None}"
         )
 
         profiling_cfg = self.profiling_cfg
         if profiling_cfg.enabled and not (
-            profiling_cfg.collects_traces or profiling_cfg.annotates_nvtx
+            profiling_cfg.collects_traces
+            or profiling_cfg.annotates_nvtx
+            or self.nsys_windows is not None
         ):
-            logger.warning("Profiling is enabled, but no collector or nvtx_annotate is.")
+            logger.warning("Profiling is enabled, but no collector, nsys window or nvtx is.")
+        if (
+            self.nsys_windows is not None
+            and profiling_cfg.collects_traces
+            and profiling_cfg.stop_after_profiling
+            and self.nsys_windows.last_step >= profiling_cfg.schedule.num_steps
+        ):
+            logger.warning(
+                "stop_after_profiling ends the run before the last nsys window closes: "
+                f"{profiling_cfg.schedule.num_steps} steps < {self.nsys_windows.last_step + 1}."
+            )
 
     @property
     def profiling_only(self) -> bool:
-        """Whether the run ends after the profiled stretch, without validation or checkpoints."""
-        return self.profiling_cfg.enabled and self.profiling_cfg.stop_after_profiling
+        """Whether the run ends after the measured steps, without validation or checkpoints."""
+        stops_after_profiling = (
+            self.profiling_cfg.enabled and self.profiling_cfg.stop_after_profiling
+        )
+        stops_after_capture = self.nsys_windows is not None and self.nsys_windows.stop_after_capture
+        return stops_after_profiling or stops_after_capture
 
     def mini_epochs(self, mini_epoch_base: int) -> Iterator[int]:
         """Run a single mini_epoch in a profiling-only run."""
@@ -93,10 +126,29 @@ class ProfilingTrainer(Trainer):
         else:
             yield from super().mini_epochs(mini_epoch_base)
 
+    def train(self, mini_epoch: int) -> None:
+        """Label the phases of the training step and open the nsys startup window."""
+        if self.profiling_cfg.annotates_nvtx:
+            self._annotate_step_phases()
+        if self.nsys_windows is not None:
+            self._open_nsys_startup_window()
+
+        with contextlib.ExitStack() as stack:
+            if self.profiling_cfg.annotates_nvtx:
+                # a module function, so patched only while training
+                stack.enter_context(
+                    nvtx_patched(torch.nn.utils, "clip_grad_norm_", "clip_grad_norm")
+                )
+            super().train(mini_epoch)
+
     def train_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
         """Measure every training step, and trace the profiled stretch of them."""
+        if self.profiling_cfg.annotates_nvtx:
+            # the time the training loop waits for the data loader
+            dataset_iter = nvtx_next(dataset_iter, "next_batch")
         batches = self._with_throughput(self._with_profiling(dataset_iter))
-        yield from self._with_nvtx(self._with_memory(batches))
+        # the nsys window is opened before and closed after the batch's nvtx range
+        yield from self._with_nvtx(self._with_nsys(self._with_memory(batches)))
 
     def _with_nvtx(
         self, batches: Iterator[tuple[int, ModelBatch]]
@@ -106,7 +158,98 @@ class ProfilingTrainer(Trainer):
             yield from batches
             return
 
-        yield from nvtx_batches(batches)
+        for bidx, batch in nvtx_batches(batches):
+            # the batch's methods, since there is a new batch each step
+            nvtx_wrap(batch, "pin_memory", "pin_memory")
+            nvtx_wrap(batch, "to_device", "to_device")
+            yield bidx, batch
+
+    def _with_nsys(
+        self, batches: Iterator[tuple[int, ModelBatch]]
+    ) -> Iterator[tuple[int, ModelBatch]]:
+        """Open and close the nsys steady window, and end a capture-only run after it."""
+        if self.nsys_windows is None:
+            yield from batches
+            return
+
+        for bidx, batch in batches:
+            self.nsys_windows.before_step(bidx)
+            yield bidx, batch
+            self.nsys_windows.after_step(bidx)
+            if self.nsys_windows.ends_run:
+                logger.info("All nsys capture windows done, ending the run.")
+                return
+
+    def _open_nsys_startup_window(self) -> None:
+        """Capture from before the data loader starts until the first forward pass is done."""
+        nsys_windows = self.nsys_windows
+        assert nsys_windows is not None
+        if not nsys_windows.startup or nsys_windows.done:
+            return
+
+        def close_after_first_forward(module, args, output) -> None:
+            handle.remove()
+            nsys_windows.after_forward(0)
+
+        handle = self.model.register_forward_hook(close_after_first_forward)
+        nsys_windows.before_data_iter()
+
+    def _annotate_step_phases(self) -> None:
+        """
+        Put each phase of the training step into its own nvtx range.
+
+        Wraps the methods of the objects that `Trainer.train` calls (instances only, once
+        per run), so the step itself needs no annotations. Module forward/backward ranges
+        come from `register_nvtx_hooks`, the per-loss-term ranges from `LossCalculator`.
+        """
+        if self.step_phases_annotated:
+            return
+        self.step_phases_annotated = True
+
+        wraps: list[tuple[object, str, str]] = [
+            (self.model, "forward", "forward"),
+            (self.loss_calculator, "compute_loss", "loss"),
+            (self, "_get_tensor_item", "item (GPU sync)"),
+            (self, "_maybe_log_loss_spike", "loss_spike_check"),
+            (self.collapse_monitor, "_compute_collapse_metrics", "collapse_metrics"),
+        ]
+        for name, target_aux in self.target_and_aux_calculators.items():
+            wraps += [
+                (target_aux, "compute", f"target_aux:{name}"),
+                (target_aux, "update_state_pre_backward", f"update_state_pre_backward:{name}"),
+                (target_aux, "update_state_post_opt_step", f"update_state_post_opt_step:{name}"),
+            ]
+        for name, target_aux in self.target_and_aux_calculators_val.items():
+            wraps += [
+                (target_aux, "update_state_pre_backward", f"update_state_pre_backward:{name}"),
+                (target_aux, "update_state_post_opt_step", f"update_state_post_opt_step:{name}"),
+            ]
+        wraps += [(optimizer, "zero_grad", "zero_grad") for optimizer in self.optimizers]
+        wraps += [(scheduler, "step", "lr_scheduler_step") for scheduler in self.lr_schedulers]
+        if self.grad_scaler is not None:
+            wraps += [
+                (self.grad_scaler, "unscale_", "unscale_grads"),
+                (self.grad_scaler, "step", "optimizer_step"),
+                (self.grad_scaler, "update", "grad_scaler_update"),
+            ]
+        if self.ema_model is not None:
+            wraps += [(self.ema_model, "update", "ema_update")]
+        for method in ("_log_terminal", "_log", "_log_collapse_metrics", "_log_instant_grad_norms"):
+            wraps += [(self, method, "log")]
+
+        for obj, method, name in wraps:
+            nvtx_wrap(obj, method, name)
+
+        if self.grad_scaler is not None:
+            # backward runs on the scaled loss, a new tensor every step
+            scale = self.grad_scaler.scale
+
+            def scale_and_annotate_backward(outputs):
+                scaled = scale(outputs)
+                nvtx_wrap(scaled, "backward", "backward")
+                return scaled
+
+            self.grad_scaler.scale = scale_and_annotate_backward
 
     def _with_throughput(
         self, batches: Iterator[tuple[int, ModelBatch]]
@@ -190,7 +333,7 @@ class ProfilingTrainer(Trainer):
         if torch.distributed.is_initialized():
             torch.distributed.barrier()
 
-        if self.profiling_only:
+        if self.profiling_cfg.stop_after_profiling:
             logger.info(f"Profiled {schedule.num_steps} training steps, ending the run.")
             return
 
@@ -216,5 +359,6 @@ class ProfilingTrainer(Trainer):
             return
 
         self._close_memory_window("train")
-        super().save_model(mini_epoch, name)
+        with self.annotate("checkpoint"):
+            super().save_model(mini_epoch, name)
         self._log_peak_memory(TRAIN, "save_model")
