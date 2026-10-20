@@ -347,10 +347,10 @@ class DataReaderBase(metaclass=ABCMeta):
         self.geoinfo_idx = []
         self.target_channel_weights = []
 
-        self.mean = np.zeros(0)
-        self.stdev = np.ones(0)
-        self.mean_geoinfo = np.zeros(0)
-        self.stdev_geoinfo = np.ones(0)
+        self.mean = np.zeros(0, dtype=np.float32)
+        self.stdev = np.ones(0, dtype=np.float32)
+        self.mean_geoinfo = np.zeros(0, dtype=np.float32)
+        self.stdev_geoinfo = np.ones(0, dtype=np.float32)
 
     @abstractmethod
     def length(self) -> int:
@@ -561,7 +561,8 @@ class DataReaderBase(metaclass=ABCMeta):
             )
         # Equivalent to (data[..., i] - mean[ch]) / stdev[ch] per channel.
         # Stats keep their dtype so float32 data minus float64 mean still promotes,
-        # matching the original loop.
+        # matching the original loop. The anemoi and obs readers keep float32 stats, so
+        # their data takes the in-place path below.
         idx_arr = np.asarray(idx, dtype=np.intp)
         mean_vec = np.asarray(mean)[idx_arr]
         std_vec = np.asarray(stdev)[idx_arr]
@@ -571,7 +572,7 @@ class DataReaderBase(metaclass=ABCMeta):
             data /= std_vec
             return data
 
-        # Mixed dtypes (typically float32 data, float64 anemoi/obs stats): promote the same
+        # Mixed dtypes (float32 data, float64 stats of other readers): promote the same
         # way the original channel loop did. Row-chunked ufuncs avoid a full-size float64
         # temporary; few-channel or non-contiguous last axes stay on the scalar loop.
         n_ch = data.shape[-1]
@@ -713,6 +714,10 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Denormalized target data
         """
+
+        if len(target) == 0:
+            return target
+
         return self._denormalize(target, self.target_idx, self.mean, self.stdev, "target")
 
 

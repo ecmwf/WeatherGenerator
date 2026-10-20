@@ -186,8 +186,8 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.properties = {
             "stream_id": 0,
         }
-        self.mean = statistics["mean"]
-        self.stdev = statistics["stdev"]
+        self.mean = np.asarray(statistics["mean"], dtype=np.float32)
+        self.stdev = np.asarray(statistics["stdev"], dtype=np.float32)
 
     @override
     def init_empty(self) -> None:

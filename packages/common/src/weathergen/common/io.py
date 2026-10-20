@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -26,11 +27,6 @@ from numpy.typing import NDArray
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
-# experimental value, should be inferred more intelligently
-SHARDING_ENABLED = True
-SHARD_N_SAMPLES = 40320
-CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
-SCALE_FACTOR = 4  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
@@ -46,19 +42,73 @@ def is_ndarray(obj: typing.Any) -> bool:
     return isinstance(obj, (np.ndarray))  # noqa: TID251
 
 
+@dataclasses.dataclass(frozen=True)
+class ZarrWriteConfig:
+    """
+    Layout of the zarr arrays written for validation and inference output.
+
+    Set by the `zarr_write` section of a run config. The defaults are an experimental
+    value; for large grids larger chunks and shards write faster, e.g. for N320 (542080
+    points): `chunk_nsamples: 542080`, `shard_nsamples: 3252480`, `scale_factor: 1`,
+    `async_concurrency: 64`.
+
+    Attributes:
+        sharding: group chunks into shards (one file per shard instead of per chunk).
+        chunk_nsamples: chunk size along the first (datapoint) dimension.
+        shard_nsamples: shard size along the first dimension, a multiple of chunk_nsamples.
+        scale_factor: chunks of the other dimensions are their size // scale_factor; shards
+            are scale_factor + 1 chunks.
+        async_concurrency: zarr's `async.concurrency` while writing; zarr's default if None.
+    """
+
+    sharding: bool = True
+    chunk_nsamples: int = 40320 // 60
+    shard_nsamples: int = 40320
+    scale_factor: int = 4
+    async_concurrency: int | None = None
+
+    def __post_init__(self):
+        assert self.chunk_nsamples > 0 and self.scale_factor > 0
+        assert self.shard_nsamples % self.chunk_nsamples == 0, (
+            f"zarr_write: shard_nsamples ({self.shard_nsamples}) must be a multiple of "
+            f"chunk_nsamples ({self.chunk_nsamples})."
+        )
+
+    @classmethod
+    def from_config(cls, cf: typing.Mapping | None) -> "ZarrWriteConfig":
+        """Read the `zarr_write` section of a run config; missing keys keep their default."""
+        section = (cf.get("zarr_write") if cf is not None else None) or {}
+        defaults = cls()
+        return cls(
+            **{
+                field.name: section.get(field.name, getattr(defaults, field.name))
+                for field in dataclasses.fields(cls)
+            }
+        )
+
+    def zarr_options(self) -> contextlib.AbstractContextManager:
+        """zarr's global config while writing, restored afterwards."""
+        if self.async_concurrency is None:
+            return contextlib.nullcontext()
+        return zarr.config.set({"async.concurrency": self.async_concurrency})
+
+
+_DEFAULT_WRITE_CONFIG = ZarrWriteConfig()
+
+
 def _get_shards(
-    shard_nsamples: tuple[int], chunks: tuple[int]
+    shard_nsamples: int, chunks: tuple[int, ...], scale_factor: int
 ) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find number of shards from chunks and predefined size of shards"""
-    shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
+    shards = (shard_nsamples, *((scale_factor + 1) * x for x in chunks[1:]))
     return shards
 
 
 def _get_chunks(
-    chunk_nsamples: tuple[int], data_shape: tuple[int]
+    chunk_nsamples: int, data_shape: tuple[int, ...], scale_factor: int
 ) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find chunks from shape of data and predefined size of chunks"""
-    chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in data_shape[1:]))
+    chunks = (chunk_nsamples, *(max(x // scale_factor, 1) for x in data_shape[1:]))
     return chunks
 
 
@@ -296,12 +346,15 @@ class OutputDataset:
         return np.arange(self.data.shape[0])
 
     def as_xarray(
-        self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples=SHARD_N_SAMPLES
+        self,
+        chunk_nsamples=_DEFAULT_WRITE_CONFIG.chunk_nsamples,
+        shard_nsamples=_DEFAULT_WRITE_CONFIG.shard_nsamples,
     ) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
-        chunks = _get_chunks(chunk_nsamples, self.data.shape)
-        if SHARDING_ENABLED:
-            shards = _get_shards(shard_nsamples, chunks)
+        scale_factor = _DEFAULT_WRITE_CONFIG.scale_factor
+        chunks = _get_chunks(chunk_nsamples, self.data.shape, scale_factor)
+        if _DEFAULT_WRITE_CONFIG.sharding:
+            shards = _get_shards(shard_nsamples, chunks, scale_factor)
             _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
             shards = None
@@ -375,11 +428,17 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path, read_only: bool):
+    def __init__(
+        self,
+        store_path: pathlib.Path,
+        read_only: bool,
+        write_config: ZarrWriteConfig | None = None,
+    ):
         self._store: LocalStore | ZipStore | None = None
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
         self.read_only = read_only
+        self.write_config = write_config or _DEFAULT_WRITE_CONFIG
 
     @property
     def _mode(self):
@@ -417,9 +476,10 @@ class ZarrIO:
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
-        for dataset in item.datasets:
-            if dataset is not None:
-                self._write_dataset(group, dataset)
+        with self.write_config.zarr_options():
+            for dataset in item.datasets:
+                if dataset is not None:
+                    self._write_dataset(group, dataset)
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
@@ -471,17 +531,18 @@ class ZarrIO:
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
 
+        layout = self.write_config
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = _get_chunks(CHUNK_N_SAMPLES, array.shape)
+            chunks = _get_chunks(layout.chunk_nsamples, array.shape, layout.scale_factor)
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + f"into group: {group}."
         )
         start_time = timeit.default_timer()
-        if SHARDING_ENABLED and chunks != "auto":
-            shards = _get_shards(SHARD_N_SAMPLES, chunks)
+        if layout.sharding and chunks != "auto":
+            shards = _get_shards(layout.shard_nsamples, chunks, layout.scale_factor)
             group.create_array(name, data=array, chunks=chunks, shards=shards)
             _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
@@ -840,21 +901,24 @@ def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:
     return _get_backend(store_path, read_only=True)
 
 
-def zarrio_writer(store_path: pathlib.Path) -> ZarrIO:
+def zarrio_writer(store_path: pathlib.Path, write_config: ZarrWriteConfig | None = None) -> ZarrIO:
     """
     Get the proper io-writer for a given store.
 
     Args:
         store_path: Full path to the storage location.
+        write_config: Layout of the written arrays; the defaults of ZarrWriteConfig if None.
     """
 
-    return _get_backend(store_path, read_only=False)
+    return _get_backend(store_path, read_only=False, write_config=write_config)
 
 
 _IO_CLASSES: dict[StoreType, type] = {StoreType.ZIP: ZipZarrIO, StoreType.LOCAL: ZarrIO}
 
 
-def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
+def _get_backend(
+    store_path: pathlib.Path, read_only: bool, write_config: ZarrWriteConfig | None = None
+) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
-    return _IO_CLASSES[StoreType(ext)](store_path, read_only)
+    return _IO_CLASSES[StoreType(ext)](store_path, read_only, write_config)

@@ -14,7 +14,7 @@ import torch
 
 import weathergen.common.config as config
 import weathergen.common.io as io
-from weathergen.common.io import TimeRange, zarrio_writer
+from weathergen.common.io import TimeRange, ZarrWriteConfig, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
 from weathergen.model.engines import LatentState
 from weathergen.utils.utils import is_stream_reconstructed
@@ -239,7 +239,7 @@ def write_output(
 
     store_path = config.get_path_results(cf, mini_epoch)
 
-    with zarrio_writer(store_path) as zio:
+    with zarrio_writer(store_path, ZarrWriteConfig.from_config(cf)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
 

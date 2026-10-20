@@ -99,6 +99,15 @@ streams: ???
 
 # type of zarr_store
 zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
+# layout of the written zarr arrays (see weathergen.common.io.ZarrWriteConfig); for large grids
+# larger chunks write faster, e.g. N320 (542080 points): chunk_nsamples: 542080,
+# shard_nsamples: 3252480, scale_factor: 1, async_concurrency: 64
+zarr_write:
+  sharding: True
+  chunk_nsamples: 672
+  shard_nsamples: 40320
+  scale_factor: 4
+  async_concurrency: null # zarr's default
 
 general:
 
