@@ -13,6 +13,7 @@ import json
 import logging
 import time
 from collections import deque
+from collections.abc import Iterator
 from decimal import Decimal
 from math import sqrt
 
@@ -26,6 +27,7 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
+from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model import ModelOutput
@@ -52,7 +54,6 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -137,7 +138,6 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
-        self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
         self.loss_spike_cfg = None
         self.loss_spike_file = None
         self.loss_spike_history = deque()
@@ -236,13 +236,6 @@ class Trainer(TrainerBase):
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
-
-        if cf.train_logging.get("track_performance_metrics"):
-            self.perf_tracker = ThroughputTracker(
-                device=torch.device(self.devices[0]),
-                warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
-                batch_size_per_gpu=self.batch_size_per_gpu,
-            )
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -606,7 +599,7 @@ class Trainer(TrainerBase):
 
         # training loop
 
-        for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
+        for mini_epoch in self.mini_epochs(mini_epoch_base):
             if is_root():
                 logger.info(
                     f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train."
@@ -632,6 +625,15 @@ class Trainer(TrainerBase):
         # already gone away, and the ranks never exit.
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
+
+    def mini_epochs(self, mini_epoch_base: int) -> Iterator[int]:
+        """
+        Yield the mini_epochs that run() iterates over.
+
+        Subclass seam: overriding this changes how long a run lasts without duplicating
+        run(). See weathergen.train.profiling_trainer.ProfilingTrainer.
+        """
+        yield from range(mini_epoch_base, self.training_cfg.num_mini_epochs)
 
     def validate_before_training(self):
         """
@@ -671,7 +673,7 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
-        for bidx, batch in enumerate(dataset_iter):
+        for bidx, batch in self.train_batches(dataset_iter):
             if cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
                 batch = batch.pin_memory()
@@ -782,13 +784,6 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
-            self.perf_tracker.step(
-                batch,
-                self.cf.general.istep,
-                log_fn=lambda m: self.train_logger.log_metrics(
-                    TRAIN, m, step=self.cf.general.istep
-                ),
-            )
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
                 self.collapse_monitor._compute_collapse_metrics(
@@ -813,6 +808,16 @@ class Trainer(TrainerBase):
             self.cf.general.istep += 1
 
         self.dataset.advance()
+
+    def train_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
+        """
+        Yield the (index, batch) pairs that train() steps over.
+
+        Subclass seam: overriding this bounds the loop or wraps it in a context (e.g. a
+        profiler) while the training step itself stays in train(), so there is only ever
+        one copy of it. See weathergen.train.profiling_trainer.ProfilingTrainer.
+        """
+        yield from enumerate(dataset_iter)
 
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
