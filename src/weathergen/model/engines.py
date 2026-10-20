@@ -1150,3 +1150,51 @@ class BilinearDecoder(nn.Module):
         """
         latent_md = torch.repeat_interleave(latent_nd, tcs_lens_n1[1:], 0)
         return self.bilin(coords_md, latent_md)
+
+class MLPProbeDecoder(nn.Module):
+    """Non-linear (MLP) probe from latent tokens to target channels.
+
+    Same forward signature as :class:`BilinearDecoder`; ``coords_md`` is unused.
+    Complements :class:`LinearProbeDecoder`: a linear probe asks whether the target
+    quantity is linearly decodable from the frozen representation; this probe asks
+    whether the information is present at all, linearly or not. A widening gap between
+    linear- and MLP-probe accuracy indicates the representation encodes the quantity
+    in a form that isn't linearly accessible -- not that the representation is poor.
+    """
+
+    def __init__(
+        self,
+        stream_name,
+        coord_dim,
+        latent_dim,
+        out_dim,
+        hidden_dims: list[int] | None = None,
+        activation: str = "GELU",
+        dropout_rate: float = 0.0,
+        with_layer_norm: bool = False,
+    ):
+        super().__init__()
+
+        self.name = f"MLPProbeDecoder_{stream_name}"
+        self.latent_dim = latent_dim
+        self.with_layer_norm = with_layer_norm
+
+        hidden_dims = hidden_dims if hidden_dims else [latent_dim]
+
+        # Submodule name must not match ``freeze_modules`` regex patterns.
+        self.input_norm = nn.LayerNorm(latent_dim) if with_layer_norm else nn.Identity()
+
+        dims = [latent_dim, *hidden_dims]
+        layers = []
+        for d_in, d_out in zip(dims[:-1], dims[1:], strict=False):
+            layers += [nn.Linear(d_in, d_out), ActivationFactory.get(activation)]
+            if dropout_rate > 0.0:
+                layers.append(nn.Dropout(dropout_rate))
+        layers.append(nn.Linear(dims[-1], out_dim))
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, coords_md, latent_nd, tcs_lens_n1):
+        del coords_md
+        latent_md = torch.repeat_interleave(latent_nd, tcs_lens_n1[1:], 0)
+        latent_md = self.input_norm(latent_md)
+        return self.mlp(latent_md)
