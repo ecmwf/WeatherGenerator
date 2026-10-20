@@ -13,12 +13,13 @@ Self-contained: no WeatherGenerator data structures required.
 Runs on CPU with small synthetic tensors.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
 
 from weathergen.utils.performance import (
+    MemoryTracker,
     ThroughputTracker,
     compute_source_bytes,
 )
@@ -154,3 +155,71 @@ def test_metrics_report_cumulative_counts(tracker):
     assert metrics["performance.throughput.global.batches"] == pytest.approx(2)
     assert metrics["performance.throughput.global.samples"] == pytest.approx(8)
     assert metrics["performance.throughput.global.mb"] == pytest.approx(3.0)
+
+
+# ---------------------------------------------------------------------------
+# MemoryTracker
+# ---------------------------------------------------------------------------
+
+_GIB = 1024**3
+
+
+def _patch_cuda_memory(allocated, reserved, calls: list | None = None):
+    """Patch the CUDA peak counters to return successive values — tests run on CPU."""
+    allocated, reserved = iter(allocated), iter(reserved)
+
+    def read(it, name):
+        def _read(device):
+            if calls is not None:
+                calls.append(name)
+            return next(it)
+
+        return _read
+
+    def reset(device):
+        if calls is not None:
+            calls.append("reset")
+
+    return (
+        patch("torch.cuda.max_memory_allocated", side_effect=read(allocated, "read_allocated")),
+        patch("torch.cuda.max_memory_reserved", side_effect=read(reserved, "read_reserved")),
+        patch("torch.cuda.reset_peak_memory_stats", side_effect=reset),
+    )
+
+
+def test_memory_tracker_returns_peaks_in_gib():
+    a, r, z = _patch_cuda_memory([2 * _GIB], [3 * _GIB])
+    with a, r, z:
+        metrics = MemoryTracker(device=torch.device("cpu")).collect("train")
+
+    assert metrics == {
+        "performance.memory.train.max_allocated_gib": pytest.approx(2.0),
+        "performance.memory.train.max_reserved_gib": pytest.approx(3.0),
+    }
+
+
+def test_memory_tracker_reads_peaks_before_resetting():
+    """Resetting first would zero the high-water marks; each read must precede its reset."""
+    calls = []
+    a, r, z = _patch_cuda_memory([0, 0], [0, 0], calls)
+    with a, r, z:
+        tracker = MemoryTracker(device=torch.device("cpu"))
+        tracker.collect("train")
+        tracker.collect("train")
+
+    read = ["read_allocated", "read_reserved", "reset"]
+    assert calls == ["reset", *read, *read]
+
+
+def test_memory_tracker_closed_windows_keep_their_own_peak():
+    """A closed window keeps the max of its parts; other windows do not see its peak."""
+    a, r, z = _patch_cuda_memory([5 * _GIB, 9 * _GIB, 1 * _GIB], [6 * _GIB, 9 * _GIB, 2 * _GIB])
+    with a, r, z:
+        tracker = MemoryTracker(device=torch.device("cpu"))
+        tracker.close_window("train")  # training steps before a checkpoint
+        save = tracker.collect("save_model")  # the checkpoint itself
+        train = tracker.collect("train")  # the rest of the training steps
+
+    assert save["performance.memory.save_model.max_allocated_gib"] == pytest.approx(9.0)
+    assert train["performance.memory.train.max_allocated_gib"] == pytest.approx(5.0)
+    assert train["performance.memory.train.max_reserved_gib"] == pytest.approx(6.0)

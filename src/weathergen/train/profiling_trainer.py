@@ -24,9 +24,9 @@ import torch
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.train.trainer import Trainer
-from weathergen.train.utils import TRAIN
+from weathergen.train.utils import TRAIN, VAL, Stage
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import ThroughputTracker, nvtx_batches
+from weathergen.utils.performance import MemoryTracker, ThroughputTracker, nvtx_batches
 from weathergen.utils.profiling import (
     ProfilingConfig,
     memory_snapshot_session,
@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 
 class ProfilingTrainer(Trainer):
     """
-    Trainer that measures the training loop (see `ProfilingConfig`, `ThroughputTracker`).
+    Trainer that measures the training loop (see `ProfilingConfig`, `ThroughputTracker`,
+    `MemoryTracker`).
 
     Only the iteration seams (`mini_epochs`, `train_batches`) are overridden, so the
     training step is the same as in a normal run. Measurement happens in `train_batches`,
@@ -54,6 +55,7 @@ class ProfilingTrainer(Trainer):
 
         self.profiling_cfg = profiling_cfg
         self.throughput_tracker: ThroughputTracker | None = None
+        self.memory_tracker: MemoryTracker | None = None
         self.profiling_done: bool = False
 
     def init(self, cf: Config, devices: list) -> None:
@@ -64,9 +66,13 @@ class ProfilingTrainer(Trainer):
             device=torch.device(self.devices[0]),
             batch_size_per_gpu=self.batch_size_per_gpu,
         )
+        self.memory_tracker = MemoryTracker.from_config(
+            self.cf, device=torch.device(self.devices[0])
+        )
         logger.info(
             f"Profiling run: {self.profiling_cfg}, "
-            f"throughput logging: {self.throughput_tracker is not None}"
+            f"throughput logging: {self.throughput_tracker is not None}, "
+            f"peak-memory logging: {self.memory_tracker is not None}"
         )
 
         profiling_cfg = self.profiling_cfg
@@ -89,7 +95,8 @@ class ProfilingTrainer(Trainer):
 
     def train_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
         """Measure every training step, and trace the profiled stretch of them."""
-        yield from self._with_nvtx(self._with_throughput(self._with_profiling(dataset_iter)))
+        batches = self._with_throughput(self._with_profiling(dataset_iter))
+        yield from self._with_nvtx(self._with_memory(batches))
 
     def _with_nvtx(
         self, batches: Iterator[tuple[int, ModelBatch]]
@@ -115,16 +122,41 @@ class ProfilingTrainer(Trainer):
             self.throughput_tracker.step(batch)
             if self._is_metrics_step(bidx):
                 # collective, so on every rank
-                self._log_train_metrics(self.throughput_tracker.compute_metrics(), istep)
+                self._log_metrics(TRAIN, self.throughput_tracker.compute_metrics(), istep)
+
+    def _with_memory(
+        self, batches: Iterator[tuple[int, ModelBatch]]
+    ) -> Iterator[tuple[int, ModelBatch]]:
+        """Log the peak memory of the training steps at the metrics interval."""
+        if self.memory_tracker is None:
+            yield from batches
+            return
+
+        for bidx, batch in batches:
+            istep = self.cf.general.istep  # train() increments it as part of the step
+            yield bidx, batch
+            if self._is_metrics_step(bidx):
+                # collective, so on every rank
+                self._log_metrics(TRAIN, self.memory_tracker.collect("train"), istep)
 
     def _is_metrics_step(self, bidx: int) -> bool:
         """Whether train() logs its metrics at this batch."""
         return bidx % self.train_logging.metrics == 0
 
-    def _log_train_metrics(self, metrics: dict[str, float] | None, istep: int) -> None:
-        """Log metrics as their own training record, on the root rank."""
+    def _log_metrics(self, stage: Stage, metrics: dict[str, float] | None, istep: int) -> None:
+        """Log metrics as their own record, on the root rank."""
         if metrics and is_root():
-            self.train_logger.log_metrics(TRAIN, metrics, step=istep)
+            self.train_logger.log_metrics(stage, metrics, step=istep)
+
+    def _close_memory_window(self, window: str) -> None:
+        """Attribute the peak memory since the last read to `window` (local)."""
+        if self.memory_tracker is not None:
+            self.memory_tracker.close_window(window)
+
+    def _log_peak_memory(self, stage: Stage, window: str) -> None:
+        """Log the peak memory of `window` (collective)."""
+        if self.memory_tracker is not None:
+            self._log_metrics(stage, self.memory_tracker.collect(window), self.cf.general.istep)
 
     def _with_profiling(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
         """Trace the profiled stretch, then continue (or stop) as configured."""
@@ -165,15 +197,24 @@ class ProfilingTrainer(Trainer):
         yield from enumerate(dataset_iter, start=schedule.num_steps)
 
     def validate(self, mini_epoch, mode_cfg, batch_size) -> None:
-        """Skipped in a profiling-only run."""
+        """Skipped in a profiling-only run; otherwise its peak memory is logged on its own."""
         if self.profiling_only:
             return
 
+        # the training steps since the last metrics interval belong to the training window
+        self._close_memory_window("train")
         super().validate(mini_epoch, mode_cfg, batch_size)
+        self._log_peak_memory(VAL, "validation")
 
     def save_model(self, mini_epoch: int, name=None) -> None:
-        """Skipped in a profiling-only run."""
+        """
+        Skipped in a profiling-only run; otherwise its peak memory is logged on its own.
+
+        Gathering the full state dict for the checkpoint is often the peak of the whole run.
+        """
         if self.profiling_only:
             return
 
+        self._close_memory_window("train")
         super().save_model(mini_epoch, name)
+        self._log_peak_memory(TRAIN, "save_model")

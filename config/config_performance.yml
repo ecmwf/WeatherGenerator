@@ -1,7 +1,7 @@
 # Overwrite config for measuring a training run:
 #   train --config config/config_performance.yml
 # Keys and defaults: ProfilingConfig in src/weathergen/utils/profiling.py and
-# ThroughputTracker in src/weathergen/utils/performance.py.
+# ThroughputTracker and MemoryTracker in src/weathergen/utils/performance.py.
 
 # trace a short stretch of training, then end the run
 profiling:
@@ -20,4 +20,6 @@ profiling:
 # cheap whole-run metrics, safe to leave on for a full run
 performance_logging:
   throughput:
+    enabled: True
+  memory:
     enabled: True

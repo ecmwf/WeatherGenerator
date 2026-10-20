@@ -8,7 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 """
-Performance logging: cheap metrics of the whole run (throughput), and nvtx ranges.
+Performance logging: cheap metrics of the whole run (throughput, peak memory), and nvtx
+ranges.
 
 Tracing a bounded stretch of training lives in `weathergen.utils.profiling`. Both are
 driven by `weathergen.train.profiling_trainer.ProfilingTrainer`.
@@ -24,9 +25,15 @@ from weathergen.common.config import Config
 
 logger = logging.getLogger(__name__)
 
+_GIB = 1024**3
+
 
 def _throughput_section(cf: Config) -> Config | dict:
     return (cf.get("performance_logging") or {}).get("throughput") or {}
+
+
+def _memory_section(cf: Config) -> Config | dict:
+    return (cf.get("performance_logging") or {}).get("memory") or {}
 
 
 class ThroughputTracker:
@@ -101,6 +108,95 @@ class ThroughputTracker:
             "performance.throughput.global.batches": batches,
             "performance.throughput.global.samples": samples,
             "performance.throughput.global.mb": mb,
+        }
+
+
+class MemoryTracker:
+    """Tracks the global (max across all ranks) peak GPU memory per window.
+
+    Reads the CUDA caching allocator's high-water marks and resets them, so each window gets
+    the peak since the previous read. `close_window` folds that peak into a window locally,
+    e.g. to keep a checkpoint's peak out of the training window; `collect` reports a window,
+    with the MAX across all ranks.
+
+    `max_memory_allocated` is the peak of memory occupied by live tensors (parameters,
+    gradients, optimizer states, activations): the model's actual demand, comparable to
+    analytic memory estimates. `max_memory_reserved` is the peak of memory the caching
+    allocator has claimed from the device; it also counts cached blocks that are free but not
+    returned to CUDA, so reserved >= allocated and the gap measures fragmentation / caching
+    slack. An OOM is raised when a new cudaMalloc fails, so reserved (plus non-PyTorch usage
+    such as NCCL buffers and cuBLAS workspaces, which neither counter sees) is what determines
+    headroom against the device's capacity.
+
+    Configured by `performance_logging.memory.enabled`, which is absent from
+    `config/default_config.yml`. Cheap and does not change training, so safe for full runs.
+    """
+
+    @staticmethod
+    def is_enabled(cf: Config) -> bool:
+        """Whether the run config asks for peak-memory logging."""
+        return _memory_section(cf).get("enabled", False)
+
+    @classmethod
+    def from_config(cls, cf: Config, device: torch.device) -> "MemoryTracker | None":
+        """The tracker the run config asks for, or None if it is off or CUDA is unavailable."""
+        if not cls.is_enabled(cf):
+            return None
+        if not torch.cuda.is_available():
+            logger.warning("Peak-memory logging requested, but CUDA is unavailable.")
+            return None
+
+        return cls(device=device)
+
+    def __init__(self, device: torch.device) -> None:
+        self._device = device
+        # local (allocated, reserved) peaks of windows closed but not yet collected
+        self._pending: dict[str, tuple[int, int]] = {}
+        # start with a clean window so the first collect reports its own peak
+        torch.cuda.reset_peak_memory_stats(device)
+
+    def close_window(self, window: str) -> None:
+        """Attribute the peak since the last read to `window`, without reporting it yet.
+
+        Local: no synchronization across ranks.
+        """
+        max_allocated = torch.cuda.max_memory_allocated(self._device)
+        max_reserved = torch.cuda.max_memory_reserved(self._device)
+        torch.cuda.reset_peak_memory_stats(self._device)
+
+        pending_allocated, pending_reserved = self._pending.get(window, (0, 0))
+        self._pending[window] = (
+            max(pending_allocated, max_allocated),
+            max(pending_reserved, max_reserved),
+        )
+
+    def collect(self, window: str) -> dict[str, float]:
+        """Close `window` and return its peak-memory metrics since it was last collected.
+
+        Collective: must be called on every rank at the same point in the training loop
+        (the cross-rank MAX reduction and the peak-stat reset run on every rank). The
+        returned dict is identical on all ranks.
+
+        Args:
+            window: what the window covers (e.g. ``"train"``, ``"validation"``,
+                ``"save_model"``); becomes part of the metric key.
+
+        Returns:
+            Dict of ``"performance.memory.<window>.max_{allocated,reserved}_gib"`` pairs.
+        """
+        self.close_window(window)
+        max_allocated, max_reserved = self._pending.pop(window)
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            peaks = torch.tensor(
+                [max_allocated, max_reserved], dtype=torch.int64, device=self._device
+            )
+            torch.distributed.all_reduce(peaks, op=torch.distributed.ReduceOp.MAX)
+            max_allocated, max_reserved = peaks.tolist()
+
+        return {
+            f"performance.memory.{window}.max_allocated_gib": max_allocated / _GIB,
+            f"performance.memory.{window}.max_reserved_gib": max_reserved / _GIB,
         }
 
 

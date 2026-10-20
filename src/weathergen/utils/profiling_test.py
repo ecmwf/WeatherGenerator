@@ -15,7 +15,7 @@ from omegaconf import OmegaConf
 
 from weathergen.common.config import _DEFAULT_CONFIG_PTH
 from weathergen.utils import profiling
-from weathergen.utils.performance import ThroughputTracker
+from weathergen.utils.performance import MemoryTracker, ThroughputTracker
 from weathergen.utils.profiling import ProfilingConfig, ProfilingSchedule
 
 _PERFORMANCE_CONFIG_PTH = _DEFAULT_CONFIG_PTH.parent / "config_performance.yml"
@@ -89,6 +89,7 @@ def test_config_without_the_sections():
     assert "performance_logging" not in default_cfg
     assert ProfilingConfig.from_config(default_cfg) == ProfilingConfig()
     assert not ThroughputTracker.is_enabled(default_cfg)
+    assert not MemoryTracker.is_enabled(default_cfg)
     assert ProfilingConfig.from_config(OmegaConf.create({})) == ProfilingConfig()
 
 
@@ -103,3 +104,4 @@ def test_performance_config_measures_everything():
     assert profiling_cfg.collects_traces
     assert profiling_cfg.schedule.num_steps == 5
     assert ThroughputTracker.is_enabled(cfg)
+    assert MemoryTracker.is_enabled(cfg)

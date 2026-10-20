@@ -12,7 +12,7 @@ from unittest.mock import patch
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.utils.performance import ThroughputTracker, nvtx_batches
+from weathergen.utils.performance import MemoryTracker, ThroughputTracker, nvtx_batches
 from weathergen.utils.profiling import ProfilingConfig
 
 _DEVICE = torch.device("cpu")
@@ -46,3 +46,19 @@ def test_nvtx_range_encloses_the_work_on_each_batch():
             calls.append(f"step_{bidx}")
 
     assert calls == ["push batch_0", "step_0", "pop", "push batch_1", "step_1", "pop"]
+
+
+def test_memory_tracker_from_config():
+    cfg = OmegaConf.create({"performance_logging": {"memory": {}}})
+    assert not MemoryTracker.is_enabled(cfg), "peak-memory logging is off by default"
+    assert MemoryTracker.from_config(cfg, _DEVICE) is None
+
+    cfg.performance_logging.memory.enabled = True
+    with patch("torch.cuda.is_available", return_value=False):
+        assert MemoryTracker.from_config(cfg, _DEVICE) is None, "needs CUDA"
+
+    with (
+        patch("torch.cuda.is_available", return_value=True),
+        patch("torch.cuda.reset_peak_memory_stats"),
+    ):
+        assert MemoryTracker.from_config(cfg, _DEVICE) is not None
