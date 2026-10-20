@@ -30,6 +30,8 @@ class StreamEmbedTransformer(torch.nn.Module):
         num_heads,
         dropout_rate=0.0,
         norm_type="LayerNorm",
+        mlp_type="mlp",
+        use_xsa=False,
         unembed_mode="full",
         stream_name="stream_embed",
     ):
@@ -53,6 +55,8 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.dim_out = dim_out
         self.num_blocks = num_blocks
         self.num_heads = num_heads
+        self.mlp_type = mlp_type
+        self.use_xsa = use_xsa
         self.unembed_mode = unembed_mode
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
@@ -66,6 +70,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=True,
                     with_flash=True,
+                    use_xsa=self.use_xsa,
                 )
             )
             self.layers.append(
@@ -74,6 +79,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     self.dim_embed,
                     hidden_factor=2,
                     dropout_rate=dropout_rate,
+                    mlp_type=self.mlp_type,
                     with_residual=True,
                 )
             )
@@ -111,7 +117,7 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         # read out
         if self.unembed_mode == "full":
-            out = self.unembed(self.ln_final(x.flatten(-2, -1)))
+            out = checkpoint(self.unembed, self.ln_final(x.flatten(-2, -1)), use_reentrant=False)
         elif self.unembed_mode == "block":
             out = [
                 ue(ln(x[:, i]))
