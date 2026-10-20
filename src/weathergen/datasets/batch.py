@@ -7,7 +7,7 @@ Provides clean separation between:
 """
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import torch
@@ -127,6 +127,15 @@ class Sample:
         """
         self.meta_info[stream_name] = meta_info
 
+    def get_latent_meta_info(self, num_cells: int) -> SampleMetaData:
+        """Project the first stream's native mask onto the common latent grid."""
+        meta_info = next(iter(self.meta_info.values()))
+        mask = meta_info.mask
+        return replace(
+            meta_info,
+            mask=mask.reshape(num_cells, -1).any(dim=1) if mask is not None else None,
+        )
+
     def get_stream_data(self, stream_name: str) -> StreamData:
         """
         Get data for stream @stream_name from sample
@@ -204,8 +213,9 @@ class BatchSamples:
             # create copy and then select subset for samples and tokens_lens
             bs = copy.copy(self)
             bs.samples = [bs.samples[i] for i in subset]
-            torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
-            bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
+            if bs.tokens_lens is not None:
+                torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
+                bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
     def select_streams(self, stream_names: list[str]) -> "BatchSamples":
@@ -227,6 +237,25 @@ class BatchSamples:
             self.tokens_lens[:, :, indices] if self.tokens_lens is not None else None
         )
         return selected
+
+    def compute_tokens_lens(self) -> None:
+        """Collect native lengths in time, sample, stream, cell order."""
+        self.tokens_lens = torch.stack(
+            [
+                torch.stack(
+                    [
+                        torch.stack(
+                            [
+                                sample.streams_data[name].source_tokens_lens[step]
+                                for name in self.stream_names
+                            ]
+                        )
+                        for sample in self.samples
+                    ]
+                )
+                for step in range(self.get_num_source_steps())
+            ]
+        )
 
     def get_num_source_steps(self) -> int:
         """
@@ -557,11 +586,15 @@ class MultiBatch:
             name: self.batch.select_streams(streams)
             for name, streams in self.encoder_streams.items()
         }
+        for batch in self.batches.values():
+            batch.source_samples.compute_tokens_lens()
+            if batch.target_samples is not batch.source_samples:
+                batch.target_samples.compute_tokens_lens()
 
     def pin_memory(self):
         self.batch.pin_memory()
         self._refresh_views()
-        # Advanced stream indexing allocates new length tensors, not observation data.
+        # Stacking view lengths allocates tensors without copying observations.
         for batch in self.batches.values():
             for samples in (batch.source_samples, batch.target_samples):
                 if samples.tokens_lens is not None and not samples.tokens_lens.is_pinned():

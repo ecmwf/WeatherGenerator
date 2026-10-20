@@ -202,7 +202,6 @@ def tokenize_spacetime(
     idxs_cells = [[] for _ in range(num_healpix_cells)]
     idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
 
-    offset_step = 0
     t_unique = np.unique(rdata.datetimes)
     for _, t in enumerate(t_unique):
         # data for current time step
@@ -210,12 +209,16 @@ def tokenize_spacetime(
         rdata_cur = IOReaderData(
             rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
         )
-        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
+        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens)
+        original_idxs = torch.from_numpy(np.flatnonzero(mask))
+        if pad_tokens:
+            # Index zero is padding; real source indices have a one-row prefix.
+            original_idxs = torch.cat((torch.zeros(1, dtype=torch.int64), original_idxs + 1))
+        idxs_cur = [[original_idxs[token] for token in cell] for cell in idxs_cur]
 
         # collect data for all time steps
         idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
         idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
-        offset_step += mask.sum()
 
     return idxs_cells, idxs_cells_lens
 
@@ -330,13 +333,13 @@ def tokenize_apply_mask_target(
 
     """
 
-    def return_empty(rdata, idxs_cells_lens):
+    def return_empty(rdata):
         do = torch.zeros([0, rdata.data.shape[-1]])
         coords = torch.zeros([0, rdata.coords.shape[-1]])
         dt = np.array([], dtype=np.datetime64)
-        masked_points_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
-        # data, datetimes, coords, coords_local, masked_points_per_cell
-        return do, dt, coords, coords, masked_points_per_cell
+        masked_points_per_cell = torch.zeros(12 * 4**hl, dtype=torch.int32)
+        idxs_data = torch.empty(0, dtype=torch.int64)
+        return do, dt, coords, coords, masked_points_per_cell, idxs_data
 
     # convert to token level, forgetting about cells
     idxs_tokens = [i for t in idxs_cells for i in t]
@@ -344,13 +347,13 @@ def tokenize_apply_mask_target(
 
     # apply spatial masking on a per token level
     if mask_tokens is None:
-        return return_empty(rdata, idxs_cells_lens)
+        return return_empty(rdata)
 
     # filter tokens using mask to obtain flat per data point index list
     idxs_data = [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
 
     if len(idxs_data) == 0:
-        return return_empty(rdata, idxs_cells_lens)
+        return return_empty(rdata)
 
     idxs_data = torch.cat(idxs_data)
 
@@ -373,6 +376,9 @@ def tokenize_apply_mask_target(
             for tt, mm in zip(idxs_cells, mask_tokens_per_cell, strict=False)
         ]
     ).to(dtype=torch.int32)
+    masked_points_per_cell = masked_points_per_cell.reshape(12 * 4**hl, -1).sum(
+        dim=1, dtype=torch.int32
+    )
 
     # compute encoding of target coordinates used in prediction network
     if torch.tensor(idxs_lens).sum() > 0:
@@ -391,7 +397,7 @@ def tokenize_apply_mask_target(
     else:
         coords_local = torch.tensor([])
 
-    return data, datetimes, coords, coords_local, masked_points_per_cell
+    return data, datetimes, coords, coords_local, masked_points_per_cell, idxs_data
 
 
 def get_source_coords_local(
