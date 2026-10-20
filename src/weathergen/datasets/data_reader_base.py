@@ -205,11 +205,11 @@ class ReaderData:
         idx_valid_geoinfos = ~np.isnan(self.geoinfos).any(axis=1)
         idx_valid = np.logical_and(idx_valid, idx_valid_geoinfos)
 
-        # apply
+        # apply (datapoints without values have no data rows)
         return ReaderData(
             self.coords[idx_valid],
             self.geoinfos[idx_valid],
-            self.data[idx_valid],
+            self.data[idx_valid] if len(self.data) > 0 else self.data,
             self.datetimes[idx_valid],
         )
 
@@ -244,7 +244,8 @@ class ReaderData:
 
         self.coords = self.coords[idxs_subset]
         self.geoinfos = self.geoinfos[idxs_subset]
-        self.data = self.data[idxs_subset]
+        # datapoints without values have no data rows
+        self.data = self.data[idxs_subset] if len(self.data) > 0 else self.data
         self.datetimes = self.datetimes[idxs_subset]
 
         return self

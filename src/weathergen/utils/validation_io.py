@@ -32,6 +32,42 @@ def _empty_step(n_samples: int, n_ens: int, n_channels: int):
     )
 
 
+def _predictions_without_targets(
+    batch, sname: str, t_idx: int, preds, n_samples: int, n_channels: int, dn_data
+):
+    """
+    Predictions of one forecast step and stream at the target points, which have no values.
+
+    The points (raw coords, times and order) come with the target coords of the source
+    samples, since inference without targets prepares no target samples.
+    """
+    fp32 = torch.float32
+    n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
+    samples = batch.get_source_samples().get_samples()
+    if preds is None or samples[0].streams_data[sname].target_is_spoof[t_idx]:
+        return _empty_step(n_samples, n_ens, n_channels)
+
+    preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
+    for pred, sample in zip(preds, samples, strict=True):
+        stream_data = sample.streams_data[sname]
+        t_coords = stream_data.target_coords_raw[t_idx]
+        t_times = stream_data.target_times_raw[t_idx]
+
+        # invert the reordering of the points by the healpix cell-based embedding
+        idxs_inv = stream_data.idxs_inv[t_idx]
+        if idxs_inv is not None and len(idxs_inv) > 0:
+            pred = pred[:, idxs_inv]
+            t_coords = t_coords[idxs_inv]
+            t_times = t_times[idxs_inv]
+
+        preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+        targets_s += [np.zeros((0, n_channels), dtype=np.float32)]
+        t_coords_s += [t_coords.cpu().numpy()]
+        t_times_s += [t_times.astype("datetime64[ns]")]
+
+    return preds_s, targets_s, t_coords_s, t_times_s
+
+
 def write_output(
     cf,
     val_cfg,
@@ -55,6 +91,9 @@ def write_output(
     ]
     assert len(outputs_physical) == 1
     target_aux_out = target_aux_out[outputs_physical[0]]
+
+    # inference without targets: predictions at target points that have no values
+    with_targets = val_cfg.get("with_targets", True)
 
     # collect all target / prediction-related information
     fp32 = torch.float32
@@ -115,6 +154,17 @@ def write_output(
             if t_idx < forecast_offset:
                 preds_s, targets_s, t_coords_s, t_times_s = _empty_step(n_samples, 1, n_channels)
 
+            elif not with_targets and not not_reconstructed:
+                preds_s, targets_s, t_coords_s, t_times_s = _predictions_without_targets(
+                    batch,
+                    sname,
+                    t_idx,
+                    model_output.get_physical_prediction(chunk_idx, sname),
+                    n_samples,
+                    n_channels,
+                    dn_data,
+                )
+
             elif not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 preds = model_output.get_physical_prediction(chunk_idx, sname)
                 n_ens = preds[0].shape[0] if preds is not None and len(preds) > 0 else 1
@@ -154,8 +204,9 @@ def write_output(
                     t_coords_s += [t_coords.cpu().numpy()]
                     t_times_s += [t_times.astype("datetime64[ns]")]
 
+            # datapoints per sample, from the predictions since targets can have no values
             targets_lens[-1] += [[]]
-            targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
+            targets_lens[-1][-1] += [p.shape[1] for p in preds_s]
 
             preds_all[-1] += [np.concatenate(preds_s, axis=1)]
             targets_all[-1] += [np.concatenate(targets_s)]

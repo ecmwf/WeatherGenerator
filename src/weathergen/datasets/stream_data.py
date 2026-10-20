@@ -10,6 +10,7 @@
 import astropy_healpix as hp
 import numpy as np
 import torch
+from numpy.typing import NDArray
 
 from weathergen.common.io import IOReaderData
 from weathergen.train.utils import TRAIN, Stage
@@ -315,8 +316,11 @@ class StreamData:
         self,
         stage: Stage,
         fstep: int,
+        times_raw: NDArray,
+        target_coords_raw: torch.Tensor,
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
+        idxs_inv: torch.Tensor | None,
         is_spoof: bool,
     ) -> None:
         """
@@ -347,6 +351,13 @@ class StreamData:
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
+
+        # raw times and coords and the point order, for writing the predictions; available
+        # without target values (inference without targets)
+        self.target_times_raw[fstep] = times_raw
+        self.target_coords_raw[fstep] = target_coords_raw
+        if stage != TRAIN:
+            self.idxs_inv[fstep] = idxs_inv
 
         self.target_is_spoof[fstep] = is_spoof
 

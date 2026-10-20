@@ -261,6 +261,17 @@ class Trainer(TrainerBase):
             for start in range(0, len(output_idxs), chunk_size)
         ]
 
+    @staticmethod
+    def _keeps_full_validation_output(mode_cfg) -> bool:
+        """
+        Whether validation keeps the predictions of all chunks (for the full loss).
+
+        Without targets (`with_targets: False`, inference) there is no loss, so only the
+        current chunk is kept and the data is moved to the device chunk by chunk.
+        """
+        with_targets = mode_cfg.get("with_targets", True)
+        return with_targets and mode_cfg.get("compute_full_validation_loss", True)
+
     def _process_validation_chunks(
         self,
         batch,
@@ -285,7 +296,7 @@ class Trainer(TrainerBase):
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
         # This assumes that you only have a physical loss, else this breaks
-        compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
+        compute_full_loss = self._keeps_full_validation_output(mode_cfg)
         should_write_output = not is_diffusion and bidx < num_samples_write
         if should_write_output:
             denormalize_data_fct = (
@@ -835,6 +846,12 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         is_diffusion = cf.get("fe_diffusion_model", False)
+        # inference without targets: predict and write, but compute no loss
+        with_targets = mode_cfg.get("with_targets", True)
+        assert with_targets or not is_diffusion, (
+            "with_targets: False is not supported for diffusion models, whose output writing "
+            "expands the targets along the denoising trajectory."
+        )
         noise_levels = list(mode_cfg.get("validation_noise_levels", [0.0]))
         if not is_diffusion:
             noise_levels = [0.0]
@@ -870,7 +887,7 @@ class Trainer(TrainerBase):
                     disable=self.cf.rank > 0,
                 ) as pbar:
                     for bidx, batch in enumerate(dataset_val_iter):
-                        compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
+                        compute_full_loss = self._keeps_full_validation_output(mode_cfg)
                         if compute_full_loss or is_diffusion:
                             batch.to_device(self.device)
                         else:
@@ -940,18 +957,20 @@ class Trainer(TrainerBase):
                                     targets_and_auxs,
                                 )
 
-                        _ = self.loss_calculator_val.compute_loss(
-                            preds=preds,
-                            targets_and_aux=targets_and_auxs,
-                            metadata=extract_batch_metadata(batch),
-                        )
+                        if with_targets:
+                            _ = self.loss_calculator_val.compute_loss(
+                                preds=preds,
+                                targets_and_aux=targets_and_auxs,
+                                metadata=extract_batch_metadata(batch),
+                            )
                         pbar.update(batch_size * self.cf.world_size)
 
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                             break
 
                     # Terminal logging per noise level for progress visibility
-                    self._log_terminal(0, mini_epoch, VAL, stage_suffix=stage_suffix)
+                    if with_targets:
+                        self._log_terminal(0, mini_epoch, VAL, stage_suffix=stage_suffix)
 
             # Extract losses for this noise level, suffix keys, and accumulate
             loss_calc = self.loss_calculator_val
@@ -970,7 +989,7 @@ class Trainer(TrainerBase):
 
         # Log all noise levels as a single "val" entry with suffixed loss keys
         samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
-        if is_root():
+        if is_root() and with_targets:
             self.train_logger.add_logs(VAL, samples, all_losses, all_stddev)
 
         # reset fixed noise level

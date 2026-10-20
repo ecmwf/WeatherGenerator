@@ -189,9 +189,12 @@ class IOReaderData:
 
     def is_empty(self):
         """
-        Test if data object is empty
+        Test if data object is empty, i.e. has no datapoints.
+
+        Datapoints can come without values (`data` with zero rows), e.g. the target points
+        of inference without targets.
         """
-        return len(self.data) == 0
+        return len(self.datetimes) == 0
 
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
@@ -205,11 +208,12 @@ class IOReaderData:
         data = np.asarray(other.data)
         datetimes = np.asarray(other.datetimes)
 
-        n_datapoints = len(data)
+        n_datapoints = len(datetimes)
 
         assert coords.shape == (n_datapoints, 2), "number of datapoints do not match data"
         assert geoinfos.shape[0] == n_datapoints, "number of datapoints do not match data"
-        assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
+        # datapoints without values have no data rows
+        assert len(data) in (0, n_datapoints), "number of datapoints do not match data"
 
         return cls(**dataclasses.asdict(other))
 
@@ -230,10 +234,11 @@ class IOReaderData:
         is_spoof = True
 
         for other in others:
-            n_datapoints = len(other.data)
+            n_datapoints = len(other.datetimes)
             assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
             assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
-            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
+            # datapoints without values have no data rows
+            assert len(other.data) in (0, n_datapoints), "number of datapoints do not match"
 
             if n_datapoints == 0:
                 continue

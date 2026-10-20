@@ -503,14 +503,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 continue
 
             if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+                (dts, cc, tc, tc_l, idxs_inv) = self.tokenizer.get_target_coords(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(
+                    self._stage, timestep_idx, dts, cc, tc, tc_l, idxs_inv, rdata.is_spoof
+                )
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
@@ -709,9 +711,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
+        # inference without targets: the target coords (on the source side) suffice to predict
+        # and write the output, so neither target values nor teacher inputs are prepared
+        if not self.mode_cfg.get("with_targets", True):
+            target_select = []
         # remove duplicates
         source_select, target_select = list(set(source_select)), list(set(target_select))
-        if len(source_select) == 0 or len(target_select) == 0:
+        if len(source_select) == 0:
             raise NotImplementedError(f"Unsupported training mode {mode}.")
 
         num_output_steps = self._get_output_length(num_forecast_steps)
@@ -915,8 +921,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # ensure the batch is valid, i.e. not completely empty and no NaN values
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
+                with_targets = self.mode_cfg.get("with_targets", True)
                 not_valid = batch.sources_empty() or batch.is_nan()
-                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
+                if with_targets and "masking" in mode:
+                    not_valid = not_valid or batch.targets_empty()
 
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not_valid:

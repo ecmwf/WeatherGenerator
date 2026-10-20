@@ -236,6 +236,11 @@ validation_config:
   # run validation before training starts (mainly for model development)
   validate_before_training: False
 
+  # load target values and compute the validation loss; False for inference without targets
+  # (e.g. in test_config): only the target points are prepared, the predictions at them are
+  # written chunk by chunk (forecast.chunk_size) and no loss is computed
+  with_targets: True
+
 
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference

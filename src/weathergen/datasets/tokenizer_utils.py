@@ -394,7 +394,8 @@ def tokenize_apply_mask_target(
     datetimes_enc = enc_time(datetimes, time_win)
     geoinfos = rdata.geoinfos[idxs_data]
     coords = rdata.coords[idxs_data]
-    data = rdata.data[idxs_data]
+    # datapoints without values (inference without targets) have no data rows
+    data = rdata.data[idxs_data] if len(rdata.data) > 0 else rdata.data
 
     if mask_channels is not None:
         assert False, "to be implemented"

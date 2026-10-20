@@ -40,6 +40,17 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
     return rdata
 
 
+def _inverse_point_order(idxs_cells, coords: torch.Tensor) -> torch.Tensor | None:
+    """Indices that restore the order of the points from their healpix cell-based order."""
+    # points can come without values, so test the coords for emptiness
+    if coords.numel() == 0:
+        return None
+    # flatten per-token indices into one flat list
+    idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
+    _, idxs_ord_inv = torch.sort(idxs_flat)
+    return idxs_ord_inv
+
+
 class TokenizerMasking(Tokenizer):
     def __init__(self, healpix_level: int, masker: Masker):
         super().__init__(healpix_level)
@@ -179,7 +190,7 @@ class TokenizerMasking(Tokenizer):
         )
 
         # TODO: split up
-        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+        _, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
             stream_info["stream_id"],
             self.hl_target,
             idxs_cells,
@@ -194,7 +205,11 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        return (coords_local, coords_per_cell)
+        # the raw times and coords, and the order of the points, are what output writing needs,
+        # so they come with the coords and do not require target values
+        idxs_ord_inv = _inverse_point_order(idxs_cells, coords)
+
+        return (datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
 
     def get_target_values(
         self,
@@ -226,11 +241,4 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        idxs_ord_inv = None
-        if data.numel() > 0:
-            # flatten per-token indices into one flat list
-            idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
-            # compute indices for inversion
-            _, idxs_ord_inv = torch.sort(idxs_flat)
-
-        return (data, datetimes, coords, idxs_ord_inv)
+        return (data, datetimes, coords, _inverse_point_order(idxs_cells, coords))
