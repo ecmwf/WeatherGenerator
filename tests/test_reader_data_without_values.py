@@ -19,6 +19,7 @@ from weathergen.datasets.data_reader_base import DTRange, ReaderData
 from weathergen.datasets.multi_stream_data_sampler import collect_datasources
 from weathergen.datasets.tokenizer_masking import readerdata_to_torch
 from weathergen.datasets.tokenizer_utils import tokenize_spacetime
+from weathergen.readers_extra.data_reader_anemoi_operan import DataReaderAnemoiOperan
 
 N_POINTS, N_CHANNELS = 5, 3
 
@@ -84,9 +85,9 @@ class _Cube:
         return self._values[key]
 
 
-def _anemoi_reader(ds: _Cube, geoinfo_idx: list[int]) -> DataReaderAnemoi:
-    reader = object.__new__(DataReaderAnemoi)
-    reader.stream_info = {"name": "ERA5"}
+def _anemoi_reader(ds: _Cube, geoinfo_idx: list[int], cls=DataReaderAnemoi) -> DataReaderAnemoi:
+    reader = object.__new__(cls)
+    reader.stream_info = {"name": "ERA5", "nominal_time_mapping": {"0": 0, "6": 6, "12": 12}}
     reader.ds, reader.len = ds, len(ds.dates)
     reader.source_idx, reader.target_idx, reader.geoinfo_idx = [0, 1], [1, 2], geoinfo_idx
     reader._latlon = np.stack([np.linspace(-80, 80, N_GRID), np.linspace(0, 300, N_GRID)], axis=1)
@@ -106,6 +107,16 @@ def test_anemoi_target_points_match_the_target_data(geoinfo_idx):
     np.testing.assert_array_equal(points.datetimes, target.datetimes)
     assert points.len() == N_TIMES * N_GRID
     assert points.data.shape == (0, len(reader.target_idx))
+
+
+def test_operan_target_points_keep_the_latest_available_sample():
+    reader = _anemoi_reader(_Cube(), geoinfo_idx=[], cls=DataReaderAnemoiOperan)
+    target = reader.get_target(0)
+    points = reader.get_target_points(0)
+
+    # the operan reader selects one sample per window, unlike the window's N_TIMES steps
+    assert points.len() == target.len() == N_GRID
+    np.testing.assert_array_equal(points.datetimes, target.datetimes)
 
 
 def test_anemoi_target_points_without_geoinfos_do_not_read():

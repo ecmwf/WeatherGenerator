@@ -16,6 +16,7 @@ from anemoi.datasets.data import MissingDateError
 
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi, _take_var_axis
 from weathergen.datasets.data_reader_base import (
+    DataReaderBase,
     ReaderData,
     TimeWindowHandler,
     TIndex,
@@ -172,3 +173,14 @@ class DataReaderAnemoiOperan(DataReaderAnemoi):
         # check_reader_data(rd, dtr)
 
         return rd
+
+    @override
+    def _get_points(self, idx: TIndex) -> ReaderData:
+        """
+        Get the target points for window idx through _get
+
+        DataReaderAnemoi._get_points derives the points without reading, which would skip the
+        selection of the latest available sample above.
+        """
+
+        return DataReaderBase._get_points(self, idx)

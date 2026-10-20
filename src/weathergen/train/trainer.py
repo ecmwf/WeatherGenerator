@@ -46,6 +46,7 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
     VAL,
+    NoOpGradScaler,
     Stage,
     cfg_keys_to_filter,
     extract_batch_metadata,
@@ -122,7 +123,7 @@ class Trainer(TrainerBase):
         self.dataset_val: MultiStreamDataSampler | None = None
         self.device: torch.device = None
         self.ema_model = None
-        self.grad_scaler: torch.amp.GradScaler | None = None
+        self.grad_scaler: torch.amp.GradScaler | NoOpGradScaler = NoOpGradScaler()
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None

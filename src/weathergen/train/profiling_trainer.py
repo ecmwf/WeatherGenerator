@@ -55,7 +55,8 @@ class ProfilingTrainer(Trainer):
     training step is the same as in a normal run. Measurement happens in `train_batches`,
     which regains control after each yielded batch has been trained on. The nvtx ranges of
     the phases of a step are added by wrapping the objects the step calls (see
-    `_annotate_step_phases`), not by annotating `Trainer.train`.
+    `_annotate_step_phases`), not by annotating `Trainer.train`. In inference only the memory
+    snapshot and the peak-memory logging apply, both around `validate`.
 
     Traces are collected on the root rank only; the other ranks run the same steps untraced
     so collectives stay matched.
@@ -228,12 +229,11 @@ class ProfilingTrainer(Trainer):
             ]
         wraps += [(optimizer, "zero_grad", "zero_grad") for optimizer in self.optimizers]
         wraps += [(scheduler, "step", "lr_scheduler_step") for scheduler in self.lr_schedulers]
-        if self.grad_scaler is not None:
-            wraps += [
-                (self.grad_scaler, "unscale_", "unscale_grads"),
-                (self.grad_scaler, "step", "optimizer_step"),
-                (self.grad_scaler, "update", "grad_scaler_update"),
-            ]
+        wraps += [
+            (self.grad_scaler, "unscale_", "unscale_grads"),
+            (self.grad_scaler, "step", "optimizer_step"),
+            (self.grad_scaler, "update", "grad_scaler_update"),
+        ]
         if self.ema_model is not None:
             wraps += [(self.ema_model, "update", "ema_update")]
         for method in ("_log_terminal", "_log", "_log_collapse_metrics", "_log_instant_grad_norms"):
@@ -242,16 +242,15 @@ class ProfilingTrainer(Trainer):
         for obj, method, name in wraps:
             nvtx_wrap(obj, method, name)
 
-        if self.grad_scaler is not None:
-            # backward runs on the scaled loss, a new tensor every step
-            scale = self.grad_scaler.scale
+        # backward runs on the scaled loss, a new tensor every step
+        scale = self.grad_scaler.scale
 
-            def scale_and_annotate_backward(outputs):
-                scaled = scale(outputs)
-                nvtx_wrap(scaled, "backward", "backward")
-                return scaled
+        def scale_and_annotate_backward(outputs):
+            scaled = scale(outputs)
+            nvtx_wrap(scaled, "backward", "backward")
+            return scaled
 
-            self.grad_scaler.scale = scale_and_annotate_backward
+        self.grad_scaler.scale = scale_and_annotate_backward
 
     def _with_throughput(
         self, batches: Iterator[tuple[int, ModelBatch]]
@@ -342,13 +341,22 @@ class ProfilingTrainer(Trainer):
         yield from enumerate(dataset_iter, start=schedule.num_steps)
 
     def validate(self, mini_epoch, mode_cfg, batch_size) -> None:
-        """Skipped in a profiling-only run; otherwise its peak memory is logged on its own."""
-        if self.profiling_only:
+        """
+        Skipped in a profiling-only run; otherwise its peak memory is logged on its own.
+
+        In inference, validation is the whole run: it is never skipped, and it is recorded in
+        a memory snapshot if one is configured (the schedule does not apply).
+        """
+        inference = self.cf.stage == "inference"
+        if self.profiling_only and not inference:
             return
 
         # the training steps since the last metrics interval belong to the training window
         self._close_memory_window("train")
-        super().validate(mini_epoch, mode_cfg, batch_size)
+        with contextlib.ExitStack() as stack:
+            if inference and self.profiling_cfg.enabled and self.profiling_cfg.memory_snapshot:
+                stack.enter_context(memory_snapshot_session(self.cf))
+            super().validate(mini_epoch, mode_cfg, batch_size)
         self._log_peak_memory(VAL, "validation")
 
     def save_model(self, mini_epoch: int, name=None) -> None:
