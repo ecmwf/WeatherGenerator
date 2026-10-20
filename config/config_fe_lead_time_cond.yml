@@ -1,0 +1,5 @@
+# Condition the forecast engine on the lead time of each step: sinusoidal embedding of the lead
+# time in hours (step x forecast.time_step), AdaLN in all attention and MLP blocks of the forecast
+# engine. The conditioning is zero-initialised, so a run loading an unconditioned checkpoint
+# starts exactly from it. DDP only (not FSDP) for now.
+fe_lead_time_cond_dim: 32

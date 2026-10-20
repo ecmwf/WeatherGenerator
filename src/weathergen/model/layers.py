@@ -63,8 +63,14 @@ class MLP(torch.nn.Module):
         name: str | None = None,
         is_dit=False,
         dit_is_cond=False,
+        aux_norm_affine=False,
     ):
-        """Constructor"""
+        """
+        Constructor
+
+        aux_norm_affine: with dim_aux, keep the elementwise affine of the (LayerNorm) pre-norm
+            in the AdaLayerNorm, so that it can load the weights of an MLP without dim_aux
+        """
 
         super(MLP, self).__init__()
 
@@ -103,7 +109,12 @@ class MLP(torch.nn.Module):
             self.noise_conditioning = LinearNormConditioning(dim_in)
             self.noise_conditioning = LinearNormConditioning(dim_in)
         elif dim_aux is not None:
-            self.lnorm = AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps)
+            self.lnorm = AdaLayerNorm(
+                dim_in,
+                dim_aux,
+                norm_elementwise_affine=aux_norm_affine and norm_type == "LayerNorm",
+                norm_eps=norm_eps,
+            )
         else:
             self.lnorm = norm(dim_in, eps=norm_eps)
 

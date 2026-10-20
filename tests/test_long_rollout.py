@@ -691,3 +691,75 @@ def test_prepare_losses_for_logging_different_keys_per_rank(tmp_path):
     torch.multiprocessing.spawn(
         _prepare_losses_worker, args=(world_size, str(tmp_path / "pg")), nprocs=world_size
     )
+
+
+def _lead_time_fe(cond_dim: int):
+    from weathergen.model.engines import ForecastingEngine
+
+    cf = OmegaConf.create({**FE_CFG, "fe_lead_time_cond_dim": cond_dim})
+    mode_cfg = OmegaConf.create({"forecast": {"policy": "fixed", "time_step": "06:00:00"}})
+    torch.manual_seed(0)
+    return ForecastingEngine(cf, mode_cfg, 256).cuda()
+
+
+def _lead_time_fe_inputs():
+    torch.manual_seed(1)
+    tokens = torch.randn(1, 256, FE_CFG["ae_global_dim_embed"], device="cuda")
+    coords = (torch.rand(1, 256, 2, device="cuda") * 3.0).to(torch.bfloat16)
+    return tokens, coords
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="flash attention needs a GPU")
+def test_lead_time_cond_starts_as_unconditioned():
+    """
+    A forecast engine with lead-time conditioning loads the weights of one without (the AdaLN
+    MLP norms take the weights of the plain LayerNorms) and, with the zero-initialised
+    conditioning, gives bitwise the same rollout.
+    """
+    fe_ref = _lead_time_fe(0).eval()
+    fe = _lead_time_fe(8).eval()
+    missing, unexpected = fe.load_state_dict(fe_ref.state_dict(), strict=False)
+    assert unexpected == []
+    assert missing and all(".embed_aux." in k for k in missing)
+
+    tokens, coords = _lead_time_fe_inputs()
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        x_ref, x = tokens, tokens
+        for step in range(1, 5):
+            x_ref = fe_ref(x_ref, step, coords=coords)
+            x = fe(x, step, coords=coords)
+            assert torch.equal(x, x_ref)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="flash attention needs a GPU")
+def test_lead_time_cond_depends_on_lead_time():
+    """
+    The zero-initialised conditioning gets gradient, and once trained the engine maps the same
+    state differently at different lead times.
+    """
+    from weathergen.model.norms import AdaLayerNorm
+
+    fe = _lead_time_fe(8).train()
+    tokens, coords = _lead_time_fe_inputs()
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        fe(tokens, 3, coords=coords).float().pow(2).mean().backward()
+    ada_ln = [m for m in fe.modules() if isinstance(m, AdaLayerNorm)]
+    assert len(ada_ln) == 2 * FE_CFG["fe_num_blocks"]
+    assert all(m.embed_aux[-1].weight.grad.abs().sum() > 0 for m in ada_ln)
+
+    fe.eval()
+    with torch.no_grad():
+        for m in ada_ln:
+            m.embed_aux[-1].weight.normal_(std=0.1)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            x_1, x_1_again, x_40 = (fe(tokens, s, coords=coords) for s in (1, 1, 40))
+    assert torch.equal(x_1, x_1_again)
+    assert not torch.allclose(x_1, x_40)
+
+
+def test_lead_time_cond_needs_time_step():
+    from weathergen.model.engines import ForecastingEngine
+
+    cf = OmegaConf.create({**FE_CFG, "fe_lead_time_cond_dim": 8})
+    with pytest.raises(AssertionError, match="time_step"):
+        ForecastingEngine(cf, OmegaConf.create({"forecast": {"policy": "fixed"}}), 256)
