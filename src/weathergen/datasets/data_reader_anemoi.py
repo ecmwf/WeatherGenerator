@@ -267,6 +267,41 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         return rd
 
+    @override
+    def _get_points(self, idx: TIndex) -> ReaderData:
+        """
+        Get the target points for window idx without reading the data
+
+        The grid and the dates are known, so only geoinfo channels, which are variables of the
+        dataset, require reading the window.
+        """
+
+        if len(self.geoinfo_idx) > 0:
+            return super()._get_points(idx)
+
+        (t_idxs, dtr) = self._get_dataset_idxs(idx)
+
+        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+            return ReaderData.empty(
+                num_data_fields=len(self.target_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
+        assert t_idxs[0] >= 0, "index must be non-negative"
+        didx_start = t_idxs[0]
+        # End is inclusive
+        didx_end = t_idxs[-1] + 1
+
+        coords = np.tile(self._latlon, (len(t_idxs), 1))
+        rd = ReaderData(
+            coords=coords,
+            geoinfos=np.zeros((len(coords), 0), dtype=np.float32),
+            data=np.zeros((0, len(self.target_idx)), dtype=np.float32),
+            datetimes=np.repeat(self.ds.dates[didx_start:didx_end], len(self._latlon)),
+        )
+        check_reader_data(rd, dtr)
+
+        return rd
+
     def select_channels(self, ds0: anemoi_datasets, ch_type: str) -> NDArray[np.int64]:
         """
         Select source or target channels

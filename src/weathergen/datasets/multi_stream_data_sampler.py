@@ -51,11 +51,14 @@ FORECAST_DEFAULTS = {
 }
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
+def collect_datasources(
+    stream_datasets: list, idx: int, type: str, rng, with_values: bool = True
+) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
 
-    rng and num_subset are used to drop data
+    rng and num_subset are used to drop data; with_values=False collects the target points
+    without their values (inference without targets)
     """
 
     rdatas = []
@@ -69,7 +72,7 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
             normalize_channels = ds.normalize_source_channels
             shuffle = ds.stream_info.get("shuffle_source", False)
         elif type == "target":
-            get_reader_data = ds.get_target
+            get_reader_data = ds.get_target if with_values else ds.get_target_points
             normalize_channels = ds.normalize_target_channels
             num_subset = ds.stream_info.get("max_num_targets", -1)
             shuffle = ds.stream_info.get("shuffle_target", False)
@@ -628,13 +631,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 input_data += [rdata]
 
         # target data: collect for all forecast steps
+        # without targets only the points to predict at are needed, not the values there
+        with_values = self.mode_cfg.get("with_targets", True)
         output_data = []
         if not is_stream_forcing(stream_ds[0].stream_info, self._stage):
             num_output_steps = self._get_output_length(num_forecast_steps)
             for timestep_idx in range(self.output_offset, num_output_steps):
                 step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-                rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+                rdata = collect_datasources(
+                    stream_ds, step_forecast_dt, "target", self.rng, with_values
+                )
 
                 if rdata.is_empty():
                     # work around for https://github.com/pytorch/pytorch/issues/158719

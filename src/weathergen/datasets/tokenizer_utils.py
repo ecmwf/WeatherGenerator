@@ -242,8 +242,10 @@ def tokenize_spacetime(
     for _, t in enumerate(t_unique):
         # data for current time step
         mask = t == rdata.datetimes
+        # datapoints without values have no data rows
+        data_cur = rdata.data[mask] if len(rdata.data) > 0 else rdata.data
         rdata_cur = IOReaderData(
-            rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
+            rdata.coords[mask], rdata.geoinfos[mask], data_cur, rdata.datetimes[mask]
         )
         idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
 

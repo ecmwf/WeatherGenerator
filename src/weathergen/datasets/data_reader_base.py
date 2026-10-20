@@ -186,8 +186,11 @@ class ReaderData:
         Returns
         -------
         length of data
+
+        Datapoints can come without values (`data` with zero rows), e.g. the target points
+        of inference without targets.
         """
-        return len(self.data)
+        return len(self.datetimes)
 
     def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
         """
@@ -275,16 +278,13 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
 
-    assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
-    assert rdata.geoinfos.shape[0] == rdata.data.shape[0], "geoinfos and data must have same length"
+    # datapoints without values have no data rows
+    assert rdata.data.shape[0] in (0, rdata.coords.shape[0]), (
+        "coords and data must have same length"
+    )
 
     # Check that all fields have the same length
-    assert (
-        rdata.coords.shape[0]
-        == rdata.geoinfos.shape[0]
-        == rdata.data.shape[0]
-        == rdata.datetimes.shape[0]
-    ), (
+    assert rdata.coords.shape[0] == rdata.geoinfos.shape[0] == rdata.datetimes.shape[0], (
         f"coords, geoinfos, data and datetimes must have the same length "
         f"{rdata.coords.shape[0]}, {rdata.geoinfos.shape[0]}, {rdata.data.shape[0]}, "
         f"{rdata.datetimes.shape[0]}"
@@ -408,6 +408,41 @@ class DataReaderBase(metaclass=ABCMeta):
 
         with io_timer(self.stream_info["name"], "reader get_target"):
             rdata = self._get(idx, self.target_idx)
+
+        return rdata
+
+    def get_target_points(self, idx: TIndex) -> ReaderData:
+        """
+        Get the target points for idx without their values
+
+        Inference without targets only needs where and when to predict, so readers that know
+        their points without reading the data skip the read.
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        target points (coords, geoinfos, datetimes), data with zero rows
+        """
+
+        with io_timer(self.stream_info["name"], "reader get_target_points"):
+            rdata = self._get_points(idx)
+
+        return rdata
+
+    def _get_points(self, idx: TIndex) -> ReaderData:
+        """
+        Get the target points for window idx, with data with zero rows
+
+        The default reads the target data and drops the values; readers whose points are known
+        without reading the data override this.
+        """
+
+        rdata = self._get(idx, self.target_idx)
+        rdata.data = rdata.data[:0]
 
         return rdata
 

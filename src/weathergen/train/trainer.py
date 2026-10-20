@@ -39,6 +39,7 @@ from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.optimizer import build_optimizer
+from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
@@ -907,6 +908,12 @@ class Trainer(TrainerBase):
                                 loss_name,
                                 target_aux,
                             ) in self.target_and_aux_calculators_val.items():
+                                # without targets only the physical entry is needed, to write
+                                # the output; latent targets would cost a teacher forward pass
+                                if not with_targets and not isinstance(
+                                    target_aux, PhysicalTargetAndAux
+                                ):
+                                    continue
                                 target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                                 targets_and_auxs[loss_name] = target_aux.compute(
                                     self.cf.general.istep,
