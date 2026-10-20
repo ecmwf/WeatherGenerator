@@ -19,25 +19,20 @@ _DEVICE = torch.device("cpu")
 
 
 def test_throughput_tracker_from_config():
-    cfg = OmegaConf.create({"performance_logging": {"throughput": {"warmup_steps": 5}}})
+    cfg = OmegaConf.create({"performance_logging": {"throughput": {}}})
 
     assert not ProfilingConfig.from_config(cfg).enabled
     assert not ThroughputTracker.is_enabled(cfg), "throughput is off by default"
     assert ThroughputTracker.from_config(cfg, _DEVICE, batch_size_per_gpu=1) is None
 
     cfg.performance_logging.throughput.enabled = True
-    tracker = ThroughputTracker.from_config(cfg, _DEVICE, batch_size_per_gpu=1)
+    tracker = ThroughputTracker.from_config(cfg, _DEVICE, batch_size_per_gpu=3)
 
     assert tracker is not None
-    assert tracker._warmup_steps == 5
+    assert tracker.batch_size_per_gpu == 3
 
 
 def test_throughput_tracker_without_the_section():
-    tracker_cfg = OmegaConf.create({"performance_logging": {"throughput": {"enabled": True}}})
-    tracker = ThroughputTracker.from_config(tracker_cfg, _DEVICE, batch_size_per_gpu=1)
-
-    assert tracker is not None
-    assert tracker._warmup_steps == ThroughputTracker.DEFAULT_WARMUP_STEPS
     assert not ThroughputTracker.is_enabled(OmegaConf.create({}))
 
 

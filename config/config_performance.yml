@@ -21,4 +21,3 @@ profiling:
 performance_logging:
   throughput:
     enabled: True
-    # warmup_steps: 2

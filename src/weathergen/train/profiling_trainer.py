@@ -17,7 +17,6 @@ Selected by the `profiling` and `performance_logging` config sections, see
 import contextlib
 import logging
 from collections.abc import Iterator
-from functools import partial
 from itertools import islice
 
 import torch
@@ -105,7 +104,7 @@ class ProfilingTrainer(Trainer):
     def _with_throughput(
         self, batches: Iterator[tuple[int, ModelBatch]]
     ) -> Iterator[tuple[int, ModelBatch]]:
-        """Step the throughput tracker after each training step, on every rank."""
+        """Count each training step, and log the global counts at the metrics interval."""
         if self.throughput_tracker is None:
             yield from batches
             return
@@ -113,9 +112,19 @@ class ProfilingTrainer(Trainer):
         for bidx, batch in batches:
             istep = self.cf.general.istep  # train() increments it as part of the step
             yield bidx, batch
-            self.throughput_tracker.step(
-                batch, istep, log_fn=partial(self.train_logger.log_metrics, TRAIN, step=istep)
-            )
+            self.throughput_tracker.step(batch)
+            if self._is_metrics_step(bidx):
+                # collective, so on every rank
+                self._log_train_metrics(self.throughput_tracker.compute_metrics(), istep)
+
+    def _is_metrics_step(self, bidx: int) -> bool:
+        """Whether train() logs its metrics at this batch."""
+        return bidx % self.train_logging.metrics == 0
+
+    def _log_train_metrics(self, metrics: dict[str, float] | None, istep: int) -> None:
+        """Log metrics as their own training record, on the root rank."""
+        if metrics and is_root():
+            self.train_logger.log_metrics(TRAIN, metrics, step=istep)
 
     def _with_profiling(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
         """Trace the profiled stretch, then continue (or stop) as configured."""
