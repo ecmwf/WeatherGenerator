@@ -955,6 +955,8 @@ class TargetPredictionEngineClassic(nn.Module):
         self.tr_mlp_type = tr_mlp_type
         self.softcap = softcap
         self.tte = torch.nn.ModuleList()
+        # dropout in all blocks of the decoder (0.1 in configs from before the option existed)
+        dropout_rate = self.cf.get("pred_dropout_rate", 0.1)
 
         for i in range(len(self.dims_embed) - 1):
             # Multi-Cross Attention Head
@@ -966,7 +968,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
-                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    dropout_rate=dropout_rate,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
@@ -983,7 +985,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     MultiSelfAttentionHeadVarlen(
                         dim_embed=self.dims_embed[i],
                         num_heads=stream_config["target_readout"]["num_heads"],
-                        dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                        dropout_rate=dropout_rate,
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
                         use_xsa=self.cf.get("use_xsa", False),
@@ -1002,7 +1004,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     self.dims_embed[i + 1],
                     with_residual=True,
                     hidden_factor=self.tr_mlp_hidden_factor,
-                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    dropout_rate=dropout_rate,
                     mlp_type=self.tr_mlp_type,
                     norm_type=self.cf.norm_type,
                     dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
