@@ -11,9 +11,10 @@ Upload a trained model (config + checkpoint) to Hugging Face.
 
 By default the files are taken from `models/<run_id>` in the root of this repository.
 
-The files are uploaded to the root of the repo with their original names, e.g.
-`model_<run_id>_latest.json` and `<run_id>_latest.chkpt`, so they can be downloaded with:
-    hf download <repo-id> --include "*<run_id>*" --local-dir models/<run_id>
+The files are uploaded to the `<run_id>/` folder of the repo with their original names, e.g.
+`<run_id>/model_<run_id>_latest.json` and `<run_id>/<run_id>_latest.chkpt`, so they can be
+downloaded with:
+    hf download <repo-id> --include "<run_id>/*" --local-dir models
 
 Log in first with a token that has write access to the repo:
     uvx --from huggingface_hub hf auth login
@@ -86,7 +87,7 @@ if __name__ == "__main__":
     files = get_model_files(model_dir, args.run_id, args.mini_epoch)
     for f in files:
         size_gb = f.stat().st_size / 1e9
-        _logger.info(f"Will upload {f.name} ({size_gb:.2f} GB) to {args.repo_id}")
+        _logger.info(f"Will upload {f.name} ({size_gb:.2f} GB) to {args.repo_id}/{args.run_id}")
     if args.dry_run:
         sys.exit(0)
 
@@ -96,7 +97,10 @@ if __name__ == "__main__":
     commit = api.create_commit(
         repo_id=args.repo_id,
         repo_type="model",
-        operations=[CommitOperationAdd(path_in_repo=f.name, path_or_fileobj=f) for f in files],
+        operations=[
+            CommitOperationAdd(path_in_repo=f"{args.run_id}/{f.name}", path_or_fileobj=f)
+            for f in files
+        ],
         commit_message=f"Upload {', '.join(f.name for f in files)}",
     )
     _logger.info(f"Uploaded to {commit.commit_url}")
