@@ -8,7 +8,7 @@ Usage:
     python make_release.py --release-name atmo-forecast --release-version 1.2rc1 \
         --run-id 12345 --dry-run
 
-Generated with Claude, manually reviewed and tested.        
+Generated with Claude, manually reviewed and tested.
 """
 
 import argparse
@@ -28,6 +28,13 @@ logger = logging.getLogger("make_release")
 SCRIPT_DIR = Path(__file__).resolve().parent  # WeatherGenerator/scripts/
 WeatherGenerator_DIR = SCRIPT_DIR.parent  # WeatherGenerator/
 WeatherGeneratorPrivate_DIR = WeatherGenerator_DIR.parent / "WeatherGenerator-private"
+
+# Canonical remotes: tags are fetched from and pushed to these by default.
+# Matched against the URLs in `git remote -v`, so the local remote name does not matter.
+CANONICAL_REMOTE_URLS = {
+    WeatherGenerator_DIR: "github.com/ecmwf/WeatherGenerator",
+    WeatherGeneratorPrivate_DIR: "gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private",
+}
 
 # ---------------------------------------------------------------------------
 # Regexes
@@ -53,9 +60,21 @@ def run(cmd: list, cwd: Path) -> subprocess.CompletedProcess:
     return result
 
 
-def git_fetch_tags(repo: Path) -> None:
-    logger.info("Fetching tags in %s …", repo)
-    run(["git", "fetch", "--tags", "origin"], cwd=repo)
+def git_find_remote(repo: Path, url_fragment: str) -> str:
+    """Return the name of the remote whose push URL contains url_fragment."""
+    result = run(["git", "remote", "-v"], cwd=repo)
+    for line in result.stdout.splitlines():
+        name, url, kind = line.split()
+        # Normalise scp-style SSH URLs (git@host:path) so host/path matches like https URLs.
+        if kind == "(push)" and url_fragment in url.replace(":", "/"):
+            return name
+    logger.error("No remote pointing to %r found in %s.", url_fragment, repo.name)
+    sys.exit(1)
+
+
+def git_fetch_tags(repo: Path, remote: str) -> None:
+    logger.info("Fetching tags from %r in %s …", remote, repo)
+    run(["git", "fetch", "--tags", remote], cwd=repo)
 
 
 def git_all_tags(repo: Path) -> list:
@@ -79,9 +98,9 @@ def git_tag(repo: Path, tag: str, message: str) -> None:
     run(["git", "tag", "-a", tag, "-m", message], cwd=repo)
 
 
-def git_push_tags(repo: Path) -> None:
-    logger.info("Pushing tags in %s …", repo.name)
-    run(["git", "push", "origin", "--tags"], cwd=repo)
+def git_push_tag(repo: Path, remote: str, tag: str) -> None:
+    logger.info("Pushing tag %r to %r in %s …", tag, remote, repo.name)
+    run(["git", "push", remote, tag], cwd=repo)
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +229,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run all checks and fetch tags, but skip tagging and pushing.",
     )
+    parser.add_argument(
+        "--remote-public",
+        metavar="NAME",
+        help="Git remote to use for WeatherGenerator instead of the canonical ecmwf remote. "
+        "Intended for testing against a fork.",
+    )
+    parser.add_argument(
+        "--remote-private",
+        metavar="NAME",
+        help="Git remote to use for WeatherGenerator-private instead of the canonical remote. "
+        "Intended for testing against a fork.",
+    )
     return parser.parse_args()
 
 
@@ -252,13 +283,21 @@ def main() -> None:
     logger.info("[3/6] Checking repositories …")
     check_repos_exist()
 
-    # 4 – Fetch tags (done even in dry-run)
-    logger.info("[4/6] Fetching tags from origin …")
+    # 4 – Resolve remotes and fetch tags (done even in dry-run)
+    logger.info("[4/6] Fetching tags …")
+    remote_overrides = {
+        WeatherGenerator_DIR: args.remote_public,
+        WeatherGeneratorPrivate_DIR: args.remote_private,
+    }
+    remotes = {
+        repo: remote_overrides[repo] or git_find_remote(repo, CANONICAL_REMOTE_URLS[repo])
+        for repo in repos
+    }
     for repo in repos:
-        git_fetch_tags(repo)
+        git_fetch_tags(repo, remotes[repo])
 
-    # Use WeatherGenerator as the authoritative tag source
-    all_tags = git_all_tags(WeatherGenerator_DIR)
+    # Check against the tags of both repos: a tag present in either one blocks the release
+    all_tags = sorted({t for repo in repos for t in git_all_tags(repo)})
 
     # 5 – Tag must not exist + no smaller version
     logger.info("[5/6] Checking version constraints …")
@@ -282,7 +321,7 @@ def main() -> None:
     # Push
     logger.info("Pushing tags …")
     for repo in repos:
-        git_push_tags(repo)
+        git_push_tag(repo, remotes[repo], full_tag)
 
     logger.info("Release %r created and pushed successfully.", full_tag)
 
