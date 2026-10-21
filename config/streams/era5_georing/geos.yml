@@ -1,0 +1,87 @@
+# (C) Copyright 2026 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+METEOSAT_SEVIRI :
+  type : obs
+  stream_id : 2
+  filenames : ['observations-file-2014-2024-seviri-h512-v5.zarr']
+  source_exclude : ["obsvalue_rawbt_065", "obsvalue_rawbt_086", "obsvalue_rawbt_160"]
+  target_exclude : ["obsvalue_rawbt_065", "obsvalue_rawbt_086", "obsvalue_rawbt_160"]
+  loss_weight : 1.0
+  token_size : 128
+  tokenize_spacetime : True
+  max_num_targets: 65536
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords : 
+    net : linear
+    dim_embed : 512
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head :    
+    ens_size : 1
+    num_layers : 1
+
+
+GOES_ABI :
+  type : obs
+  stream_id : 3
+  filenames : ['observations-file-2017-2024-abi-goes16-IR-h512-v2.zarr']
+  source_exclude : ["obsvalue_rawbt_086", "obsvalue_rawbt_160"]
+  target_exclude : ["obsvalue_rawbt_086", "obsvalue_rawbt_160"]
+  loss_weight : 1.0
+  token_size : 128
+  tokenize_spacetime : True
+  max_num_targets: 65536
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords : 
+    net : linear
+    dim_embed : 512
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head : 
+    ens_size : 1
+    num_layers : 1
+
+
+HIMAWARI_AHI :
+  type : obs
+  stream_id : 4
+  filenames : ['observations-file-2015-2022-himawari8-IR-h512-v1.zarr']
+  source_exclude : ["obsvalue_rawbt_086", "obsvalue_rawbt_160"]
+  target_exclude : ["obsvalue_rawbt_086", "obsvalue_rawbt_160"]
+  loss_weight : 1.0
+  token_size : 128
+  tokenize_spacetime : True
+  max_num_targets: 65536
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords : 
+    net : linear
+    dim_embed : 512
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head : 
+    ens_size : 1
+    num_layers : 1

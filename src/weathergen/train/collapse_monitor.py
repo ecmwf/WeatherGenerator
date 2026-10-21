@@ -703,7 +703,7 @@ class CollapseMonitor:
         for _calc_name, calculator in target_and_aux_calculators.items():
             if isinstance(calculator, EMATeacher):
                 step = batch_size * cf.general.istep
-                ema_beta = calculator.get_current_beta(step)
+                ema_beta = calculator.get_current_beta(step, batch_size)
                 break
 
         # Debug logging
