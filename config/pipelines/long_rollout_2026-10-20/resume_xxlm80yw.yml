@@ -1,0 +1,18 @@
+# Resume B' (pfanchnd, anchored pushforward without forecast-engine dropout) for its last mini-epoch (~3.5 h), in place (run_id == from_run_id) from its mini-epoch 3 checkpoint.
+# Its chain broke: later chain parts load xxlm80yw_latest.chkpt, which the trainer only writes every
+# train_logging.checkpoint (500) batches within a mini-epoch, never reached with 256-batch
+# mini-epochs; after the 2026-10-20 filesystem incident every further part failed at startup.
+# train_logging.checkpoint=128 makes the _latest checkpoint exist for the parts of this resume.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-20/resume_xxlm80yw.yml
+parallelize: true
+stages:
+  - name: pfanchndresume
+    stage: train
+    run_id: xxlm80yw
+    from_run_id: xxlm80yw
+    mini_epoch: 3
+    options:
+      - train_logging.checkpoint=128
+    chain_jobs: 1
+    nodes: 8
