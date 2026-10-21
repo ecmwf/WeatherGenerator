@@ -20,11 +20,11 @@ case "$1" in
     ;;
   sync-safe)
     (
-      # Creates a virtual environment, checking the integrity of the cache 
+      # Creates a virtual environment, checking the integrity of the cache
       # and copying the files.
-      # This is slower (+ 60 seconds to the sync) but it is prevents issues with 
+      # This is slower (+ 60 seconds to the sync) but it is prevents issues with
       # corrupted cache. These issues happen when a shared filesystem such as LUSTRE
-      # is used along with symlinks and a SCRATCH deletion policy: some files from 
+      # is used along with symlinks and a SCRATCH deletion policy: some files from
       # cached packages may get deleted because they seem to not be touched enough.
       cd "$SCRIPT_DIR" || exit 1
       # --refresh --reinstall : LUSTRE may clean up some pieces of the cache.
@@ -52,9 +52,11 @@ case "$1" in
     ;;
   lint-check)
     (
+      # Warning: make sure that the ruff versions are aligned
+      # with pyproject.toml
       cd "$SCRIPT_DIR" || exit 1
       uv run --no-project --with "ruff==0.12.2" \
-        ruff format --target-version py312 -n src/ scripts/ packages/ \
+      ruff format --target-version py312 --check src/ scripts/ packages/ \
       && \
       uv run --no-project --with "ruff==0.12.2" \
         ruff check  --target-version py312 src/ scripts/ packages/ \
@@ -151,11 +153,11 @@ case "$1" in
       # 1. Get the path of the private config of the cluster
       # 2. Read the yaml and extract the path of the shared conf
       # This uses the yq command. It is a python package so uvx (bundled with uv) will donwload and create the right venv
-      # The 'yq' command is used in a separate virtual environment, because the cache 
-      # around that tool can get corrupted. 
+      # The 'yq' command is used in a separate virtual environment, because the cache
+      # around that tool can get corrupted.
       # See https://github.com/ecmwf/WeatherGenerator/issues/2298
       export working_dir=$(cat "$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config)" |
-        UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV=""  uvx yq .path_shared_working_dir)      
+        UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV=""  uvx yq .path_shared_working_dir)
       # Remove quotes
       export working_dir=$(echo "$working_dir" | sed 's/[\"\x27]//g')
       # If the working directory does not exist, exit with an error

@@ -61,18 +61,40 @@ class LinePlots:
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
         self.baseline = plotter_cfg.get("baseline")
-        self.out_plot_dir_lines = Path(output_basedir) / "line_plots"
-        self.out_plot_dir_ratio = Path(output_basedir) / "ratio_plots"
-        self.out_plot_dir_psd = Path(output_basedir) / "psd_plots"
-        if not os.path.exists(self.out_plot_dir_lines):
-            _logger.info(f"Creating dir {self.out_plot_dir_lines}")
-            os.makedirs(self.out_plot_dir_lines, exist_ok=True)
-        if not os.path.exists(self.out_plot_dir_ratio):
-            _logger.info(f"Creating dir {self.out_plot_dir_ratio}")
-            os.makedirs(self.out_plot_dir_ratio, exist_ok=True)
-        if not os.path.exists(self.out_plot_dir_psd):
-            _logger.info(f"Creating dir {self.out_plot_dir_psd}")
-            os.makedirs(self.out_plot_dir_psd, exist_ok=True)
+        self._base_dir_lines = Path(output_basedir) / "line_plots"
+        self._base_dir_ratio = Path(output_basedir) / "ratio_plots"
+        self._base_dir_psd = Path(output_basedir) / "psd_plots"
+
+        self.out_plot_dir_lines = self._base_dir_lines
+        self.out_plot_dir_ratio = self._base_dir_ratio
+        self.out_plot_dir_psd = self._base_dir_psd
+        # heat_map uses self.out_plot_dir (alias for line_plots dir)
+        self.out_plot_dir = self._base_dir_lines
+
+        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
+            os.makedirs(d, exist_ok=True)
+
+    def set_subdir(self, metric: str, region: str) -> None:
+        """Set a metric/region subdirectory for all output paths.
+
+        After calling this, plots will be saved into e.g.
+        ``<basedir>/line_plots/<metric>/<region>/``.
+
+        Parameters
+        ----------
+        metric : str
+            Current metric name.
+        region : str
+            Current region name.
+        """
+        subdir = Path(metric) / region
+        self.out_plot_dir_lines = self._base_dir_lines / subdir
+        self.out_plot_dir_ratio = self._base_dir_ratio / subdir
+        self.out_plot_dir_psd = self._base_dir_psd / subdir
+        self.out_plot_dir = self.out_plot_dir_lines
+
+        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
+            os.makedirs(d, exist_ok=True)
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
@@ -278,6 +300,7 @@ class LinePlots:
         print_summary: bool = False,
         title: str | None = None,
         colors: list[str | None] | None = None,
+        line: float | None = None,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -296,6 +319,9 @@ class LinePlots:
             Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
+        line:
+            If provided, draw a horizontal reference line at the given y-value
+            (e.g. the optimal value of a metric).
         Returns
         -------
             None
@@ -350,8 +376,9 @@ class LinePlots:
             x_dim_opts,
             y_dim,
             print_summary,
+            line=line,
             title=title,
-            out_plot_dir=self.out_plot_dir_lines,
+            out_plot_dir=self.out_plot_dir,
         )
 
     def _plot_base(
@@ -415,17 +442,17 @@ class LinePlots:
 
         ax = fig.gca()
 
-        ax.set_xlabel(xlabel, fontsize=10)
-        ax.set_ylabel(ylabel, fontsize=10)
+        ax.set_xlabel(xlabel, fontsize="medium")
+        ax.set_ylabel(ylabel, fontsize="medium")
 
         clean_title = title if title is not None else clean_label(name)
         ax.set_title(
             clean_title,
-            fontsize=11,
+            fontsize="large",
             fontweight="medium",
         )
-        ax.legend(frameon=False, fancybox=False, edgecolor="0.6", fontsize=8)
-        ax.tick_params(axis="both", labelsize=9, direction="in", top=True, right=True)
+        ax.legend(frameon=False, fancybox=False, edgecolor="0.6", fontsize="small")
+        ax.tick_params(axis="both", labelsize="small", direction="in", top=True, right=True)
 
         # Thin spines
         for spine in ax.spines.values():
@@ -764,7 +791,7 @@ class LinePlots:
         if forecast_step:
             title_parts.append(f"step {forecast_step}")
         ax_spec.set_title(" – ".join(title_parts))
-        ax_spec.legend(frameon=False, fontsize=7)
+        ax_spec.legend(frameon=False, fontsize="x-small")
         ax_spec.grid(True, which="both", ls="--", alpha=0.4)
 
         # Lower panel: ratio (pred / target)

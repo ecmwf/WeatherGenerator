@@ -38,11 +38,15 @@ class ScoreCards:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
-        self.out_plot_dir = Path(output_basedir) / "score_cards"
+        self._base_dir = Path(output_basedir) / "score_cards"
+        self.out_plot_dir = self._base_dir
         self.baseline = plotter_cfg.get("baseline")
-        if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
-            os.makedirs(self.out_plot_dir, exist_ok=True)
+        os.makedirs(self.out_plot_dir, exist_ok=True)
+
+    def set_subdir(self, metric: str, region: str) -> None:
+        """Set a metric/region subdirectory for output."""
+        self.out_plot_dir = self._base_dir / metric / region
+        os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
         self,
@@ -133,16 +137,16 @@ class ScoreCards:
             f"{model_name}\nSkill: {skill_models[i]:.3f}" for i, model_name in enumerate(runs[1::])
         ]
         ax.set_xticks(np.arange(1, n_runs))
-        ax.set_xticklabels(xlabels, fontsize=10)
+        ax.set_xticklabels(xlabels, fontsize="medium")
         ax.set_yticks(np.arange(n_common_channels) + 0.5)
-        ax.set_yticklabels(ylabels, fontsize=10)
+        ax.set_yticklabels(ylabels, fontsize="medium")
         for label in ax.get_yticklabels():
             label.set_horizontalalignment("center")
             label.set_x(-0.17)
-        ax.set_ylabel("Variable", fontsize=14)
+        ax.set_ylabel("Variable", fontsize="x-large")
         ax.set_title(
             f"Model Scorecard vs. Baseline '{runs[0]}'",
-            fontsize=16,
+            fontsize="xx-large",
             pad=20,
         )
         for x in np.arange(0.5, n_runs - 1, 1):

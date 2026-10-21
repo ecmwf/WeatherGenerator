@@ -5,6 +5,9 @@
 #  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 #  animation_format: "gif" #options: "mp4", "gif"
+#  font_size: 12
+#  font_type: "serif" 
+#  animation_format: "mp4" #options: "mp4", "gif"
 
 #  dpi_val : 300
 #  fps: 2
@@ -54,19 +57,30 @@ evaluation:
         # psd_regrid_resolution: 1.0           # degrees, only for fft method
   # metrics  : ["rmse", "mae"]
   # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
-  summary_plots : true
-  ratio_plots : false
-  heat_maps : false
+
+  # ── Score visualisations ──
+  # Supported values: metric_plots, ratio, heatmap, scorecard, bar,
+  #                   score_map, score_animation, init_hour
+  # metric_plots: draws each metric in its standard form (score vs lead time,
+  # or the Q-Q / PSD plot for qq_analysis / psd).
+  # init_hour:  the score vs the hour of day the forecast was initialised (x-axis, 0–23 h).
+  score_plots: [metric_plots, ratio]
+
+  # Legacy boolean flags (deprecated — use score_plots list above instead):
+  # summary_plots : true
+  # ratio_plots : false
+  # heat_maps : false
+  # score_cards: false
+  # bar_plots: false
+  # plot_score_maps: false
+  # plot_score_animations: false
+  # plot_score_init_timeseries: true
+
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
-  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation
-  plot_score_animations: false #plot animations of score maps across forecast steps. it slows down score computation
-  plot_score_init_timeseries: true #plot timeseries of scores across forecast steps. 
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
-  score_cards: false
-  bar_plots: false
   # baseline: "ar40mckx"
 
 
@@ -84,13 +98,20 @@ default_streams:
     plotting:
       sample: [1, 3]
       forecast_step: [1,3, 2] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
-      ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
-      plot_maps: true
-      plot_bias: false
-      plot_target: false
-      plot_histograms: true
-      plot_animations: true
-      plot_timeseries: false
+      ensemble: [0,2,5] #supported: "all", "mean", "std", [0,1,2]
+      # ── Data visualisations ──
+      # Each entry is a name or a name with output formats ([image], [video] or both;
+      # a video animates the per-forecast-step images, which are kept).
+      #   maps:            {predictions|target|bias: [formats]}   ("maps" alone = predictions images)
+      #   histograms, histograms_per_sample, histograms_across_samples   (images, or : [formats])
+      #   timeseries
+      data_plots:
+        - maps:
+            predictions: [image, video]
+            # target: [image]
+            # bias: [image, video]
+        - histograms: [image, video]
+        # - timeseries
 
   CERRA:
     regions: ["europe"]
@@ -101,12 +122,10 @@ default_streams:
     plotting:
       sample: [2, 3, 0]
       forecast_step: [1,3, 4, 5]
-      plot_maps: true
-      plot_bias: false
-      plot_target: false
-      plot_histograms: true
-      plot_animations: true
-      plot_timeseries: false
+      data_plots:
+        - maps:
+            predictions: [image, video]
+        - histograms: [image, video]
       
   IMERG_ANEMOI:
     channels: ["tp_imerg_0"]
@@ -118,12 +137,10 @@ default_streams:
       sample: [1, 3]
       forecast_step: [1, 2, 3] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
       ensemble: [14]
-      plot_maps: true
-      plot_bias: false
-      plot_target: false
-      plot_histograms: true
-      plot_animations: true
-      plot_timeseries: false
+      data_plots:
+        - maps:
+            predictions: [image, video]
+        - histograms: [image, video]
 
 run_ids :
   ar40mckx:
@@ -158,12 +175,10 @@ run_ids :
           sample: [1, 3]
           forecast_step: [1,3, 2]
           ensemble: "mean" 
-          plot_maps: true
-          plot_bias: false
-          plot_target: false
-          plot_histograms: true
-          plot_animations: true
-          plot_timeseries: false
+          data_plots:
+            - maps:
+                predictions: [image, video]
+            - histograms: [image, video]
 
   
 

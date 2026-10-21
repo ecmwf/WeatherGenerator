@@ -21,7 +21,7 @@ from numpy.typing import NDArray
 
 # Local application / package
 from weathergen.common.config import (
-    get_path_run,
+    get_path_results,
     load_merge_configs,
     load_run_config,
 )
@@ -52,7 +52,7 @@ class WeatherGenReader(Reader):
         self.inference_cfg = self.get_inference_config()
 
         if not self.results_base_dir:
-            self.results_base_dir = get_path_run(self.inference_cfg)
+            self.results_base_dir = get_path_results(self.inference_cfg)
             _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
@@ -244,10 +244,14 @@ class WeatherGenReader(Reader):
         """
         Load a single pre-computed score for a given run, stream and metric.
 
+        Also checks that the stored ``eval_settings`` (regrid, rank, ensemble, etc.)
+        match the current configuration.  Returns None (forcing recomputation) if
+        settings have changed.
+
         Returns
         -------
         score: xr.DataArray or None
-            DataArray of the score if found, else None.
+            DataArray of the score if found and settings match, else None.
         """
         if parameters is None:
             parameters = {}
@@ -259,14 +263,34 @@ class WeatherGenReader(Reader):
 
         score = None
         if score_path.exists():
-            with open(score_path) as f:
-                data_dict = json.load(f)
-                if "scores" not in data_dict:
-                    data_dict = {"scores": [data_dict]}
-                for score_version in data_dict["scores"]:
-                    if score_version["attrs"] == parameters:
-                        score = xr.DataArray.from_dict(score_version)
-                        break
+            try:
+                with open(score_path) as f:
+                    data_dict = json.load(f)
+            except (json.JSONDecodeError, OSError) as exc:
+                _logger.warning(
+                    f"Corrupted or unreadable score file {score_path.name} "
+                    f"({type(exc).__name__}). Forcing recomputation."
+                )
+                return None
+
+            if "scores" not in data_dict:
+                data_dict = {"scores": [data_dict]}
+
+            # Check eval_settings match current config
+            stored_settings = data_dict.get("eval_settings", {})
+            current_settings = self.get_eval_settings(stream)
+            if stored_settings != current_settings:
+                _logger.info(
+                    f"Eval settings changed for {score_path.name}: "
+                    f"stored={stored_settings}, current={current_settings}. "
+                    f"Forcing recomputation."
+                )
+                return None
+
+            for score_version in data_dict["scores"]:
+                if score_version["attrs"] == parameters:
+                    score = xr.DataArray.from_dict(score_version)
+                    break
         return score
 
     def get_recomputable_metrics(self, metrics: dict) -> dict:

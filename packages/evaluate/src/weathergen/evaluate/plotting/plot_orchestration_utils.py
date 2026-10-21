@@ -106,9 +106,10 @@ def _compute_scores(
             preds_fs = da_preds[fstep]
             preds_next, tars_next = get_next_fstep_data(fstep, da_preds, da_tars, fsteps)
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
-            tars_r, preds_r, tars_next_r, preds_next_r = [
+            # The climatology is aligned to the full target, so it is masked with the data.
+            tars_r, preds_r, tars_next_r, preds_next_r, climatology_r = [
                 bbox.apply_mask(x) if x is not None else None
-                for x in (tars_fs, preds_fs, tars_next, preds_next)
+                for x in (tars_fs, preds_fs, tars_next, preds_next, climatology)
             ]
             tasks.append(
                 dict(
@@ -117,7 +118,7 @@ def _compute_scores(
                     metric_names=metric_names,
                     metric_params=metric_params,
                     score_data=VerifiedData(
-                        preds_r, tars_r, preds_next_r, tars_next_r, climatology
+                        preds_r, tars_r, preds_next_r, tars_next_r, climatology_r
                     ),
                     preds_r=preds_r,
                 )

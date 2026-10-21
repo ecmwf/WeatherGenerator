@@ -3,7 +3,7 @@
 #global_plotting_options:
 #  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
-#  animation_format: "gif" #options: "mp4", "gif"
+#  animation_format: "mp4" #options: "mp4", "gif"
 #  dpi_val : 300
 #  fps: 2
 #  ERA5:
@@ -52,10 +52,9 @@ default_streams:
     plotting:
       sample: [0]
       forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
-      plot_maps: true
-      plot_histograms: false
-      plot_animations: true
-      plot_timeseries: false
+      data_plots:
+        - maps:
+            predictions: [image, video]
   CERRA:
     regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"] #, "blah"]
@@ -65,10 +64,8 @@ default_streams:
     plotting:
       sample: [0]
       forecast_step: "all"
-      plot_maps: true
-      plot_bias: false
-      plot_target: false
-      plot_histograms: true
-      plot_animations: true
-      plot_timeseries: false
+      data_plots:
+        - maps:
+            predictions: [image, video]
+        - histograms: [image, video]
       

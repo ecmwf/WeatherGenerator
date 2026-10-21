@@ -37,7 +37,11 @@ except ImportError:
     HAS_DATASHADER = False
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plotting.plot_utils import DefaultMarkerSize, format_datetime
+from weathergen.evaluate.plotting.plot_utils import (
+    DefaultMarkerSize,
+    apply_font_settings,
+    format_datetime,
+)
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -70,6 +74,15 @@ np.seterr(divide="ignore", invalid="ignore")
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
 _logger.debug(f"Taking cartopy paths from {work_dir}")
+
+# Score maps use a continuous blue->red colormap (no diverging white midpoint,
+# unlike "coolwarm") so mid-range score values stay visually distinguishable.
+# The endpoints are coolwarm's own muted blue/red, just interpolated directly
+# instead of through coolwarm's near-white middle.
+SCORE_MAP_CMAP = mpl.colors.LinearSegmentedColormap.from_list(
+    "score_maps_blue_red",
+    [(0.2298057, 0.298717966, 0.753683153), (0.705673158, 0.01555616, 0.150232812)],
+)
 
 
 @dataclass
@@ -130,6 +143,9 @@ class Plotter:
             Stream identifier for which the plots will be created.
             It can also be set later via update_data_selection.
         """
+        # Plotters are constructed inside loky worker processes, which do not
+        # inherit rcParams set in the parent — apply font settings here.
+        apply_font_settings(plotter_cfg)
 
         _logger.debug(f"Taking cartopy paths from {work_dir}")
 
@@ -387,14 +403,13 @@ class Plotter:
         color_tar = "black"
         color_pred = "#00897B"  # teal / green-blue
 
-        # Create figure with two subplots: histogram + ratio
-        fig, (ax_hist, ax_ratio) = plt.subplots(
-            2,
-            1,
-            sharex=True,
-            figsize=self.fig_size or (8, 6),
-            gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
-        )
+        # Create figure with three rows: histogram, ratio, and stats text
+        fig = plt.figure(figsize=self.fig_size or (8, 8), constrained_layout=True)
+        gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 0.5])
+        ax_hist = fig.add_subplot(gs[0])
+        ax_ratio = fig.add_subplot(gs[1], sharex=ax_hist)
+        ax_text = fig.add_subplot(gs[2])
+        ax_text.set_axis_off()
 
         # Upper panel: histogram curves
         ax_hist.plot(
@@ -435,14 +450,15 @@ class Plotter:
             f"Wasserstein distance: {w_dist:.4g}\n{t_s.summary('Target:')}\n{p_s.summary('Pred:')}"
         )
 
-        fig.text(
+        ax_text.text(
             0.5,
-            -0.02,
+            0.5,
             stat_text,
             ha="center",
             va="top",
-            fontsize=7,
+            fontsize="x-small",
             family="monospace",
+            transform=ax_text.transAxes,
             bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
         )
 
@@ -474,7 +490,7 @@ class Plotter:
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving histogram to {fname}")
-        fig.savefig(fname, bbox_inches="tight")
+        fig.savefig(fname)
         plt.close(fig)
 
         return name
@@ -575,7 +591,7 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=self._match_glob_kwargs(map_kwargs, var) | map_kwargs_stream,
-                        title=self.get_map_title(var, valid_time, da_t),
+                        title=self.get_map_title(var, valid_time, da_t, tag=tag),
                     )
                     plot_names.append(name)
 
@@ -685,7 +701,7 @@ class Plotter:
         opts : dict
             Parsed map kwargs from ``_parse_map_kwargs``.
         tag : str
-            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``).
+            Plot tag (e.g. ``'targets'``, ``'preds'``, ``'bias'``, ``'score_maps_<metric>'``).
 
         Returns
         -------
@@ -693,6 +709,9 @@ class Plotter:
             The resolved colormap.
         """
 
+        # Score maps always use a continuous blue->red colormap (overrides config)
+        if str(tag).startswith("score_maps"):
+            return SCORE_MAP_CMAP
         # Bias maps always use coolwarm for visual consistency (overrides config)
         if str(tag).startswith("bias"):
             return plt.get_cmap("coolwarm")
@@ -990,7 +1009,7 @@ class Plotter:
         # canvas so fine structure is visible; sparse grids use the default.
         figsize = self.fig_size
         if figsize is None and data.size >= 200_000:
-            figsize = (15, 7)
+            figsize = (16, 8)
 
         proj = ccrs.PlateCarree()
         if regionname:
@@ -1002,7 +1021,7 @@ class Plotter:
                 # If regionname isn't in the library, fall back to PlateCarree
                 _logger.warning(f"Region '{regionname}' not found in library, using PlateCarree.")
                 proj = ccrs.PlateCarree()
-        fig = plt.figure(figsize=figsize, dpi=self.dpi_val)
+        fig = plt.figure(figsize=figsize, dpi=self.dpi_val, constrained_layout=True)
         ax = fig.add_subplot(1, 1, 1, projection=proj)
         try:
             ax.coastlines(linewidth=0.3)
@@ -1040,7 +1059,7 @@ class Plotter:
 
         # render points
         if opts["use_datashader"] and HAS_DATASHADER:
-            artist = self._render_datashader(
+            self._render_datashader(
                 ax, proj, data, opts["norm"], opts["cmap"], opts["marker_size_base"]
             )
         else:
@@ -1058,7 +1077,7 @@ class Plotter:
                 lat=data["lat"],
             )
 
-            artist = self._render_scatter(
+            self._render_scatter(
                 ax, data, opts["norm"], opts["cmap"], marker_size, opts["marker"], opts["extra"]
             )
 
@@ -1076,23 +1095,23 @@ class Plotter:
             ax.gridlines(draw_labels=False, linestyle="--", color="gray", linewidth=0.6, alpha=0.7)
 
         cbar = plt.colorbar(
-            artist,
+            mpl.cm.ScalarMappable(norm=opts["norm"], cmap=opts["cmap"]),
             ax=ax,
             fraction=0.03,
             pad=0.02,
             shrink=0.6,
             orientation="horizontal",
         )
-        cbar.set_label(f"Variable: {varname}", fontsize=7)
-        cbar.ax.tick_params(labelsize=6)
+        cbar.set_label(f"Variable: {varname}", fontsize="x-small")
+        cbar.ax.tick_params(labelsize="xx-small")
         cbar.outline.set_linewidth(0.3)
-        plt.title(title, fontsize=8)
+        plt.title(title, fontsize="small")
 
         # save
         name = self._build_map_filename(varname, regionname, tag, data)
         fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
         _logger.debug(f"Saving map to {fname}")
-        plt.savefig(fname, bbox_inches="tight")
+        plt.savefig(fname, pad_inches=0)
         plt.close()
 
         return name
@@ -1165,7 +1184,7 @@ class Plotter:
         """
         return self.out_plot_basedir / self.stream / "histograms"
 
-    def get_map_title(self, var, valid_time, data):
+    def get_map_title(self, var, valid_time, data, tag=""):
         """Build the title string for a map plot.
 
         Parameters
@@ -1178,6 +1197,9 @@ class Plotter:
         data : xr.DataArray
             DataArray from which to extract ``valid_time`` range when
             *valid_time* is ``None``.
+        tag : str
+            Plot tag. When ``"targets"``, ``" (target)"`` is appended
+            to the title.
 
         Returns
         -------
@@ -1185,6 +1207,8 @@ class Plotter:
             Formatted title string.
         """
         title = f"{self.stream}, {var} : fstep = {self.fstep:03}"
+        if tag == "targets":
+            title += " (target)"
         if valid_time is not None:
             title += f" ({format_datetime(valid_time)})"
         elif "valid_time" in data.coords:
