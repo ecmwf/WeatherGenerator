@@ -7,7 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import logging
+import pathlib
 
 import numpy as np
 import torch
@@ -42,6 +44,7 @@ def write_output(
     batch,
     model_output,
     target_aux_out,
+    store_path: "pathlib.Path | None" = None,
 ):
     """
     Interface for writing model output
@@ -72,18 +75,6 @@ def write_output(
     timestep_idxs = [s for s in model_output.forecast_steps if s >= chunk_forecast_offset]
 
     n_samples = len(batch.get_source_samples().get_samples())
-
-    # Diffusion inference inflates the model output's fstep dimension to one entry per
-    # ODE denoising step (the trajectory). The batch only has the original physical
-    # forecast indices, so synthesize a contiguous run of indices starting at the
-    # original first index to cover every entry in model_output / target_aux_out.
-    n_pred_steps = len(model_output.physical)
-    if (
-        cf.get("fe_diffusion_model", False)
-        and chunk_forecast_offset == 0
-        and n_pred_steps > len(timestep_idxs)
-    ):
-        timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
 
     targets_lens = []
 
@@ -237,11 +228,73 @@ def write_output(
         forecast_steps=timestep_idxs,
     )
 
-    store_path = config.get_path_results(cf, mini_epoch)
+    store_path = store_path if store_path is not None else config.get_path_results(cf, mini_epoch)
 
     with zarrio_writer(store_path) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
+
+
+def write_dev_trajectory_output(
+    cf,
+    val_cfg,
+    batch_size,
+    mini_epoch,
+    batch_idx,
+    dn_data,
+    batch,
+    model_output,
+    target_aux_out,
+) -> None:
+    """
+    Write the diffusion denoising trajectory collected in dev mode (``fe_diffusion_dev_mode``).
+
+    ``model_output.dev_trajectory_output`` holds one decoded prediction per ODE step, shaped
+    like a forecast rollout of pseudo forecast-steps. The real target is identical for every
+    such pseudo-step (it is the same physical target the whole trajectory denoises towards), so
+    it is replicated to match before delegating to :func:`write_output`. The result is written
+    to a separate store under ``dev/diffusion_trajectory``, using the same filename convention
+    as the official output (:func:`weathergen.common.config.get_path_results`), so it never
+    mixes with the official validation/test output but can still be read by pointing the
+    ``evaluate`` package's ``results_base_dir`` at that directory (see
+    ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``).
+    """
+    dev_output = model_output.dev_trajectory_output
+    if dev_output is None:
+        return
+
+    n_pred = len(dev_output.physical)
+    dev_target_aux_out = {}
+    for name, t_aux in target_aux_out.items():
+        t_aux = copy.copy(t_aux)
+        n_tgt = len(t_aux.physical)
+        if n_tgt > 0:
+            t_aux.physical = [t_aux.physical[i % n_tgt] for i in range(n_pred)]
+            t_aux.latent = [t_aux.latent[i % n_tgt] for i in range(n_pred)]
+        dev_target_aux_out[name] = t_aux
+
+    ext = io.StoreType(cf.zarr_store).value
+    dev_dir = get_dev_trajectory_dir(cf)
+    dev_dir.mkdir(parents=True, exist_ok=True)
+    store_path = dev_dir / f"validation_chkpt{mini_epoch:05d}_rank{cf.rank:04d}.{ext}"
+
+    write_output(
+        cf,
+        val_cfg,
+        batch_size,
+        mini_epoch,
+        batch_idx,
+        dn_data,
+        batch,
+        dev_output,
+        dev_target_aux_out,
+        store_path=store_path,
+    )
+
+
+def get_dev_trajectory_dir(cf) -> pathlib.Path:
+    """Directory holding dev-mode diffusion trajectory output (mirrors get_path_results)."""
+    return config.get_path_run(cf) / "dev" / "diffusion_trajectory"
 
 
 def get_latent_output(batch, model_output):

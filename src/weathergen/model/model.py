@@ -74,6 +74,10 @@ class ModelOutput:
         self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
         self.batch_samples = source_samples
         self.latent_deep = None
+        # Dev-mode only (fe_diffusion_dev_mode): a separate ModelOutput holding every ODE
+        # denoising step, shaped like a forecast rollout of len(tokens) pseudo-steps so it can
+        # be written/scored with the same tooling as a real forecast. Never used for losses.
+        self.dev_trajectory_output: ModelOutput | None = None
 
     def chunk_idx(self, fstep: int) -> int:
         """Index of forecast step fstep into chunk-local data, e.g. predictions."""
@@ -378,9 +382,6 @@ class Model(torch.nn.Module):
         self.register_token_idxs = list(range(cf.num_register_tokens))
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
         self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
-        # One-shot flag to avoid log spam when warning about an unsupported
-        # diffusion-inference + multi-step-rollout combination.
-        self._warned_diffusion_multi_step = False
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -896,45 +897,37 @@ class Model(torch.nn.Module):
                     coords=model_params.rope_coords,
                 )
 
-                # Trajectory inspection mode: decode each ODE step as a separate forecast output
-                # so the full denoising trajectory can be inspected downstream.
+                # Diffusion denoising trajectory: by default only the final ODE state is a
+                # real forecast-step prediction, decoded once below like any other step.
                 # Not used when diffusion_rollout=True — that case is handled in the unified
                 # diffusion block below.
                 if isinstance(tokens, list) and not self.cf.get("diffusion_rollout", False):
-                    # Diffusion inference currently only supports a single physical forecast
-                    # step (forecast.num_steps=1); the per-ODE-step trajectory consumes the
-                    # ModelOutput fstep dimension. Multi-step autoregressive rollouts on top of
-                    # diffusion are not implemented yet.
-                    if (
-                        len(source_samples.get_output_idxs()) > 1
-                        and not self._warned_diffusion_multi_step
-                    ):
-                        logger.warning(
-                            "Diffusion inference is being run with forecast.num_steps=%d (>1). "
-                            "Only a single forecast step is supported in this mode; the "
-                            "per-ODE-step denoising trajectory will overwrite later forecast "
-                            "steps in the model output.",
-                            len(source_samples.get_output_idxs()),
-                        )
-                        self._warned_diffusion_multi_step = True
-                    # Resize output to fit the diffusion trajectory.
-                    output = self._reindex_output_for_trajectory(output, len(tokens))
                     cond = source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                     predict_residual = self.cf.get("fe_diffusion_model", False) and self.cf.get(
                         "fe_diffusion_predict_residual", False
                     )
-                    for i, toks in enumerate(tokens):
-                        toks_abs = cond + toks if predict_residual else toks
-                        output = self.predict_decoders(
-                            model_params, step, toks_abs, source_samples, output, out_step=i
+
+                    if self.cf.get("fe_diffusion_dev_mode", False):
+                        output.dev_trajectory_output = self._decode_diffusion_trajectory_dev(
+                            model_params,
+                            step,
+                            tokens,
+                            source_samples,
+                            output.forecast_offset,
+                            cond,
+                            predict_residual,
                         )
-                        output = self.predict_latent(
-                            model_params, step, toks_abs, source_samples, output, out_step=i
-                        )
+
+                    # Only the final denoised state is a real forecast-step prediction.
+                    final_toks = tokens[-1]
+                    final_abs = cond + final_toks if predict_residual else final_toks
+                    output = self.predict_decoders(
+                        model_params, step, final_abs, source_samples, output
+                    )
+                    output = self.predict_latent(
+                        model_params, step, final_abs, source_samples, output
+                    )
                     # Feed the final denoised state back as conditioning for the next step.
-                    # Pass tokens[-1] forward so inference diagnostics have a reference point;
-                    # inference_forward always starts from pure noise regardless.
-                    final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
                     source_samples.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = final_abs
                     # NOTE: This is precautionary, might need to be handled differently.
                     # It should not be the same as conditioning tokens.
@@ -999,17 +992,40 @@ class Model(torch.nn.Module):
 
         return output
 
-    @staticmethod
-    def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
+    def _decode_diffusion_trajectory_dev(
+        self,
+        model_params: ModelParams,
+        step: int,
+        tokens: list[torch.Tensor],
+        source_samples: BatchSamples,
+        forecast_offset: int,
+        cond: torch.Tensor,
+        predict_residual: bool,
+    ) -> ModelOutput:
         """
-        Resize a ModelOutput to hold ``n_steps`` forecast steps, preserving any latent entries
-        that were already attached to fstep 0 (e.g. encoder posteriors).
+        Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (dev mode
+        only, ``fe_diffusion_dev_mode``).
+
+        The result is shaped like a forecast rollout of ``len(tokens)`` pseudo-steps so it can
+        be written and scored with the same ``write_output``/fast-eval tooling used for a real
+        forecast (see ``validation_io.write_output`` and
+        ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``). It is never merged into the real
+        output returned by ``forward``.
         """
-        new_output = ModelOutput(n_steps)
-        if len(output.latent) > 0:
-            for k, v in output.latent[0].items():
-                new_output.add_latent_prediction(0, k, v)
-        return new_output
+        dev_output = ModelOutput(
+            list(range(forecast_offset, forecast_offset + len(tokens))),
+            forecast_offset,
+            source_samples,
+        )
+        for i, toks in enumerate(tokens):
+            toks_abs = cond + toks if predict_residual else toks
+            dev_output = self.predict_decoders(
+                model_params, step, toks_abs, source_samples, dev_output, out_step=i
+            )
+            dev_output = self.predict_latent(
+                model_params, step, toks_abs, source_samples, dev_output, out_step=i
+            )
+        return dev_output
 
     def _get_initial_conditions(
         self, samples_or_output: BatchSamples | ModelOutput, model_params: ModelParams
