@@ -58,7 +58,7 @@ from weathergen.train.utils import (
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
-from weathergen.utils.validation_io import write_output
+from weathergen.utils.validation_io import AsyncOutputWriter, stage_output, write_output
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,8 @@ class Trainer(TrainerBase):
         self.loss_spike_cfg = None
         self.loss_spike_file = None
         self.loss_spike_history = deque()
+        # writes validation output in the background while validate() runs
+        self.output_writer: AsyncOutputWriter | None = None
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -263,6 +265,19 @@ class Trainer(TrainerBase):
             for start in range(0, len(output_idxs), chunk_size)
         ]
 
+    def _write_output(self, *args) -> None:
+        """
+        Write output with the arguments of write_output.
+
+        With an output writer, the copies to host and the zarr write run in the background,
+        overlapping with the next forecast steps.
+        """
+        if self.output_writer is None:
+            write_output(*args)
+        else:
+            staged = stage_output(*args, copy_stream=self.output_writer.copy_stream)
+            self.output_writer.submit(staged)
+
     @staticmethod
     def _keeps_full_validation_output(mode_cfg) -> bool:
         """
@@ -352,7 +367,7 @@ class Trainer(TrainerBase):
                     target_output = {physical_loss_names[0]: target_aux_chunk}
                 else:
                     target_output = targets_and_auxs
-                write_output(
+                self._write_output(
                     self.cf,
                     mode_cfg,
                     batch_size,
@@ -847,6 +862,22 @@ class Trainer(TrainerBase):
         """
         Perform validation / test computation as specified by mode_cfg.
 
+        With output.async_write, the output is written in the background; all of it is
+        written when validate() returns.
+        """
+        if mode_cfg.get("output", {}).get("async_write", False):
+            self.output_writer = AsyncOutputWriter(self.device)
+        try:
+            self._validate(mini_epoch, mode_cfg, batch_size)
+        finally:
+            if self.output_writer is not None:
+                output_writer, self.output_writer = self.output_writer, None
+                output_writer.close()
+
+    def _validate(self, mini_epoch, mode_cfg, batch_size):
+        """
+        Perform validation / test computation as specified by mode_cfg.
+
         For diffusion models, runs separate validation passes for each noise level
         specified in ``validation_noise_levels`` (defaults to ``[0.0]``).
         Losses are logged with a per-noise-level suffix so they can be compared.
@@ -961,7 +992,7 @@ class Trainer(TrainerBase):
                                     if mode_cfg.get("output", {}).get("normalized_samples", False)
                                     else self.dataset_val.denormalize_target_channels
                                 )
-                                write_output(
+                                self._write_output(
                                     self.cf,
                                     mode_cfg,
                                     batch_size,

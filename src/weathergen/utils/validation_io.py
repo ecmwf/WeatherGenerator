@@ -7,9 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
 import logging
+import pathlib
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import numpy as np
+import numpy.typing as npt
 import torch
 
 import weathergen.common.config as config
@@ -20,6 +24,137 @@ from weathergen.model.engines import LatentState
 from weathergen.utils.utils import is_stream_reconstructed
 
 _logger = logging.getLogger(__name__)
+
+
+class _HostCopier:
+    """
+    Copies tensors to host memory, synchronously or on a separate stream.
+
+    Without a copy stream, a tensor is copied when it is passed in. With one, the call only
+    allocates pinned host memory; start() queues all copies on the copy stream behind the
+    work queued so far on the current stream, and the host tensors are valid after wait().
+    """
+
+    def __init__(self, copy_stream: torch.cuda.Stream | None = None):
+        self.copy_stream = copy_stream
+        self._pending: list[tuple[torch.Tensor, torch.Tensor]] = []
+        self._done: torch.cuda.Event | None = None
+
+    def __call__(self, t: torch.Tensor) -> torch.Tensor | npt.NDArray:
+        t = t.detach()
+        if self.copy_stream is None or not t.is_cuda:
+            return t.cpu().numpy()
+        host = torch.empty(t.shape, dtype=t.dtype, pin_memory=True)
+        self._pending.append((t, host))
+        return host
+
+    def start(self) -> None:
+        """Queue the copies to host, without waiting for them."""
+        if self.copy_stream is None:
+            return
+        self.copy_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(self.copy_stream):
+            for t, host in self._pending:
+                host.copy_(t, non_blocking=True)
+                # keep the caching allocator from reusing t before the copy has finished
+                t.record_stream(self.copy_stream)
+            self._done = torch.cuda.Event()
+            self._done.record(self.copy_stream)
+        self._pending.clear()
+
+    def wait(self) -> None:
+        """Wait until the copies to host have finished."""
+        if self._done is not None:
+            self._done.synchronize()
+
+
+def _as_numpy(x):
+    """Host tensors to numpy arrays, also inside lists and dicts."""
+    if isinstance(x, torch.Tensor):
+        return x.numpy()
+    if isinstance(x, list):
+        return [_as_numpy(v) for v in x]
+    if isinstance(x, dict):
+        return {k: _as_numpy(v) for k, v in x.items()}
+    return x
+
+
+@dataclasses.dataclass
+class StagedOutput:
+    """
+    Output of a batch (or forecast chunk) whose copies to host are in flight.
+
+    Of the batch, model output and targets it holds only host data that they don't change
+    afterwards (the raw sources), so they can be changed or released while it is written.
+    """
+
+    host: _HostCopier
+    # fstep, stream, sample: data per sample, concatenated over samples when written
+    preds: list[list[list]]
+    targets: list[list[list]]
+    targets_coords: list[list[list]]
+    targets_times: list[list[list]]
+    latents: list[list[dict]] | None
+    # remaining fields of io.OutputBatchData
+    batch_data_args: dict
+    store_path: pathlib.Path
+    write_config: ZarrWriteConfig
+
+    def write(self) -> None:
+        """Wait for the copies to host and write the output to the zarr store."""
+        self.host.wait()
+
+        def cat(per_step, axis=0):
+            return [
+                [np.concatenate(_as_numpy(per_sample), axis=axis) for per_sample in per_stream]
+                for per_stream in per_step
+            ]
+
+        data = io.OutputBatchData(
+            targets=cat(self.targets),
+            predictions=cat(self.preds, axis=1),
+            targets_coords=cat(self.targets_coords),
+            targets_times=cat(self.targets_times),
+            latents=_as_numpy(self.latents),
+            **self.batch_data_args,
+        )
+
+        with zarrio_writer(self.store_path, self.write_config) as zio:
+            for subset in data.items():
+                zio.write_zarr(subset)
+
+
+class AsyncOutputWriter:
+    """
+    Writes staged output in a background thread, while the next forecast steps run.
+
+    The copies to host run on a separate stream, so they overlap with the compute on the
+    device. One write is in flight at a time, which keeps the writes to the zarr store in
+    order and bounds the memory held by staged output.
+    """
+
+    def __init__(self, device: torch.device):
+        self.copy_stream = torch.cuda.Stream(device) if device.type == "cuda" else None
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="output-writer")
+        self._in_flight: Future | None = None
+
+    def submit(self, staged: StagedOutput | None) -> None:
+        """Write staged output after the previous write has finished."""
+        self.wait()
+        if staged is not None:
+            self._in_flight = self._executor.submit(staged.write)
+
+    def wait(self) -> None:
+        """Wait for the write in flight; raises its exception if it failed."""
+        in_flight, self._in_flight = self._in_flight, None
+        if in_flight is not None:
+            in_flight.result()
+
+    def close(self) -> None:
+        try:
+            self.wait()
+        finally:
+            self._executor.shutdown()
 
 
 def _empty_step(n_samples: int, n_ens: int, n_channels: int):
@@ -33,7 +168,7 @@ def _empty_step(n_samples: int, n_ens: int, n_channels: int):
 
 
 def _predictions_without_targets(
-    batch, sname: str, t_idx: int, preds, n_samples: int, n_channels: int, dn_data
+    batch, sname: str, t_idx: int, preds, n_samples: int, n_channels: int, dn_data, to_host
 ):
     """
     Predictions of one forecast step and stream at the target points, which have no values.
@@ -60,9 +195,10 @@ def _predictions_without_targets(
             t_coords = t_coords[idxs_inv]
             t_times = t_times[idxs_inv]
 
-        preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+        # copy=True: denormalization is in place and must not change the model output
+        preds_s += [to_host(dn_data(sname, pred.to(fp32, copy=True)))]
         targets_s += [np.zeros((0, n_channels), dtype=np.float32)]
-        t_coords_s += [t_coords.cpu().numpy()]
+        t_coords_s += [to_host(t_coords)]
         t_times_s += [t_times.astype("datetime64[ns]")]
 
     return preds_s, targets_s, t_coords_s, t_times_s
@@ -82,6 +218,41 @@ def write_output(
     """
     Interface for writing model output
     """
+    staged = stage_output(
+        cf,
+        val_cfg,
+        batch_size,
+        mini_epoch,
+        batch_idx,
+        dn_data,
+        batch,
+        model_output,
+        target_aux_out,
+    )
+    if staged is not None:
+        staged.write()
+
+
+def stage_output(
+    cf,
+    val_cfg,
+    batch_size,
+    mini_epoch,
+    batch_idx,
+    dn_data,
+    batch,
+    model_output,
+    target_aux_out,
+    copy_stream: torch.cuda.Stream | None = None,
+) -> StagedOutput | None:
+    """
+    Collect the model output to be written and start its copy to host.
+
+    Everything needed from batch, model_output and target_aux_out is taken here. With
+    copy_stream the copies to host are queued on that stream without waiting for them.
+    Returns None if there is nothing to write.
+    """
+    to_host = _HostCopier(copy_stream)
 
     # TODO: how to handle multiple physical loss terms
     outputs_physical = [
@@ -163,6 +334,7 @@ def write_output(
                     n_samples,
                     n_channels,
                     dn_data,
+                    to_host,
                 )
 
             elif not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
@@ -196,26 +368,29 @@ def write_output(
                         t_coords = t_coords[idxs_inv]
                         t_times = t_times[idxs_inv]
 
-                    # denormalize data if requested and map to storage format
-                    preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-                    targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
+                    # denormalize data if requested and map to storage format;
+                    # copy=True: denormalization is in place and must not change the
+                    # model output or the targets, which the loss may still use
+                    preds_s += [to_host(dn_data(sname, pred.to(fp32, copy=True)))]
+                    targets_s += [to_host(dn_data(sname, target.to(fp32, copy=True)))]
 
                     # extract original target coords and times from target data
-                    t_coords_s += [t_coords.cpu().numpy()]
+                    t_coords_s += [to_host(t_coords)]
                     t_times_s += [t_times.astype("datetime64[ns]")]
 
             # datapoints per sample, from the predictions since targets can have no values
             targets_lens[-1] += [[]]
             targets_lens[-1][-1] += [p.shape[1] for p in preds_s]
 
-            preds_all[-1] += [np.concatenate(preds_s, axis=1)]
-            targets_all[-1] += [np.concatenate(targets_s)]
-            targets_coords_all[-1] += [np.concatenate(t_coords_s)]
-            targets_times_all[-1] += [np.concatenate(t_times_s)]
+            # concatenated over samples when written, after the copies to host
+            preds_all[-1] += [preds_s]
+            targets_all[-1] += [targets_s]
+            targets_coords_all[-1] += [t_coords_s]
+            targets_times_all[-1] += [t_times_s]
 
-    if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
+    if sum(n for lens_step in targets_lens for lens in lens_step for n in lens) == 0:
         _logger.warning("Writing no data since predictions are empty.")
-        return
+        return None
 
     # collect source information
     sources = []
@@ -268,37 +443,39 @@ def write_output(
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
-    latents_all = get_latent_output(batch, model_output) if write_latents else None
+    latents_all = get_latent_output(batch, model_output, to_host) if write_latents else None
 
-    data = io.OutputBatchData(
-        sources,
-        source_intervals,
-        targets_all,
-        preds_all,
-        targets_coords_all,
-        targets_times_all,
-        targets_lens,
-        output_streams,
-        target_channels,
-        source_channels,
-        geoinfo_channels,
+    to_host.start()
+
+    return StagedOutput(
+        host=to_host,
+        preds=preds_all,
+        targets=targets_all,
+        targets_coords=targets_coords_all,
+        targets_times=targets_times_all,
         latents=latents_all,
-        sample_start=sample_start,
-        forecast_offset=forecast_offset,
-        forecast_steps=timestep_idxs,
+        batch_data_args=dict(
+            sources=sources,
+            source_intervals=source_intervals,
+            targets_lens=targets_lens,
+            streams=output_streams,
+            target_channels=target_channels,
+            source_channels=source_channels,
+            geoinfo_channels=geoinfo_channels,
+            sample_start=sample_start,
+            forecast_offset=forecast_offset,
+            forecast_steps=timestep_idxs,
+        ),
+        store_path=config.get_path_results(cf, mini_epoch),
+        write_config=ZarrWriteConfig.from_config(cf),
     )
 
-    store_path = config.get_path_results(cf, mini_epoch)
 
-    with zarrio_writer(store_path, ZarrWriteConfig.from_config(cf)) as zio:
-        for subset in data.items():
-            zio.write_zarr(subset)
-
-
-def get_latent_output(batch, model_output):
+def get_latent_output(batch, model_output, to_host=None):
     """
     Interface for getting latent states
     """
+    to_host = to_host if to_host is not None else _HostCopier()
 
     # collect latent outputs per forecast step and per sample
     fp32 = torch.float32
@@ -327,9 +504,9 @@ def get_latent_output(batch, model_output):
                     for field_name, tensor in fields.items():
                         if tensor is not None:
                             sample_tensor = tensor[i_sample]
-                            per_sample[field_name] = sample_tensor.detach().to(fp32).cpu().numpy()
+                            per_sample[field_name] = to_host(sample_tensor.to(fp32))
                 else:
-                    per_sample[lname] = lval[i_sample].detach().to(fp32).cpu().numpy()
+                    per_sample[lname] = to_host(lval[i_sample].to(fp32))
             latents_all[-1].append(per_sample)
 
     return latents_all
