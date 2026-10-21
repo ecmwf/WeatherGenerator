@@ -1,0 +1,70 @@
+# Numerics test: temporal JEPA, teacher sees the next time window (mirrors
+# temporal_jepa_pretraining of weathergen-configs at tiny scale)
+
+ae_aggregation_num_blocks: 1
+num_register_tokens: 4
+qk_norm_type: "RMSNorm"
+
+training_config:
+  training_mode: ["student_teacher"]
+  teacher_time_offset: 1
+
+  deep_ssl:
+    enabled: true
+    tap_after:
+      - local2global
+      - "global:0"
+      - "global:1"
+    fusion_hidden_factor: 4
+    level_weights: [0.25, 0.25, 0.25, 0.25]
+
+  context_loss:
+    enabled: false
+
+  window_offset_prediction : 0
+
+  losses : {
+    "student-teacher": {
+        enabled: True,
+        type: LossLatentSSLStudentTeacher,
+        weight: 1.0,
+        loss_fcts : {
+          "JEPA": {
+            'weight': 1, "loss_extra_args": {temporal: true}, "out_dim": 128, "head": transformer,
+            "num_blocks": 1, "num_heads": 4, "with_qk_lnorm": True, "intermediate_dim": 64,
+            "dropout_rate": 0.0,
+            target_source_correspondence: {0 : {0 : "independent"} },
+        },
+        },
+        target_and_aux_calc: { "EMATeacher" :
+          { ema_ramp_up_ratio : null,
+            ema_halflife_in_thousands: 400000,
+            model_param_overrides : {
+              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
+            },
+          }
+        }
+      }
+  }
+
+  model_input: {
+    "random_easy" : {
+      masking_strategy: "forecast",
+      num_samples: 1,
+      num_steps_input: 1,
+      masking_strategy_config : {},
+    },
+  }
+
+  target_input: {
+    "random_easy_target" : {
+      masking_strategy: "forecast",
+      num_samples: 1,
+      masking_strategy_config : {},
+    },
+  }
+
+  forecast :
+    time_step: 00:00:00
+    num_steps: 0
+    policy: null
