@@ -90,15 +90,6 @@ def _format_date(date: str) -> str:
 
 def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
-        "--private-config",
-        type=Path,
-        default=None,
-        help=(
-            "Path to the private configuration file that includes platform specific information "
-            " like paths."
-        ),
-    )
-    parser.add_argument(
         "--config",
         type=Path,
         nargs="*",
