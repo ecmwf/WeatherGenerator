@@ -43,6 +43,7 @@ from weathergen.utils.profiling import (
     pytorch_profiler_session,
     wrap_module_forward_with_profiling,
 )
+from weathergen.utils.validation_io import AsyncOutputWriter, StagedOutput
 
 logger = logging.getLogger(__name__)
 
@@ -408,6 +409,10 @@ class ProfilingTrainer(Trainer):
                 self._annotate_validation_phases()
                 # a module function, so patched only while validating
                 stack.enter_context(nvtx_patched(trainer_module, "write_output", "write_output"))
+                # with output.async_write: staging on this thread, writing on the writer thread
+                stack.enter_context(nvtx_patched(trainer_module, "stage_output", "stage_output"))
+                stack.enter_context(nvtx_patched(StagedOutput, "write", "write_staged_output"))
+                stack.enter_context(nvtx_patched(AsyncOutputWriter, "wait", "wait_output_writer"))
                 stack.enter_context(self.annotate("validation"))
             super().validate(mini_epoch, mode_cfg, batch_size)
         self._log_peak_memory(VAL, "validation")
