@@ -19,26 +19,26 @@ affect the metrics/artifacts produced by a normal training or validation run. Th
     free of plotting backends and keeps the hot path cheap), and
   * read and visualised later by small, standalone scripts.
 
-This module defines the common lifecycle (:class:`DevOutputWriter`) and two concrete
+This module defines the common lifecycle (:class:`DevOutputWriter`) and three concrete
 backends used across the codebase:
 
   * :class:`ScalarSeriesZarrWriter` - appends one row per call to a set of named 1D
     series of equal length (e.g. one value per diffusion ODE step). Used for the
     diffusion sampling diagnostics.
+  * :class:`DiffusionTrajectoryZarrWriter` - writes one zarr group per validation sample
+    holding the diffusion denoising trajectory, with an explicit
+    ``denoising_step`` array dimension (as opposed to overloading the real
+    forecast-step dimension used by the official validation/test output). Read by
+    ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``.
   * :class:`ScalarMetricsJSONLWriter` - appends one JSON line per call, each a flat
     ``dict[str, float]``. Thin adapter around ``TrainLogger.log_metrics``, used e.g. for
     SSL collapse monitoring metrics.
 
-A third style of dev output - the diffusion dev-mode trajectory - does not go through a
-writer in this module: it reuses ``weathergen.utils.validation_io.write_output`` directly
-(with an overridden store path) so it is written with the exact same schema as the
-official validation/test output and can be read by the ``evaluate`` package unmodified;
-see ``write_dev_trajectory_output``.
-
-Both writers here are intentionally independent of any specific model: they only depend
+All writers here are intentionally independent of any specific model: they only depend
 on `Config` and plain arrays/dicts, so they can be unit tested and reused outside of
 model.py / diffusion.py.
 """
+
 
 from __future__ import annotations
 
@@ -158,6 +158,54 @@ class ScalarSeriesZarrWriter(DevOutputWriter):
                 continue
             dset.resize((dset.shape[0] + 1, dset.shape[1]))
             dset[-1, :] = row
+
+
+class DiffusionTrajectoryZarrWriter(DevOutputWriter):
+    """
+    Writes the diffusion denoising trajectory decoded in dev mode, one zarr group per
+    validation sample, with an explicit ``denoising_step`` array dimension.
+
+    Unlike the official validation/test output (which indexes by real forecast step),
+    the per-sample ``predictions`` array here has shape ``(denoising_step, ens,
+    point, channel)``; ``target``/``coords``/``times`` have no ``denoising_step``
+    axis since the real target is the same physical quantity the whole trajectory denoises
+    towards.
+    Independent of ``write_output``/``OutputBatchData`` and thus not readable by the
+    ``evaluate`` package; see ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``.
+    """
+
+    def __init__(
+        self,
+        cf: Config,
+        name: str = "diffusion_trajectory",
+        enabled_flag: str = "fe_diffusion_dev_mode",
+    ) -> None:
+        super().__init__(cf, name, enabled_flag)
+        self._group: zarr.Group | None = None
+
+    def _open(self) -> zarr.Group:
+        if self._group is None:
+            self.root.mkdir(parents=True, exist_ok=True)
+            self._group = zarr.open_group(str(self.root / f"{self.name}.zarr"), mode="a")
+        return self._group
+
+    def _write(self, payload: tuple[int, Mapping[str, Mapping[str, typing.Any]]]) -> None:
+        sample_idx, streams = payload
+        group = self._open()
+        sample_group_name = f"sample{sample_idx:05d}"
+        if sample_group_name in group:
+            del group[sample_group_name]
+        sample_group = group.create_group(sample_group_name)
+
+        for stream_name, data in streams.items():
+            stream_group = sample_group.create_group(stream_name)
+            for key in ("predictions", "target", "coords", "times"):
+                arr = np.asarray(data[key])
+                stream_group.create_array(key, shape=arr.shape, dtype=arr.dtype, chunks=arr.shape)
+                stream_group[key][...] = arr
+            # times are stored as int64 ns-since-epoch since zarr has no datetime64 dtype
+            stream_group["times"].attrs["units"] = "datetime64[ns] (int64 view)"
+            stream_group.attrs["channels"] = list(data["channels"])
 
 
 class ScalarMetricsJSONLWriter(DevOutputWriter):

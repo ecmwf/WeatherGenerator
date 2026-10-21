@@ -850,9 +850,14 @@ class Trainer(TrainerBase):
 
             with torch.no_grad():
                 # print progress bar but only in interactive mode, i.e. when without ddp
+                # position=0 keeps this bar above the nested per-denoising-step bar
+                # (position=1) that diffusion.py's DiffusionForecastEngine prints during
+                # diffusion inference.
                 with tqdm.tqdm(
                     total=len(self.data_loader_validation) * self.cf.world_size,
                     disable=self.cf.rank > 0,
+                    desc="validation samples",
+                    position=0,
                 ) as pbar:
                     for bidx, batch in enumerate(dataset_val_iter):
                         compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)

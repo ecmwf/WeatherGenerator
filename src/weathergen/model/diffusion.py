@@ -28,11 +28,13 @@ import math
 
 import numpy as np
 import torch
+import tqdm
 
 from weathergen.common.config import Config
 from weathergen.common.dev_output import ScalarSeriesZarrWriter
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
+from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
 
@@ -606,7 +608,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             if self.s_churn > 0
             else " (deterministic Heun sampler)"
         )
-        logger.info(
+        logger.debug(
             f"Inference sigma schedule ({self.noise_distribution}): "
             f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
             f"sigma_min_eff={sigma_min_eff:.4f} "
@@ -643,10 +645,19 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Only populated when return_trajectory=True.
         intermediate_x: list[torch.Tensor] = [] if return_trajectory else None
 
-        # Main sampling loop.
+        # Main sampling loop. position=1 nests this bar below the per-sample/batch bar
+        # (position=0) in trainer.py's validation loop, so progress is visible at both
+        # levels during inference.
         x_next = x * t_steps[0]
+        step_pairs = list(zip(t_steps[:-1], t_steps[1:], strict=False))
         for i, (t_cur, t_next) in enumerate(
-            zip(t_steps[:-1], t_steps[1:], strict=False)
+            tqdm.tqdm(
+                step_pairs,
+                desc="denoising step",
+                position=1,
+                leave=False,
+                disable=not is_root(),
+            )
         ):  # 0, ..., N-1
             t_cur = torch.tensor([t_cur], device="cuda").float()
             t_next = torch.tensor([t_next], device="cuda").float()

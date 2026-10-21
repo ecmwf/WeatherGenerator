@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
 import logging
 import pathlib
 
@@ -16,6 +15,7 @@ import torch
 
 import weathergen.common.config as config
 import weathergen.common.io as io
+from weathergen.common.dev_output import DiffusionTrajectoryZarrWriter
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
 from weathergen.model.engines import LatentState
@@ -249,47 +249,76 @@ def write_dev_trajectory_output(
     """
     Write the diffusion denoising trajectory collected in dev mode (``fe_diffusion_dev_mode``).
 
-    ``model_output.dev_trajectory_output`` holds one decoded prediction per ODE step, shaped
-    like a forecast rollout of pseudo forecast-steps. The real target is identical for every
-    such pseudo-step (it is the same physical target the whole trajectory denoises towards), so
-    it is replicated to match before delegating to :func:`write_output`. The result is written
-    to a separate store under ``dev/diffusion_trajectory``, using the same filename convention
-    as the official output (:func:`weathergen.common.config.get_path_results`), so it never
-    mixes with the official validation/test output but can still be read by pointing the
-    ``evaluate`` package's ``results_base_dir`` at that directory (see
-    ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``).
+    ``model_output.dev_trajectory_output`` holds one decoded prediction per ODE step. Unlike
+    the official validation/test output, denoising steps are kept as an explicit
+    ``denoising_step`` array dimension instead of being conflated with real
+    forecast steps; the real target (identical for every denoising step, since it is the
+    same physical target the whole trajectory denoises towards) is stored once per
+    sample/stream. See ``weathergen.common.dev_output.DiffusionTrajectoryZarrWriter`` and
+    ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``.
     """
     dev_output = model_output.dev_trajectory_output
     if dev_output is None:
         return
 
-    n_pred = len(dev_output.physical)
-    dev_target_aux_out = {}
-    for name, t_aux in target_aux_out.items():
-        t_aux = copy.copy(t_aux)
-        n_tgt = len(t_aux.physical)
-        if n_tgt > 0:
-            t_aux.physical = [t_aux.physical[i % n_tgt] for i in range(n_pred)]
-            t_aux.latent = [t_aux.latent[i % n_tgt] for i in range(n_pred)]
-        dev_target_aux_out[name] = t_aux
+    outputs_physical = [
+        loss_name
+        for loss_name, loss_term in val_cfg.losses.items()
+        if loss_term.type == "LossPhysical"
+    ]
+    assert len(outputs_physical) == 1
+    t_aux = target_aux_out[outputs_physical[0]]
 
-    ext = io.StoreType(cf.zarr_store).value
-    dev_dir = get_dev_trajectory_dir(cf)
-    dev_dir.mkdir(parents=True, exist_ok=True)
-    store_path = dev_dir / f"validation_chkpt{mini_epoch:05d}_rank{cf.rank:04d}.{ext}"
+    fp32 = torch.float32
+    # same leading-padding convention as write_output: only steps >= the trajectory's own
+    # forecast_offset were actually decoded, the real target is always the list's last entry
+    denoising_step_idxs = [
+        s for s in dev_output.forecast_steps if s >= dev_output.forecast_offset
+    ]
+    target_data_all = t_aux.physical[-1]
 
-    write_output(
-        cf,
-        val_cfg,
-        batch_size,
-        mini_epoch,
-        batch_idx,
-        dn_data,
-        batch,
-        dev_output,
-        dev_target_aux_out,
-        store_path=store_path,
-    )
+    writer = DiffusionTrajectoryZarrWriter(cf)
+    n_samples = len(batch.get_source_samples().get_samples())
+    for i_sample in range(n_samples):
+        streams_payload = {}
+        for sname in cf.streams.keys():
+            if not is_stream_reconstructed(cf.streams[sname]):
+                continue
+            target_data = target_data_all[sname]
+            if target_data["is_spoof"][i_sample]:
+                continue
+
+            target = target_data["target"][i_sample]
+            t_coords = target_data["target_coords"][i_sample]
+            t_times = target_data["target_times"][i_sample]
+            idxs_inv = target_data["idxs_inv"][i_sample]
+
+            preds_per_step = []
+            for d_idx in denoising_step_idxs:
+                chunk_idx = dev_output.chunk_idx(d_idx)
+                preds = dev_output.get_physical_prediction(chunk_idx, sname)
+                # preds are empty (e.g. forcing streams) so use target with an added ens axis
+                pred = preds[i_sample] if preds is not None else target.clone().unsqueeze(0)
+                if idxs_inv is not None:
+                    pred = pred[:, idxs_inv]
+                preds_per_step += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+
+            if idxs_inv is not None:
+                target = target[idxs_inv]
+                t_coords = t_coords[idxs_inv]
+                t_times = t_times[idxs_inv]
+
+            streams_payload[sname] = {
+                "predictions": np.stack(preds_per_step, axis=0),
+                "target": dn_data(sname, target.to(fp32)).detach().cpu().numpy(),
+                "coords": t_coords.cpu().numpy(),
+                "times": t_times.astype("datetime64[ns]").astype("int64"),
+                "channels": list(cf.streams[sname].val_target_channels),
+            }
+
+        if streams_payload:
+            sample_idx = batch_idx * batch_size + i_sample
+            writer.write((sample_idx, streams_payload))
 
 
 def get_dev_trajectory_dir(cf) -> pathlib.Path:

@@ -828,10 +828,6 @@ class Model(torch.nn.Module):
                 # diffusion model's single forecast step lines up with a deterministic
                 # offset=1 model's +1-step lead time. There is no older step to sum over —
                 # the sole loaded step IS the conditioning.
-                print(
-                    "Using the sole loaded step as conditioning token for inference "
-                    "(offset=1, num_steps_input=1)."
-                )
                 conditioning_tokens = tokens[:, 0]
             elif self.cf.stage == "inference":
                 assert tokens.shape[1] > 1, (
@@ -1019,11 +1015,16 @@ class Model(torch.nn.Module):
         )
         for i, toks in enumerate(tokens):
             toks_abs = cond + toks if predict_residual else toks
+            # out_step indexes dev_output.physical/.latent directly (global forecast step, not
+            # chunk-local), so it must start at forecast_offset like the rest of the list, else
+            # the leading empty padding slot stays at the wrong end and write_output (which only
+            # reads steps >= forecast_offset) never sees the first ODE step.
+            out_step = forecast_offset + i
             dev_output = self.predict_decoders(
-                model_params, step, toks_abs, source_samples, dev_output, out_step=i
+                model_params, step, toks_abs, source_samples, dev_output, out_step=out_step
             )
             dev_output = self.predict_latent(
-                model_params, step, toks_abs, source_samples, dev_output, out_step=i
+                model_params, step, toks_abs, source_samples, dev_output, out_step=out_step
             )
         return dev_output
 
