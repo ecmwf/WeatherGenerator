@@ -1,9 +1,9 @@
 # Long-lead CRPS continuation of crps8 (klbklwf7: fair CRPS over 2 MC-dropout members on the fixed
 # 8-step objective from nhv6tkln). crps8 is calibrated and close to IFS-ENS from day 3 but never
 # trained beyond 2 days; C (pushforward + CRPS from nhv6tkln) damaged the short range. This
-# continues crps8 with the anchored pushforward of B' (every batch scores steps 1-8 and the last 8
-# of K in [8, 40]) and lead balancing, so that the long lead times are trained without the short
-# range losing weight.
+# continues crps8 with anchored pushforward (every batch scores steps 1-4 and the last 4 of K in
+# [8, 12, ..., 40]; B' used 8 + 8, which does not fit with 2 members) and lead balancing, so that
+# the long lead times are trained without the short range losing weight.
 # - From crps8's latest mini-epoch checkpoint (12; crps8 itself keeps running to 25 and is the
 #   8-step control). Its learning rate was still at lr_max 5e-5, so this re-warms to the same.
 # - Forecast-engine dropout kept (it is the ensemble mechanism), decoder frozen as in crps8,
@@ -33,6 +33,13 @@ stages:
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
       - training_config.forecast.lead_balance.power=0.5
+      # 4 + 4 scored steps with gradient (8 + 8 do not fit with 2 members: OOM at 90 GiB in the
+      # smoke test ioq8yjj6), so the memory is that of crps8 and C
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=4
+      - training_config.forecast.rollout_loss_steps=4
+      # K in steps of 4, so that the final windows of 4 steps tile 6h - 10 days (K = 8 is crps8's objective)
+      - training_config.forecast.num_steps=[8,12,16,20,24,28,32,36,40]
       - training_config.num_mini_epochs=10
       - training_config.learning_rate_scheduling.lr_max=5.0e-05
       # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
