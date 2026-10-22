@@ -9,6 +9,7 @@ uv run pytest  ./integration_tests/small1.py
 
 import json
 import logging
+import math
 import os
 import shutil
 from pathlib import Path
@@ -63,6 +64,7 @@ def test_train(setup, test_run_id):
     assert_missing_metrics_file(test_run_id)
     assert_train_loss_below_threshold(test_run_id)
     assert_val_loss_below_threshold(test_run_id)
+    assert_monitoring_metrics(test_run_id)
     logger.info("end test_train")
 
 
@@ -182,3 +184,34 @@ def assert_val_loss_below_threshold(run_id):
     # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
     assert loss_metric < 0.2, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.2"
+
+
+MONITOR_TYPES = ["grads", "weights", "updates", "activations", "attention"]
+
+
+def assert_monitoring_metrics(run_id):
+    """Training-time monitoring is wired into the trainer and logs finite values.
+
+    Checks only that each monitor type logged at least one `mon/<type>/` key and that every
+    `mon/*` value is finite (the logger writes NaN/inf as strings). Exact keys are not pinned.
+    """
+    metrics = load_metrics(run_id)
+    mon_values = {}
+    for record in metrics:
+        for key, value in record.items():
+            if key.startswith("mon/"):
+                mon_values.setdefault(key, []).append(value)
+    assert mon_values, f"No 'mon/' metrics logged for run_id: {run_id}"
+
+    for mon_type in MONITOR_TYPES:
+        assert any(k.startswith(f"mon/{mon_type}/") for k in mon_values), (
+            f"No 'mon/{mon_type}/' metric logged for run_id: {run_id}"
+        )
+
+    non_finite = {
+        key: value
+        for key, values in mon_values.items()
+        for value in values
+        if isinstance(value, str) or not math.isfinite(value)
+    }
+    assert not non_finite, f"Non-finite monitoring metrics: {non_finite}"
