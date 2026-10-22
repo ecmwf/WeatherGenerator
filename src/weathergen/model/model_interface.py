@@ -226,46 +226,34 @@ def init_model_and_shard(
     if is_root():
         log_trainable_summary(model)
 
-    # Optionally overlay the physical decoder from a separate checkpoint.
+    # Optionally overlay the physical decoder from a separate checkpoint. This runs after the
+    # primary load so it takes precedence for decoder weights regardless of whether this is a
+    # fresh load or a continuation (e.g. inference with a latent-diffusion run that has no
+    # trained decoder, reusing a pretrained decoder from another run on every invocation).
     decoder_run_id = cf.get("load_decoder_chkpt", {}).get("run_id", None)
     if decoder_run_id:
-        # if run is a continuation, decoder should already be present from primary load
-        if run_id_contd is not None:
-            if is_root():
-                logger.info(
-                    "Run is a continuation, decoder not loaded separately; it is already "
-                    f"present from the primary model ({run_id_contd})."
-                )
-        else:
-            decoder_mini_epoch = cf.load_decoder_chkpt.get("mini_epoch", -1)
-            if is_root():
-                logger.info(
-                    f"Loading decoder weights from id={decoder_run_id} "
-                    f"at mini_epoch {decoder_mini_epoch}."
-                )
-            model = load_decoder_from_checkpoint(
-                cf, model, device, decoder_run_id, with_ddp, with_fsdp, decoder_mini_epoch
+        decoder_mini_epoch = cf.load_decoder_chkpt.get("mini_epoch", -1)
+        if is_root():
+            logger.info(
+                f"Loading decoder weights from id={decoder_run_id} "
+                f"at mini_epoch {decoder_mini_epoch}."
             )
+        model = load_decoder_from_checkpoint(
+            cf, model, device, decoder_run_id, with_ddp, with_fsdp, decoder_mini_epoch
+        )
 
     # Optionally overlay the encoder from a separate checkpoint -- as above.
     encoder_run_id = cf.get("load_encoder_chkpt", {}).get("run_id", None)
     if encoder_run_id:
-        if run_id_contd is not None:
-            if is_root():
-                logger.info(
-                    "Run is a continuation, encoder not loaded separately; it is already "
-                    f"present from the primary model ({run_id_contd})."
-                )
-        else:
-            encoder_mini_epoch = cf.load_encoder_chkpt.get("mini_epoch", -1)
-            if is_root():
-                logger.info(
-                    f"Loading encoder weights from id={encoder_run_id} "
-                    f"at mini_epoch {encoder_mini_epoch}."
-                )
-            model = load_encoder_from_checkpoint(
-                cf, model, device, encoder_run_id, with_ddp, with_fsdp, encoder_mini_epoch
+        encoder_mini_epoch = cf.load_encoder_chkpt.get("mini_epoch", -1)
+        if is_root():
+            logger.info(
+                f"Loading encoder weights from id={encoder_run_id} "
+                f"at mini_epoch {encoder_mini_epoch}."
             )
+        model = load_encoder_from_checkpoint(
+            cf, model, device, encoder_run_id, with_ddp, with_fsdp, encoder_mini_epoch
+        )
 
     # model params
     model_params = ModelParams(cf).create(cf)
