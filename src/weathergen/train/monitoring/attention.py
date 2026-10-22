@@ -27,12 +27,19 @@ from weathergen.train.monitoring.stats import stats_context
 
 
 def _first_nonempty_sequence(cu_seqlens_q, cu_seqlens_k):
+    """First sequence with queries and >= 2 keys (a single key has entropy 0 by definition,
+    e.g. one-token healpix cells in the local engine), else the first with any keys."""
     cu_q = cu_seqlens_q.tolist() if isinstance(cu_seqlens_q, torch.Tensor) else list(cu_seqlens_q)
     cu_k = cu_seqlens_k.tolist() if isinstance(cu_seqlens_k, torch.Tensor) else list(cu_seqlens_k)
+    fallback = None
     for i in range(min(len(cu_q), len(cu_k)) - 1):
-        if cu_q[i + 1] > cu_q[i] and cu_k[i + 1] > cu_k[i]:
-            return (int(cu_q[i]), int(cu_q[i + 1])), (int(cu_k[i]), int(cu_k[i + 1]))
-    return None
+        len_q, len_k = cu_q[i + 1] - cu_q[i], cu_k[i + 1] - cu_k[i]
+        if len_q > 0 and len_k > 0:
+            seq = (int(cu_q[i]), int(cu_q[i + 1])), (int(cu_k[i]), int(cu_k[i + 1]))
+            if len_k > 1:
+                return seq
+            fallback = fallback or seq
+    return fallback
 
 
 def attention_probe_stats(
@@ -44,14 +51,15 @@ def attention_probe_stats(
     cu_seqlens_k,
     num_queries: int | None = None,
 ) -> dict[str, torch.Tensor] | None:
-    """Per-head attention stats of the first (non-empty) varlen sequence, in fp32.
+    """Per-head attention stats of the first varlen sequence with >= 2 keys, in fp32.
 
     Returns `{"max_logit": [H], "entropy": [H], "max_logit_bound": [H]}` with
     - max_logit: max of q·k·scale over (sampled) queries and all keys, before the softcap;
     - entropy: softmax entropy of the (softcapped, `softcap*tanh(l/softcap)` if softcap > 0)
       logits, averaged over queries and normalised by log(L_k) (1 = uniform attention);
     - max_logit_bound: max‖q‖·max‖k‖·scale over the whole sequence (cheap upper bound).
-    Returns None if all sequences are empty. At most `num_queries` (evenly strided) query
+    Falls back to a single-key sequence (entropy 0) if there is none, and returns None if
+    all sequences are empty. At most `num_queries` (evenly strided) query
     rows are used. Reads `cu_seqlens` on the host (one sync if they live on the GPU).
     """
     with stats_context(q.device):
