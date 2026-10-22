@@ -4,7 +4,7 @@
 
 When ``fe_diffusion_dev_mode: true`` is set, ``weathergen.utils.validation_io`` writes the
 per-ODE-step decoded predictions to
-``<run>/dev/diffusion_trajectory/diffusion_trajectory.zarr`` (see
+``<run>/dev/diffusion_trajectory/diffusion_trajectory.zip`` (see
 ``weathergen.common.dev_output.DiffusionTrajectoryZarrWriter``), one group per validation
 sample. Unlike the official validation/test output, denoising steps are kept as their own
 explicit ``denoising_step`` array dimension rather than being conflated with real forecast
@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import zarr
 from numpy.typing import NDArray
+from zarr.storage import ZipStore
 
 import weathergen.common.config as config
 from weathergen.utils.validation_io import get_dev_trajectory_dir
@@ -51,7 +52,7 @@ def _resolve_store_path(run_id: str | None, path: str | None, mini_epoch: int) -
             raise ValueError("Either --run-id or --path must be provided.")
         cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=None)
         base = get_dev_trajectory_dir(cf)
-    store_path = base / f"{STORE_NAME}.zarr"
+    store_path = base / f"{STORE_NAME}.zip"
     if not store_path.exists():
         raise FileNotFoundError(
             f"No dev trajectory store found at {store_path}. Was the run started with "
@@ -185,47 +186,49 @@ def main() -> None:
     out_dir = Path(args.output) if args.output else store_path.parent / "plots"
     rmse_dir = out_dir / "rmse"
     maps_dir = out_dir / "maps"
-    group = zarr.open_group(str(store_path), mode="r")
 
-    for sample_name in sorted(group.group_keys()):
-        sample_group = group[sample_name]
-        for stream_name in sorted(sample_group.group_keys()):
-            stream_group = sample_group[stream_name]
-            predictions = np.asarray(stream_group["predictions"])
-            target = np.asarray(stream_group["target"])
-            coords = np.asarray(stream_group["coords"])
-            channels = list(stream_group.attrs["channels"])
+    with ZipStore(str(store_path), mode="r") as store:
+        group = zarr.open_group(store=store, mode="r")
 
-            for requested in args.channels:
-                if requested.isdigit():
-                    channel_idx = int(requested)
-                elif requested in channels:
-                    channel_idx = channels.index(requested)
-                else:
-                    # e.g. requested default channels not carried by every stream
-                    logger.debug(
-                        "Skipping channel '%s' for %s/%s: not in %s",
-                        requested,
-                        sample_name,
-                        stream_name,
-                        channels,
+        for sample_name in sorted(group.group_keys()):
+            sample_group = group[sample_name]
+            for stream_name in sorted(sample_group.group_keys()):
+                stream_group = sample_group[stream_name]
+                predictions = np.asarray(stream_group["predictions"])
+                target = np.asarray(stream_group["target"])
+                coords = np.asarray(stream_group["coords"])
+                channels = list(stream_group.attrs["channels"])
+
+                for requested in args.channels:
+                    if requested.isdigit():
+                        channel_idx = int(requested)
+                    elif requested in channels:
+                        channel_idx = channels.index(requested)
+                    else:
+                        # e.g. requested default channels not carried by every stream
+                        logger.debug(
+                            "Skipping channel '%s' for %s/%s: not in %s",
+                            requested,
+                            sample_name,
+                            stream_name,
+                            channels,
+                        )
+                        continue
+
+                    channel_name = channels[channel_idx]
+                    prefix = f"{sample_name}_{stream_name}_{channel_name}"
+                    plot_errors(
+                        predictions, target, channel_idx, channel_name, rmse_dir / f"{prefix}.png"
                     )
-                    continue
-
-                channel_name = channels[channel_idx]
-                prefix = f"{sample_name}_{stream_name}_{channel_name}"
-                plot_errors(
-                    predictions, target, channel_idx, channel_name, rmse_dir / f"{prefix}.png"
-                )
-                plot_maps(
-                    predictions,
-                    target,
-                    coords,
-                    channel_idx,
-                    channel_name,
-                    args.num_map_steps,
-                    maps_dir / f"{prefix}.png",
-                )
+                    plot_maps(
+                        predictions,
+                        target,
+                        coords,
+                        channel_idx,
+                        channel_name,
+                        args.num_map_steps,
+                        maps_dir / f"{prefix}.png",
+                    )
 
 
 if __name__ == "__main__":

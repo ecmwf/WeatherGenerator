@@ -2,14 +2,15 @@
 
 """Plot diffusion ODE sampling diagnostics written by ScalarSeriesZarrWriter.
 
-Reads the ``diffusion_sampling_diagnostics.zarr`` store produced during inference when
+Reads the ``diffusion_sampling_diagnostics.zip`` store produced during inference when
 ``fe_diffusion_dev_mode: true`` is set (see weathergen.model.diffusion.DiffusionForecastEngine
 and weathergen.common.dev_output.ScalarSeriesZarrWriter), and recreates the sampling
 diagnostics figure that used to be plotted inline during inference.
 
-Each named array in the store has shape (num_calls, num_ode_steps): one row per
-inference call (e.g. per validation sample). By default the most recent call is
-plotted; use --call-index to pick another one, or --all to overlay every call.
+The store holds one group per inference call ("call00000", "call00001", ...), each with
+the named 1D series recorded for that call (e.g. one value per ODE step). By default the
+most recent call is plotted; use --call-index to pick another one, or --all to overlay
+every call.
 
 Usage:
     uv run python scripts/dev/plot_diffusion_sampling_diagnostics.py --run-id <id>
@@ -27,6 +28,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import zarr
+from zarr.storage import ZipStore
 
 import weathergen.common.config as config
 
@@ -43,7 +45,7 @@ def _resolve_store_path(run_id: str | None, path: str | None, mini_epoch: int | 
             raise ValueError("Either --run-id or --path must be provided.")
         cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=None)
         base = config.get_path_run(cf)
-    store_path = base / "dev" / STORE_NAME / f"{STORE_NAME}.zarr"
+    store_path = base / "dev" / STORE_NAME / f"{STORE_NAME}.zip"
     if not store_path.exists():
         raise FileNotFoundError(
             f"No dev diagnostics store found at {store_path}. Was the run started with "
@@ -83,9 +85,18 @@ def _plot_call(axes, steps: np.ndarray, series: dict[str, np.ndarray], label: st
     axes[6].set_ylabel("std (log scale)")
 
 
+def _open_calls(store_path: Path) -> tuple[ZipStore, list[str]]:
+    """Open the zip store and return it (caller must close it) with sorted call group names."""
+    store = ZipStore(str(store_path), mode="r")
+    call_names = sorted(zarr.open_group(store=store, mode="r").group_keys())
+    return store, call_names
+
+
 def plot_diagnostics(store_path: Path, call_indices: list[int], out_path: Path) -> None:
-    group = zarr.open_group(str(store_path), mode="r")
-    num_steps = group["sigma"].shape[1]
+    store, call_names = _open_calls(store_path)
+    group = zarr.open_group(store=store, mode="r")
+    first_call = group[call_names[0]]
+    num_steps = first_call["sigma"].shape[0]
     steps = np.arange(num_steps)
 
     n_plots = 7
@@ -101,16 +112,14 @@ def plot_diagnostics(store_path: Path, call_indices: list[int], out_path: Path) 
     fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
 
     for call_idx in call_indices:
-        # Some series (e.g. "l2_to_target") were only recorded for a subset of calls in
-        # older stores, so their row count can be smaller than others'; skip those here
-        # rather than failing the whole plot.
-        series = {
-            key: np.asarray(group[key][call_idx])
-            for key in group.array_keys()
-            if -group[key].shape[0] <= call_idx < group[key].shape[0]
-        }
+        call_group = group[call_names[call_idx]]
+        # Some series (e.g. "l2_to_target") are only recorded for a subset of calls, so a
+        # call's group may be missing some keys; _plot_call already handles that.
+        series = {key: np.asarray(call_group[key]) for key in call_group.array_keys()}
         label = f"call {call_idx}" if len(call_indices) > 1 else None
         _plot_call(axes, steps, series, label)
+
+    store.close()
 
     for ax, title in zip(axes, titles, strict=True):
         ax.set_title(title)
@@ -149,8 +158,9 @@ def main() -> None:
     args = parser.parse_args()
 
     store_path = _resolve_store_path(args.run_id, args.path, args.mini_epoch)
-    group = zarr.open_group(str(store_path), mode="r")
-    num_calls = group["sigma"].shape[0]
+    store, call_names = _open_calls(store_path)
+    store.close()
+    num_calls = len(call_names)
 
     call_indices = list(range(num_calls)) if args.all else [args.call_index % num_calls]
     out_path = (

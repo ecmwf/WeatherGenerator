@@ -22,17 +22,24 @@ affect the metrics/artifacts produced by a normal training or validation run. Th
 This module defines the common lifecycle (:class:`DevOutputWriter`) and three concrete
 backends used across the codebase:
 
-  * :class:`ScalarSeriesZarrWriter` - appends one row per call to a set of named 1D
-    series of equal length (e.g. one value per diffusion ODE step). Used for the
-    diffusion sampling diagnostics.
-  * :class:`DiffusionTrajectoryZarrWriter` - writes one zarr group per validation sample
-    holding the diffusion denoising trajectory, with an explicit
-    ``denoising_step`` array dimension (as opposed to overloading the real
-    forecast-step dimension used by the official validation/test output). Read by
-    ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``.
+  * :class:`ScalarSeriesZarrWriter` - appends one group per call ("call00000", ...) to a
+    zip-backed zarr store, each holding the named 1D series recorded for that call (e.g.
+    one value per diffusion ODE step). Used for the diffusion sampling diagnostics.
+  * :class:`DiffusionTrajectoryZarrWriter` - appends one group per validation sample
+    ("sample00000", ...) to a zip-backed zarr store, holding the diffusion denoising
+    trajectory with an explicit ``denoising_step`` array dimension (as opposed to
+    overloading the real forecast-step dimension used by the official validation/test
+    output). Read by ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``.
   * :class:`ScalarMetricsJSONLWriter` - appends one JSON line per call, each a flat
     ``dict[str, float]``. Thin adapter around ``TrainLogger.log_metrics``, used e.g. for
     SSL collapse monitoring metrics.
+
+The two zarr-backed writers store to a ``.zip`` file rather than a plain zarr directory:
+a directory store creates many small per-chunk files which can exhaust inode quotas on
+HPC filesystems over a long run, whereas a zip archive holds the same data in a single
+file. Zip archives only support *appending* new entries, not modifying existing ones in
+place, so both writers give every call/sample its own freshly named, immutable group
+instead of growing a single shared array in place.
 
 All writers here are intentionally independent of any specific model: they only depend
 on `Config` and plain arrays/dicts, so they can be unit tested and reused outside of
@@ -50,6 +57,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 import zarr
 from omegaconf import OmegaConf
+from zarr.storage import ZipStore
 
 from weathergen.common.config import Config, get_path_run
 from weathergen.utils.distributed import is_root
@@ -103,12 +111,10 @@ class DevOutputWriter(abc.ABC):
 
 class ScalarSeriesZarrWriter(DevOutputWriter):
     """
-    Appends one row per :meth:`write` call to a zarr group of equal-length 1D series.
-
-    Each key in the payload dict becomes a 2D zarr array of shape
-    ``(num_calls, series_length)`` that grows by one row per call. Intended for
-    diagnostics gathered once per "event" (e.g. once per diffusion inference call),
-    such as per-ODE-step scalar traces.
+    Appends one group per :meth:`write` call to a zip-backed zarr store, each holding the
+    named 1D series recorded for that call (e.g. one value per diffusion ODE step).
+    Intended for diagnostics gathered once per "event" (e.g. once per diffusion inference
+    call), such as per-ODE-step scalar traces.
     """
 
     def __init__(
@@ -118,52 +124,38 @@ class ScalarSeriesZarrWriter(DevOutputWriter):
         enabled_flag: str = "fe_diffusion_dev_mode",
     ) -> None:
         super().__init__(cf, name, enabled_flag)
-        self._group: zarr.Group | None = None
+        self._store_path = self.root / f"{name}.zip"
+        # lazily resolved: how many calls were already written (e.g. by a previous,
+        # resumed run) before this process started
+        self._next_call_idx: int | None = None
 
-    def _open(self) -> zarr.Group:
-        if self._group is None:
-            self.root.mkdir(parents=True, exist_ok=True)
-            self._group = zarr.open_group(str(self.root / f"{self.name}.zarr"), mode="a")
-        return self._group
+    def _resolve_next_call_idx(self) -> int:
+        if not self._store_path.exists():
+            return 0
+        with ZipStore(str(self._store_path), mode="r") as store:
+            group = zarr.open_group(store=store, mode="r")
+            existing = [int(k.removeprefix("call")) for k in group.group_keys()]
+        return max(existing, default=-1) + 1
 
     def _write(self, payload: Mapping[str, Sequence[float]]) -> None:
-        group = self._open()
-        # Length shared by all series recorded this call (e.g. num_ode_steps). Used to
-        # NaN-pad series that are conditionally empty this call (e.g. "l2_to_target" is only
-        # populated when a reference token is available) so every key still gets exactly one
-        # row per call and row index == call index stays aligned across all keys.
-        non_empty_lengths = {len(v) for v in payload.values() if len(v) > 0}
-        ref_length = max(non_empty_lengths) if non_empty_lengths else 0
+        if self._next_call_idx is None:
+            self._next_call_idx = self._resolve_next_call_idx()
 
-        for key, values in payload.items():
-            if len(values) == 0:
-                if ref_length == 0:
-                    # nothing recorded at all this call; nothing to align against
+        self.root.mkdir(parents=True, exist_ok=True)
+        with ZipStore(str(self._store_path), mode="a") as store:
+            call_group = zarr.group(store=store).create_group(f"call{self._next_call_idx:05d}")
+            for key, values in payload.items():
+                if len(values) == 0:
+                    # e.g. "l2_to_target" is only populated when a reference token is available
                     continue
-                row = np.full(ref_length, np.nan, dtype=np.float64)
-            else:
-                row = np.asarray(values, dtype=np.float64)
-            if key not in group:
-                group.create_array(
-                    key, shape=(0, row.shape[0]), chunks=(1, row.shape[0]), dtype=row.dtype
-                )
-            dset = group[key]
-            if dset.shape[1] != row.shape[0]:
-                logger.warning(
-                    "Skipping dev output series '%s': expected length %d, got %d.",
-                    key,
-                    dset.shape[1],
-                    row.shape[0],
-                )
-                continue
-            dset.resize((dset.shape[0] + 1, dset.shape[1]))
-            dset[-1, :] = row
+                call_group.create_array(key, data=np.asarray(values, dtype=np.float64))
+        self._next_call_idx += 1
 
 
 class DiffusionTrajectoryZarrWriter(DevOutputWriter):
     """
-    Writes the diffusion denoising trajectory decoded in dev mode, one zarr group per
-    validation sample, with an explicit ``denoising_step`` array dimension.
+    Writes the diffusion denoising trajectory decoded in dev mode, one group per validation
+    sample, with an explicit ``denoising_step`` array dimension.
 
     Unlike the official validation/test output (which indexes by real forecast step),
     the per-sample ``predictions`` array here has shape ``(denoising_step, ens,
@@ -181,31 +173,29 @@ class DiffusionTrajectoryZarrWriter(DevOutputWriter):
         enabled_flag: str = "fe_diffusion_dev_mode",
     ) -> None:
         super().__init__(cf, name, enabled_flag)
-        self._group: zarr.Group | None = None
-
-    def _open(self) -> zarr.Group:
-        if self._group is None:
-            self.root.mkdir(parents=True, exist_ok=True)
-            self._group = zarr.open_group(str(self.root / f"{self.name}.zarr"), mode="a")
-        return self._group
+        self._store_path = self.root / f"{name}.zip"
 
     def _write(self, payload: tuple[int, Mapping[str, Mapping[str, typing.Any]]]) -> None:
         sample_idx, streams = payload
-        group = self._open()
-        sample_group_name = f"sample{sample_idx:05d}"
-        if sample_group_name in group:
-            del group[sample_group_name]
-        sample_group = group.create_group(sample_group_name)
-
-        for stream_name, data in streams.items():
-            stream_group = sample_group.create_group(stream_name)
-            for key in ("predictions", "target", "coords", "times"):
-                arr = np.asarray(data[key])
-                stream_group.create_array(key, shape=arr.shape, dtype=arr.dtype, chunks=arr.shape)
-                stream_group[key][...] = arr
-            # times are stored as int64 ns-since-epoch since zarr has no datetime64 dtype
-            stream_group["times"].attrs["units"] = "datetime64[ns] (int64 view)"
-            stream_group.attrs["channels"] = list(data["channels"])
+        self.root.mkdir(parents=True, exist_ok=True)
+        # zip archives only support appending; re-writing the same sample_idx within a
+        # run (or across resumed runs) would raise since the group would already exist.
+        # Attributes must be set at creation time (attributes=...) rather than assigned
+        # afterwards: a zip entry can only be written once per open session, and
+        # `.attrs[...] = ...` after the fact would try to rewrite the already-written
+        # zarr.json, silently producing a duplicate (and ambiguous-on-read) zip entry.
+        with ZipStore(str(self._store_path), mode="a") as store:
+            sample_group = zarr.group(store=store).create_group(f"sample{sample_idx:05d}")
+            for stream_name, data in streams.items():
+                stream_group = sample_group.create_group(
+                    stream_name, attributes={"channels": list(data["channels"])}
+                )
+                for key in ("predictions", "target", "coords", "times"):
+                    # times are stored as int64 ns-since-epoch since zarr has no datetime64 dtype
+                    attrs = {"units": "datetime64[ns] (int64 view)"} if key == "times" else None
+                    stream_group.create_array(
+                        key, data=np.asarray(data[key]), attributes=attrs
+                    )
 
 
 class ScalarMetricsJSONLWriter(DevOutputWriter):
