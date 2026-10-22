@@ -23,6 +23,7 @@ import math
 import torch
 
 from weathergen.train.monitoring.base import Monitor, StatBuffer, register_monitor
+from weathergen.train.monitoring.stats import stats_context
 
 
 def _first_nonempty_sequence(cu_seqlens_q, cu_seqlens_k):
@@ -34,7 +35,6 @@ def _first_nonempty_sequence(cu_seqlens_q, cu_seqlens_k):
     return None
 
 
-@torch.no_grad()
 def attention_probe_stats(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -54,6 +54,11 @@ def attention_probe_stats(
     Returns None if all sequences are empty. At most `num_queries` (evenly strided) query
     rows are used. Reads `cu_seqlens` on the host (one sync if they live on the GPU).
     """
+    with stats_context(q.device):
+        return _attention_probe_stats(q, k, scale, softcap, cu_seqlens_q, cu_seqlens_k, num_queries)
+
+
+def _attention_probe_stats(q, k, scale, softcap, cu_seqlens_q, cu_seqlens_k, num_queries):
     seq = _first_nonempty_sequence(cu_seqlens_q, cu_seqlens_k)
     if seq is None:
         return None
@@ -96,7 +101,7 @@ class _Probe:
         if self.fired or buf is None:
             return
         # no_grad: saving tensors for backward would break activation-checkpoint recompute
-        with torch.no_grad():
+        with stats_context(q.device):
             stats = attention_probe_stats(
                 q.detach(),
                 k.detach(),

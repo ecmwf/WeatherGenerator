@@ -16,7 +16,7 @@ import math
 import torch
 
 from weathergen.train.monitoring.base import Monitor, StatBuffer, register_monitor
-from weathergen.train.monitoring.stats import absmax, local_tensor, sumsq
+from weathergen.train.monitoring.stats import absmax, local_tensor, stats_context, sumsq
 
 
 def _first_tensor(output):
@@ -76,7 +76,7 @@ class ActivationStats(Monitor):
             buf = self._buf
             if buf is None or x is None or not x.is_floating_point() or x.numel() == 0:
                 return
-            with torch.no_grad():
+            with stats_context(x.device):
                 x = local_tensor(x)
                 buf.accumulate(k_sq, sumsq(x), "sum")
                 buf.accumulate(k_n, x.numel(), "sum")

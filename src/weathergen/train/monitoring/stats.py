@@ -9,6 +9,7 @@
 
 """Shared tensor stat primitives (fp32 accumulation, no full fp32 copies of the input)."""
 
+import contextlib
 import math
 
 import torch
@@ -24,6 +25,14 @@ def local_tensor(t: torch.Tensor) -> torch.Tensor:
     if DTensor is not None and isinstance(t, DTensor):
         t = t.to_local()
     return t.detach()
+
+
+@contextlib.contextmanager
+def stats_context(device: torch.device):
+    """no_grad and autocast disabled, for stats computed inside the (autocast) forward:
+    autocast would otherwise run the probe's q·k in bf16 or upcast whole activations."""
+    with torch.no_grad(), torch.autocast(device_type=device.type, enabled=False):
+        yield
 
 
 def sumsq(x: torch.Tensor) -> torch.Tensor:
