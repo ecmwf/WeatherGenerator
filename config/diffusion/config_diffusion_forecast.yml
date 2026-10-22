@@ -102,6 +102,11 @@ fe_diffusion_edm_preconditioning: False
 sigma_min_quantile: 0.05
 # Number of ODE denoising steps at inference. If null, uses diffusion.forward's default.
 fe_diffusion_num_inference_steps: null
+# When True, additionally decode every ODE denoising step (not just the final one) and write
+# it to <run>/analytics/diffusion_steps/ for offline inspection; see
+# scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py and
+# scripts/analytics/diffusion/plot_diffusion_steps.py.
+fe_diffusion_log_analytics: False
 
 healpix_level: 5
 

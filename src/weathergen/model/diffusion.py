@@ -28,10 +28,13 @@ import math
 
 import numpy as np
 import torch
+import tqdm
 
-from weathergen.common.config import Config, get_path_run
+from weathergen.common.config import Config
+from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
+from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +190,14 @@ class DiffusionForecastEngine(torch.nn.Module):
         # noise_level_rn ~ Uniform[log(sigma_min), log(sigma_max)], so sigma = exp(noise_level_rn).
         self.train_log_min = math.log(self.sigma_min)
         self.train_log_max = math.log(self.sigma_max)
+
+        # Inference-mode only: persists per-ODE-step sampling diagnostics to a JSONL file instead
+        # of plotting them inline. See scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py.
+        self._diagnostics_writer = ScalarSeriesJSONLWriter(
+            cf,
+            name="diffusion_sampling_diagnostics",
+            enabled=cf.get("fe_diffusion_log_analytics", False),
+        )
 
     def forward(
         self,
@@ -484,8 +495,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 num_steps=num_steps,
                 coords=coords,
                 batch_size=num_ensemble_members,
-                log_diagnostics=True,
-                return_trajectory=False,
+                return_diffusion_steps=False,
             )
             return final_x
 
@@ -495,8 +505,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             fstep=fstep,
             num_steps=num_steps,
             coords=coords,
-            log_diagnostics=True,
-            return_trajectory=True,
+            return_diffusion_steps=True,
         )
         return intermediate_x
 
@@ -539,8 +548,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         num_steps: int,
         coords: torch.Tensor | None,
         batch_size: int = 1,
-        log_diagnostics: bool = True,
-        return_trajectory: bool = False,
+        return_diffusion_steps: bool = False,
     ) -> "tuple[torch.Tensor, list[torch.Tensor] | None]":
         """Run one complete ODE denoising trajectory from pure noise.
 
@@ -552,16 +560,14 @@ class DiffusionForecastEngine(torch.nn.Module):
             coords: Optional spatial coordinates for :meth:`denoise`.
             batch_size: Number of independent noise realisations to denoise in
                 parallel.  Defaults to 1 (trajectory / single-sample mode).
-            log_diagnostics: Whether to emit the sigma-schedule log message and
-                save the diagnostic plot.
-            return_trajectory: When ``True``, also return the list of intermediate
+            return_diffusion_steps: When ``True``, also return the list of intermediate
                 states (one per ODE step).  Set to ``False`` in ensemble mode to
                 avoid storing the full trajectory N times.
 
         Returns:
             ``(final_x, intermediate_x)`` where *final_x* has shape
             ``(batch_size, num_healpix_cells, embed_dim)`` and *intermediate_x*
-            is either a list of per-step tensors (when ``return_trajectory=True``)
+            is either a list of per-step tensors (when ``return_diffusion_steps=True``)
             or ``None``.
         """
         # The encoder prepends register/class tokens to the healpix-cell latents,
@@ -600,20 +606,19 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
         sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
-        if log_diagnostics:
-            _churn = (
-                f", stochastic churn: s_churn={self.s_churn}, s_min={self.s_min}, "
-                f"s_max={self.s_max}, s_noise={self.s_noise}"
-                if self.s_churn > 0
-                else " (deterministic Heun sampler)"
-            )
-            logger.info(
-                f"Inference sigma schedule ({self.noise_distribution}): "
-                f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
-                f"sigma_min_eff={sigma_min_eff:.4f} "
-                f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
-                f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn}"
-            )
+        _churn = (
+            f", stochastic churn: s_churn={self.s_churn}, s_min={self.s_min}, "
+            f"s_max={self.s_max}, s_noise={self.s_noise}"
+            if self.s_churn > 0
+            else " (deterministic Heun sampler)"
+        )
+        logger.debug(
+            f"Inference sigma schedule ({self.noise_distribution}): "
+            f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
+            f"sigma_min_eff={sigma_min_eff:.4f} "
+            f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
+            f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn}"
+        )
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -641,13 +646,22 @@ class DiffusionForecastEngine(torch.nn.Module):
         }
 
         # Per-step intermediate denoised states (one per ODE step).
-        # Only populated when return_trajectory=True.
-        intermediate_x: list[torch.Tensor] = [] if return_trajectory else None
+        # Only populated when return_diffusion_steps=True.
+        intermediate_x: list[torch.Tensor] = [] if return_diffusion_steps else None
 
-        # Main sampling loop.
+        # Main sampling loop. position=1 nests this bar below the per-sample/batch bar
+        # (position=0) in trainer.py's validation loop, so progress is visible at both
+        # levels during inference.
         x_next = x * t_steps[0]
+        step_pairs = list(zip(t_steps[:-1], t_steps[1:], strict=False))
         for i, (t_cur, t_next) in enumerate(
-            zip(t_steps[:-1], t_steps[1:], strict=False)
+            tqdm.tqdm(
+                step_pairs,
+                desc="denoising step",
+                position=1,
+                leave=False,
+                disable=not is_root(),
+            )
         ):  # 0, ..., N-1
             t_cur = torch.tensor([t_cur], device="cuda").float()
             t_next = torch.tensor([t_next], device="cuda").float()
@@ -684,111 +698,59 @@ class DiffusionForecastEngine(torch.nn.Module):
                     track["l2_to_target"].append((x_next - self.cur_token).norm().item())
                     track["x"].append(self.cur_token.cpu())
 
-            if return_trajectory:
+            if return_diffusion_steps:
                 intermediate_x.append(x_next)
 
-        if log_diagnostics:
-            self._plot_sampling_diagnostics(track, num_steps)
+        # "x" holds full latent tensors for ad-hoc inspection, not a per-step scalar series,
+        # so it is excluded from the on-disk diagnostics. self._diagnostics_writer no-ops
+        # unless fe_diffusion_log_analytics is enabled.
+        scalar_track = {k: v for k, v in track.items() if k != "x"}
+        self._diagnostics_writer.write(scalar_track)
 
         return x_next, intermediate_x
 
-    def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
-        """Save a diagnostic plot of the sampling trajectory."""
-        import matplotlib
 
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+def _decode_diffusion_steps(
+    model: "Model",
+    model_params: "ModelParams",
+    step: int,
+    tokens: list[torch.Tensor],
+    source_samples: "BatchSamples",
+    forecast_offset: int,
+    cond: torch.Tensor,
+    predict_residual: bool,
+) -> "ModelOutput":
+    """
+    Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (dev mode
+    only, ``fe_diffusion_log_analytics``).
 
-        steps = list(range(len(track["sigma"])))
-        has_target = len(track["l2_to_target"]) > 0
-        n_plots = 7
+    The result is shaped like a forecast rollout of ``len(tokens)`` pseudo-steps so it can
+    be written and scored with the same ``write_output``/fast-eval tooling used for a real
+    forecast (see ``validation_io.write_output`` and
+    ``scripts/analytics/diffusion/plot_diffusion_steps.py``). It is never merged into
+    the real output returned by ``Model.forward``.
+    """
+    from weathergen.model.model import ModelOutput  # local import: avoids a model<->diffusion cycle
 
-        fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
-
-        # 1) Sigma schedule
-        axes[0].semilogy(steps, track["sigma"], "o-", markersize=3, label="sigma (schedule)")
-        if track.get("sigma_post") and track["sigma_post"] != track["sigma"]:
-            # Stochastic sampler: show the per-step noise bump from churn.
-            axes[0].semilogy(
-                steps,
-                track["sigma_post"],
-                "x--",
-                markersize=4,
-                color="tab:green",
-                label="sigma_post (post-churn)",
-            )
-        axes[0].set_ylabel("sigma (noise level)")
-        axes[0].set_title(
-            f"Sampling diagnostics  |  sigma_max_eff={track['sigma'][0]:.2f}, "
-            f"sigma_data={self.sigma_data}, steps={num_steps}"
+    analytics_output = ModelOutput(
+        list(range(forecast_offset, forecast_offset + len(tokens))),
+        forecast_offset,
+        source_samples,
+    )
+    for i, toks in enumerate(tokens):
+        toks_abs = cond + toks if predict_residual else toks
+        # out_step indexes analytics_output.physical/.latent directly (global forecast step, not
+        # chunk-local), so it must start at forecast_offset like the rest of the list, else
+        # the leading empty padding slot stays at the wrong end and write_output (which only
+        # reads steps >= forecast_offset) never sees the first ODE step.
+        out_step = forecast_offset + i
+        analytics_output = model.predict_decoders(
+            model_params, step, toks_abs, source_samples, analytics_output, out_step=out_step
         )
-        axes[0].axhline(
-            self.sigma_data, color="grey", ls="--", lw=0.8, label=f"sigma_data={self.sigma_data}"
+        analytics_output = model.predict_latent(
+            model_params, step, toks_abs, source_samples, analytics_output, out_step=out_step
         )
-        axes[0].legend(fontsize=8)
-        axes[0].grid(True, alpha=0.3)
-
-        # 2) Std of x_next and denoised estimate
-        axes[1].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
-        axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
-        if self.cur_token is not None:
-            target_std = self.cur_token.std().item()
-            axes[1].axhline(
-                target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}"
-            )
-        axes[1].set_ylabel("std")
-        axes[1].legend(fontsize=8)
-        axes[1].grid(True, alpha=0.3)
-
-        if has_target:
-            # 3) L2 error to target
-            axes[2].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
-            axes[2].set_ylabel("L2 error to target")
-            axes[2].grid(True, alpha=0.3)
-
-        # 4) d_cur norm and step norm
-        axes[3].semilogy(steps, track["d_cur_norm"], "o-", markersize=3, label="||d_cur||")
-        axes[3].semilogy(
-            steps,
-            track["d_cur_step_norm"],
-            "^-",
-            markersize=3,
-            label="||(t_next - t_post) * d_cur||",
-        )
-        axes[3].set_ylabel("norm (log scale)")
-        axes[3].set_title("ODE drift norms")
-        axes[3].legend(fontsize=8)
-        axes[3].grid(True, alpha=0.3)
-
-        # 5) Residual std: Std(x_post - denoised)
-        axes[4].semilogy(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[4].set_ylabel("std (log scale)")
-        axes[4].set_title("Std(x_post - denoised)")
-        axes[4].grid(True, alpha=0.3)
-
-        # 6) Residual std zoomed to [0, 1]
-        axes[5].plot(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[5].set_ylim(0, 1)
-        axes[5].set_ylabel("std (clipped to 1)")
-        axes[5].set_title("Std(x_post - denoised)  [y ≤ 1]")
-        axes[5].grid(True, alpha=0.3)
-
-        # 7) Std of x_next over sampling steps
-        axes[6].semilogy(steps, track["x_std"], "o-", markersize=3, color="tab:blue")
-        axes[6].set_ylabel("std (log scale)")
-        axes[6].set_title("Std of x_next over denoising steps")
-        axes[6].grid(True, alpha=0.3)
-
-        axes[-1].set_xlabel("sampling step")
-        fig.tight_layout()
-
-        out_dir = get_path_run(self.cf)
-        out_dir.mkdir(exist_ok=True, parents=True)
-        out_path_base = out_dir / "plots" / "validation" / "plots"
-        out_path_base.mkdir(exist_ok=True, parents=True)
-        fig.savefig(out_path_base / "sampling_diagnostics.png", dpi=150)
-        plt.close(fig)
-        logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
+    return analytics_output
 
 
 class Preconditioner:
