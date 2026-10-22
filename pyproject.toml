@@ -176,6 +176,8 @@ link-mode = "symlink"
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
 exclude-newer = "2026-04-27T00:00:00Z"
+# Allow the fixed fsspec release without lifting the cutoff for other packages.
+exclude-newer-package = { fsspec = "2026-06-17T00:00:00Z" }
 
 # torch 2.9.1 pulls nvidia-nccl-cu12==2.27.5. Override
 # torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
