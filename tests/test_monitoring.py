@@ -49,6 +49,7 @@ MONITORING_CFG = {
         "updates": {"enabled": True, "every": 1},
         "activations": {"enabled": True, "every": 1, "include": ["blocks.*"]},
         "attention": {"enabled": True, "every": 1, "include": ["*"]},
+        "adam_state": {"enabled": True, "every": 1},
     },
 }
 

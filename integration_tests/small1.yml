@@ -127,6 +127,7 @@ train_logging:
     monitors:
       grads: {every: 5}
       attention: {every: 5}
+      adam_state: {enabled: True}
 
 # parameters for data loading
 data_loading :

@@ -186,7 +186,7 @@ def assert_val_loss_below_threshold(run_id):
     assert loss_metric < 0.2, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.2"
 
 
-MONITOR_TYPES = ["grads", "weights", "updates", "activations", "attention"]
+MONITOR_TYPES = ["grads", "weights", "updates", "activations", "attention", "adam_state"]
 
 
 def assert_monitoring_metrics(run_id):

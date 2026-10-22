@@ -20,7 +20,13 @@ import logging
 from omegaconf import DictConfig, OmegaConf
 
 # import monitor modules so that they register themselves
-from weathergen.train.monitoring import activations, attention, grads, weights  # noqa: F401
+from weathergen.train.monitoring import (  # noqa: F401
+    activations,
+    attention,
+    grads,
+    optimizer_state,
+    weights,
+)
 from weathergen.train.monitoring.base import Monitor, StatBuffer, get_registry, register_monitor
 from weathergen.train.monitoring.manager import MonitorManager, NullMonitorManager
 from weathergen.train.monitoring.selection import Selection
@@ -45,7 +51,7 @@ MONITORING_DEFAULTS = {
     "every": 100,  # istep cadence
     "group_by": "block",  # param | block | module_type
     "include": ["*"],  # FQN globs
-    "exclude": ["*target_token_engines*", "*ema*"],
+    "exclude": ["*ema*"],
     "monitors": {
         "grads": {"enabled": True, "every": 20},
         "weights": {"enabled": True},
@@ -54,8 +60,12 @@ MONITORING_DEFAULTS = {
             "enabled": True,
             "include": ["*fe_blocks*", "*ae_global_engine*"],
             "sample_layers": [0, "mid", -1],
+            "outlier_k": 6.0,  # outlier_frac = frac(|x| > outlier_k * rms); null disables
+            "max_tokens": None,  # strided subsample of rows per call; null = all tokens
         },
         "attention": {"enabled": True, "every": 500, "num_queries": 128},
+        # opt-in: reads Adam(W) exp_avg / exp_avg_sq (params without them, e.g. Muon, are skipped)
+        "adam_state": {"enabled": False, "eps_mult": 10.0},
     },
 }
 
@@ -74,7 +84,7 @@ def build_monitor_manager(cfg, model, optimizers, train_logger):
     """Build the manager from the `train_logging.monitoring` config section (dict or
     DictConfig). Returns a `NullMonitorManager` when monitoring is disabled.
 
-    `optimizers` is unused for now; it is reserved for optimizer-state monitors (Adam √v).
+    `optimizers` is passed to the monitors via `Monitor.bind_optimizers` (used by `adam_state`).
     """
     cfg = OmegaConf.merge(OmegaConf.create(MONITORING_DEFAULTS), cfg or {})
     if not cfg.enabled:
@@ -95,7 +105,9 @@ def build_monitor_manager(cfg, model, optimizers, train_logger):
         selection = Selection(
             mcfg.include, mcfg.exclude, mcfg.group_by, mcfg.get("sample_layers", None)
         )
-        monitors.append(registry[name](mcfg, model, selection))
+        monitor = registry[name](mcfg, model, selection)
+        monitor.bind_optimizers(optimizers or [])
+        monitors.append(monitor)
 
     if not monitors:
         return NullMonitorManager()

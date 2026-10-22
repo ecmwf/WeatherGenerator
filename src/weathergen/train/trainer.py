@@ -715,7 +715,11 @@ class Trainer(TrainerBase):
                         mini_epoch,
                         loss_value,
                     )
-                self.monitor.abort_step()  # no collectives; skip decision is synced across ranks
+                # no collectives. NOTE: assumes every rank takes the skip decision on the same
+                # step, otherwise end_step()'s all_reduce (and FSDP's backward) hangs. Unverified:
+                # loss_value looks rank-local (no all-reduce in _maybe_log_loss_spike).
+                # TODO: verify on multi-GPU and all-reduce the decision if needed.
+                self.monitor.abort_step()
                 continue
 
             # TODO re-enable this, need to think on how to make it compatible with

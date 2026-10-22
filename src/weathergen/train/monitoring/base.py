@@ -162,6 +162,9 @@ class Monitor:
         if self.every <= 0:
             raise ValueError(f"monitoring.monitors.{self.name}.every must be > 0")
 
+    def bind_optimizers(self, optimizers: list[torch.optim.Optimizer]) -> None:
+        """Called once after construction; monitors that read optimizer state override this."""
+
     def is_active(self, istep: int) -> bool:
         return istep % self.every == 0
 

@@ -22,8 +22,8 @@ TOTAL_GROUP = "all"
 
 @register_monitor("grads")
 class GradStats(Monitor):
-    """Post-clip l2 / rms / absmax of the selected grads per group, plus the pre-clip total norm
-    returned by `clip_grad_norm_` as `mon/grads/all/total_norm`."""
+    """Post-clip l2 / rms / absmax / min / max / nonfinite of the selected grads per group, plus
+    the pre-clip total norm returned by `clip_grad_norm_` as `mon/grads/all/total_norm`."""
 
     def __init__(self, cfg, model, selection):
         super().__init__(cfg, model, selection)

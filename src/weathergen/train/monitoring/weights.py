@@ -22,7 +22,11 @@ from weathergen.train.monitoring.stats import foreach_sumsq_absmax, local_tensor
 def accumulate_norm_stats(
     buf: StatBuffer, monitor: Monitor, entries: list[tuple[str, torch.Tensor | None]]
 ) -> None:
-    """Accumulate l2 / rms / absmax per group from local shards `(group, tensor)`.
+    """Accumulate l2 / rms / absmax / min / max / nonfinite per group from local shards
+    `(group, tensor)`.
+
+    `nonfinite` counts the tensors of the group whose norm is not finite (contains nan/inf);
+    it is derived from the sum of squares, so it costs no extra pass over the data.
 
     `None` or empty shards (FSDP2 uneven sharding, unused params) contribute identity values,
     so every rank adds the same set of keys. Outputs are only logged for groups with data.
@@ -30,18 +34,29 @@ def accumulate_norm_stats(
     nonempty = [(g, t) for g, t in entries if t is not None and t.numel() > 0]
     sq, amax = foreach_sumsq_absmax([t for _, t in nonempty])
     for (group, t), s, a in zip(nonempty, sq, amax, strict=True):
+        t_min, t_max = torch.aminmax(t)
         buf.accumulate(monitor.key(group, "#sumsq"), s, "sum")
         buf.accumulate(monitor.key(group, "#absmax"), a, "max")
+        buf.accumulate(monitor.key(group, "#min"), t_min, "min")
+        buf.accumulate(monitor.key(group, "#max"), t_max, "max")
+        buf.accumulate(monitor.key(group, "#nonfinite"), (~torch.isfinite(s)).float(), "sum")
         buf.accumulate(monitor.key(group, "#count"), t.numel(), "sum")
 
     for group in dict.fromkeys(g for g, _ in entries):
         k_sq, k_amax, k_n = (monitor.key(group, s) for s in ("#sumsq", "#absmax", "#count"))
+        k_min, k_max, k_nf = (monitor.key(group, s) for s in ("#min", "#max", "#nonfinite"))
         buf.register(k_sq, "sum")
         buf.register(k_amax, "max")
+        buf.register(k_min, "min")
+        buf.register(k_max, "max")
+        buf.register(k_nf, "sum")
         buf.register(k_n, "sum")
 
         def has_data(r, k_n=k_n):
             return r.get(k_n, 0) > 0
+
+        for stat, k in (("min", k_min), ("max", k_max), ("nonfinite", k_nf)):
+            buf.output(monitor.key(group, stat), lambda r, k=k, h=has_data: r[k] if h(r) else None)
 
         buf.output(
             monitor.key(group, "l2"),
@@ -59,7 +74,8 @@ def accumulate_norm_stats(
 
 @register_monitor("weights")
 class WeightStats(Monitor):
-    """l2 / rms / absmax of the selected weights after the optimizer step."""
+    """l2 / rms / absmax / min / max / nonfinite of the selected weights after the optimizer
+    step."""
 
     def __init__(self, cfg, model, selection):
         super().__init__(cfg, model, selection)
