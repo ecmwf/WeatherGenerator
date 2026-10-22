@@ -25,6 +25,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.train.monitoring import NullMonitorManager, build_monitor_manager
 from weathergen.train.monitoring.attention import attention_probe_stats
+from weathergen.train.monitoring.stats import rms
 
 DIM = 16
 NUM_HEADS = 2
@@ -136,10 +137,6 @@ def _assert_no_forward_hooks_or_probes(model):
     assert not torch.nn.modules.module._global_forward_pre_hooks
 
 
-def _rms(x):
-    return x.detach().float().pow(2).mean().sqrt()
-
-
 def _run_unmonitored(model, batches):
     """Plain training steps; records losses and reference stats with a test-owned hook."""
     opt = torch.optim.AdamW(model.parameters(), lr=1e-2)
@@ -147,7 +144,7 @@ def _run_unmonitored(model, batches):
     ref_block = model.get_submodule(REF_BLOCK)
     out = {"loss": [], "grad_l2": [], "weight_l2": [], "act_rms": []}
     for x, y in batches:
-        handle = ref_block.register_forward_hook(lambda m, i, o: out["act_rms"].append(_rms(o)))
+        handle = ref_block.register_forward_hook(lambda m, i, o: out["act_rms"].append(rms(o)))
         pred = model(x)
         handle.remove()  # before backward, so checkpoint recompute does not fire it again
         loss = torch.nn.functional.mse_loss(pred, y)
@@ -171,18 +168,15 @@ def _run_monitored(model, batches, train_logger):
     for istep, (x, y) in enumerate(batches):
         num_calls = len(train_logger.calls)
         assert manager.begin_step(istep)
-        manager.on_forward_start()
-        pred = model(x)
-        manager.on_forward_end()
+        with manager.forward():
+            pred = model(x)
         _assert_no_forward_hooks_or_probes(model)
         loss = torch.nn.functional.mse_loss(pred, y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRAD_CLIP)
         manager.on_after_clip(total_norm)
-        manager.on_before_opt_step()
         opt.step()
-        manager.on_after_opt_step()
         manager.end_step()
         _assert_no_forward_hooks_or_probes(model)
 
@@ -198,9 +192,16 @@ def _run_monitored(model, batches, train_logger):
     num_calls = len(train_logger.calls)
     x, _ = batches[0]
     manager.begin_step(len(batches))
-    manager.on_forward_start()
-    model(x)
-    manager.on_forward_end()
+    with manager.forward():
+        model(x)
+    manager.abort_step()
+    _assert_no_forward_hooks_or_probes(model)
+
+    # An exception inside the forward must not leave hooks or probes behind.
+    manager.begin_step(len(batches) + 1)
+    with pytest.raises(RuntimeError, match="forward failed"), manager.forward():
+        model(x)
+        raise RuntimeError("forward failed")
     manager.abort_step()
     _assert_no_forward_hooks_or_probes(model)
     assert len(train_logger.calls) == num_calls, "abort_step must not log"
@@ -256,13 +257,11 @@ def test_disabled_monitoring_returns_null_manager(as_dictconfig):
     assert isinstance(manager, NullMonitorManager)
 
     assert not manager.begin_step(0)
-    manager.on_forward_start()
-    model(torch.randn(NUM_TOKENS, 4)).sum().backward()
-    manager.on_forward_end()
+    with manager.forward():
+        pred = model(torch.randn(NUM_TOKENS, 4))
+    pred.sum().backward()
     manager.on_after_clip(torch.tensor(1.0))
-    manager.on_before_opt_step()
     opt.step()
-    manager.on_after_opt_step()
     manager.end_step()
     manager.abort_step()
     assert train_logger.calls == []
