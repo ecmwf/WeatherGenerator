@@ -3,7 +3,7 @@
 """Plot diffusion ODE sampling diagnostics written by ScalarSeriesZarrWriter.
 
 Reads the ``diffusion_sampling_diagnostics.zip`` store produced during inference when
-``fe_diffusion_dev_mode: true`` is set (see weathergen.model.diffusion.DiffusionForecastEngine
+``fe_diffusion_log_analytics: true`` is set (see weathergen.model.diffusion.DiffusionForecastEngine
 and weathergen.common.dev_output.ScalarSeriesZarrWriter), and recreates the sampling
 diagnostics figure that used to be plotted inline during inference.
 
@@ -49,7 +49,7 @@ def _resolve_store_path(run_id: str | None, path: str | None, mini_epoch: int | 
     if not store_path.exists():
         raise FileNotFoundError(
             f"No dev diagnostics store found at {store_path}. Was the run started with "
-            "fe_diffusion_dev_mode=true?"
+            "fe_diffusion_log_analytics=true?"
         )
     return store_path
 

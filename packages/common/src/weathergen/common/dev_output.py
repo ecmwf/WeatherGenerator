@@ -81,7 +81,7 @@ class DevOutputWriter(abc.ABC):
         self,
         cf: Config,
         name: str,
-        enabled_flag: str = "fe_diffusion_dev_mode",
+        enabled_flag: str = "fe_diffusion_log_analytics",
     ):
         """
         Args:
@@ -91,7 +91,7 @@ class DevOutputWriter(abc.ABC):
             enabled_flag: Config key gating whether this writer is active, resolved with
                 ``OmegaConf.select`` so dotted paths work (e.g.
                 ``"train_logging.collapse_monitoring.enabled"``). Defaults to
-                ``fe_diffusion_dev_mode``, the shared switch for diffusion dev outputs.
+                ``fe_diffusion_log_analytics``, the shared switch for diffusion dev outputs.
         """
         self.cf = cf
         self.name = name
@@ -121,7 +121,7 @@ class ScalarSeriesZarrWriter(DevOutputWriter):
         self,
         cf: Config,
         name: str,
-        enabled_flag: str = "fe_diffusion_dev_mode",
+        enabled_flag: str = "fe_diffusion_log_analytics",
     ) -> None:
         super().__init__(cf, name, enabled_flag)
         self._store_path = self.root / f"{name}.zip"
@@ -170,7 +170,7 @@ class DiffusionTrajectoryZarrWriter(DevOutputWriter):
         self,
         cf: Config,
         name: str = "diffusion_trajectory",
-        enabled_flag: str = "fe_diffusion_dev_mode",
+        enabled_flag: str = "fe_diffusion_log_analytics",
     ) -> None:
         super().__init__(cf, name, enabled_flag)
         self._store_path = self.root / f"{name}.zip"
@@ -215,7 +215,7 @@ class ScalarMetricsJSONLWriter(DevOutputWriter):
         cf: Config,
         name: str,
         log_fn,
-        enabled_flag: str = "fe_diffusion_dev_mode",
+        enabled_flag: str = "fe_diffusion_log_analytics",
     ) -> None:
         """
         Args:

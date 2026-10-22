@@ -930,7 +930,7 @@ class Trainer(TrainerBase):
                                 # Dev mode only: separately persist the per-ODE-step denoising
                                 # trajectory (see model.ModelOutput.dev_trajectory_output), so it
                                 # never mixes with the official output above.
-                                if self.cf.get("fe_diffusion_dev_mode", False):
+                                if self.cf.get("fe_diffusion_log_analytics", False):
                                     write_dev_trajectory_output(
                                         self.cf,
                                         mode_cfg,

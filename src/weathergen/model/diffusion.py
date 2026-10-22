@@ -699,7 +699,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # "x" holds full latent tensors for ad-hoc inspection, not a per-step scalar series,
         # so it is excluded from the on-disk diagnostics. self._diagnostics_writer no-ops
-        # unless fe_diffusion_dev_mode is enabled.
+        # unless fe_diffusion_log_analytics is enabled.
         scalar_track = {k: v for k, v in track.items() if k != "x"}
         self._diagnostics_writer.write(scalar_track)
 

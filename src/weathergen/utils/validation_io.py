@@ -247,7 +247,7 @@ def write_dev_trajectory_output(
     target_aux_out,
 ) -> None:
     """
-    Write the diffusion denoising trajectory collected in dev mode (``fe_diffusion_dev_mode``).
+    Write the diffusion denoising trajectory collected in dev mode (``fe_diffusion_log_analytics``).
 
     ``model_output.dev_trajectory_output`` holds one decoded prediction per ODE step. Unlike
     the official validation/test output, denoising steps are kept as an explicit

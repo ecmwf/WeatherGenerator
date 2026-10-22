@@ -74,7 +74,7 @@ class ModelOutput:
         self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
         self.batch_samples = source_samples
         self.latent_deep = None
-        # Dev-mode only (fe_diffusion_dev_mode): a separate ModelOutput holding every ODE
+        # Dev-mode only (fe_diffusion_log_analytics): a separate ModelOutput holding every ODE
         # denoising step, shaped like a forecast rollout of len(tokens) pseudo-steps so it can
         # be written/scored with the same tooling as a real forecast. Never used for losses.
         self.dev_trajectory_output: ModelOutput | None = None
@@ -903,7 +903,7 @@ class Model(torch.nn.Module):
                         "fe_diffusion_predict_residual", False
                     )
 
-                    if self.cf.get("fe_diffusion_dev_mode", False):
+                    if self.cf.get("fe_diffusion_log_analytics", False):
                         output.dev_trajectory_output = self._decode_diffusion_trajectory_dev(
                             model_params,
                             step,
@@ -1000,7 +1000,7 @@ class Model(torch.nn.Module):
     ) -> ModelOutput:
         """
         Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (dev mode
-        only, ``fe_diffusion_dev_mode``).
+        only, ``fe_diffusion_log_analytics``).
 
         The result is shaped like a forecast rollout of ``len(tokens)`` pseudo-steps so it can
         be written and scored with the same ``write_output``/fast-eval tooling used for a real
@@ -1144,7 +1144,6 @@ class Model(torch.nn.Module):
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
-        chunk_idx = output.chunk_idx(step)
         fstep_idx = output.fstep_idx(step)
 
         # Empty dicts evaluate to False in python
@@ -1250,6 +1249,9 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-            output.add_physical_prediction(chunk_idx, stream_name, pred)
+            # out_step (not chunk_idx derived from the constant `step`) so that decoding the
+            # same real forecast step at several out_steps (e.g. one per ODE denoising step in
+            # the dev trajectory) doesn't repeatedly overwrite a single slot.
+            output.add_physical_prediction(out_step, stream_name, pred)
 
         return output
