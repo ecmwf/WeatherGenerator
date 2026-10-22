@@ -31,7 +31,7 @@ import torch
 import tqdm
 
 from weathergen.common.config import Config
-from weathergen.common.dev_output import ScalarSeriesZarrWriter
+from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 from weathergen.utils.distributed import is_root
@@ -191,9 +191,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.train_log_min = math.log(self.sigma_min)
         self.train_log_max = math.log(self.sigma_max)
 
-        # Dev-mode only: persists per-ODE-step sampling diagnostics to a zarr store instead of
-        # plotting them inline. See scripts/dev/plot_diffusion_sampling_diagnostics.py.
-        self._diagnostics_writer = ScalarSeriesZarrWriter(cf, name="diffusion_sampling_diagnostics")
+        # Inference-mode only: persists per-ODE-step sampling diagnostics to a JSONL file instead
+        # of plotting them inline. See scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py.
+        self._diagnostics_writer = ScalarSeriesJSONLWriter(
+            cf,
+            name="diffusion_sampling_diagnostics",
+            enabled=cf.get("fe_diffusion_log_analytics", False),
+        )
 
     def forward(
         self,
@@ -491,7 +495,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 num_steps=num_steps,
                 coords=coords,
                 batch_size=num_ensemble_members,
-                return_trajectory=False,
+                return_diffusion_steps=False,
             )
             return final_x
 
@@ -501,7 +505,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             fstep=fstep,
             num_steps=num_steps,
             coords=coords,
-            return_trajectory=True,
+            return_diffusion_steps=True,
         )
         return intermediate_x
 
@@ -544,7 +548,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         num_steps: int,
         coords: torch.Tensor | None,
         batch_size: int = 1,
-        return_trajectory: bool = False,
+        return_diffusion_steps: bool = False,
     ) -> "tuple[torch.Tensor, list[torch.Tensor] | None]":
         """Run one complete ODE denoising trajectory from pure noise.
 
@@ -556,14 +560,14 @@ class DiffusionForecastEngine(torch.nn.Module):
             coords: Optional spatial coordinates for :meth:`denoise`.
             batch_size: Number of independent noise realisations to denoise in
                 parallel.  Defaults to 1 (trajectory / single-sample mode).
-            return_trajectory: When ``True``, also return the list of intermediate
+            return_diffusion_steps: When ``True``, also return the list of intermediate
                 states (one per ODE step).  Set to ``False`` in ensemble mode to
                 avoid storing the full trajectory N times.
 
         Returns:
             ``(final_x, intermediate_x)`` where *final_x* has shape
             ``(batch_size, num_healpix_cells, embed_dim)`` and *intermediate_x*
-            is either a list of per-step tensors (when ``return_trajectory=True``)
+            is either a list of per-step tensors (when ``return_diffusion_steps=True``)
             or ``None``.
         """
         # The encoder prepends register/class tokens to the healpix-cell latents,
@@ -642,8 +646,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         }
 
         # Per-step intermediate denoised states (one per ODE step).
-        # Only populated when return_trajectory=True.
-        intermediate_x: list[torch.Tensor] = [] if return_trajectory else None
+        # Only populated when return_diffusion_steps=True.
+        intermediate_x: list[torch.Tensor] = [] if return_diffusion_steps else None
 
         # Main sampling loop. position=1 nests this bar below the per-sample/batch bar
         # (position=0) in trainer.py's validation loop, so progress is visible at both
@@ -694,7 +698,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                     track["l2_to_target"].append((x_next - self.cur_token).norm().item())
                     track["x"].append(self.cur_token.cpu())
 
-            if return_trajectory:
+            if return_diffusion_steps:
                 intermediate_x.append(x_next)
 
         # "x" holds full latent tensors for ad-hoc inspection, not a per-step scalar series,
@@ -704,6 +708,49 @@ class DiffusionForecastEngine(torch.nn.Module):
         self._diagnostics_writer.write(scalar_track)
 
         return x_next, intermediate_x
+
+
+def _decode_diffusion_steps(
+    model: "Model",
+    model_params: "ModelParams",
+    step: int,
+    tokens: list[torch.Tensor],
+    source_samples: "BatchSamples",
+    forecast_offset: int,
+    cond: torch.Tensor,
+    predict_residual: bool,
+) -> "ModelOutput":
+    """
+    Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (dev mode
+    only, ``fe_diffusion_log_analytics``).
+
+    The result is shaped like a forecast rollout of ``len(tokens)`` pseudo-steps so it can
+    be written and scored with the same ``write_output``/fast-eval tooling used for a real
+    forecast (see ``validation_io.write_output`` and
+    ``scripts/analytics/diffusion/plot_diffusion_steps.py``). It is never merged into
+    the real output returned by ``Model.forward``.
+    """
+    from weathergen.model.model import ModelOutput  # local import: avoids a model<->diffusion cycle
+
+    analytics_output = ModelOutput(
+        list(range(forecast_offset, forecast_offset + len(tokens))),
+        forecast_offset,
+        source_samples,
+    )
+    for i, toks in enumerate(tokens):
+        toks_abs = cond + toks if predict_residual else toks
+        # out_step indexes analytics_output.physical/.latent directly (global forecast step, not
+        # chunk-local), so it must start at forecast_offset like the rest of the list, else
+        # the leading empty padding slot stays at the wrong end and write_output (which only
+        # reads steps >= forecast_offset) never sees the first ODE step.
+        out_step = forecast_offset + i
+        analytics_output = model.predict_decoders(
+            model_params, step, toks_abs, source_samples, analytics_output, out_step=out_step
+        )
+        analytics_output = model.predict_latent(
+            model_params, step, toks_abs, source_samples, analytics_output, out_step=out_step
+        )
+    return analytics_output
 
 
 class Preconditioner:

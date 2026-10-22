@@ -24,7 +24,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.model.diffusion import DiffusionForecastEngine, _decode_diffusion_steps
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -74,10 +74,6 @@ class ModelOutput:
         self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
         self.batch_samples = source_samples
         self.latent_deep = None
-        # Dev-mode only (fe_diffusion_log_analytics): a separate ModelOutput holding every ODE
-        # denoising step, shaped like a forecast rollout of len(tokens) pseudo-steps so it can
-        # be written/scored with the same tooling as a real forecast. Never used for losses.
-        self.dev_trajectory_output: ModelOutput | None = None
 
     def chunk_idx(self, fstep: int) -> int:
         """Index of forecast step fstep into chunk-local data, e.g. predictions."""
@@ -904,7 +900,8 @@ class Model(torch.nn.Module):
                     )
 
                     if self.cf.get("fe_diffusion_log_analytics", False):
-                        output.dev_trajectory_output = self._decode_diffusion_trajectory_dev(
+                        output.diffusion_steps_output = _decode_diffusion_steps(
+                            self,
                             model_params,
                             step,
                             tokens,
@@ -987,46 +984,6 @@ class Model(torch.nn.Module):
                 )
 
         return output
-
-    def _decode_diffusion_trajectory_dev(
-        self,
-        model_params: ModelParams,
-        step: int,
-        tokens: list[torch.Tensor],
-        source_samples: BatchSamples,
-        forecast_offset: int,
-        cond: torch.Tensor,
-        predict_residual: bool,
-    ) -> ModelOutput:
-        """
-        Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (dev mode
-        only, ``fe_diffusion_log_analytics``).
-
-        The result is shaped like a forecast rollout of ``len(tokens)`` pseudo-steps so it can
-        be written and scored with the same ``write_output``/fast-eval tooling used for a real
-        forecast (see ``validation_io.write_output`` and
-        ``scripts/dev/plot_diffusion_trajectory_dev_eval.py``). It is never merged into the real
-        output returned by ``forward``.
-        """
-        dev_output = ModelOutput(
-            list(range(forecast_offset, forecast_offset + len(tokens))),
-            forecast_offset,
-            source_samples,
-        )
-        for i, toks in enumerate(tokens):
-            toks_abs = cond + toks if predict_residual else toks
-            # out_step indexes dev_output.physical/.latent directly (global forecast step, not
-            # chunk-local), so it must start at forecast_offset like the rest of the list, else
-            # the leading empty padding slot stays at the wrong end and write_output (which only
-            # reads steps >= forecast_offset) never sees the first ODE step.
-            out_step = forecast_offset + i
-            dev_output = self.predict_decoders(
-                model_params, step, toks_abs, source_samples, dev_output, out_step=out_step
-            )
-            dev_output = self.predict_latent(
-                model_params, step, toks_abs, source_samples, dev_output, out_step=out_step
-            )
-        return dev_output
 
     def _get_initial_conditions(
         self, samples_or_output: BatchSamples | ModelOutput, model_params: ModelParams
@@ -1251,7 +1208,7 @@ class Model(torch.nn.Module):
             pred = torch.split(pred, t_coords_lens, dim=1)
             # out_step (not chunk_idx derived from the constant `step`) so that decoding the
             # same real forecast step at several out_steps (e.g. one per ODE denoising step in
-            # the dev trajectory) doesn't repeatedly overwrite a single slot.
+            # diffusion) doesn't repeatedly overwrite a single slot.
             output.add_physical_prediction(out_step, stream_name, pred)
 
         return output

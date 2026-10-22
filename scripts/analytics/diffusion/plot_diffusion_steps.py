@@ -2,10 +2,10 @@
 
 """Plot the diffusion denoising trajectory written in dev mode.
 
-When ``fe_diffusion_log_analytics: true`` is set, ``weathergen.utils.validation_io`` writes the
+When ``fe_diffusion_log_analytics: true`` is set, ``weathergen.utils.inference_logger`` writes the
 per-ODE-step decoded predictions to
-``<run>/dev/diffusion_trajectory/diffusion_trajectory.zip`` (see
-``weathergen.common.dev_output.DiffusionTrajectoryZarrWriter``), one group per validation
+``<run>/analytics/diffusion_steps/diffusion_steps.zip`` (see
+``weathergen.utils.inference_logger.DiffusionStepsZarrWriter``), one group per validation
 sample. Unlike the official validation/test output, denoising steps are kept as their own
 explicit ``denoising_step`` array dimension rather than being conflated with real forecast
 steps, so this store is independent of ``write_output``/``OutputBatchData`` and cannot be
@@ -27,8 +27,8 @@ For every (sample, stream, channel) found in the store this produces:
     ``--plot-individual-maps`` is enabled (default).
 
 Usage:
-    uv run python scripts/dev/plot_diffusion_trajectory_dev_eval.py --run-id <id>
-    uv run python scripts/dev/plot_diffusion_trajectory_dev_eval.py --path <run_dir> \\
+    uv run python scripts/analytics/diffusion/plot_diffusion_steps.py --run-id <id>
+    uv run python scripts/analytics/diffusion/plot_diffusion_steps.py --path <run_dir> \\
         --channels 2t q_850 --denoising-steps 0 2 4 6 8 --max-workers 8
 """
 
@@ -50,11 +50,11 @@ from zarr.storage import ZipStore
 
 import weathergen.common.config as config
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
-from weathergen.utils.validation_io import get_dev_trajectory_dir
+from weathergen.utils.inference_logger import get_diffusion_steps_dir
 
 logger = logging.getLogger(__name__)
 
-STORE_NAME = "diffusion_trajectory"
+STORE_NAME = "diffusion_steps"
 DEFAULT_CHANNELS = ["2t", "q_850", "z_500"]
 # same default projection/colormap as weathergen.evaluate.plotting.plotter.Plotter.scatter_plot
 MAP_CMAP = "coolwarm"
@@ -67,11 +67,11 @@ def _resolve_store_path(run_id: str | None, path: str | None, mini_epoch: int) -
         if run_id is None:
             raise ValueError("Either --run-id or --path must be provided.")
         cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=None)
-        base = get_dev_trajectory_dir(cf)
+        base = get_diffusion_steps_dir(cf)
     store_path = base / f"{STORE_NAME}.zip"
     if not store_path.exists():
         raise FileNotFoundError(
-            f"No dev trajectory store found at {store_path}. Was the run started with "
+            f"No diffusion steps store found at {store_path}. Was the run started with "
             "fe_diffusion_log_analytics=true?"
         )
     return store_path
