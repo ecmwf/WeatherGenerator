@@ -57,7 +57,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
         source2target_matching_idxs, output_info, target2source_matching_idxs, _ = metadata
 
-        preds = preds.latent[0]  # [0] because we always want the first fstep
+        preds = preds.get_latent_prediction(1)  # State after the first engine call.
         target_info = targets.aux_outputs
         targets = targets.latent
 
