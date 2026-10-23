@@ -71,6 +71,34 @@ class SpatialAdaLN(torch.nn.Module):
         return self.norm(x) * (1 + scale) + shift, gate
 
 
+class DiffusionForecastConditioning:
+    """Diffusion conditioning type for ForecastingEngine's blocks.
+
+    Wraps the raw ``fe_diffusion_model_conditioning_type`` config value so call sites compare
+    against ``conditioning_type`` directly instead of re-reading the config string everywhere.
+    """
+
+    def __init__(self, conditioning_type: str | None):
+        self.conditioning_type = conditioning_type
+
+    def validate(self, conditioning: torch.Tensor | None) -> None:
+        """Check conditioning is present/absent exactly when this mode expects it.
+
+        concatenate/concatenate_hiddendim bake conditioning into tokens before calling the
+        engine (see DiffusionForecastEngine.denoise() below), so they expect conditioning=None
+        when reaching ForecastingEngine.forward().
+        """
+        if self.conditioning_type in {"ada_ln", "cross_attn", "cross_attn_rev", "additive"}:
+            assert conditioning is not None, (
+                f"conditioning must be provided for '{self.conditioning_type}' "
+                "diffusion model conditioning"
+            )
+        elif self.conditioning_type is None:
+            assert conditioning is None, (
+                "conditioning should not be provided when diffusion model conditioning is disabled"
+            )
+
+
 class DiffusionForecastEngine(torch.nn.Module):
     # Adopted from https://github.com/NVlabs/edm/blob/main/training/loss.py#L72
 
