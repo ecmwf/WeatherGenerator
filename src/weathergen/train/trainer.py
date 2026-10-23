@@ -35,6 +35,7 @@ from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.monitoring import MonitorManager, NullMonitorManager, build_monitor_manager
 from weathergen.train.optimizer import build_optimizer
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
@@ -136,6 +137,8 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
+        # training-time monitoring (mon/* metrics); built in run() once model and optimizers exist
+        self.monitor: MonitorManager | NullMonitorManager = NullMonitorManager()
         self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
         self.loss_spike_cfg = None
         self.loss_spike_file = None
@@ -560,6 +563,14 @@ class Trainer(TrainerBase):
             for optimizer, lr_cfg in zip(self.optimizers, lr_cfgs, strict=True)
         ]
 
+        self.monitor = build_monitor_manager(
+            cf.train_logging.get("monitoring", {}),
+            self.model,
+            self.optimizers,
+            self.train_logger,
+            params_sharded=cf.with_ddp and cf.with_fsdp,
+        )
+
         # Restore optimizer momentum buffers when continuing from a checkpoint
         if run_id_contd is not None and self.cf.general.istep != 0:
             self._load_optimizer_state(run_id_contd, mini_epoch_contd)
@@ -657,6 +668,8 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            self.monitor.begin_step(self.cf.general.istep)
+
             if cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
                 batch = batch.pin_memory()
@@ -668,11 +681,13 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds = self.model(
-                    model_params=self.model_params,
-                    samples_or_output=batch.get_source_samples(),
-                    forecast_steps=batch.get_output_idxs(),
-                )
+                # monitoring hooks / attention probes exist only inside this context
+                with self.monitor.forward():
+                    preds = self.model(
+                        model_params=self.model_params,
+                        samples_or_output=batch.get_source_samples(),
+                        forecast_steps=batch.get_output_idxs(),
+                    )
 
                 targets_and_auxs = {}
                 for loss_name, target_aux in self.target_and_aux_calculators.items():
@@ -704,6 +719,11 @@ class Trainer(TrainerBase):
                         mini_epoch,
                         loss_value,
                     )
+                # no collectives. NOTE: assumes every rank takes the skip decision on the same
+                # step, otherwise end_step()'s all_reduce (and FSDP's backward) hangs. Unverified:
+                # loss_value looks rank-local (no all-reduce in _maybe_log_loss_spike).
+                # TODO: verify on multi-GPU and all-reduce the decision if needed.
+                self.monitor.abort_step()
                 continue
 
             # TODO re-enable this, need to think on how to make it compatible with
@@ -734,6 +754,7 @@ class Trainer(TrainerBase):
             total_norm = torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
             )
+            self.monitor.on_after_clip(total_norm)
 
             # log gradient norms
             if self.log_grad_norms:
@@ -766,6 +787,9 @@ class Trainer(TrainerBase):
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
+
+            # monitoring: weights / update ratio, fused cross-rank reduction, logging (on root)
+            self.monitor.end_step()
 
             self.perf_tracker.step(
                 batch,

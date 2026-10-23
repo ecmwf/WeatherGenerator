@@ -126,6 +126,10 @@ train_logging:
   metrics: 20
   checkpoint: 250
   log_grad_norms: False
+  # Training-time monitoring (mon/* metrics: grads, weights, updates, activations, attention).
+  # Other options and their defaults: MONITORING_DEFAULTS in weathergen/train/monitoring.
+  monitoring:
+    enabled: False
 
 # parameters for data loading
 data_loading :
