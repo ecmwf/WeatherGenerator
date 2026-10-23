@@ -100,7 +100,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x, x_lens, ada_ln_aux=None, coords=None):
+    def forward(self, x, x_lens, ada_ln_aux=None, coords=None, **kwargs):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
@@ -323,7 +323,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         # compile for efficiency
         self.flex_attention = torch.compile(flex_attention, dynamic=False)
 
-    def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
+    def forward(self, x, coords=None, emb=None, ada_ln_aux=None, **kwargs):
         if self.with_residual:
             x_in = x
 
@@ -427,7 +427,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
+    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None, **kwargs):
         if self.with_residual:
             x_q_in = x_q
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
@@ -540,7 +540,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
+    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None, **kwargs):
         if self.with_residual:
             x_q_in = x_q
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
@@ -669,7 +669,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
             self.att = self.attention
             self.softmax = torch.nn.Softmax(dim=-1)
 
-    def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
+    def forward(self, x, coords=None, emb=None, ada_ln_aux=None, **kwargs):
         if self.with_residual:
             x_in = x
 
@@ -783,7 +783,7 @@ class MultiCrossAttentionHead(torch.nn.Module):
         self.softmax = torch.nn.Softmax(dim=-1)
 
     #########################################
-    def forward(self, x_q, x_kv, emb=None):
+    def forward(self, x_q, x_kv, emb=None, **kwargs):
         if self.with_residual:
             x_q_in = x_q
 
