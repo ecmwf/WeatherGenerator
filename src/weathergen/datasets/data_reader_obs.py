@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import override
 
 import numpy as np
+import numpy.typing as npt
 import zarr
 
 from weathergen.datasets.data_reader_base import (
@@ -27,11 +28,11 @@ _logger = logging.getLogger(__name__)
 
 
 def _columns_from_block(
-    block: np.ndarray,
-    coords_idx: list[int] | np.ndarray,
-    geoinfo_idx: list[int] | np.ndarray,
-    channels_idx: list[int] | np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    block: npt.NDArray,
+    coords_idx: list[int] | npt.NDArray,
+    geoinfo_idx: list[int] | npt.NDArray,
+    channels_idx: list[int] | npt.NDArray,
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """Split a dense (rows, cols) obs block into coords / geoinfos / data.
 
     Matches three ``oindex[rows, cols]`` calls. Obs zarrs store every column in

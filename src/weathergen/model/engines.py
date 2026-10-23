@@ -658,7 +658,8 @@ class ForecastingEngine(torch.nn.Module):
                             dit_is_cond=self.conditioning.conditioning_type == "ada_ln",
                         )
                     )
-                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
+                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for
+                # cross_attn conditioning
                 if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
                     self.fe_blocks.append(
                         MultiCrossAttentionHead(

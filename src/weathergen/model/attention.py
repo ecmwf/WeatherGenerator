@@ -604,7 +604,11 @@ class MultiSelfAttentionHead(torch.nn.Module):
         use_xsa=False,
         with_2d_rope=False,
         is_dit=False,  # should only be True for diffusion model
-        dit_is_cond=False,  # whether the attention is used for conditioning in the diffusion model (as opposed to denoising). Should only be True for cross attention layers in the diffusion model, and will control whether ada_ln_aux is applied to the input or output of the attention layer
+        # whether the attention is used for conditioning in the diffusion model
+        # (as opposed to denoising). Should only be True for cross attention layers in
+        # the diffusion model, and will control whether ada_ln_aux is applied to the input
+        # or output of the attention layer
+        dit_is_cond=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 

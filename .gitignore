@@ -228,3 +228,6 @@ output
 models
 results
 reports
+
+# default config file for plot_train
+config/runs_plot_train.yml
