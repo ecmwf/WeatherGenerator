@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = ["boto3<1.36", "certifi"]
+# dependencies = ["boto3<1.36", "certifi>=2026.10.19"]
 # [tool.uv]
 # exclude-newer = "2025-05-01T00:00:00Z"
 # ///
@@ -74,6 +74,7 @@ def main() -> None:
         verify=certifi.where(),
         config=client_config,
     )
+    print(args.endpoint_url, certifi.where(), client_config)
     output_path = args.output_dir.expanduser().resolve() / args.run_id
     output_path.mkdir(parents=True, exist_ok=True)
 
