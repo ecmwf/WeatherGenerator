@@ -260,7 +260,7 @@ def write_output(
                             latents_in_sample,
                             coords=_get_latent_coords(cf, source_samples[sample_idx]),
                             source_interval=source_interval,
-                            valid_time=source_interval.end + latent_step * time_step,
+                            valid_time=source_interval.start + latent_step * time_step,
                             num_register_tokens=int(cf.get("num_register_tokens", 0)),
                             num_class_tokens=int(cf.get("num_class_tokens", 0)),
                         )
