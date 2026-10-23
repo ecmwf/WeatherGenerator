@@ -124,8 +124,18 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
+    def __init__(
+        self,
+        healpix_level: int,
+        stage: Stage,
+        streams=None,
+        mode_cfg=None,
+        diffusion_noise_cfg=None,
+    ):
         self.rng = None
+
+        # training noise distribution (diffusion.noise) used for streams with diffusion_rn
+        self.diffusion_noise_cfg = diffusion_noise_cfg or {}
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -633,12 +643,13 @@ class Masker:
             mask = np.ones(num_cells, dtype=np.bool)
 
             if "diffusion_rn" in masking_strategy_config:
-                noise_dist = masking_strategy_config.get("noise_distribution", "log_normal")
+                noise_cfg = self.diffusion_noise_cfg
+                noise_dist = noise_cfg.get("distribution", "log_normal")
                 if noise_dist == "log_uniform":
-                    # Store log_sigma directly; model interprets it via noise_distribution flag.
+                    # Store log_sigma directly; the model interprets it via noise.distribution.
                     masking_params["noise_level_rn"] = self.rng.uniform(
-                        np.log(masking_strategy_config["sigma_min"]),
-                        np.log(masking_strategy_config["sigma_max"]),
+                        np.log(noise_cfg["sigma_min"]),
+                        np.log(noise_cfg["sigma_max"]),
                     )
                 else:  # log_normal (default): store eta ~ N(0,1)
                     masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)

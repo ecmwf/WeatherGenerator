@@ -609,10 +609,9 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
-        _concat_hd = (
-            self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
-        )
-        _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
+        diff_cf = self.cf.get("diffusion", {})
+        _concat_hd = diff_cf.get("conditioning_type") == "concatenate_hiddendim"
+        _diffusion_latent_dim = diff_cf.get("latent_dim") or self.cf.ae_global_dim_embed
         _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
@@ -634,9 +633,8 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                            == "ada_ln",
+                            is_dit=diff_cf.get("enabled", False),
+                            dit_is_cond=diff_cf.get("conditioning_type") == "ada_ln",
                         )
                     )
                 else:
@@ -656,14 +654,13 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                            == "ada_ln",
+                            is_dit=diff_cf.get("enabled", False),
+                            dit_is_cond=diff_cf.get("conditioning_type") == "ada_ln",
                         )
                     )
                 # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for
                 # cross_attn conditioning
-                if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                if diff_cf.get("conditioning_type") == "cross_attn":
                     self.fe_blocks.append(
                         MultiCrossAttentionHead(
                             dim_embed_q=_diffusion_latent_dim,
@@ -677,7 +674,7 @@ class ForecastingEngine(torch.nn.Module):
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
+                            is_dit=diff_cf.get("enabled", False),
                         )
                     )
                 # Add MLP block
@@ -692,9 +689,8 @@ class ForecastingEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
-                        is_dit=self.cf.get("fe_diffusion_model", False),
-                        dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "ada_ln",
+                        is_dit=diff_cf.get("enabled", False),
+                        dit_is_cond=diff_cf.get("conditioning_type") == "ada_ln",
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -737,7 +733,8 @@ class ForecastingEngine(torch.nn.Module):
         if forecast_residual:
             tokens_in = tokens
 
-        if self.cf.get("fe_diffusion_model", False):
+        diff_cf = self.cf.get("diffusion", {})
+        if diff_cf.get("enabled", False):
             assert noise_emb is not None, (
                 "noise_emb must be provided for diffusion model conditioning"
             )
@@ -748,52 +745,43 @@ class ForecastingEngine(torch.nn.Module):
                     assert conditioning is not None, (
                         "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
                     )
-                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                    if diff_cf.get("conditioning_type") == "cross_attn":
                         tokens = checkpoint(
                             block, tokens, conditioning, noise_emb, use_reentrant=False
                         )
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "cross_attn_rev"
-                    ):
+                    elif diff_cf.get("conditioning_type") == "cross_attn_rev":
                         tokens = checkpoint(
                             block, conditioning, tokens, noise_emb, use_reentrant=False
                         )
                 else:
-                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
+                    if diff_cf.get("conditioning_type") == "ada_ln":
                         assert conditioning is not None, (
                             "conditioning must be provided when enabled"
                         )
                         tokens = checkpoint(
                             block, tokens, coords, noise_emb, conditioning, use_reentrant=False
                         )
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                    elif diff_cf.get("conditioning_type") == "cross_attn":
                         assert conditioning is not None, (
                             "conditioning (e.g. enc(X_t)) needed for cross_attn conditioning"
                         )
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "cross_attn_rev"
-                    ):
+                    elif diff_cf.get("conditioning_type") == "cross_attn_rev":
                         assert conditioning is not None, (
                             "conditioning (e.g. enc(X_t)) needed for cross_attn_rev conditioning"
                         )
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "additive":
+                    elif diff_cf.get("conditioning_type") == "additive":
                         assert conditioning is not None, (
                             "conditioning (e.g. enc(X_t)) needed for additive conditioning"
                         )
                         tokens = tokens + conditioning
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate":
+                    elif diff_cf.get("conditioning_type") == "concatenate":
                         # Conditioning already baked into tokens via sequence concat
                         # in DiffusionForecastEngine.denoise()
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "concatenate_hiddendim"
-                    ):
+                    elif diff_cf.get("conditioning_type") == "concatenate_hiddendim":
                         # Conditioning already baked into tokens via hidden-dim concat
                         # in DiffusionForecastEngine.denoise()
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)

@@ -103,13 +103,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         self.rank = cf.rank
         self.world_size = cf.world_size
-        self.diffusion_model_conditioning = cf.get("fe_diffusion_model_conditioning", None)
+        self.diffusion_model_conditioning = cf.get("diffusion", {}).get("conditioning", None)
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # initialise healpix
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
+        self.masker = Masker(
+            cf.healpix_level,
+            stage,
+            cf.streams,
+            self.mode_cfg,
+            diffusion_noise_cfg=cf.get("diffusion", {}).get("noise"),
+        )
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
