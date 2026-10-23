@@ -109,7 +109,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # initialise healpix
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
+        self.masker = Masker(
+            cf.healpix_level,
+            stage,
+            cf.streams,
+            self.mode_cfg,
+            diffusion_noise_cfg=cf.get("diffusion", {}).get("noise"),
+        )
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))

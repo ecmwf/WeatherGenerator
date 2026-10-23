@@ -43,10 +43,11 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.diff_cf = self.cf.diffusion
         self.sigma_data = self.diff_cf.sigma_data
-        self.rho = self.diff_cf.rho
-        self.p_mean = self.diff_cf.p_mean
-        self.p_std = self.diff_cf.p_std
-        self.noise_distribution = self.diff_cf.get("noise_distribution", "log_normal")
+        noise_cf = self.diff_cf.noise
+        self.noise_distribution = noise_cf.get("distribution", "log_normal")
+        if self.noise_distribution == "log_normal":
+            self.p_mean = noise_cf.p_mean
+            self.p_std = noise_cf.p_std
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
