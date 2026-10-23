@@ -74,7 +74,6 @@ def main() -> None:
         verify=certifi.where(),
         config=client_config,
     )
-    print(args.endpoint_url, certifi.where(), client_config)
     output_path = args.output_dir.expanduser().resolve() / args.run_id
     output_path.mkdir(parents=True, exist_ok=True)
 
