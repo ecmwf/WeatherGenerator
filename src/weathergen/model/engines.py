@@ -15,7 +15,6 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.attention import (
     MultiCrossAttentionHead,
     MultiCrossAttentionHeadVarlen,
@@ -715,7 +714,7 @@ class ForecastingEngine(torch.nn.Module):
         self,
         tokens: torch.Tensor,
         fstep: int,
-        meta_info: SampleMetaData = None,
+        meta_info: dict | None = None,
         noise_emb: torch.Tensor = None,
         conditioning: torch.Tensor = None,
         coords: torch.Tensor = None,
