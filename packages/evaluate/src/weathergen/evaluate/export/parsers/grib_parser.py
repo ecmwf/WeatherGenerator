@@ -97,7 +97,7 @@ class GribParser(NetcdfParser):
                 )
             if "long" in mapped_info:
                 attributes["long_name"] = mapped_info["long"]
-            variables[mapped_name] = xr.DataArray(
+            variables[grib_shortnames.get(mapped_name, mapped_name)] = xr.DataArray(
                 data=da.values,
                 dims=da.dims,
                 coords=coords,
@@ -124,5 +124,14 @@ class GribParser(NetcdfParser):
         out_fname = self.get_output_filename(forecast_ref_time)
         _logger.info(f"Saving to {out_fname}.")
         ds = self.gribify(ds)
-        to_grib(ds, out_fname)
-        _logger.info(f"Saved GRIB file to {out_fname}.")
+        ds.to_netcdf("~/WeatherGen/test_octavi2/pre_save.nc")
+        # split into surface and pressure level variables if needed
+        surface_ds_list = [var for var in ds.data_vars if "isobaricInhPa" not in ds[var].coords]
+        surface_ds = ds[surface_ds_list]
+        pressure_ds_list = [var for var in ds.data_vars if "isobaricInhPa" in ds[var].coords]
+        pressure_ds = ds[pressure_ds_list]
+        surface_fn = str(out_fname).replace(".grib", "_surface.grib")
+        pressure_fn = str(out_fname).replace(".grib", "_pressure.grib")
+        to_grib(surface_ds, surface_fn)
+        to_grib(pressure_ds, pressure_fn)
+        _logger.info(f"Saved GRIB file to {surface_fn} and {pressure_fn}.")

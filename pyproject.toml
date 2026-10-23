@@ -176,7 +176,7 @@ link-mode = "symlink"
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
 exclude-newer = "2026-04-27T00:00:00Z"
-
+exclude-newer-package = {eccodes = false, eccodeslib = false, cfgrib = false, eckitlib=false, eckit = false, earthkit-data=false, earthkit-utils=false}
 # torch 2.9.1 pulls nvidia-nccl-cu12==2.27.5. Override
 # torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
 override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]

@@ -318,11 +318,10 @@ class Regridder:
         """
 
         # set coords
-        lat_min = data["latitude"].min().item()
-        lat_max = data["latitude"].max().item()
-        lon_min = data["longitude"].min().item()
-        lon_max = data["longitude"].max().item()
-
+        lat_min = -90
+        lat_max = 90
+        lon_min = -180
+        lon_max = 180
         new_coords = data.coords.copy()
         new_coords.update(
             {
@@ -673,10 +672,10 @@ class Regridder:
                     lat_min, lat_max, lon_min, lon_max = self.region
                     # get closest points in original dataset with some buffer
                     region_mask = (
-                        (regrid_da.latitude >= lat_min - 1)
-                        & (regrid_da.latitude <= lat_max + 1)
-                        & (regrid_da.longitude >= lon_min - 1)
-                        & (regrid_da.longitude <= lon_max + 1)
+                        (regrid_da.latitude >= lat_min)
+                        & (regrid_da.latitude <= lat_max)
+                        & (regrid_da.longitude >= lon_min)
+                        & (regrid_da.longitude <= lon_max)
                     )
                     regrid_da = regrid_da.where(region_mask, drop=True)
                 except ValueError as e:
