@@ -250,6 +250,10 @@ def write_output(
                 for sample_idx, latents_in_sample in enumerate(latents_in_step):
                     if latents_in_sample:
                         source_interval = source_intervals[sample_idx]
+                        latents_in_sample["valid_interval"] = (
+                            np.array([source_interval.start, source_interval.end], "datetime64[ns]")
+                            + latent_step * time_step
+                        )
                         zio.write_latent(
                             sample_start + sample_idx,
                             latent_step,
