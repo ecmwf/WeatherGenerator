@@ -32,6 +32,8 @@ def accumulate_norm_stats(
     so every rank adds the same set of keys. Outputs are only logged for groups with data.
     """
     nonempty = [(g, t) for g, t in entries if t is not None and t.numel() > 0]
+    if not monitor.adds_param_stats():
+        nonempty = []
     sq, amax = foreach_sumsq_absmax([t for _, t in nonempty])
     for (group, t), s, a in zip(nonempty, sq, amax, strict=True):
         t_min, t_max = torch.aminmax(t)
@@ -103,13 +105,16 @@ class UpdateRatio(Monitor):
 
     @torch.no_grad()
     def on_after_clip(self, buf, total_norm):
-        self._snapshot = [local_tensor(p).clone() for _, p, _ in self.params]
+        if self.adds_param_stats():
+            self._snapshot = [local_tensor(p).clone() for _, p, _ in self.params]
+        else:
+            self._snapshot = []  # replica: only registers the (identity) keys
 
     @torch.no_grad()
     def on_step_end(self, buf):
         if self._snapshot is None:
             return
-        new = [local_tensor(p) for _, p, _ in self.params]
+        new = [local_tensor(p) for _, p, _ in self.params] if self._snapshot else []
         idx = [i for i, t in enumerate(new) if t.numel() > 0]
         dw_sq, w_sq = [], []
         if idx:

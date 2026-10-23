@@ -315,3 +315,41 @@ def test_attention_probe_matches_explicit_softmax(softcap):
     )
     torch.testing.assert_close(stats_other["max_logit"], stats["max_logit"])
     torch.testing.assert_close(stats_other["entropy"], stats["entropy"])
+
+
+def _replicated_worker(rank, world_size, init_file, out_file):
+    """One rank of a DDP-like run: identical params, data and grads on every rank."""
+    import torch.distributed as dist
+
+    dist.init_process_group(
+        "gloo", init_method=f"file://{init_file}", rank=rank, world_size=world_size
+    )
+    try:
+        torch.manual_seed(0)
+        out = _run_monitored(ToyModel(), _make_batches(NUM_STEPS), FakeTrainLogger())
+        if rank == 0:
+            torch.save(out["logged"], out_file)
+    finally:
+        dist.destroy_process_group()
+
+
+def test_replicated_params_are_not_counted_per_rank(tmp_path):
+    """With replicated params (DDP), param / grad / optimizer-state stats on 2 ranks must
+    equal the single-process ones, not be summed over the replicas."""
+    torch.manual_seed(0)
+    single = _run_monitored(ToyModel(), _make_batches(NUM_STEPS), FakeTrainLogger())["logged"]
+
+    out_file = tmp_path / "logged.pt"
+    torch.multiprocessing.spawn(
+        _replicated_worker, args=(2, tmp_path / "init", out_file), nprocs=2, join=True
+    )
+    replicated = torch.load(out_file)
+
+    prefixes = ("mon/grads/", "mon/weights/", "mon/updates/", "mon/adam_state/")
+    for istep, (ref, got) in enumerate(zip(single, replicated, strict=True)):
+        keys = [k for k in ref if k.startswith(prefixes)]
+        assert keys and set(keys) <= set(got), f"step {istep}: missing keys"
+        for key in keys:
+            torch.testing.assert_close(
+                torch.tensor(float(got[key])), torch.tensor(float(ref[key])), **FP32_TOL
+            )

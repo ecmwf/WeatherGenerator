@@ -153,6 +153,9 @@ class Monitor:
     """
 
     name: str = "monitor"
+    # Set by `build_monitor_manager`: True when params are sharded across ranks (FSDP), False
+    # when every rank holds a full replica (DDP / single process).
+    params_sharded: bool = False
 
     def __init__(self, cfg, model: torch.nn.Module, selection: Selection):
         self.cfg = cfg
@@ -164,6 +167,14 @@ class Monitor:
 
     def bind_optimizers(self, optimizers: list[torch.optim.Optimizer]) -> None:
         """Called once after construction; monitors that read optimizer state override this."""
+
+    def adds_param_stats(self) -> bool:
+        """Whether this rank adds stats of params / grads / optimizer state. Under FSDP each rank
+        adds its shard; replicated params (DDP) are added on rank 0 only, so that sum-reduced
+        stats (l2, counts) are not counted once per replica."""
+        if self.params_sharded or not (dist.is_available() and dist.is_initialized()):
+            return True
+        return dist.get_rank() == 0
 
     def is_active(self, istep: int) -> bool:
         return istep % self.every == 0

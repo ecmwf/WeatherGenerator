@@ -49,7 +49,7 @@ class AdamStateStats(Monitor):
 
     @torch.no_grad()
     def on_step_end(self, buf):
-        for _, p, group in self.params:
+        for _, p, group in self.params if self.adds_param_stats() else []:
             entry = self._opt_of.get(id(p))
             if entry is None:
                 continue

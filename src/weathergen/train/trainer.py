@@ -564,7 +564,11 @@ class Trainer(TrainerBase):
         ]
 
         self.monitor = build_monitor_manager(
-            cf.train_logging.get("monitoring", {}), self.model, self.optimizers, self.train_logger
+            cf.train_logging.get("monitoring", {}),
+            self.model,
+            self.optimizers,
+            self.train_logger,
+            params_sharded=cf.with_ddp and cf.with_fsdp,
         )
 
         # Restore optimizer momentum buffers when continuing from a checkpoint

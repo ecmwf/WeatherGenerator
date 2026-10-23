@@ -80,11 +80,13 @@ def _monitor_cfg(cfg: DictConfig, name: str) -> DictConfig:
     return OmegaConf.create(mcfg)
 
 
-def build_monitor_manager(cfg, model, optimizers, train_logger):
+def build_monitor_manager(cfg, model, optimizers, train_logger, params_sharded: bool = False):
     """Build the manager from the `train_logging.monitoring` config section (dict or
     DictConfig). Returns a `NullMonitorManager` when monitoring is disabled.
 
     `optimizers` is passed to the monitors via `Monitor.bind_optimizers` (used by `adam_state`).
+    `params_sharded` is True when the model is sharded across ranks (FSDP); with replicated
+    params (DDP) only rank 0 adds param / grad / optimizer-state stats.
     """
     cfg = OmegaConf.merge(OmegaConf.create(MONITORING_DEFAULTS), cfg or {})
     if not cfg.enabled:
@@ -106,6 +108,7 @@ def build_monitor_manager(cfg, model, optimizers, train_logger):
             mcfg.include, mcfg.exclude, mcfg.group_by, mcfg.get("sample_layers", None)
         )
         monitor = registry[name](mcfg, model, selection)
+        monitor.params_sharded = params_sharded
         monitor.bind_optimizers(optimizers or [])
         monitors.append(monitor)
 
