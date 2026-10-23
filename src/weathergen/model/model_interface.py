@@ -130,7 +130,7 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
-        if cf.get("fe_diffusion_model", False):
+        if cf.get("diffusion", {}).get("enabled", False):
             model_fe_blocks = model.forecast_engine.net.fe_blocks
         else:
             model_fe_blocks = model.forecast_engine.fe_blocks

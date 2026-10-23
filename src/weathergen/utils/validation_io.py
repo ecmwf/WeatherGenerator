@@ -79,7 +79,7 @@ def write_output(
     # original first index to cover every entry in model_output / target_aux_out.
     n_pred_steps = len(model_output.physical)
     if (
-        cf.get("fe_diffusion_model", False)
+        cf.get("diffusion", {}).get("enabled", False)
         and chunk_forecast_offset == 0
         and n_pred_steps > len(timestep_idxs)
     ):

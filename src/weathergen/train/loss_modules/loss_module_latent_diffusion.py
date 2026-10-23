@@ -41,11 +41,12 @@ class LossLatentDiffusion(LossModuleBase):
         self.device = device
         self.name = "LossLatentDiff"
 
-        self.sigma_data = self.cf.sigma_data
-        self.rho = self.cf.rho
-        self.p_mean = self.cf.p_mean
-        self.p_std = self.cf.p_std
-        self.noise_distribution = self.cf.get("noise_distribution", "log_normal")
+        self.diff_cf = self.cf.diffusion
+        self.sigma_data = self.diff_cf.sigma_data
+        self.rho = self.diff_cf.rho
+        self.p_mean = self.diff_cf.p_mean
+        self.p_std = self.diff_cf.p_std
+        self.noise_distribution = self.diff_cf.get("noise_distribution", "log_normal")
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -70,7 +71,7 @@ class LossLatentDiffusion(LossModuleBase):
         # model predicts x0 directly (c_skip=0, c_out=1 in diffusion.denoise), that weight
         # behaves like ~1/sigma^2 and lets trivial near-clean (low-sigma) samples dominate
         # the gradient. The alternatives below are appropriate for direct x0-prediction.
-        weighting = self.cf.get("diffusion_loss_weighting", "edm")
+        weighting = self.diff_cf.get("loss_weighting", "edm")
         if weighting == "edm":
             # lambda(sigma) = (sigma^2 + sigma_data^2) / (sigma * sigma_data)^2
             return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
@@ -78,7 +79,7 @@ class LossLatentDiffusion(LossModuleBase):
             # Min-SNR-gamma weighting (Hang et al., 2023) for direct x0-prediction.
             # SNR = sigma_data^2 / sigma^2; capping at gamma prevents low-noise samples
             # from dominating while still down-weighting the untrained high-noise tail.
-            gamma = self.cf.get("diffusion_min_snr_gamma", 5.0)
+            gamma = self.diff_cf.get("min_snr_gamma", 5.0)
             snr = (self.sigma_data / sigma) ** 2
             return torch.clamp(snr, max=gamma) / self.sigma_data**2
         elif weighting == "uniform_x0":
@@ -86,7 +87,7 @@ class LossLatentDiffusion(LossModuleBase):
             return torch.ones_like(sigma) / self.sigma_data**2
         else:
             raise ValueError(
-                f"Unknown diffusion_loss_weighting '{weighting}'. "
+                f"Unknown diffusion.loss_weighting '{weighting}'. "
                 "Expected one of: 'edm', 'min_snr_gamma', 'uniform_x0'."
             )
 
