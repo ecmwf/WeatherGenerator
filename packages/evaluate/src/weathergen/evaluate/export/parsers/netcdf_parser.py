@@ -50,6 +50,7 @@ class NetcdfParser(CfParser):
         super().__init__(config=config, grid_type=self.grid_type)
 
         self.mapping = config.get("variables", {})
+        self.zarr_coords: np.typing.NDArray | None = None
 
     def process_sample(
         self,
@@ -103,6 +104,7 @@ class NetcdfParser(CfParser):
                     "Grid points between forecast steps are not consistent."
                     "Check that inference was not performed with masking"
                 )
+            self.zarr_coords = get_grid_points(da_fs[0])
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
@@ -124,12 +126,20 @@ class NetcdfParser(CfParser):
         -------
             Full path to the output file.
         """
-
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
-        out_fname = (
-            Path(self.output_dir)
-            / f"{self.data_type}_{frt}_{self.run_id}_{self.stream}.{self.file_extension}"
-        )
+        if self.filename_template is None:
+            out_fname = (
+                Path(self.output_dir)
+                / f"{self.data_type}_{frt}_{self.run_id}_{self.stream}.{self.file_extension}"
+            )
+        else:
+            out_fname = Path(
+                self.filename_template.replace("%S", self.stream)
+                .replace("%D", self.data_type)
+                .replace("%R", self.run_id)
+                .replace("%T", frt)
+            )
+            out_fname = (Path(self.output_dir) / out_fname).with_suffix(f".{self.file_extension}")
         return out_fname
 
     def reshape(self, data: xr.DataArray) -> xr.Dataset:
@@ -212,11 +222,28 @@ class NetcdfParser(CfParser):
         """
         if self.regrid_degree is None or self.regrid_type is None:
             _logger.info("No regridding specified, skipping regridding step.")
+            if self.region is not None:
+                lat_min, lat_max, lon_min, lon_max = self.region
+                # get closest points in original dataset with some buffer
+                region_mask = (
+                    (ds.latitude >= lat_min - 1)
+                    & (ds.latitude <= lat_max + 1)
+                    & (ds.longitude >= lon_min - 1)
+                    & (ds.longitude <= lon_max + 1)
+                )
+                region_ds = ds.where(region_mask, drop=True)
+                return region_ds
             return ds
-        nc_regridder = Regridder(ds, output_grid_type=self.regrid_type, degree=self.regrid_degree)
-
-        regrid_ds = nc_regridder.regrid_ds()
-        return regrid_ds
+        else:
+            nc_regridder = Regridder(
+                ds,
+                output_grid_type=self.regrid_type,
+                degree=self.regrid_degree,
+                region=self.region,
+                zarr_coords=self.zarr_coords,
+            )
+            regrid_ds = nc_regridder.regrid_ds()
+            return regrid_ds
 
     def concatenate(
         self,

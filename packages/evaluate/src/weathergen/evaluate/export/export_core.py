@@ -355,11 +355,13 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     stream = kwargs.stream
     channels_cfg = kwargs.channels
     n_processes = kwargs.n_processes
+    region = kwargs.region
     epoch = kwargs.epoch
     rank = kwargs.rank
     # OmegaConf wraps lists in ListConfig, which is not a `list` instance.
     if OmegaConf.is_list(rank):
         rank = list(rank)
+
     init_time_reference = kwargs.get("init_time_reference", "source_start")
     if init_time_reference not in ("source_start", "source_end"):
         raise ValueError(
@@ -479,6 +481,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                                 ref_time=init_time,
                                 source_interval_start=source_start,
                                 source_interval_end=init_time,
+                                region=region,
                             )
                             processed_samples.append(processed_sample)
                             # Free memory immediately.
