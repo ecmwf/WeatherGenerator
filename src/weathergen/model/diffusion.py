@@ -31,7 +31,6 @@ import numpy.typing as npt
 import torch
 
 from weathergen.common.config import Config, get_path_run
-from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
 logger = logging.getLogger(__name__)
@@ -256,7 +255,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self,
         tokens: torch.Tensor = None,
         fstep: int = None,
-        meta_info: dict[str, SampleMetaData] = None,
+        meta_info: dict | None = None,
         coords: torch.Tensor = None,
         num_steps: int = 10,
     ) -> torch.Tensor:
@@ -275,7 +274,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         Args:
             tokens: Training tensor of shape (B, H, D) - required during training
             fstep: Forecast step index - required for both modes
-            meta_info: Sample metadata dict containing timestamps - required for both modes
+            meta_info: Stream-independent meta information: noise_level_rn (training),
+                timestamp (date/time conditioning), conditioning_tokens (forecast conditioning)
             coords: Optional coordinate tensor
             num_steps: Number of diffusion steps for inference (default: 30)
 
@@ -330,7 +330,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self,
         tokens: torch.Tensor,
         fstep: int,
-        meta_info: dict[str, SampleMetaData],
+        meta_info: dict,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
         """
@@ -356,18 +356,17 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         c = None
         if self.conditioning in ["date_time", "date", "time"]:
-            c = meta_info["ERA5"].params["timestamp"]
+            c = meta_info["timestamp"]
         elif self.conditioning == "forecast":
             # c = meta_info["ERA5"].params["conditioning_tokens"]
             # X_{t-1} as conditioning (model.py extracts last step as target,
             # passes second-to-last here)
-            c = meta_info["LATENT_CONDITIONING_TOKENS"]
+            c = meta_info["conditioning_tokens"]
 
-        noise_stream = self.diff_cf.get("noise_stream", "ERA5")
-        noise_level_rn = torch.tensor(
-            [meta_info[noise_stream].params["noise_level_rn"]], 
-            device=tokens.device
+        assert "noise_level_rn" in meta_info, (
+            "noise_level_rn (batch meta_info, drawn by the data sampler) is required for training"
         )
+        noise_level_rn = torch.tensor([meta_info["noise_level_rn"]], device=tokens.device)
 
         # Compute sigma from noise_level_rn.
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
@@ -495,7 +494,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self,
         fstep: int,
         num_steps: int = 50,
-        meta_info: dict[str, SampleMetaData] = None,
+        meta_info: dict | None = None,
         coords: torch.Tensor = None,
     ) -> "list[torch.Tensor] | torch.Tensor":
         """
@@ -514,7 +513,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         Args:
             fstep: Forecast step index for the network
             num_steps: Number of diffusion denoising steps (default: 50)
-            meta_info: Optional sample metadata dict containing timestamps for temporal conditioning
+            meta_info: Stream-independent meta information containing the timestamp
+                (date/time conditioning) or conditioning_tokens (forecast conditioning)
             coords: Optional coordinate tensor for spatial conditioning
         Returns:
             list[Tensor]: ODE trajectory (one tensor per denoising step) when
@@ -526,9 +526,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Extract conditioning (mirrors training_forward).
         c = None
         if self.conditioning in ["date_time", "date", "time"]:
-            c = meta_info["ERA5"].params["timestamp"]
+            c = meta_info["timestamp"]
         elif self.conditioning == "forecast":
-            c = meta_info["LATENT_CONDITIONING_TOKENS"]
+            c = meta_info["conditioning_tokens"]
 
         num_ensemble_members: int = self.num_ensemble_members
 

@@ -103,19 +103,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         self.rank = cf.rank
         self.world_size = cf.world_size
-        self.diffusion_model_conditioning = cf.get("diffusion", {}).get("conditioning", None)
+        diffusion_cfg = cf.get("diffusion", {})
+        self.diffusion_model_conditioning = diffusion_cfg.get("conditioning", None)
+        # training noise distribution; one noise level is drawn per batch
+        self.diffusion_noise_cfg = (
+            diffusion_cfg.get("noise", {}) if diffusion_cfg.get("enabled", False) else None
+        )
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # initialise healpix
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(
-            cf.healpix_level,
-            stage,
-            cf.streams,
-            self.mode_cfg,
-            diffusion_noise_cfg=cf.get("diffusion", {}).get("noise"),
-        )
+        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
@@ -685,6 +684,18 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return batch
 
+    def _sample_diffusion_noise_level(self) -> float:
+        """
+        Draw the diffusion noise level for a batch from the training noise distribution.
+
+        log_uniform: returns log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
+        log_normal: returns eta ~ N(0, 1); sigma = exp(eta * p_std + p_mean) in the model
+        """
+        noise_cfg = self.diffusion_noise_cfg
+        if noise_cfg.get("distribution", "log_normal") == "log_uniform":
+            return self.rng.uniform(np.log(noise_cfg["sigma_min"]), np.log(noise_cfg["sigma_max"]))
+        return self.rng.normal(0.0, 1.0)
+
     def _get_batch(self, idx: int, num_forecast_steps: int):
         """
         Assemble a batch using the sample corresponding to idx
@@ -717,6 +728,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             self.output_offset,
             num_output_steps,
         )
+        if self.diffusion_noise_cfg is not None:
+            batch.add_meta_info({"noise_level_rn": self._sample_diffusion_noise_level()})
+        if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
+            # valid time of the first target step: start of its time window (stream independent)
+            target_base_idx = idx + self.teacher_time_offset
+            win_idx = target_base_idx + (self.time_step * self.output_offset) // self.step_timedelta
+            batch.add_meta_info({"timestamp": self.time_window_handler.window(win_idx).start})
 
         # for all streams
         for stream_name, stream_ds in self.streams_datasets.items():
@@ -822,18 +840,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 target_metadata = target_masks.metadata[tidx]
 
-                # Get first target step's times
-                # (using self.output_offset as the first output step index)
-                if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
-                    target_times_array = sdata.target_times_raw[self.output_offset]
-                    target_metadata.add_params(
-                        {
-                            "timestamp": (
-                                target_times_array[0] if len(target_times_array) > 0 else None
-                            )
-                        }
-                    )
-
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
                 # Map target to all source students
@@ -846,30 +852,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
-
-        # add target times in source for diffusion model date/time conditioning
-        if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
-            # TODO: Might need upgrading fro num_samples > 1
-
-            # Assert singular source and target samples
-            assert len(batch.source_samples.samples) == 1, (
-                "Only single source sample supported for diffusion model conditioning."
-            )
-            assert len(batch.target_samples.samples) == 1, (
-                "Only single target sample supported for diffusion model conditioning."
-            )
-
-            source_sample = batch.source_samples.samples[0]
-            target_sample = batch.target_samples.samples[0]
-
-            # Copy target timestamps to source metadata for all streams
-            for stream_name in [s["name"] for s in self.streams]:
-                if (
-                    stream_name in target_sample.meta_info
-                    and stream_name in source_sample.meta_info
-                ):
-                    target_timestamp = target_sample.meta_info[stream_name].params.get("timestamp")
-                    source_sample.meta_info[stream_name].add_params({"timestamp": target_timestamp})
 
         return batch
 

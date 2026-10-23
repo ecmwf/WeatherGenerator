@@ -124,18 +124,8 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(
-        self,
-        healpix_level: int,
-        stage: Stage,
-        streams=None,
-        mode_cfg=None,
-        diffusion_noise_cfg=None,
-    ):
+    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
-
-        # training noise distribution (diffusion.noise) used for streams with diffusion_rn
-        self.diffusion_noise_cfg = diffusion_noise_cfg or {}
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -479,16 +469,6 @@ class Masker:
                         channel_names=source_channel_names,
                     )
 
-                # One noise level per source/target pair. diffusion.py reads it off the source
-                # metadata to noise the latents, the latent-diffusion loss reads it off the target
-                # metadata to weight the residual; they have to be the same draw. The target is
-                # authoritative, so any value drawn for the source above is discarded here. This
-                # also covers sources whose mask is forced empty (diagnostic streams, randomly
-                # dropped sources), which never draw a noise level of their own.
-                target_noise_level = target_masks.metadata[target_idx].params.get("noise_level_rn")
-                if target_noise_level is not None:
-                    mask_params["noise_level_rn"] = target_noise_level
-
                 corr = target_idx
                 source_masks.add_mask(
                     source_mask, mask_params, source_cfg, losses, i_source, corr, relationship
@@ -641,18 +621,6 @@ class Masker:
 
         elif "forecast" in strategy or strategy == "causal":
             mask = np.ones(num_cells, dtype=np.bool)
-
-            if "diffusion_rn" in masking_strategy_config:
-                noise_cfg = self.diffusion_noise_cfg
-                noise_dist = noise_cfg.get("distribution", "log_normal")
-                if noise_dist == "log_uniform":
-                    # Store log_sigma directly; the model interprets it via noise.distribution.
-                    masking_params["noise_level_rn"] = self.rng.uniform(
-                        np.log(noise_cfg["sigma_min"]),
-                        np.log(noise_cfg["sigma_max"]),
-                    )
-                else:  # log_normal (default): store eta ~ N(0,1)
-                    masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
 
         elif strategy == "healpix":
             # prepare healpix-based masking

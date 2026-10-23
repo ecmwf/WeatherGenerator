@@ -175,6 +175,8 @@ class BatchSamples:
     output_steps: int
     output_idxs: list[int]
     device: str | None
+    # stream-independent meta information shared by all samples
+    meta_info: dict
 
     def __init__(
         self, stream_names: list[str], num_samples: int, output_steps, output_idxs
@@ -185,6 +187,7 @@ class BatchSamples:
         self.output_idxs = output_idxs
         self.device = None
         self.latent = []
+        self.meta_info = {}
 
     @property
     def batch_samples(self) -> typing.Self:
@@ -351,9 +354,15 @@ class ModelBatch:
         self.target_samples = BatchSamples(
             stream_names, num_target_samples, output_steps, self.output_idxs
         )
+        # batch-level meta information is shared between source and target samples
+        self.target_samples.meta_info = self.source_samples.meta_info
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+
+    def add_meta_info(self, params: dict) -> None:
+        """Add stream-independent meta information for the whole batch."""
+        self.source_samples.meta_info.update(params)
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
