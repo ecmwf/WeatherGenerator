@@ -7,7 +7,7 @@
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-24/crps8_w8_smoke.yml
 parallelize: true
 stages:
-  - name: smokecrps8w8
+  - name: smokew8anch4
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
