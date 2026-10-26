@@ -368,23 +368,13 @@ class Trainer(TrainerBase):
         val_cfg = self.validation_cfg
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
 
-        # recover mini_epoch when continuing run
-        if self.world_size_original is None:
-            mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
-        else:
-            len_per_rank = (
-                max(1, len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu))
-            ) * self.batch_size_per_gpu
-            mini_epoch_base = int(
-                self.cf.general.istep
-                / (
-                    min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
-                    * self.world_size_original
-                )
-            )
+        # recover mini_epoch and the batches of it already trained when continuing run
+        steps_per_mini_epoch = self.dataset.num_batches_per_rank(cf.data_loading.num_workers)
+        mini_epoch_base, skip_batches = divmod(self.cf.general.istep, steps_per_mini_epoch)
 
-        # align the sampler, which starts at mini_epoch 0 in every process, with the resumed one
+        # align the samplers, which start at mini_epoch 0 in every process, with the resumed one
         self.dataset.mini_epoch = mini_epoch_base
+        self.dataset_val.mini_epoch = mini_epoch_base
 
         if is_root():
             config.save(self.cf, None)
@@ -401,7 +391,8 @@ class Trainer(TrainerBase):
                 logger.info(
                     f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train."
                 )
-            self.train(mini_epoch)
+            self.train(mini_epoch, skip_batches)
+            skip_batches = 0
 
             if is_root():
                 logger.info(
@@ -444,7 +435,7 @@ class Trainer(TrainerBase):
             else:
                 assert False, "validate_before_training must be integer or boolean."
 
-    def train(self, mini_epoch):
+    def train(self, mini_epoch, skip_batches=0):
         """
         Perform training for one epoch
         """
@@ -455,12 +446,17 @@ class Trainer(TrainerBase):
         apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
 
         dataset_iter = iter(self.data_loader)
+        if skip_batches > 0 and is_root():
+            logger.info(f"Mini_epoch {mini_epoch}: skipping {skip_batches} trained batches.")
 
         self.optimizer.zero_grad()
 
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            # batches already in the resumed checkpoint are loaded but not trained
+            if bidx < skip_batches:
+                continue
             with self.training_loop_annotation_context(f"batch_{bidx}"):
                 if cf.data_loading.get("memory_pinning", False):
                     # pin memory for faster CPU-GPU transfer
@@ -575,11 +571,11 @@ class Trainer(TrainerBase):
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
 
-            # save model checkpoint (with designation _latest)
+            self.cf.general.istep += 1
+
+            # save model checkpoint (with designation _latest), istep counts the completed steps
             if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
-
-            self.cf.general.istep += 1
 
         self.dataset.advance()
 

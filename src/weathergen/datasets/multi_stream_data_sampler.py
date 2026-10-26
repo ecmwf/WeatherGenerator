@@ -805,6 +805,15 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def __len__(self):
         return self.len
 
+    def num_batches_per_rank(self, num_workers: int) -> int:
+        """Number of batches each rank yields per mini_epoch with the split of worker_workset."""
+        if num_workers == 0:
+            return len(range(0, self.len, self.batch_size))
+        per_worker = self.len // num_workers
+        n_last = self.len - (num_workers - 1) * per_worker
+        n_other = len(range(0, per_worker, self.batch_size))
+        return (num_workers - 1) * n_other + len(range(0, n_last, self.batch_size))
+
     def worker_workset(self):
         local_start, local_end = self.rank * self.len, (self.rank + 1) * self.len
 
