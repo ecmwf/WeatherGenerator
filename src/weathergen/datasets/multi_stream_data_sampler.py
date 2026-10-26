@@ -167,10 +167,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.streams_datasets = self._init_stream_datasets(cf)
         self.streams = cf.streams
 
-        # RNG seed setup
-        rs = cf.data_loading.rng_seed
-        nw = cf.data_loading.num_workers
-        self.data_loader_rng_seed = rs if rs > nw else rs * 97
+        # RNG seed setup, see _make_rng()
+        self.data_loader_rng_seed = cf.data_loading.rng_seed
+        self._num_iters = 0
 
         self.rng = None
 
@@ -303,7 +302,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         Returns: permutation index, forecast steps index
         """
-        self.rng = np.random.default_rng(self.data_loader_rng_seed)
+        self.rng = self._make_rng()
         fsm = self._get_fsm()
         self.check_samples(fsm)
         perms = self._calc_baseperms(fsm)
@@ -679,6 +678,31 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return batch
 
+    def _make_rng(self) -> np.random.Generator:
+        """
+        Create the random number generator for the current iteration (i.e. mini_epoch).
+
+        The worker processes are generated as bit-wise copy of the "template" (the actual
+        instance of the present class that is created) whenever __iter__ is started. This
+        happens for each mini_epoch, for train and validation, and independently for each DDP
+        rank. The generator therefore has to be unique for DDP rank, loader worker, mini_epoch
+        and stage. All of these enter the seed as separate entropy values, so that every
+        combination yields an independent stream. The iteration count covers persistent loader
+        workers, whose mini_epoch is not advanced.
+        """
+        worker_info = torch.utils.data.get_worker_info()
+        worker_id = worker_info.id + 1 if worker_info is not None else 0
+        entropy = [
+            int(self.data_loader_rng_seed),
+            int(self.rank),
+            worker_id,
+            self.mini_epoch,
+            self._num_iters,
+            ("train", "val", "test").index(self._stage),
+        ]
+        self._num_iters += 1
+        return np.random.default_rng(np.random.SeedSequence(entropy))
+
     def _get_batch(self, idx: int, num_forecast_steps: int):
         """
         Assemble a batch using the sample corresponding to idx
@@ -925,19 +949,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             iter_end = local_end
 
         else:
-            # ensure the rng seed is fully unique across workers and mini_epochs
-            # the worker processes are generated as bit-wise copy of the "template" (the actual
-            # instance of the present class that is created) whenever __iter__ is started. This
-            # happens for each mini_epoch, for train and validation, and independently for each DDP
-            # worker. After the bit-wise copy, the rng seed needs to be made unique for
-            # DDP workers, loader process, mini_epoch.
-            dist = torch.distributed
-            self.data_loader_rng_seed *= (
-                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
-                * ((worker_info.id + 1) * 37)
-                * (self.mini_epoch + 13)
-                * 7
-            )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers
             iter_start = local_start + worker_info.id * per_worker
