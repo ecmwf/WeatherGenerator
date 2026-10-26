@@ -217,20 +217,20 @@ variables:
     var: strd
     long: surface_thermal_radiation_downwards
     std: surface_downwelling_longwave_flux_in_air
-    wg_unit: {CERRA:   J m-2,
+    wg_unit: {CERRA:   J m**-2,
                NORA3:   W/m^2,
-               ERA5:    J m-2,
-               DEFAULT: J m-2}
-    std_unit: J m-2
+               ERA5:    J m**-2,
+               DEFAULT: J m**-2}
+    std_unit: J m**-2
     level_type: sfc
   ssrd:
     var: ssrd
     long: surface_solar_radiation_downwards
     std: surface_downwelling_shortwave_flux_in_air
-    wg_unit: {CERRA:   J m-2,
+    wg_unit: {CERRA:   J m**-2,
                NORA3:   W/m^2,
-               ERA5:    J m-2,
-               DEFAULT: J m-2}
+               ERA5:    J m**-2,
+               DEFAULT: J m**-2}
     std_unit: J m**-2
     level_type: sfc
 
