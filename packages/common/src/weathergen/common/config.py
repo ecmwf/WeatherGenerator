@@ -292,34 +292,46 @@ def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
     return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> list[Path]:
+def get_model_results(
+    run_id: str, mini_epoch_list: list, rank_list: list, results_path: None | Path
+) -> list[Path]:
     """
     Find all model results zarr stores from a given run_id.
     """
-    run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
-    if not run_results.exists():
-        raise FileNotFoundError(
-            f"Results directory for run_id {run_id} does not exist: {run_results}"
-        )
-
     found_paths = []
+    if results_path is None:
+        run_results = (
+            Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
+        )
+        if not run_results.exists():
+            raise FileNotFoundError(
+                f"Results directory for run_id {run_id} does not exist: {run_results}"
+            )
 
-    for rank in rank_list:
-        if isinstance(rank, int):
-            rank = f"{rank:04d}"
-        else:
-            rank = "*"
-
-        for mini_epoch_int in mini_epoch_list:
-            if isinstance(mini_epoch_int, int):
-                mini_epoch = f"{mini_epoch_int:05d}"
+        for rank in rank_list:
+            if isinstance(rank, int):
+                rank = f"{rank:04d}"
             else:
-                mini_epoch = "*"
+                rank = "*"
 
-            glob_str = f"validation_chkpt{mini_epoch}_rank{rank}"
+            for mini_epoch_int in mini_epoch_list:
+                if isinstance(mini_epoch_int, int):
+                    mini_epoch = f"{mini_epoch_int:05d}"
+                else:
+                    mini_epoch = "*"
 
+                glob_str = f"validation_chkpt{mini_epoch}_rank{rank}"
+
+                for ext in StoreType.extensions():
+                    found_paths.extend(run_results.glob(f"{glob_str}.{ext}"))
+    else:
+        run_results = Path(results_path)
+        if run_results.is_file():
+            found_paths = [run_results]
+        elif run_results.is_dir():
             for ext in StoreType.extensions():
-                found_paths.extend(run_results.glob(f"{glob_str}.{ext}"))
+                # will search for all .zarr/.zip files
+                found_paths.extend(run_results.glob(f"*.{ext}"))
 
     if not found_paths:
         raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {run_results}")
