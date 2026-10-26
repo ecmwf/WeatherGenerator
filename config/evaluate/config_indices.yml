@@ -38,6 +38,34 @@ default_streams:
           use_climatology: true
           significance_level: 0.05
 
+  # Example: a stream whose zarr stores monthly means instead of 6h timesteps
+  # (same dims/coords shape, "forecast_step" just advances by one month per
+  # entry rather than 6h). Index computation itself (EOF/SVD, significance
+  # test) is agnostic to the actual time delta between forecast steps, so no
+  # per-index change is needed; only climatology time-matching must switch
+  # from day-of-year+hour to calendar-month.
+  ERA5pl_monthly:
+    channels: ["z_50", "z_500", "z_850"]
+    # Explicit override so this stream's own monthly-mean climatology is
+    # loaded instead of the (inferred) hourly one; see
+    # WeatherGenReader.get_climatology_filename.
+    climatology_path: "/path/to/era5_monthly_climatology.zarr"
+    climatology_match: monthly  # "hourly" (default, day-of-year+hour) or
+                                 # "monthly" (calendar-month only, exact
+                                 # match); use "monthly" when forecast_step
+                                 # is a monthly-mean value instead of a 6h
+                                 # step, matched against a monthly (not
+                                 # hourly/daily) climatology dataset.
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+    indices:
+      - nam:
+          min_lat: 20.0
+          use_climatology: true
+          significance_level: 0.05
+
 run_ids:
   n5lpzqsm:
     label: "pretrained model n5lpzqsm"
