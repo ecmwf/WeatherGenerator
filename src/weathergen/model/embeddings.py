@@ -10,7 +10,7 @@
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.model.attention import MultiSelfAttentionHead
+from weathergen.model.attention import Attention
 from weathergen.model.layers import MLP
 
 # from weathergen.model.mlp import MLP
@@ -60,12 +60,11 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.layers = torch.nn.ModuleList()
         for _ in range(self.num_blocks):
             self.layers.append(
-                MultiSelfAttentionHead(
+                Attention(
                     self.dim_embed,
                     self.num_heads,
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=True,
-                    with_flash=True,
                 )
             )
             self.layers.append(

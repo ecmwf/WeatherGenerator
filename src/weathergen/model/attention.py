@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from functools import partial
 
 import torch
-import torch.nn.functional as F
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
@@ -45,10 +44,8 @@ class SeqLensFlash:
     def from_lens(cls, q_lens, kv_lens=None) -> "SeqLensFlash":
         kv_lens = kv_lens if kv_lens is not None else q_lens
 
-        # flash_attn_varlen requires cu_seqlens to have a leading 0.
-        # F.pad adds a 0 at the beginning of the cumsum tensor.
-        cu_q = F.pad(torch.cumsum(q_lens, 0, dtype=torch.int32), (1, 0))
-        cu_kv = F.pad(torch.cumsum(kv_lens, 0, dtype=torch.int32), (1, 0))
+        cu_q = torch.cumsum(q_lens, 0, dtype=torch.int32)
+        cu_kv = torch.cumsum(kv_lens, 0, dtype=torch.int32)
 
         return cls(
             cu_q=cu_q,
