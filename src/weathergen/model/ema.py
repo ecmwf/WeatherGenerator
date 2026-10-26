@@ -95,10 +95,7 @@ class EMAModel:
             # Due to DDP only being applied only to the student the names may missmatch
             # Thus, we check for the alternate naming scheme
             p_src = self.src_params.get("module." + name, None) if p_src is None else p_src
-            if "identity" in name.lower() or "q_cells" in name.lower():
-                continue
             if p_src is None:
-                # EMA-only param or intentionally excluded
                 assert False, f"{name}: All parameters of the EMA model must be in the base model."
 
             p_ema.lerp_(p_src, 1.0 - beta)
