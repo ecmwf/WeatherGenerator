@@ -121,7 +121,12 @@ class Reader(ABC):
             "climatology_match": stream_cfg.get("climatology_match"),
         }
         # Defaults that should not trigger cache invalidation
-        defaults = {"ensemble": "all", "rank": "all", "agg_dims": "ipoint", "climatology_match": "hourly"}
+        defaults = {
+            "ensemble": "all",
+            "rank": "all",
+            "agg_dims": "ipoint",
+            "climatology_match": "hourly",
+        }
 
         settings: dict = {}
         for key, val in entries.items():
