@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = ["boto3<1.36", "certifi"]
+# dependencies = ["boto3<1.36", "certifi>=2026.10.19"]
 # [tool.uv]
 # exclude-newer = "2025-05-01T00:00:00Z"
 # ///
