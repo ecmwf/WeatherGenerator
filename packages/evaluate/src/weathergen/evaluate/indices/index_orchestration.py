@@ -182,13 +182,15 @@ def _index_single_sample(
         if result is None:
             continue
 
-        index, _pattern, explained_variance_ratio = result
+        index, diagnostics = result
         index_by_channel[ch] = index
         # TODO: implement correct container for pattern, e.g. zarr zipstore.
-        # Dropped from attrs for now: storing one full domain-sized pattern
-        # per sample per channel as a JSON list blows up the output file
-        # (samples x channels x n_points floats, pretty-printed).
-        attrs[f"{ch}/explained_variance_ratio"] = explained_variance_ratio
+        # "pattern" (if present) is dropped here rather than serialized:
+        # storing one full domain-sized pattern per sample per channel as a
+        # JSON list blows up the output file (samples x channels x n_points
+        # floats, pretty-printed).
+        if "explained_variance_ratio" in diagnostics:
+            attrs[f"{ch}/explained_variance_ratio"] = diagnostics["explained_variance_ratio"]
 
     if not index_by_channel:
         return None

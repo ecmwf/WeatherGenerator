@@ -33,7 +33,7 @@ def compute_annular_mode_index(
     anomaly: np.typing.NDArray,
     lat: np.typing.NDArray,
     significance_level: float = 0.05,
-) -> tuple[np.typing.NDArray, np.typing.NDArray, float] | None:
+) -> tuple[np.typing.NDArray, dict] | None:
     """Compute an annular-mode index (NAM or SAM) from a (time, space) anomaly field.
 
     Parameters
@@ -47,17 +47,23 @@ def compute_annular_mode_index(
     lat : np.typing.NDArray
         Latitude of each point, shape ``(n_points,)``. Sign indicates
         hemisphere; only ``cos(lat)`` is used, so it is hemisphere-agnostic.
+        NOTE: cos(lat) alone is only exact area-weighting on a regular
+        lat-lon grid; on a reduced Gaussian grid (e.g. O96) point density
+        along a latitude band also varies, so this under/overweights some
+        points. See TODO below.
     significance_level : float
         Two-tailed p-value threshold for masking the spatial pattern.
 
     Returns
     -------
-    tuple[index, pattern, explained_variance_ratio] | None
+    tuple[index, diagnostics] | None
         ``index``: shape ``(n_time,)``, the standardized (z-scored) leading
-        PC. ``pattern``: shape ``(n_points,)``, the per-point regression of
-        the anomaly onto the index (NaN at points dropped as all-NaN, 0
-        where not statistically significant). ``None`` if there are too few
-        time steps or valid points to fit an EOF.
+        PC. ``diagnostics``: dict with ``"pattern"`` (shape ``(n_points,)``,
+        the per-point regression of the anomaly onto the index; NaN at
+        points dropped as all-NaN, 0 where not statistically significant)
+        and ``"explained_variance_ratio"`` (float, leading-mode variance
+        fraction). ``None`` if there are too few time steps or valid points
+        to fit an EOF.
     """
     n_time, n_points = anomaly.shape
     if n_time < _MIN_TIME_STEPS:
@@ -73,7 +79,9 @@ def compute_annular_mode_index(
     lat_valid = lat[valid_points]
 
     # cos(lat) area-weighting before the SVD (matches EOF.cosine_latitude_weights).
-    # TODO: Normalize according to actual grid density
+    # TODO: Normalize according to actual grid density (cos(lat) alone is not
+    # exact on reduced Gaussian grids such as O96, where point density along
+    # a latitude band is not uniform).
     weights = np.cos(np.radians(lat_valid))
     weighted = anomaly_valid * weights[None, :]
 
@@ -104,7 +112,7 @@ def compute_annular_mode_index(
     pattern = np.full(n_points, np.nan)
     pattern[valid_points] = pattern_valid
 
-    return index, pattern, explained_variance_ratio
+    return index, {"pattern": pattern, "explained_variance_ratio": explained_variance_ratio}
 
 
 def _regress_pattern(
