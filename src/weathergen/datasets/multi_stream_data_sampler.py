@@ -682,12 +682,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
         Create the random number generator for the current iteration (i.e. mini_epoch).
 
-        The worker processes are generated as bit-wise copy of the "template" (the actual
-        instance of the present class that is created) whenever __iter__ is started. This
-        happens for each mini_epoch, for train and validation, and independently for each DDP
-        rank. The generator therefore has to be unique for DDP rank, loader worker, mini_epoch
-        and stage. All of these enter the seed as separate entropy values, so that every
-        combination yields an independent stream. The iteration count covers persistent loader
+        The generator has to be unique for DDP rank, loader worker, mini_epoch and stage. 
+        All of these enter the seed as separate entropy values, so that every combination 
+        yields an independent stream. The iteration count covers persistent loader 
         workers, whose mini_epoch is not advanced.
         """
         worker_info = torch.utils.data.get_worker_info()
