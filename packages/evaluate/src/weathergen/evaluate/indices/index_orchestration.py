@@ -10,9 +10,11 @@
 """Index orchestration: per-sample index computation, stream aggregation, JSON output.
 
 Structurally parallel to ``scores/score_orchestration.py`` but parallelizes
-over *sample* rather than *forecast step*: an index (e.g. NAM, SAM) needs one
-sample's full forecast-lead-time trajectory as a single population to fit its
-EOF, whereas scores are independent per (fstep, region).
+over *sample* rather than *forecast step*: an EOF-based index (e.g. NAM, SAM)
+needs one sample's full forecast-lead-time trajectory as a single population
+to fit its EOF, whereas scores are independent per (fstep, region). Simpler
+per-sample indices (e.g. the Nino 3.4 area-mean) reuse the same per-sample
+trajectory plumbing without needing an EOF fit.
 """
 
 import json
@@ -24,6 +26,7 @@ import xarray as xr
 from joblib import delayed
 
 from weathergen.evaluate.indices.annular_mode import compute_annular_mode_index
+from weathergen.evaluate.indices.nino34 import compute_nino34_index
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.utils.clim_utils import get_climatology
@@ -36,11 +39,16 @@ _logger = logging.getLogger(__name__)
 INDEX_REGISTRY = {
     "nam": compute_annular_mode_index,
     "sam": compute_annular_mode_index,
+    "nino34": compute_nino34_index,
 }
 
 # index name -> default hemisphere for its polar-cap domain, overridable via
 # the index's own "hemisphere" config param.
 _DEFAULT_HEMISPHERE = {"nam": "north", "sam": "south"}
+
+# Nino 3.4 box default (5N-5S, 170W-120W), overridable via the index's own
+# "lat_min"/"lat_max"/"lon_min"/"lon_max" config params.
+_NINO34_BBOX_DEFAULTS = {"lat_min": -5.0, "lat_max": 5.0, "lon_min": -170.0, "lon_max": -120.0}
 
 
 def _select_sample(da: xr.DataArray, sample: int) -> xr.DataArray:
@@ -71,6 +79,40 @@ def _build_polar_cap_bbox(index_name: str, parameters: dict) -> RegionBoundingBo
         lon_max=180.0,
         projection=ccrs.PlateCarree(),
     )
+
+
+def _build_nino34_bbox(index_name: str, parameters: dict) -> RegionBoundingBox:
+    """Build the fixed equatorial-Pacific box for the Nino 3.4 index.
+
+    Defaults to the conventional 5N-5S, 170W-120W box; each bound is
+    overridable via the index's own ``lat_min``/``lat_max``/``lon_min``/
+    ``lon_max`` config params.
+    """
+    del index_name  # unused: single fixed box, no per-index-name variant
+    bounds = {
+        **_NINO34_BBOX_DEFAULTS,
+        **{k: v for k, v in parameters.items() if k in _NINO34_BBOX_DEFAULTS},
+    }
+    return RegionBoundingBox(
+        lat_min=bounds["lat_min"],
+        lat_max=bounds["lat_max"],
+        lon_min=bounds["lon_min"],
+        lon_max=bounds["lon_max"],
+        projection=ccrs.PlateCarree(),
+    )
+
+
+# index name -> bbox builder callable; defaults to the polar-cap builder
+# (NAM/SAM) for any index not listed here.
+_BBOX_BUILDER_REGISTRY = {
+    "nino34": _build_nino34_bbox,
+}
+
+
+def _build_index_bbox(index_name: str, parameters: dict) -> RegionBoundingBox:
+    """Dispatch to the right domain-bbox builder for ``index_name``."""
+    builder = _BBOX_BUILDER_REGISTRY.get(index_name, _build_polar_cap_bbox)
+    return builder(index_name, parameters)
 
 
 def _index_single_sample(
@@ -208,7 +250,7 @@ def calc_indices_per_stream(
             _logger.warning(f"Unknown index '{index_name}', skipping.")
             continue
 
-        bbox = _build_polar_cap_bbox(index_name, parameters)
+        bbox = _build_index_bbox(index_name, parameters)
 
         use_climatology = parameters.get("use_climatology", True)
         aligned_clim_data = get_climatology(reader, da_tars, stream) if use_climatology else None

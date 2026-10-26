@@ -66,6 +66,30 @@ default_streams:
           use_climatology: true
           significance_level: 0.05
 
+  # Example: Nino 3.4 (ENSO SST-anomaly index), conventionally a monthly-mean
+  # index. Unlike NAM/SAM it is a simple area-weighted box mean (no EOF/SVD),
+  # so it has no `significance_level`/`hemisphere` params; its domain is a
+  # fixed equatorial-Pacific box, overridable via `lat_min`/`lat_max`/
+  # `lon_min`/`lon_max`.
+  SSTmonthly:
+    channels: ["sst"]
+    climatology_path: "/path/to/sst_monthly_climatology.zarr"
+    climatology_match: monthly
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+    indices:
+      - nino34:
+          use_climatology: true    # anomaly vs monthly climatology; falls
+                                    # back to this sample's own
+                                    # forecast-lead-time mean otherwise (not
+                                    # comparable across samples).
+          # lat_min: -5.0           # defaults shown; override to customize
+          # lat_max: 5.0            # the box (e.g. Nino 3, Nino 4, ...).
+          # lon_min: -170.0
+          # lon_max: -120.0
+
 run_ids:
   n5lpzqsm:
     label: "pretrained model n5lpzqsm"
