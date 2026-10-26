@@ -163,7 +163,7 @@ def get_reader(
     region: str | None = None,
     metric: dict[str, object] | None = None,
 ):
-    if reader_type == "zarr":
+    if reader_type in ("zarr", "anemoi-target"):
         reader = WeatherGenZarrReader(run, run_id, private_paths)
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
@@ -221,7 +221,7 @@ def _process_stream(
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
         return run_id, stream, {}, {}
 
-    needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
+    needs_plotting = stream_dict.get("plotting") and type_ in ("zarr", "anemoi-target")
     needs_scoring = stream_dict.get("evaluation", False)
 
     # --- Determine scoring state before loading any data ---
