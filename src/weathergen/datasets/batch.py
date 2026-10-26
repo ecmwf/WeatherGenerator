@@ -41,6 +41,9 @@ class Sample:
     # keys: stream name, values: SampleMetaData
     meta_info: dict[str | SampleMetaData]
 
+    # stream-independent meta information of this sample
+    sample_meta_info: dict
+
     # data for all streams
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
@@ -66,6 +69,7 @@ class Sample:
 
     def __init__(self, stream_names: list[str]) -> None:
         self.meta_info = {}
+        self.sample_meta_info = {}
 
         self.streams_data = {}
         for stream_name in stream_names:
@@ -157,6 +161,12 @@ class Sample:
 
         self.meta_info[stream_name] = meta_info
 
+    def add_sample_meta_info(self, params: dict) -> None:
+        """
+        Add stream-independent meta information to sample
+        """
+        self.sample_meta_info.update(params)
+
     def get_stream_data(self, stream_name: str) -> StreamData:
         """
         Get data for stream @stream_name from sample
@@ -175,8 +185,6 @@ class BatchSamples:
     output_steps: int
     output_idxs: list[int]
     device: str | None
-    # stream-independent meta information shared by all samples
-    meta_info: dict
 
     def __init__(
         self, stream_names: list[str], num_samples: int, output_steps, output_idxs
@@ -187,7 +195,6 @@ class BatchSamples:
         self.output_idxs = output_idxs
         self.device = None
         self.latent = []
-        self.meta_info = {}
 
     @property
     def batch_samples(self) -> typing.Self:
@@ -230,6 +237,17 @@ class BatchSamples:
 
     def get_samples(self) -> list[Sample]:
         return self.samples
+
+    def get_sample_meta_info(self) -> dict[str, np.typing.NDArray]:
+        """
+        Get stream-independent meta information of all samples, stacked along the sample dim.
+
+        Only keys that are set for every sample are returned.
+        """
+        if len(self.samples) == 0:
+            return {}
+        keys = set.intersection(*(set(s.sample_meta_info) for s in self.samples))
+        return {k: np.array([s.sample_meta_info[k] for s in self.samples]) for k in sorted(keys)}
 
     def get_subset(self, subset: list | None = None):
         if subset is None:
@@ -354,15 +372,9 @@ class ModelBatch:
         self.target_samples = BatchSamples(
             stream_names, num_target_samples, output_steps, self.output_idxs
         )
-        # batch-level meta information is shared between source and target samples
-        self.target_samples.meta_info = self.source_samples.meta_info
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
-
-    def add_meta_info(self, params: dict) -> None:
-        """Add stream-independent meta information for the whole batch."""
-        self.source_samples.meta_info.update(params)
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""

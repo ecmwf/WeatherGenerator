@@ -364,9 +364,15 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = meta_info["conditioning_tokens"]
 
         assert "noise_level_rn" in meta_info, (
-            "noise_level_rn (batch meta_info, drawn by the data sampler) is required for training"
+            "noise_level_rn (sample meta_info, drawn by the data sampler) is required for training"
         )
-        noise_level_rn = torch.tensor([meta_info["noise_level_rn"]], device=tokens.device)
+        # one noise level per sample: (B,) -> (B, 1, 1) to broadcast over cells and channels
+        noise_level_rn = torch.as_tensor(
+            meta_info["noise_level_rn"], dtype=torch.float32, device=tokens.device
+        ).reshape(-1, 1, 1)
+        assert noise_level_rn.shape[0] == y.shape[0], (
+            f"got {noise_level_rn.shape[0]} noise levels for {y.shape[0]} samples"
+        )
 
         # Compute sigma from noise_level_rn.
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
@@ -387,14 +393,15 @@ class DiffusionForecastEngine(torch.nn.Module):
         self,
         x: torch.Tensor,
         c: torch.Tensor,
-        sigma: float,
+        sigma: torch.Tensor,
         fstep: int,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         The actual diffusion step, where the model removes noise from the input x under
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
-        noise level sigma.
+        noise level sigma: either a single noise level of shape (1,) or one noise level per sample
+        of shape (B, 1, 1).
         """
         # Scaling coefficients (EDM Eq. 7). With EDM preconditioning enabled, c_skip/c_out
         # keep the network output O(1) across all sigma and make the denoiser output D -> x
@@ -410,12 +417,15 @@ class DiffusionForecastEngine(torch.nn.Module):
         c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
         c_noise = sigma.log() / 4
 
-        # Embed noise level
-        noise_emb = self.noise_embedder(c_noise)
+        # Embed noise level: (1, D_emb) or (B, D_emb)
+        noise_emb = self.noise_embedder(c_noise.reshape(-1))
 
         # Precondition input and feed through network
         if self.conditioning in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
+            if c.ndim == 2:
+                # one timestamp per sample: (B, D_c) -> (B, 1, D_c) to broadcast over cells
+                c = c.unsqueeze(1)
 
         net_input = c_in * x
 

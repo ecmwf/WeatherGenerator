@@ -56,8 +56,8 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         *args,
         **kwargs,
     ) -> tuple[Any, Any]:
-        # one noise level per batch, drawn by the data sampler
-        noise_level_rn = batch.meta_info["noise_level_rn"]
+        # one noise level per target sample, drawn by the data sampler
+        noise_level_rn = batch.get_sample_meta_info()["noise_level_rn"]
 
         # TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():

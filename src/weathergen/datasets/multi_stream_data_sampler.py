@@ -686,7 +686,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
     def _sample_diffusion_noise_level(self) -> float:
         """
-        Draw the diffusion noise level for a batch from the training noise distribution.
+        Draw the diffusion noise level for a sample from the training noise distribution.
 
         log_uniform: returns log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
         log_normal: returns eta ~ N(0, 1); sigma = exp(eta * p_std + p_mean) in the model
@@ -728,13 +728,21 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             self.output_offset,
             num_output_steps,
         )
+        # stream-independent meta information per sample
         if self.diffusion_noise_cfg is not None:
-            batch.add_meta_info({"noise_level_rn": self._sample_diffusion_noise_level()})
+            # one noise level per target sample; source samples inherit the noise level of their
+            # target (see below) so that model noising and loss weighting use the same draw
+            for target_sample in batch.target_samples.samples:
+                target_sample.add_sample_meta_info(
+                    {"noise_level_rn": self._sample_diffusion_noise_level()}
+                )
         if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
             # valid time of the first target step: start of its time window (stream independent)
             target_base_idx = idx + self.teacher_time_offset
             win_idx = target_base_idx + (self.time_step * self.output_offset) // self.step_timedelta
-            batch.add_meta_info({"timestamp": self.time_window_handler.window(win_idx).start})
+            timestamp = self.time_window_handler.window(win_idx).start
+            for sample in batch.source_samples.samples + batch.target_samples.samples:
+                sample.add_sample_meta_info({"timestamp": timestamp})
 
         # for all streams
         for stream_name, stream_ds in self.streams_datasets.items():
@@ -852,6 +860,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
+
+        if self.diffusion_noise_cfg is not None:
+            for source_sample, tidx in zip(
+                batch.source_samples.samples, batch.source2target_matching_idxs, strict=True
+            ):
+                assert tidx >= 0, "source sample without corresponding target sample"
+                noise_level_rn = batch.target_samples.samples[tidx].sample_meta_info[
+                    "noise_level_rn"
+                ]
+                source_sample.add_sample_meta_info({"noise_level_rn": noise_level_rn})
 
         return batch
 

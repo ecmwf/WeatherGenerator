@@ -816,10 +816,10 @@ class Model(torch.nn.Module):
         forecast_offset = global_steps[0]
         final_step = global_steps[-1]
 
-        # stream-independent meta information passed to the forecast engine: batch-level meta
-        # information (e.g. diffusion noise level, timestamp) and model-derived conditioning;
-        # a copy so that the batch itself is not modified
-        fe_meta_info = dict(source_samples.meta_info)
+        # stream-independent meta information passed to the forecast engine: per-sample meta
+        # information stacked along the sample dim (e.g. diffusion noise level, timestamp) and
+        # model-derived conditioning
+        fe_meta_info = source_samples.get_sample_meta_info()
 
         diff_cf = self.cf.get("diffusion", {})
         if diff_cf.get("enabled", False) and diff_cf.get("conditioning") == "forecast":

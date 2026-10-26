@@ -104,16 +104,27 @@ class LossLatentDiffusion(LossModuleBase):
         loss_fct,
         target: torch.Tensor,
         pred: torch.Tensor,
-        noise_weight: torch.Tensor = 1.0,
+        noise_weight: torch.Tensor | None = None,
     ):
         """
-        Compute loss for given loss function
+        Compute loss for given loss function.
+
+        The loss is computed per sample (dim 0 of target and pred), weighted by the per-sample
+        noise_weight (if given) and averaged over samples.
         """
+        assert target.shape[0] == pred.shape[0], (
+            f"number of target ({target.shape[0]}) and predicted ({pred.shape[0]}) samples differ"
+        )
+        losses = torch.stack(
+            [
+                loss_fct(target=target[i : i + 1], pred=pred[i : i + 1])[0]
+                for i in range(target.shape[0])
+            ]
+        )
+        if noise_weight is not None:
+            losses = noise_weight * losses
 
-        loss, loss_chs = loss_fct(target=target, pred=pred)
-        loss = noise_weight * loss
-
-        return loss
+        return losses.mean()
 
     def compute_loss(self, preds: dict, targets: dict, **kwargs) -> LossValues:
         losses_all: dict[str, Tensor] = {
@@ -147,13 +158,14 @@ class LossLatentDiffusion(LossModuleBase):
                 stddev_all={"latent": nan},
             )
 
-        eta = torch.tensor(
-            [targets.aux_outputs["noise_level_rn"]], device=self.device, dtype=torch.float32
-        )
+        # one noise level per sample: (B,)
+        eta = torch.as_tensor(
+            targets.aux_outputs["noise_level_rn"], device=self.device, dtype=torch.float32
+        ).reshape(-1)
         fsteps = len(target_tokens_all)
 
         # During validation, use unweighted loss (no noise-level scaling)
-        noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta)
+        noise_weight = None if self.stage == "val" else self._get_noise_weight(eta)
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)

@@ -199,10 +199,11 @@ class LinearNormConditioning(torch.nn.Module):
         scale_minus_one, offset, gate = torch.chunk(conditional_scale_offset, 3, dim=-1)
         scale = scale_minus_one + 1.0
 
-        # Reshape scale and offset for broadcasting if needed
+        # Reshape scale, offset and gate for broadcasting if needed
         while scale.dim() < inputs.dim():
             scale = scale.unsqueeze(1)
             offset = offset.unsqueeze(1)
+            gate = gate.unsqueeze(1)
         return (inputs * scale + offset).to(
             self.dtype
         ), gate  # TODO: check if to(self.dtype) needed here
