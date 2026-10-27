@@ -46,7 +46,7 @@
       "domain": "WeatherGen",
       "color": "42C716",
       "module": "weathergen.model.attention",
-      "functions": ["MultiSelfAttentionHeadVarlen.__init__","MultiSelfAttentionHeadVarlen.forward","MultiSelfAttentionHeadVarlenFlex.__init__","MultiSelfAttentionHeadVarlenFlex.forward","MultiSelfAttentionHeadLocal.__init__","MultiSelfAttentionHeadLocal.forward","MultiCrossAttentionHeadVarlen.__init__","MultiCrossAttentionHeadVarlen.forward","MultiCrossAttentionHeadVarlenSlicedQ.__init__","MultiCrossAttentionHeadVarlenSlicedQ.forward","MultiSelfAttentionHead.__init__","MultiSelfAttentionHead.forward","MultiCrossAttentionHead.__init__","MultiCrossAttentionHead.forward"]
+      "functions": ["Attention.__init__","Attention.forward","MultiSelfAttentionHeadVarlenFlex.__init__","MultiSelfAttentionHeadVarlenFlex.forward","MultiSelfAttentionHeadLocal.__init__","MultiSelfAttentionHeadLocal.forward","MultiCrossAttentionHeadVarlenSlicedQ.__init__","MultiCrossAttentionHeadVarlenSlicedQ.forward"]
     },
     {
       "domain": "WeatherGen",
