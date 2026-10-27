@@ -36,12 +36,12 @@ from weathergen.evaluate.plotting.plot_orchestration import (
     plot_summary,
     plot_timeseries_summary,
     run_score_map_pipeline,
-    run_score_timeseries_pipeline,
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
     metric_list_to_json,
+    results_to_dict,
 )
 from weathergen.evaluate.utils.config_compat import get_plot_score_options, parse_plot_config
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
@@ -272,38 +272,30 @@ def _process_stream(
     else:
         return run_id, stream, scores_dict, {}
 
-    stream_computed_scores = calc_scores_per_stream(
+    # One pass over the data: per-sample scores plus, when requested, the
+    # sample-aggregated scores for the score maps and the init-hour plots.
+    results = calc_scores_per_stream(
         reader,
         stream,
         regions_to_compute,
         metrics_to_compute,
         output_data=output_data,
+        compute_spatial=plot_score_maps,
+        compute_timeseries=plot_score_init_time_series,
     )
-    metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
-    scores_dict = merge(stream_loaded_scores, stream_computed_scores)
+    metric_list_to_json(reader, stream, results, regions_to_compute)
+    scores_dict = merge(stream_loaded_scores, results_to_dict(results, "score"))
 
     if plot_score_maps:
         run_score_map_pipeline(
             reader,
             stream,
-            regions_to_compute,
-            metrics_to_compute,
-            output_data=output_data,
+            results,
             global_plotting_options=global_plotting_opts,
             plot_score_options=plot_score_options,
         )
 
-    if plot_score_init_time_series:
-        ts_scores = run_score_timeseries_pipeline(
-            reader,
-            stream,
-            regions_to_compute,
-            metrics_to_compute,
-            output_data=output_data,
-            global_plotting_options=global_plotting_opts,
-        )
-    else:
-        ts_scores = {}
+    ts_scores = results_to_dict(results, "timeseries") if plot_score_init_time_series else {}
 
     return run_id, stream, scores_dict, ts_scores
 
@@ -368,22 +360,17 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
             )
 
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    # timeseries_scores[metric][region][stream][run_id][fstep] = xr.DataArray
-    timeseries_scores: dict = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    )
+    # timeseries_scores[metric][region][stream][run_id] = xr.DataArray(forecast_step, ...)
+    timeseries_scores: dict = {}
     results = [_process_stream(**task) for task in tasks]
 
-    for run_id, stream, stream_scores, ts_scores in results:
+    for _run_id, _stream, stream_scores, ts_scores in results:
         for metric, regions_dict in stream_scores.items():
             for region, streams_dict in regions_dict.items():
                 for stream_key, runs_dict in streams_dict.items():
                     scores_dict[metric][region][stream_key].update(runs_dict)
 
-        # Accumulate timeseries scores: ts_scores[metric][region][fstep]
-        for metric, region_dict in ts_scores.items():
-            for region, fstep_dict in region_dict.items():
-                timeseries_scores[metric][region][stream][run_id].update(fstep_dict)
+        merge(timeseries_scores, ts_scores)
 
     # MLFlow logging
     if mlflow_client:
