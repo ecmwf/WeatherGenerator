@@ -102,3 +102,39 @@ def test_init_ddp_leaves_missing_seed_to_init_seeds():
 
     cf = TrainerBase.init_seeds(cf)
     assert cf.data_loading.rng_seed >= 1
+
+
+def _make_ranked_cf(rng_seed: int, rank: int) -> OmegaConf:
+    cf = _make_cf(rng_seed)
+    cf.rank = rank
+    return cf
+
+
+def test_reseed_per_rank_diverges_across_ranks():
+    """Ranks share the init seed but draw independent streams after reseeding."""
+    TrainerBase.reseed_per_rank(_make_ranked_cf(42, rank=0))
+    rank0 = _draw_all()
+    TrainerBase.reseed_per_rank(_make_ranked_cf(42, rank=1))
+    rank1 = _draw_all()
+
+    assert all(a != b for a, b in zip(rank0, rank1, strict=True))
+
+
+def test_reseed_per_rank_is_reproducible():
+    """The same (seed, rank) pair yields identical draws from every global RNG."""
+    TrainerBase.reseed_per_rank(_make_ranked_cf(42, rank=3))
+    first = _draw_all()
+    TrainerBase.reseed_per_rank(_make_ranked_cf(42, rank=3))
+    second = _draw_all()
+
+    assert first == second
+
+
+def test_reseed_per_rank_differs_from_init_seeds():
+    """Rank 0 does not keep the shared init stream after reseeding."""
+    TrainerBase.init_seeds(_make_cf(42))
+    shared = _draw_all()
+    TrainerBase.reseed_per_rank(_make_ranked_cf(42, rank=0))
+    reseeded = _draw_all()
+
+    assert shared != reseeded
