@@ -41,7 +41,7 @@ class Sample:
     # keys: stream name, values: SampleMetaData
     meta_info: dict[str | SampleMetaData]
 
-    # stream-independent meta information of this sample
+    # stream-independent meta information of sample
     sample_meta_info: dict
 
     # data for all streams
@@ -161,9 +161,9 @@ class Sample:
 
         self.meta_info[stream_name] = meta_info
 
-    def add_sample_meta_info(self, params: dict) -> None:
+    def set_sample_meta_info(self, params: dict) -> None:
         """
-        Add stream-independent meta information to sample
+        Set stream-independent meta information of sample
         """
         self.sample_meta_info.update(params)
 
@@ -376,6 +376,34 @@ class ModelBatch:
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
+    def set_source_target_matching(self, source_to_target: np.typing.NDArray) -> None:
+        """
+        Set the correspondence between source and target samples (identical for all streams)
+
+        source_to_target: index of the corresponding target sample for each source sample
+        """
+        source_to_target = np.asarray(source_to_target, dtype=np.int32)
+        assert len(source_to_target) == len(self.source_samples), (
+            "source_to_target has to provide a target index for each source sample"
+        )
+        assert ((source_to_target >= 0) & (source_to_target < len(self.target_samples))).all(), (
+            "invalid target sample index in source_to_target"
+        )
+        self.source2target_matching_idxs = source_to_target.copy()
+        self.target2source_matching_idxs = [
+            [sidx for sidx, t in enumerate(source_to_target) if t == tidx]
+            for tidx in range(len(self.target_samples))
+        ]
+
+    def set_sample_meta_info(self, source_params: list[dict], target_params: list[dict]) -> None:
+        """
+        Set stream-independent meta information for all source and target samples
+        """
+        for sample, params in zip(self.source_samples.samples, source_params, strict=True):
+            sample.set_sample_meta_info(params)
+        for sample, params in zip(self.target_samples.samples, target_params, strict=True):
+            sample.set_sample_meta_info(params)
+
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
 
@@ -435,7 +463,6 @@ class ModelBatch:
     def add_source_stream(
         self,
         source_sample_idx: int,
-        target_sample_idx: int,
         stream_name: str,
         stream_data: StreamData,
         source_meta_info: SampleMetaData,
@@ -449,13 +476,9 @@ class ModelBatch:
         # add the meta_info
         self.source_samples.samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
 
-        assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
-        self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
-
     def add_target_stream(
         self,
         target_sample_idx: int,
-        source_sample_idx: int | list[int],
         stream_name: str,
         stream_data: StreamData,
         target_meta_info: SampleMetaData,
@@ -467,16 +490,6 @@ class ModelBatch:
 
         # add the meta_info -- for target we have different
         self.target_samples.samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
-
-        if isinstance(source_sample_idx, int):
-            assert source_sample_idx < len(self.source_samples), (
-                "invalid value for source_sample_idx"
-            )
-        else:
-            assert all(idx < len(self.source_samples) for idx in source_sample_idx), (
-                "invalid value for source_sample_idx"
-            )
-        self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
     def is_empty(self):
         """

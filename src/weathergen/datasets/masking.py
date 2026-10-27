@@ -124,8 +124,16 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
+    def __init__(
+        self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None, diffusion_cfg=None
+    ):
         self.rng = None
+
+        # diffusion: training noise distribution, one noise level is drawn per sample
+        diffusion_cfg = diffusion_cfg or {}
+        self.diffusion_noise_cfg = (
+            diffusion_cfg.get("noise", {}) if diffusion_cfg.get("enabled", False) else None
+        )
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -341,6 +349,52 @@ class Masker:
         # TODO: check validity of target_source_correspondence with target and source cfgs
 
         return corr_dict
+
+    def build_sample_params(
+        self, num_target_samples: int, source_to_target: np.typing.NDArray
+    ) -> tuple[list[dict], list[dict]]:
+        """
+        Generate stream-independent masking parameters, i.e. shared by all streams of a sample.
+
+        Parameters are drawn per target sample. Each source sample inherits the parameters of its
+        corresponding target sample, e.g. so that model and loss use the same diffusion noise level.
+
+        Parameters
+        ----------
+        num_target_samples : int
+            Number of target samples.
+        source_to_target : np.typing.NDArray
+            Index of the corresponding target sample for each source sample.
+
+        Returns
+        -------
+        tuple[list[dict], list[dict]]
+            Parameters for each target sample and for each source sample.
+        """
+        target_params = [{} for _ in range(num_target_samples)]
+
+        if self.diffusion_noise_cfg is not None:
+            for params in target_params:
+                params["noise_level_rn"] = self._sample_diffusion_noise_level()
+
+        assert (np.asarray(source_to_target) >= 0).all(), (
+            "source sample without corresponding target sample"
+        )
+        source_params = [dict(target_params[tidx]) for tidx in source_to_target]
+
+        return target_params, source_params
+
+    def _sample_diffusion_noise_level(self) -> float:
+        """
+        Draw the diffusion noise level for a sample from the training noise distribution.
+
+        log_uniform: returns log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
+        log_normal: returns eta ~ N(0, 1); sigma = exp(eta * p_std + p_mean) in the model
+        """
+        noise_cfg = self.diffusion_noise_cfg
+        if noise_cfg.get("distribution", "log_normal") == "log_uniform":
+            return self.rng.uniform(np.log(noise_cfg["sigma_min"]), np.log(noise_cfg["sigma_max"]))
+        return self.rng.normal(0.0, 1.0)
 
     def build_samples_for_stream(
         self,

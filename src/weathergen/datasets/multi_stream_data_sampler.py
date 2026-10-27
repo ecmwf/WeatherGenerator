@@ -103,18 +103,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         self.rank = cf.rank
         self.world_size = cf.world_size
-        diffusion_cfg = cf.get("diffusion", {})
-        self.diffusion_model_conditioning = diffusion_cfg.get("conditioning", None)
-        # training noise distribution; one noise level is drawn per batch
-        self.diffusion_noise_cfg = (
-            diffusion_cfg.get("noise", {}) if diffusion_cfg.get("enabled", False) else None
-        )
+        self.diffusion_model_conditioning = cf.get("diffusion", {}).get("conditioning", None)
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # initialise healpix
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
+        self.masker = Masker(
+            cf.healpix_level, stage, cf.streams, self.mode_cfg, diffusion_cfg=cf.get("diffusion")
+        )
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
@@ -648,8 +645,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _get_source_target_masks(self, training_mode):
         """
         Generate source and target masks for all streams.
+
+        Returns the masks per stream, the number of source and target samples, and the index of
+        the corresponding target sample for each source sample (source_to_target). The numbers of
+        samples and source_to_target are identical for all streams.
         """
         masks = {}
+        source_to_target = None
         for stream_name, stream_info in self.streams.items():
             # Build source and target sample masks
             masks[stream_name] = self.tokenizer.build_samples_for_stream(
@@ -661,8 +663,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # identical for all streams
             num_target_samples = len(masks[stream_name][0])
             num_source_samples = len(masks[stream_name][1])
+            if source_to_target is None:
+                source_to_target = masks[stream_name][2]
+            assert np.array_equal(source_to_target, masks[stream_name][2]), (
+                "source to target mapping has to be identical for all streams"
+            )
 
-        return masks, num_source_samples, num_target_samples
+        return masks, num_source_samples, num_target_samples, source_to_target
 
     def _get_output_length(self, num_forecast_steps):
         # max(1, ...) : self.output_offset and num_forecast_steps are zero for pure masking
@@ -684,18 +691,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return batch
 
-    def _sample_diffusion_noise_level(self) -> float:
-        """
-        Draw the diffusion noise level for a sample from the training noise distribution.
-
-        log_uniform: returns log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
-        log_normal: returns eta ~ N(0, 1); sigma = exp(eta * p_std + p_mean) in the model
-        """
-        noise_cfg = self.diffusion_noise_cfg
-        if noise_cfg.get("distribution", "log_normal") == "log_uniform":
-            return self.rng.uniform(np.log(noise_cfg["sigma_min"]), np.log(noise_cfg["sigma_max"]))
-        return self.rng.normal(0.0, 1.0)
-
     def _get_batch(self, idx: int, num_forecast_steps: int):
         """
         Assemble a batch using the sample corresponding to idx
@@ -705,8 +700,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         source_cfgs = self.mode_cfg.get("model_input")
         target_cfgs = self.mode_cfg.get("target_input", {})
 
-        # get/coordinate masks
-        masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
+        # get/coordinate masks; source_to_target: index of the corresponding target sample for
+        # each source sample, identical for all streams
+        masks_streams, num_source_samples, num_target_samples, source_to_target = (
+            self._get_source_target_masks(mode)
+        )
 
         source_select, target_select = [], []
         if "masking" in mode:
@@ -728,26 +726,26 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             self.output_offset,
             num_output_steps,
         )
-        # stream-independent meta information per sample
-        if self.diffusion_noise_cfg is not None:
-            # one noise level per target sample; source samples inherit the noise level of their
-            # target (see below) so that model noising and loss weighting use the same draw
-            for target_sample in batch.target_samples.samples:
-                target_sample.add_sample_meta_info(
-                    {"noise_level_rn": self._sample_diffusion_noise_level()}
-                )
+        batch.set_source_target_matching(source_to_target)
+
+        # stream-independent masking parameters per sample (e.g. diffusion noise level)
+        target_params, source_params = self.masker.build_sample_params(
+            num_target_samples, source_to_target
+        )
+        batch.set_sample_meta_info(source_params, target_params)
         if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
             # valid time of the first target step: start of its time window (stream independent)
             target_base_idx = idx + self.teacher_time_offset
             win_idx = target_base_idx + (self.time_step * self.output_offset) // self.step_timedelta
             timestamp = self.time_window_handler.window(win_idx).start
             for sample in batch.source_samples.samples + batch.target_samples.samples:
-                sample.add_sample_meta_info({"timestamp": timestamp})
+                sample.set_sample_meta_info({"timestamp": timestamp})
 
         # for all streams
         for stream_name, stream_ds in self.streams_datasets.items():
             stream_info = self.streams[stream_name]
-            (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
+            # source to target mapping is identical for all streams, see above
+            (target_masks, source_masks, _) = masks_streams[stream_name]
 
             # max number of input steps
             input_steps = np.array([sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()])
@@ -814,7 +812,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     input_mask=source_mask,
                 )
 
-                batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
+                batch.add_source_stream(sidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
             input_data_target_orig = input_data_target
@@ -850,26 +848,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
-                # Map target to all source students
-                student_indices = [
-                    s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx
-                ]
-                batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
+                batch.add_target_stream(tidx, stream_name, sdata, target_metadata)
 
         source_in_steps = input_steps.max().item()
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
-
-        if self.diffusion_noise_cfg is not None:
-            for source_sample, tidx in zip(
-                batch.source_samples.samples, batch.source2target_matching_idxs, strict=True
-            ):
-                assert tidx >= 0, "source sample without corresponding target sample"
-                noise_level_rn = batch.target_samples.samples[tidx].sample_meta_info[
-                    "noise_level_rn"
-                ]
-                source_sample.add_sample_meta_info({"noise_level_rn": noise_level_rn})
 
         return batch
 
