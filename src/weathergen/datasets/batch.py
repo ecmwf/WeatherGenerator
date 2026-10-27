@@ -238,16 +238,30 @@ class BatchSamples:
     def get_samples(self) -> list[Sample]:
         return self.samples
 
-    def get_sample_meta_info(self) -> dict[str, np.typing.NDArray]:
+    def stack_sample_meta_info(self) -> dict[str, np.typing.NDArray]:
         """
-        Get stream-independent meta information of all samples, stacked along the sample dim.
-
-        Only keys that are set for every sample are returned.
+        Stack the stream-independent meta information (e.g. diffusion noise level, timestamp) 
+        of all samples along the sample dim.
+        Returns one array of length num_samples per key; empty if there are no samples.
         """
         if len(self.samples) == 0:
             return {}
-        keys = set.intersection(*(set(s.sample_meta_info) for s in self.samples))
-        return {k: np.array([s.sample_meta_info[k] for s in self.samples]) for k in sorted(keys)}
+
+        keys = set(self.samples[0].sample_meta_info)
+        assert all(set(s.sample_meta_info) == keys for s in self.samples), (
+            "all samples have to provide the same sample meta info keys, got "
+            f"{[sorted(s.sample_meta_info) for s in self.samples]}"
+        )
+
+        stacked = {}
+        for key in sorted(keys):
+            values = [s.sample_meta_info[key] for s in self.samples]
+            assert all(np.ndim(v) == 0 for v in values), (
+                f"sample meta info '{key}' has to be a scalar per sample, "
+                f"got shapes {[np.shape(v) for v in values]}"
+            )
+            stacked[key] = np.array(values)
+        return stacked
 
     def get_subset(self, subset: list | None = None):
         if subset is None:

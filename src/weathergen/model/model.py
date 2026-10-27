@@ -819,7 +819,7 @@ class Model(torch.nn.Module):
         # stream-independent meta information passed to the forecast engine: per-sample meta
         # information stacked along the sample dim (e.g. diffusion noise level, timestamp) and
         # model-derived conditioning
-        fe_meta_info = source_samples.get_sample_meta_info()
+        fe_meta_info = source_samples.stack_sample_meta_info()
 
         diff_cf = self.cf.get("diffusion", {})
         if diff_cf.get("enabled", False) and diff_cf.get("conditioning") == "forecast":

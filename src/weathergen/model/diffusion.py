@@ -364,7 +364,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = meta_info["conditioning_tokens"]
 
         assert "noise_level_rn" in meta_info, (
-            "noise_level_rn (sample meta_info, drawn by the data sampler) is required for training"
+            "noise_level_rn (sample meta_info, drawn by the Masker) is required for training"
         )
         # one noise level per sample: (B,) -> (B, 1, 1) to broadcast over cells and channels
         noise_level_rn = torch.as_tensor(
