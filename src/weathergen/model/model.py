@@ -899,7 +899,7 @@ class Model(torch.nn.Module):
                         "fe_diffusion_predict_residual", False
                     )
 
-                    if self.cf.get("fe_diffusion_log_analytics", False):
+                    if self.cf.get("inference_logging", {}).get("fe_diffusion_log_analytics", False):
                         output.diffusion_steps_output = _decode_diffusion_steps(
                             self,
                             model_params,

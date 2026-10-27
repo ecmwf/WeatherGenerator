@@ -9,17 +9,13 @@
 
 """
 Shared infrastructure for writing "analytic output" diagnostics: data useful for
-inspecting/debugging a model (e.g. the diffusion denoising trajectory, SSL collapse
-indicators) that must not affect the metrics/artifacts of a normal training or
-validation run.
+inspecting/debugging a model (e.g. the diffusion denoising trajectory) that must not
+affect the metrics/artifacts of a normal training or validation run.
 
 All writers share a common lifecycle (:class:`AnalyticsOutputWriter`): gated behind an
 explicit config flag (disabled by default), rank-0-only, and written incrementally to
-disk rather than rendered inline, for later inspection by standalone scripts.
-:class:`DiffusionStepsZarrWriter` stores to a zip-backed zarr archive, giving every
-sample its own freshly named, immutable group (zip archives only support appending, not
-modifying existing entries); the JSONL writers (:class:`ScalarSeriesJSONLWriter`,
-:class:`ScalarMetricsJSONLWriter`) append one JSON line per call instead.
+disk rather than rendered inline, for later inspection by standalone scripts. The
+concrete writers here are inference-only.
 """
 
 
@@ -65,7 +61,7 @@ class AnalyticsOutputWriter(abc.ABC):
             name: Short identifier for this writer, used as the on-disk subdirectory
                 name (e.g. "diffusion_sampling_diagnostics").
             enabled: Whether this writer is active. Callers resolve this from their own
-                config flag (e.g. ``fe_diffusion_log_analytics`` or
+                config flag (e.g. ``inference_logging.fe_diffusion_log_analytics`` or
                 ``train_logging.collapse_monitoring.enabled``).
         """
         self.cf = cf
@@ -139,12 +135,8 @@ class DiffusionStepsZarrWriter(AnalyticsOutputWriter):
     def _write(self, payload: tuple[int, Mapping[str, Mapping[str, typing.Any]]]) -> None:
         sample_idx, streams = payload
         self.root.mkdir(parents=True, exist_ok=True)
-        # zip archives only support appending; re-writing the same sample_idx within a
-        # run (or across resumed runs) would raise since the group would already exist.
-        # Attributes must be set at creation time (attributes=...) rather than assigned
-        # afterwards: a zip entry can only be written once per open session, and
-        # `.attrs[...] = ...` after the fact would try to rewrite the already-written
-        # zarr.json, silently producing a duplicate (and ambiguous-on-read) zip entry.
+        # Appends one group per sample to the zip store; channels must be passed as
+        # attributes= at creation since entries in this store can't be rewritten afterwards.
         with ZipStore(str(self._store_path), mode="a") as store:
             sample_group = zarr.group(store=store).create_group(f"sample{sample_idx:05d}")
             for stream_name, data in streams.items():
@@ -159,38 +151,6 @@ class DiffusionStepsZarrWriter(AnalyticsOutputWriter):
                     )
 
 
-class ScalarMetricsJSONLWriter(AnalyticsOutputWriter):
-    """
-    Appends one JSON line per :meth:`write` call, each a flat ``dict[str, float]``.
-
-    This is a thin :class:`AnalyticsOutputWriter` adapter around the append-only metrics file
-    already used for scalar training/validation metrics (see
-    ``weathergen.utils.train_logger.TrainLogger.log_metrics``), so that scalar dev metrics -
-    e.g. SSL collapse indicators - follow the same enable-flag + rank-0-only contract as the
-    other dev output writers, without changing how ``CollapseMonitor`` itself computes or
-    caches metrics.
-    """
-
-    def __init__(
-        self,
-        cf: Config,
-        name: str,
-        log_fn,
-        enabled: bool,
-    ) -> None:
-        """
-        Args:
-            log_fn: Callable with the same signature as
-                ``TrainLogger.log_metrics(stage, metrics, step=None)``.
-        """
-        super().__init__(cf, name, enabled)
-        self._log_fn = log_fn
-
-    def _write(self, payload: tuple[str, Mapping[str, float]]) -> None:
-        stage, metrics = payload
-        self._log_fn(stage, metrics)
-
-
 def write_diffusion_steps_output(
     cf,
     val_cfg,
@@ -203,7 +163,8 @@ def write_diffusion_steps_output(
     target_aux_out,
 ) -> None:
     """
-    Write the diffusion denoising trajectory collected in dev mode (``fe_diffusion_log_analytics``).
+    Write the diffusion denoising trajectory collected in dev mode
+    (``inference_logging.fe_diffusion_log_analytics``).
 
     ``model_output.diffusion_steps_output`` holds one decoded prediction per ODE step. Unlike
     the official validation/test output, denoising steps are kept as an explicit
@@ -214,7 +175,7 @@ def write_diffusion_steps_output(
     ``scripts/analytics/diffusion/plot_diffusion_steps.py``.
     """
     analytics_output = getattr(model_output, "diffusion_steps_output", None)
-    if analytics_output is None:
+    if analytics_output is None or cf.stage != "inference":
         return
 
     outputs_physical = [
@@ -234,7 +195,9 @@ def write_diffusion_steps_output(
     target_data_all = t_aux.physical[-1]
 
     writer = DiffusionStepsZarrWriter(
-        cf, enabled=cf.get("fe_diffusion_log_analytics", False), name="diffusion_steps"
+        cf,
+        enabled=cf.get("inference_logging", {}).get("fe_diffusion_log_analytics", False),
+        name="diffusion_steps",
     )
     n_samples = len(batch.get_source_samples().get_samples())
     for i_sample in range(n_samples):
@@ -282,3 +245,11 @@ def write_diffusion_steps_output(
 def get_diffusion_steps_dir(cf) -> pathlib.Path:
     """Directory holding the diffusion-steps analytics output (mirrors get_path_results)."""
     return get_path_run(cf) / "analytics" / "diffusion_steps"
+
+
+# Dedicated inference writers invoked alongside write_output, each gated by its own dotted
+# config flag. Only initialised/called during an actual inference run never during
+# training's periodic validation passes. Add new (flag, writer) entries here.
+EXTRA_INFERENCE_WRITERS = [
+    ("inference_logging.fe_diffusion_log_analytics", write_diffusion_steps_output),
+]

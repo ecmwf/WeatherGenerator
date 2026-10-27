@@ -34,7 +34,6 @@ from weathergen.common.config import Config
 from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
-from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
 
@@ -193,11 +192,13 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Inference-mode only: persists per-ODE-step sampling diagnostics to a JSONL file instead
         # of plotting them inline. See scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py.
-        self._diagnostics_writer = ScalarSeriesJSONLWriter(
-            cf,
-            name="diffusion_sampling_diagnostics",
-            enabled=cf.get("fe_diffusion_log_analytics", False),
-        )
+        self._diagnostics_writer = None
+        if cf.stage == "inference":
+            self._diagnostics_writer = ScalarSeriesJSONLWriter(
+                cf,
+                name="diffusion_sampling_diagnostics",
+                enabled=cf.get("inference_logging", {}).get("fe_diffusion_log_analytics", False),
+            )
 
     def forward(
         self,
@@ -606,7 +607,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
         sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
-        _churn = (
+        _churn_msg = (
             f", stochastic churn: s_churn={self.s_churn}, s_min={self.s_min}, "
             f"s_max={self.s_max}, s_noise={self.s_noise}"
             if self.s_churn > 0
@@ -617,7 +618,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
             f"sigma_min_eff={sigma_min_eff:.4f} "
             f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
-            f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn}"
+            f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn_msg}"
         )
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
@@ -642,11 +643,10 @@ class DiffusionForecastEngine(torch.nn.Module):
             "d_cur_norm": [],
             "d_cur_step_norm": [],
             "residual_std": [],
-            "x": [x.cpu()],
+            "latent_states": [x.cpu()],
         }
 
         # Per-step intermediate denoised states (one per ODE step).
-        # Only populated when return_diffusion_steps=True.
         intermediate_x: list[torch.Tensor] = [] if return_diffusion_steps else None
 
         # Main sampling loop. position=1 nests this bar below the per-sample/batch bar
@@ -660,7 +660,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 desc="denoising step",
                 position=1,
                 leave=False,
-                disable=not is_root(),
+                disable=self.cf.rank > 0,
             )
         ):  # 0, ..., N-1
             t_cur = torch.tensor([t_cur], device="cuda").float()
@@ -693,19 +693,20 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["d_cur_norm"].append(d_cur.norm().item())
                 track["d_cur_step_norm"].append(((t_next - t_post) * d_cur).norm().item())
                 track["residual_std"].append((x_post - denoised).std().item())
-                track["x"].append(x_next.cpu())
+                track["latent_states"].append(x_next.cpu())
                 if self.cur_token is not None:
                     track["l2_to_target"].append((x_next - self.cur_token).norm().item())
-                    track["x"].append(self.cur_token.cpu())
+                    track["latent_states"].append(self.cur_token.cpu())
 
             if return_diffusion_steps:
                 intermediate_x.append(x_next)
 
-        # "x" holds full latent tensors for ad-hoc inspection, not a per-step scalar series,
-        # so it is excluded from the on-disk diagnostics. self._diagnostics_writer no-ops
-        # unless fe_diffusion_log_analytics is enabled.
-        scalar_track = {k: v for k, v in track.items() if k != "x"}
-        self._diagnostics_writer.write(scalar_track)
+        # Drop the full latent tensors (see "latent_states" above) before writing: the
+        # diagnostics file only stores per-step scalars, and self._diagnostics_writer is
+        # None outside inference, and no-ops unless fe_diffusion_log_analytics is enabled.
+        if self._diagnostics_writer is not None:
+            scalar_track = {k: v for k, v in track.items() if k != "latent_states"}
+            self._diagnostics_writer.write(scalar_track)
 
         return x_next, intermediate_x
 
@@ -721,14 +722,14 @@ def _decode_diffusion_steps(
     predict_residual: bool,
 ) -> "ModelOutput":
     """
-    Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (dev mode
-    only, ``fe_diffusion_log_analytics``).
+    Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (only if
+    ``inference_logging.fe_diffusion_log_analytics``).
 
-    The result is shaped like a forecast rollout of ``len(tokens)`` pseudo-steps so it can
-    be written and scored with the same ``write_output``/fast-eval tooling used for a real
-    forecast (see ``validation_io.write_output`` and
-    ``scripts/analytics/diffusion/plot_diffusion_steps.py``). It is never merged into
-    the real output returned by ``Model.forward``.
+    The result is shaped like a forecast rollout of ``len(tokens)`` pseudo-steps, matching
+    the indexing ``predict_decoders``/``predict_latent`` expect, but it is written via the
+    dedicated ``DiffusionStepsZarrWriter`` independent of ``validation_io.write_output`` or
+    ``OutputBatchData`` and not readable by the ``evaluate`` package. It is never merged
+    into the real output returned by ``Model.forward``.
     """
     from weathergen.model.model import ModelOutput  # local import: avoids a model<->diffusion cycle
 

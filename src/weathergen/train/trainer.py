@@ -26,7 +26,6 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
-from weathergen.utils.inference_logger import ScalarMetricsJSONLWriter
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model import ModelOutput
@@ -53,20 +52,17 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.inference_logger import write_diffusion_steps_output
+from weathergen.utils.inference_logger import EXTRA_INFERENCE_WRITERS
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
-from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
+from weathergen.utils.train_logger import (
+    ScalarMetricsJSONLWriter,
+    TrainLogger,
+    prepare_losses_for_logging,
+)
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
-
-# Additional per-sample output writers invoked alongside write_output, each gated by its own
-# config flag and called with the exact same arguments. Add new (flag, writer) entries here
-# to trigger the writer in validate().
-_EXTRA_OUTPUT_WRITERS = [
-    ("fe_diffusion_log_analytics", write_diffusion_steps_output),
-]
 
 LOSS_SPIKE_DETECTION_DEFAULTS = {
     "enabled": False,
@@ -905,7 +901,7 @@ class Trainer(TrainerBase):
                                 targets_and_auxs,
                                 is_diffusion,
                             )
-                            # The diffusion target_aux calculator seeds a single latent target
+                            # The diffusion target_aux calculator needs a single latent target
                             # slot regardless of the number of real forecast steps; replicate it
                             # to keep the downstream loss calculator and validation IO aligned.
                             if is_diffusion:
@@ -935,20 +931,21 @@ class Trainer(TrainerBase):
                                     preds,
                                     targets_and_auxs,
                                 )
-                                # Additional per-sample analytics writers (see _EXTRA_OUTPUT_WRITERS)
-                                for flag, write_extra_output in _EXTRA_OUTPUT_WRITERS:
-                                    if self.cf.get(flag, False):
-                                        write_extra_output(
-                                            self.cf,
-                                            mode_cfg,
-                                            batch_size,
-                                            mini_epoch,
-                                            bidx,
-                                            denormalize_data_fct,
-                                            batch,
-                                            preds,
-                                            targets_and_auxs,
-                                        )
+                                # Dedicated inference writers (see EXTRA_INFERENCE_WRITERS)
+                                if self.cf.stage == "inference":
+                                    for flag, write_inference_output in EXTRA_INFERENCE_WRITERS:
+                                        if OmegaConf.select(self.cf, flag, default=False):
+                                            write_inference_output(
+                                                self.cf,
+                                                mode_cfg,
+                                                batch_size,
+                                                mini_epoch,
+                                                bidx,
+                                                denormalize_data_fct,
+                                                batch,
+                                                preds,
+                                                targets_and_auxs,
+                                            )
 
                         _ = self.loss_calculator_val.compute_loss(
                             preds=preds,

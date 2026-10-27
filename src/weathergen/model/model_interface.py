@@ -226,33 +226,38 @@ def init_model_and_shard(
     if is_root():
         log_trainable_summary(model)
 
-    # Optionally overlay the physical decoder from a separate checkpoint. This runs after the
-    # primary load so it takes precedence for decoder weights regardless of whether this is a
-    # fresh load or a continuation (e.g. inference with a latent-diffusion run that has no
-    # trained decoder, reusing a pretrained decoder from another run on every invocation).
-    decoder_run_id = cf.get("load_decoder_chkpt", {}).get("run_id", None)
-    if decoder_run_id:
-        decoder_mini_epoch = cf.load_decoder_chkpt.get("mini_epoch", -1)
-        if is_root():
-            logger.info(
-                f"Loading decoder weights from id={decoder_run_id} "
-                f"at mini_epoch {decoder_mini_epoch}."
-            )
-        model = load_decoder_from_checkpoint(
-            cf, model, device, decoder_run_id, with_ddp, with_fsdp, decoder_mini_epoch
-        )
-
-    # Optionally overlay the encoder from a separate checkpoint -- as above.
+    # Optionally overlay the encoder from a separate checkpoint. This runs after the primary
+    # load so it takes precedence for encoder weights regardless of whether this is a fresh
+    # load or a continuation.
     encoder_run_id = cf.get("load_encoder_chkpt", {}).get("run_id", None)
     if encoder_run_id:
-        encoder_mini_epoch = cf.load_encoder_chkpt.get("mini_epoch", -1)
-        if is_root():
-            logger.info(
-                f"Loading encoder weights from id={encoder_run_id} "
-                f"at mini_epoch {encoder_mini_epoch}."
-            )
-        model = load_encoder_from_checkpoint(
-            cf, model, device, encoder_run_id, with_ddp, with_fsdp, encoder_mini_epoch
+        model = load_part_from_checkpoint(
+            cf,
+            model,
+            device,
+            encoder_run_id,
+            with_ddp,
+            with_fsdp,
+            cf.load_encoder_chkpt.get("mini_epoch", -1),
+            prefixes=_ENCODER_PREFIXES,
+            part="encoder",
+            cfg_key="load_encoder_chkpt",
+        )
+
+    # Optionally overlay the physical decoder from a separate checkpoint -- as above.
+    decoder_run_id = cf.get("load_decoder_chkpt", {}).get("run_id", None)
+    if decoder_run_id:
+        model = load_part_from_checkpoint(
+            cf,
+            model,
+            device,
+            decoder_run_id,
+            with_ddp,
+            with_fsdp,
+            cf.load_decoder_chkpt.get("mini_epoch", -1),
+            prefixes=_DECODER_PREFIXES,
+            part="decoder",
+            cfg_key="load_decoder_chkpt",
         )
 
     # model params
@@ -377,69 +382,7 @@ _DECODER_PREFIXES = ("embed_target_coords", "target_token_engines", "pred_heads"
 _ENCODER_PREFIXES = ("encoder",)
 
 
-def load_decoder_from_checkpoint(
-    cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, mini_epoch=-1
-):
-    """Overlay only the physical decoder weights from a separate checkpoint.
-
-    Filters the checkpoint to ``embed_target_coords.*``, ``target_token_engines.*`` and
-    ``pred_heads.*`` and loads them into ``model`` with ``strict=False`` (all other model
-    weights are left untouched). This allows e.g. reusing a pretrained decoder together with an
-    encoder / forecast engine that was trained separately (see load_model for the primary load).
-
-    Args:
-        run_id : model_id of the run providing the decoder weights
-        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
-    """
-    return _load_part_from_checkpoint(
-        cf,
-        model,
-        device,
-        run_id,
-        with_ddp,
-        with_fsdp,
-        mini_epoch,
-        prefixes=_DECODER_PREFIXES,
-        part="decoder",
-        cfg_key="load_decoder_chkpt",
-    )
-
-
-def load_encoder_from_checkpoint(
-    cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, mini_epoch=-1
-):
-    """Overlay only the encoder weights from a separate checkpoint.
-
-    The mirror of :func:`load_decoder_from_checkpoint`: filters the checkpoint to ``encoder.*``
-    (stream embedders, ae_local / ae_local_global / ae_global / ae_aggregation engines and the
-    learned queries) and loads them with ``strict=False``, leaving the forecast engine and
-    decoder from the primary load untouched. Use it to pair one run's forecast engine with a
-    *different* run's encoder.
-
-    Shapes must already agree -- this overlays weights, it does not reshape anything. Encoders
-    from different backbones are compatible only when their architecture and stream set produce
-    identical tensor shapes; check before relying on it, since a partial match loads what it can
-    and reports the rest rather than failing.
-
-    Args:
-        run_id : model_id of the run providing the encoder weights
-        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
-    """
-    return _load_part_from_checkpoint(
-        cf,
-        model,
-        device,
-        run_id,
-        with_ddp,
-        with_fsdp,
-        mini_epoch,
-        prefixes=_ENCODER_PREFIXES,
-        part="encoder",
-        cfg_key="load_encoder_chkpt",
-    )
-
-
-def _load_part_from_checkpoint(
+def load_part_from_checkpoint(
     cf,
     model,
     device,
@@ -452,7 +395,20 @@ def _load_part_from_checkpoint(
     part: str,
     cfg_key: str,
 ):
-    """Overlay one named part of a model (``prefixes``) from another run's checkpoint."""
+    """Overlay one named part of a model (``prefixes``) from another run's checkpoint.
+
+    Filters the checkpoint to keys matching ``prefixes`` and loads them into ``model`` with
+    ``strict=False`` (all other weights are left untouched); e.g. reusing a pretrained
+    decoder/encoder together with a forecast engine that was trained separately (see
+    load_model for the primary load). Shapes must already agree -- this overlays weights,
+    it does not reshape anything.
+
+    Args:
+        run_id : run_id of the model providing the ``part`` weights
+        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
+    """
+    if is_root():
+        logger.info(f"Loading {part} weights from id={run_id} at mini_epoch {mini_epoch}.")
 
     path_run = get_path_model(run_id=run_id)
     mini_epoch_id = (
