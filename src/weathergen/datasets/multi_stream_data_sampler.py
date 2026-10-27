@@ -203,13 +203,13 @@ accomodate any number of samples or forecast steps"
 
         # choose correct num samples
         if not self.repeat_data and self.samples_per_mini_epoch:
-            if self.samples_per_mini_epoch >= available_samples:
+            if self.samples_per_mini_epoch > available_samples:
                 logger.warning(
                     f"There are only {available_samples} available_samples, \
 samples_per_mini_epoch reduced to {available_samples} to avoid repeating data. \
 Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
-                self.samples_per_mini_epoch = max(available_samples - 1, 1)
+                self.samples_per_mini_epoch = available_samples
             else:
                 logger.info("Sufficient available samples in the time range specified")
         else:
