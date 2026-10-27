@@ -81,6 +81,20 @@ class DiffusionForecastConditioning:
     def __init__(self, conditioning_type: str | None):
         self.conditioning_type = conditioning_type
 
+    def __eq__(self, other: object) -> bool:
+        """Value equality, so, e.g., ``self.conditioning == "ada_ln"`` works directly instead
+        of having to compare against ``self.conditioning.conditioning_type``.
+        """
+        if isinstance(other, DiffusionForecastConditioning):
+            other = other.conditioning_type
+        return self.conditioning_type == other
+
+    def __hash__(self) -> int:
+        return hash(self.conditioning_type)
+
+    def __repr__(self) -> str:
+        return f"DiffusionForecastConditioning({self.conditioning_type!r})"
+
     def validate(self, conditioning: torch.Tensor | None) -> None:
         """Check conditioning is present/absent exactly when this mode expects it.
 

@@ -610,7 +610,7 @@ class ForecastingEngine(torch.nn.Module):
         self.conditioning = DiffusionForecastConditioning(
             self.cf.get("fe_diffusion_model_conditioning_type", None)
         )
-        _concat_hd = self.conditioning.conditioning_type == "concatenate_hiddendim"
+        _concat_hd = self.conditioning == "concatenate_hiddendim"
         _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
         _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
 
@@ -634,7 +634,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.conditioning.conditioning_type == "ada_ln",
+                            dit_is_cond=self.conditioning == "ada_ln",
                         )
                     )
                 else:
@@ -655,7 +655,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.conditioning.conditioning_type == "ada_ln",
+                            dit_is_cond=self.conditioning == "ada_ln",
                         )
                     )
                 # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for
@@ -690,7 +690,7 @@ class ForecastingEngine(torch.nn.Module):
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         is_dit=self.cf.get("fe_diffusion_model", False),
-                        dit_is_cond=self.conditioning.conditioning_type == "ada_ln",
+                        dit_is_cond=self.conditioning == "ada_ln",
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -742,7 +742,7 @@ class ForecastingEngine(torch.nn.Module):
                 if isinstance(block, MultiCrossAttentionHead):
                     x_q, x_kv = (
                         (conditioning, tokens)
-                        if self.conditioning.conditioning_type == "cross_attn_rev"
+                        if self.conditioning == "cross_attn_rev"
                         else (tokens, conditioning)
                     )
                     tokens = checkpoint(
@@ -751,13 +751,11 @@ class ForecastingEngine(torch.nn.Module):
                 else:
                     # additive conditioning is re-added at every block (but not a plain norm
                     # layer, see fe_layer_norm_after_blocks), not just once.
-                    if self.conditioning.conditioning_type == "additive" and not isinstance(
+                    if self.conditioning == "additive" and not isinstance(
                         block, KwargLayerNorm
                     ):
                         tokens = tokens + conditioning
-                    ada_ln_aux = (
-                        conditioning if self.conditioning.conditioning_type == "ada_ln" else None
-                    )
+                    ada_ln_aux = conditioning if self.conditioning == "ada_ln" else None
                     tokens = checkpoint(
                         block,
                         tokens,
