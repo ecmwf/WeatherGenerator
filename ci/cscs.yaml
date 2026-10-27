@@ -13,6 +13,7 @@ test_job:
 
         export PRIVATE_REPO_BRANCH="${PRIVATE_REPO_BRANCH:-main}"
         echo "PRIVATE_REPO_BRANCH=$PRIVATE_REPO_BRANCH"
+        export WG_REPO="$PWD"
         export WEATHERGEN_PRIVATE_REPO_PATH="$PWD/WeatherGenerator-private"
         echo "WEATHERGEN_PRIVATE_REPO_PATH=$WEATHERGEN_PRIVATE_REPO_PATH"
         echo "uv version: $(uv --version) path: $(which uv)"
@@ -34,8 +35,9 @@ test_job:
         ./scripts/actions.sh integration-test${STAGE_TYPE:-}
         echo "Test installation"
         export TEST_DIR="$(mktemp -d)"
+        cd $TEST_DIR
         uv venv "$TEST_DIR/.venv"
-        uv pip install "$PWD/WeatherGenerator"
+        uv pip install "$WG_REPO"
         echo "Testing complete"
 
     variables:
