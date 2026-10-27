@@ -727,7 +727,7 @@ class TargetPredictionEngineClassic(nn.Module):
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
         self.tte = torch.nn.ModuleList()
-        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1) # Assuming dropout_rate is 0.1
+        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1)  # Assuming dropout_rate is 0.1
 
         for i in range(len(self.dims_embed) - 1):
             # Multi-Cross Attention Head
@@ -860,7 +860,7 @@ class TargetPredictionEngine(nn.Module):
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
-        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1) # Assuming dropout_rate is 0.1
+        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1)  # Assuming dropout_rate is 0.1
 
         # For backwards compatibility
 
