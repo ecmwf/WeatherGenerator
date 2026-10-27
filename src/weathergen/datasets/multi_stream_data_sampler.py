@@ -732,14 +732,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_params, source_params = self.masker.build_sample_params(
             num_target_samples, source_to_target
         )
-        batch.set_sample_meta_info(source_params, target_params)
+        batch.update_sample_meta_info(source_params, target_params)
         if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
             # valid time of the first target step: start of its time window (stream independent)
             target_base_idx = idx + self.teacher_time_offset
             win_idx = target_base_idx + (self.time_step * self.output_offset) // self.step_timedelta
             timestamp = self.time_window_handler.window(win_idx).start
             for sample in batch.source_samples.samples + batch.target_samples.samples:
-                sample.set_sample_meta_info({"timestamp": timestamp})
+                sample.update_sample_meta_info({"timestamp": timestamp})
 
         # for all streams
         for stream_name, stream_ds in self.streams_datasets.items():

@@ -161,9 +161,9 @@ class Sample:
 
         self.meta_info[stream_name] = meta_info
 
-    def set_sample_meta_info(self, params: dict) -> None:
+    def update_sample_meta_info(self, params: dict) -> None:
         """
-        Set stream-independent meta information of sample
+        Update stream-independent meta information of sample (existing keys are overwritten)
         """
         self.sample_meta_info.update(params)
 
@@ -395,14 +395,14 @@ class ModelBatch:
             for tidx in range(len(self.target_samples))
         ]
 
-    def set_sample_meta_info(self, source_params: list[dict], target_params: list[dict]) -> None:
+    def update_sample_meta_info(self, source_params: list[dict], target_params: list[dict]) -> None:
         """
-        Set stream-independent meta information for all source and target samples
+        Update stream-independent meta information of all source and target samples
         """
         for sample, params in zip(self.source_samples.samples, source_params, strict=True):
-            sample.set_sample_meta_info(params)
+            sample.update_sample_meta_info(params)
         for sample, params in zip(self.target_samples.samples, target_params, strict=True):
-            sample.set_sample_meta_info(params)
+            sample.update_sample_meta_info(params)
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
