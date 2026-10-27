@@ -97,6 +97,8 @@ def run_inference(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
+    cf.streams.ERA5.max_num_targets = -1
+
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
