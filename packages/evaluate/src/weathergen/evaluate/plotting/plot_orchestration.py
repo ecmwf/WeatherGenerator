@@ -27,7 +27,6 @@ from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.bar_plots import BarPlots
 from weathergen.evaluate.plotting.line_plots import LinePlots
 from weathergen.evaluate.plotting.pdf_merge import merge_pdf_subdirectories
-from weathergen.evaluate.plotting.plot_orchestration_utils import _compute_ranges
 from weathergen.evaluate.plotting.plot_utils import (
     PlotSubdir,
     apply_font_settings,
@@ -120,7 +119,15 @@ def run_score_map_pipeline(
     apply_font_settings(plotter_cfg)
     run_id = reader.run_id
 
-    score_ranges_dict = _compute_ranges(spatial)
+    # Colour range of each (metric, region, channel) over all forecast steps; the scores
+    # are passed as both inputs of common_ranges, which takes targets and predictions.
+    score_ranges_dict: dict = {}
+    for region, by_metric in spatial.items():
+        for metric, da in by_metric.items():
+            ranges = common_ranges(
+                {0: da}, {0: da}, [str(c) for c in da.channel.values], oc.DictConfig({})
+            )
+            score_ranges_dict.setdefault(metric, {})[region] = oc.OmegaConf.to_container(ranges)
 
     regions = list(spatial)
     fsteps = sorted(
