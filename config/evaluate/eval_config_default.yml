@@ -26,18 +26,14 @@
 evaluation:
   metrics: ["rmse", "mae"]
   # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
-  summary_plots : true
-  ratio_plots : false
-  heat_maps : false
+  # Score visualisations: metric_plots, ratio, heatmap, scorecard, bar,
+  #                       score_map, score_animation, init_hour
+  score_plots: [metric_plots]
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
-  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation
-  plot_score_animations: false #plot animations of score maps across forecast steps. it slows down score computation
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
-  score_cards: false
-  bar_plots: false
   #agg_dims: ["ipoint"] #----> NOTE: advanced! Handle with care. This will average the scores across the specified list of dimensions. Supported dimensions: "ipoint", "sample", "forecast_step", "ensemble". Use with caution, as it can hide important details about the model performance. 
 
 

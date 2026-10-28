@@ -63,7 +63,10 @@ evaluation:
   #                   score_map, score_animation, init_hour
   # metric_plots: draws each metric in its standard form (score vs lead time,
   # or the Q-Q / PSD plot for qq_analysis / psd).
-  # init_hour:  the score vs the hour of day the forecast was initialised (x-axis, 0–23 h).
+  # init_hour:  the score vs the hour of day the forecast was initialised (x-axis, 0–23 h),
+  #             one plot per metric, channel, region and forecast step, written to
+  #             <summary_dir>/score_by_init_hour/ (gridded zarr streams only; psd is skipped).
+  #             Older configs called this "timeseries": rename it to init_hour.
   score_plots: [metric_plots, ratio]
 
   # Legacy boolean flags (deprecated — use score_plots list above instead):
@@ -223,7 +226,7 @@ run_ids :
   ###############################
 
   #Example of syntax to stack multiple runs over the ensemble dimension  
-  merge_test: #<------ This is the new run_id name of the merged dataset. NB. you always need to specify one
+  merge_test_json: #<------ This is the new run_id name of the merged dataset. NB. you always need to specify one
     type: "jsonmerge" # <------- VERY IMPORTANT
     merge_run_ids:
       - so67dku4
@@ -265,12 +268,13 @@ run_ids :
           forecast_step: "all"
           sample: "all"
   
-  #mertics with parameters example:
+  #metrics with parameters example:
   ###############################
 
   #Example of syntax to pass parameters to individual metrics
-  evaluation:
-    metrics:
-    - fbi:
-        thresh: 280
-    - rmse
+  #(goes under the top-level `evaluation:` block, not under run_ids):
+  # evaluation:
+  #   metrics:
+  #   - fbi:
+  #       thresh: 280
+  #   - rmse
