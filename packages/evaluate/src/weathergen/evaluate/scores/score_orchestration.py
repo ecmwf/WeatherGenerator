@@ -9,18 +9,16 @@
 
 """Score orchestration: per-fstep scoring, stream aggregation, and JSON output.
 
-``calc_scores_per_stream`` is the single scoring entry point.  It scores the loaded
-data in up to three modes, all through ``compute_scores_for_region`` /
-``_score_single_fstep`` with different ``agg_dims``:
+``calc_scores_per_stream`` is the scoring entry point.  It scores the loaded data
+through ``compute_scores_for_region`` / ``_score_single_fstep`` with different
+``agg_dims``:
 
 * ``score``: aggregated over ``ipoint``; one value per (sample, forecast step, channel).
 * ``spatial``: aggregated over ``sample``; one value per (forecast step, point, channel).
   Used for score maps.
-* ``timeseries``: aggregated over ``sample`` and ``ipoint``, grouped by the
-  ``source_end_hour`` coordinate (hour of day of the initialisation time, set by the
-  DataArray builders); one value per (forecast step, init hour, channel).
 
-The three outputs of one metric are held together in a :class:`MetricResult`.
+Scores by initialisation hour are computed in ``scores/init_hour.py``.  All outputs of
+one metric are held together in a :class:`MetricResult`.
 """
 
 import json
@@ -30,7 +28,6 @@ from dataclasses import dataclass
 import numpy as np
 import xarray as xr
 from joblib import delayed
-from numpy.typing import NDArray
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
@@ -58,9 +55,10 @@ class MetricResult:
     spatial
         Score aggregated over samples, dims ``(forecast_step, ipoint, channel[, ens])``
         with ``lat``/``lon`` on ``ipoint``.  ``None`` unless computed.
-    timeseries
-        Score aggregated over samples and points per initialisation hour, dims
-        ``(forecast_step, source_end_hour, channel[, ens])``.  ``None`` unless computed.
+    by_init_hour
+        Score aggregated over samples and points per initialisation hour of the day, dims
+        ``(forecast_step, init_hour, channel[, ens])``.  ``None`` unless computed
+        (``init_hour.compute_scores_by_init_hour``).
     """
 
     name: str
@@ -69,7 +67,7 @@ class MetricResult:
     run_id: str
     score: xr.DataArray
     spatial: xr.DataArray | None = None
-    timeseries: xr.DataArray | None = None
+    by_init_hour: xr.DataArray | None = None
 
 
 def results_to_dict(results: dict[str, dict[str, MetricResult]], field: str = "score") -> dict:
@@ -77,7 +75,7 @@ def results_to_dict(results: dict[str, dict[str, MetricResult]], field: str = "s
 
     With ``field="score"`` this is the nested shape ``plot_summary``, ``collect_channels``
     and the MLflow upload consume, and that the readers' ``load_scores`` returns for
-    cached scores; with ``field="timeseries"`` it is what ``plot_timeseries_summary`` reads.
+    cached scores; with ``field="by_init_hour"`` it is what ``plot_init_hour_summary`` reads.
     """
     d: dict = {}
     for region, by_metric in results.items():
@@ -87,19 +85,6 @@ def results_to_dict(results: dict[str, dict[str, MetricResult]], field: str = "s
                     r.run_id
                 ] = getattr(r, field)
     return d
-
-
-def _init_hours(init_times) -> NDArray:
-    """Hour of day (0-23) of each initialisation time; -1 for NaT."""
-    t = np.asarray(init_times, dtype="datetime64[ns]")
-    return np.where(np.isnat(t), -1, t.astype("datetime64[h]").astype("int64") % 24)
-
-
-def _with_init_hour(da_dict: dict | None, hours: dict) -> dict | None:
-    """Copy of a per-fstep dict with ``hours[fstep]`` attached as the ``source_end_hour`` coord."""
-    if da_dict is None:
-        return None
-    return {fs: da.assign_coords(source_end_hour=hours[fs]) for fs, da in da_dict.items()}
 
 
 def get_next_fstep_data(fstep, da_preds, da_tars, fsteps):
@@ -206,9 +191,9 @@ def calc_scores_per_stream(
     regions: list[str],
     metrics_dict: dict,
     output_data: ReaderOutput | None = None,
+    climatology: dict | None = None,
     *,
     compute_spatial: bool = False,
-    compute_timeseries: bool = False,
 ) -> dict[str, dict[str, MetricResult]]:
     """Calculate scores for a given run and stream using the specified metrics.
 
@@ -225,12 +210,12 @@ def calc_scores_per_stream(
     output_data : ReaderOutput | None
         Pre-loaded data.  When provided, reader.get_data() is skipped — this
         avoids the double-load when data is already loaded for plotting.
+    climatology : dict | None
+        Climatology aligned to the targets (``get_climatology``).  Computed here when
+        not given and a metric needs it.
     compute_spatial : bool
         Also compute the sample-aggregated score per point (``MetricResult.spatial``),
         used for score maps.  Gridded streams only.
-    compute_timeseries : bool
-        Also compute the score per initialisation hour (``MetricResult.timeseries``),
-        used for the init-hour plots.
 
     Returns
     -------
@@ -263,24 +248,13 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     fsteps = sorted(list(da_preds.keys()))
 
-    needs_clim = needs_climatology(metrics_dict)
-    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
+    if climatology is None and needs_climatology(metrics_dict):
+        climatology = get_climatology(reader, da_tars, stream)
 
     max_workers = reader.eval_cfg.get("max_workers", None)
     agg_dims = reader.eval_cfg.get("agg_dims", "ipoint")
 
     compute_spatial = compute_spatial and is_gridded_data
-    # Init-hour mode: group by the hour of day of `init_times`, attached as a `sample`
-    # coordinate for the scoring call only (it must not end up in the score JSON).
-    compute_timeseries = compute_timeseries and is_gridded_data
-    hours: dict = {}
-    if compute_timeseries:
-        hours = {
-            fs: xr.DataArray(
-                _init_hours(da.init_times.values), dims="sample", coords={"sample": da.sample}
-            )
-            for fs, da in da_preds.items()
-        }
 
     for region in regions:
         bbox = RegionBoundingBox.from_region_name(region)
@@ -293,7 +267,7 @@ def calc_scores_per_stream(
             da_preds,
             da_tars,
             fsteps,
-            aligned_clim_data,
+            climatology,
             is_gridded_data,
             group_by_coord,
             bbox,
@@ -318,43 +292,29 @@ def calc_scores_per_stream(
 
         # PSD is a spectrum over space; it is not aggregated over samples.
         sample_agg_metrics = {m: p for m, p in metrics.items() if m != "psd"}
-        if not sample_agg_metrics:
-            continue
-
-        # Same scoring as above with other aggregation dims; the per-fstep arrays carry a
-        # scalar `forecast_step` coordinate, so one concat stacks them.
-        common = (reader.run_id, stream, region, da_preds, da_tars, fsteps, aligned_clim_data)
-        if compute_spatial:
+        if compute_spatial and sample_agg_metrics:
+            # Same scoring as above aggregated over samples; the per-fstep arrays carry a
+            # scalar `forecast_step` coordinate, so one concat stacks them.
             per_fstep, _ = compute_scores_for_region(
-                *common, is_gridded_data, None, bbox, sample_agg_metrics, max_workers, "sample"
+                reader.run_id,
+                stream,
+                region,
+                da_preds,
+                da_tars,
+                fsteps,
+                climatology,
+                is_gridded_data,
+                None,
+                bbox,
+                sample_agg_metrics,
+                max_workers,
+                "sample",
             )
             spatial = xr.concat(
                 [c for _, c, _ in per_fstep], dim="forecast_step", coords="different"
             )
             for metric in spatial.metric.values:
                 results[region][str(metric)].spatial = spatial.sel(metric=metric, drop=True)
-
-        if compute_timeseries:
-            per_fstep, _ = compute_scores_for_region(
-                reader.run_id,
-                stream,
-                region,
-                _with_init_hour(da_preds, hours),
-                _with_init_hour(da_tars, hours),
-                fsteps,
-                _with_init_hour(aligned_clim_data, hours),
-                is_gridded_data,
-                "source_end_hour",
-                bbox,
-                sample_agg_metrics,
-                max_workers,
-                ["sample", "ipoint"],
-            )
-            ts = xr.concat([c for _, c, _ in per_fstep], dim="forecast_step", coords="different")
-            if "source_end_hour" not in ts.dims:  # one init hour only: get_score does not group
-                ts = ts.expand_dims(source_end_hour=[int(hours[fsteps[0]].values[0])])
-            for metric in ts.metric.values:
-                results[region][str(metric)].timeseries = ts.sel(metric=metric, drop=True)
 
     return results
 

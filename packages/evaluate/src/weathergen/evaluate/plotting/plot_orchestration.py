@@ -991,24 +991,24 @@ def plot_data(
 # ---------------------------------------------------------------------------
 
 
-def plot_timeseries_summary(
+def plot_init_hour_summary(
     cfg: dict,
-    timeseries_scores: dict,
+    init_hour_scores: dict,
     summary_dir: Path,
 ) -> None:
-    """Plot timeseries summary comparing multiple run_ids on the same figure.
+    """Plot scores by initialisation hour, comparing multiple run_ids on the same figure.
 
     Parameters
     ----------
     cfg : dict
         Configuration dictionary (used for runs, labels, colors, plotting options).
-    timeseries_scores : dict
-        Nested dict: ``timeseries_scores[metric][region][stream][run_id] = xr.DataArray``
-        with dims ``(forecast_step, source_end_hour[, channel])`` (``MetricResult.timeseries``).
+    init_hour_scores : dict
+        Nested dict: ``init_hour_scores[metric][region][stream][run_id] = xr.DataArray``
+        with dims ``(forecast_step, init_hour[, channel])`` (``MetricResult.by_init_hour``).
     summary_dir : Path
         Directory to write summary plots to.
     """
-    if not timeseries_scores:
+    if not init_hour_scores:
         return
 
     runs = cfg.run_ids
@@ -1016,10 +1016,10 @@ def plot_timeseries_summary(
     image_format = plt_opt.get("image_format", "png")
     dpi_val = plt_opt.get("dpi_val", 150)
 
-    ts_dir = summary_dir / "score_init_time_series"
+    ts_dir = summary_dir / "score_by_init_hour"
     ts_dir.mkdir(parents=True, exist_ok=True)
 
-    for metric_name, region_dict in timeseries_scores.items():
+    for metric_name, region_dict in init_hour_scores.items():
         for region, stream_dict in region_dict.items():
             for stream, run_dict in stream_dict.items():
                 if not run_dict:
@@ -1046,7 +1046,7 @@ def plot_timeseries_summary(
                             score_vals = (
                                 score.sel(channel=channel) if channel is not None else score
                             )
-                            hours = score_vals.coords["source_end_hour"].values
+                            hours = score_vals.coords["init_hour"].values
                             values = score_vals.values.flatten()
                             run_label = runs[run_id].get("label", run_id)
                             label = f"{run_label} ({run_id})"
@@ -1062,11 +1062,11 @@ def plot_timeseries_summary(
 
                         ch_label = channel if channel is not None else "all"
                         title = (
-                            f"{metric_name.upper()} vs source end hour | "
+                            f"{metric_name.upper()} vs initialisation hour | "
                             f"{ch_label} | fstep {fstep} | {region} | {stream}"
                         )
                         plt.title(title)
-                        plt.xlabel("Source window end hour [UTC]")
+                        plt.xlabel("Initialisation hour [UTC]")
                         plt.ylabel(metric_name.upper())
                         if hours is not None and len(hours) > 0:
                             plt.xlim(min(hours) - 0.5, max(hours) + 0.5)
@@ -1079,12 +1079,12 @@ def plot_timeseries_summary(
                         plot_path = (
                             ts_dir / f"{metric_name}_{ch_label}_{region}_{stream}"
                             f"_{run_ids_str}"
-                            f"_fstep_{fstep}_by_source_end_hour.{image_format}"
+                            f"_fstep_{fstep}_by_init_hour.{image_format}"
                         )
                         plt.savefig(plot_path, bbox_inches="tight")
                         plt.close()
 
-    _logger.info(f"Timeseries summary plots saved to {ts_dir}.")
+    _logger.info(f"Scores by initialisation hour plots saved to {ts_dir}.")
 
 
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
