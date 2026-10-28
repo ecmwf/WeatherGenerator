@@ -306,10 +306,9 @@ def _build_single_animation(
 
         {prefix}_{run_id}_{tag}_{sample}_{valid_time}_{stream}_{region}_{var}_{fstep:03d}
 
-    When ``score_animation=True`` filenames are constructed deterministically because
-    the fstep is embedded in the tag (``score_maps_{metric}_fstep_{N}``) rather
-    than being a zero-padded suffix.  Pass ``tag="score_maps_{metric}"`` and
-    ``sample`` as the ensemble value (or ``None`` for no ensemble).
+    Score-map frames follow the same pattern without the sample and valid time
+    (``map_{run_id}_score_maps[_ens_{ens}]_{metric}_{stream}_{region}_{var}_{fstep:03d}``):
+    pass ``tag="score_maps[_ens_{ens}]_{metric}"`` and ``sample=None``.
 
     Returns the list of source frame paths assembled into the animation, or an
     empty list when no (or fewer than two for score maps) frames were found.
@@ -486,7 +485,6 @@ def _dispatch_score_map_animations(
             image_format=plotter_cfg["image_format"],
             animation_format=plotter_cfg["animation_format"],
             duration_ms=duration_ms,
-            score_animation=True,
         )
         for metric in metrics
         for region in regions
@@ -1023,7 +1021,7 @@ def plot_init_hour_summary(
     image_format = plt_opt.get("image_format", "png")
     dpi_val = plt_opt.get("dpi_val", 150)
 
-    ts_dir = summary_dir / "score_by_init_hour"
+    ts_dir = summary_dir / "_".join(runs) / "score_by_init_hour"
     ts_dir.mkdir(parents=True, exist_ok=True)
 
     for metric_name, region_dict in init_hour_scores.items():

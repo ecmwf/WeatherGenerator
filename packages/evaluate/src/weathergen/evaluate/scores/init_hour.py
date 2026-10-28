@@ -98,7 +98,9 @@ def compute_scores_by_init_hour(
         )
         if not per_fstep:
             continue
-        scores = xr.concat([c for _, c, _ in per_fstep], dim="forecast_step", coords="different")
+        scores = xr.concat(
+            [c for _, c, _ in per_fstep], dim="forecast_step", coords="different", compat="equals"
+        )
         if "init_hour" not in scores.dims:  # a single init hour: get_score does not group
             scores = scores.expand_dims(init_hour=[int(hours[fsteps[0]].values[0])])
         for metric in scores.metric.values:

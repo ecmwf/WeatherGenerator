@@ -311,7 +311,10 @@ def calc_scores_per_stream(
                 "sample",
             )
             spatial = xr.concat(
-                [c for _, c, _ in per_fstep], dim="forecast_step", coords="different"
+                [c for _, c, _ in per_fstep],
+                dim="forecast_step",
+                coords="different",
+                compat="equals",
             )
             for metric in spatial.metric.values:
                 results[region][str(metric)].spatial = spatial.sel(metric=metric, drop=True)

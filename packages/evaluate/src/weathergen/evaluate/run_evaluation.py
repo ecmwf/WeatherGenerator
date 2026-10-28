@@ -227,8 +227,13 @@ def _process_stream(
     needs_scoring = stream_dict.get("evaluation", False)
 
     # --- Determine scoring state before loading any data ---
-    plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ == "zarr"
-    plot_score_init_hour = plot_score_options.get("plot_score_init_hour", False) and type_ == "zarr"
+    # score maps and init-hour scores are recomputed from the data: readers that load it only
+    reads_data = type_ in ("zarr", "anemoi-target")
+    for option, name in (("plot_score_maps", "score_map"), ("plot_score_init_hour", "init_hour")):
+        if plot_score_options.get(option, False) and not reads_data:
+            _logger.warning(f"RUN {run_id} - {stream}: '{name}' not supported for type '{type_}'.")
+    plot_score_maps = plot_score_options.get("plot_score_maps", False) and reads_data
+    plot_score_init_hour = plot_score_options.get("plot_score_init_hour", False) and reads_data
 
     recomputable_metrics = {}
     stream_loaded_scores: dict = {}
@@ -238,7 +243,7 @@ def _process_stream(
         stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
         needs_score_recomputation = (
             plot_score_maps or plot_score_init_hour or bool(recomputable_metrics)
-        ) and type_ == "zarr"
+        ) and reads_data
 
     # --- Load data only when necessary ---
     output_data = None
