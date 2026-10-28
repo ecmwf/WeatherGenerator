@@ -176,6 +176,8 @@ def run_train(args):
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
+    breakpoint()
+
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
     init_loggers(log_path=config.get_path_logs(cf))
