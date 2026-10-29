@@ -29,8 +29,10 @@ import math
 import numpy as np
 import numpy.typing as npt
 import torch
+import tqdm
 
-from weathergen.common.config import Config, get_path_run
+from weathergen.common.config import Config
+from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
@@ -69,6 +71,48 @@ class SpatialAdaLN(torch.nn.Module):
         """x, c: (B, H, D).  Returns (x_modulated, gate) both (B, H, D)."""
         scale, shift, gate = self.proj(c).chunk(3, dim=-1)
         return self.norm(x) * (1 + scale) + shift, gate
+
+
+class DiffusionForecastConditioning:
+    """Diffusion conditioning type for ForecastingEngine's blocks.
+
+    Wraps the raw ``fe_diffusion_model_conditioning_type`` config value so call sites compare
+    against ``conditioning_type`` directly instead of re-reading the config string everywhere.
+    """
+
+    def __init__(self, conditioning_type: str | None):
+        self.conditioning_type = conditioning_type
+
+    def __eq__(self, other: object) -> bool:
+        """Value equality, so, e.g., ``self.conditioning == "ada_ln"`` works directly instead
+        of having to compare against ``self.conditioning.conditioning_type``.
+        """
+        if isinstance(other, DiffusionForecastConditioning):
+            other = other.conditioning_type
+        return self.conditioning_type == other
+
+    def __hash__(self) -> int:
+        return hash(self.conditioning_type)
+
+    def __repr__(self) -> str:
+        return f"DiffusionForecastConditioning({self.conditioning_type!r})"
+
+    def validate(self, conditioning: torch.Tensor | None) -> None:
+        """Check conditioning is present/absent exactly when this mode expects it.
+
+        concatenate/concatenate_hiddendim bake conditioning into tokens before calling the
+        engine (see DiffusionForecastEngine.denoise() below), so they expect conditioning=None
+        when reaching ForecastingEngine.forward().
+        """
+        if self.conditioning_type in {"ada_ln", "cross_attn", "cross_attn_rev", "additive"}:
+            assert conditioning is not None, (
+                f"conditioning must be provided for '{self.conditioning_type}' "
+                "diffusion model conditioning"
+            )
+        elif self.conditioning_type is None:
+            assert conditioning is None, (
+                "conditioning should not be provided when diffusion model conditioning is disabled"
+            )
 
 
 class DiffusionForecastEngine(torch.nn.Module):
@@ -180,11 +224,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.s_max = math.inf if _s_max is None else float(_s_max)
         self.s_noise = float(self.cf.get("fe_diffusion_s_noise", 1.0))
 
-        # Register/class tokens prepended by the encoder. The diffusion engine ignores them: they
-        # are stripped from target, conditioning and coords, not diffused, and re-attached as
-        # zeros to the output only to keep the encoder token layout (see _prepend_aux_tokens).
+        # Encoder register/class tokens are ignored by the diffusion engine (not diffused).
         self.num_aux_tokens = self.cf.num_register_tokens + self.cf.num_class_tokens
-        # Learnable registers of the denoiser itself, independent of the encoder's registers.
+        # Learnable registers of the denoiser, independent of the encoder's registers.
         self.num_diffusion_registers = self.cf.get("fe_diffusion_num_register_tokens", 0) or 0
         self.diffusion_registers = (
             torch.nn.Parameter(torch.randn(1, self.num_diffusion_registers, _lat_dim) * 0.02)
@@ -192,7 +234,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             else None
         )
 
-        self.cur_token = None  # TODO: re move after single sample experiments
+        self.log_analytics = cf.get("inference_logging", {}).get(
+            "fe_diffusion_log_analytics", False
+        )
+        # Target tokens for sampling diagnostics; only kept when analytics logging is enabled.
+        self.cur_token: torch.Tensor | None = None
         self._noised_tokens: torch.Tensor | None = None
 
         self._noise = None
@@ -201,6 +247,16 @@ class DiffusionForecastEngine(torch.nn.Module):
         # noise_level_rn ~ Uniform[log(sigma_min), log(sigma_max)], so sigma = exp(noise_level_rn).
         self.train_log_min = math.log(self.sigma_min)
         self.train_log_max = math.log(self.sigma_max)
+
+        # Inference-mode only: persists per-ODE-step sampling diagnostics to a JSONL file instead
+        # of plotting them inline. See scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py.
+        self._diagnostics_writer = None
+        if cf.stage == "inference":
+            self._diagnostics_writer = ScalarSeriesJSONLWriter(
+                cf,
+                name="diffusion_sampling_diagnostics",
+                enabled=self.log_analytics,
+            )
 
     def forward(
         self,
@@ -265,7 +321,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             elif self.cf.stage == "inference":
                 if fstep is None:
                     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
-                self.cur_token = tokens.detach() if tokens is not None else None
+                self.cur_token = (
+                    tokens.detach() if self.log_analytics and tokens is not None else None
+                )
                 # Allow the number of ODE denoising steps to be set from the config.
                 # Falls back to the `num_steps` argument default when not configured.
                 num_steps = self.cf.get("fe_diffusion_num_inference_steps", None) or num_steps
@@ -294,8 +352,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         # c = [data.get_input_data(t) for t in range(data.get_sample_len() - 1)]
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
-
-        self.cur_token = tokens.detach()
 
         # y is always the target to denoise (set by DiffusionLatentTargetEncoder.pre_compute)
         y = tokens
@@ -328,8 +384,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
         else:
             raise ValueError(f"Unsupported noise_distribution: {self.noise_distribution}")
-        # Only the healpix-cell tokens are diffused; register/class tokens are dropped from x
-        # and re-attached (as zeros) to the output.
+        # Only the healpix-cell tokens are diffused.
         y_cells = y[:, self.num_aux_tokens :]
         x_noisy = y_cells + torch.randn_like(y_cells) * sigma
 
@@ -339,12 +394,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         return self._prepend_aux_tokens(denoised)
 
     def _prepend_aux_tokens(self, x_cells: torch.Tensor) -> torch.Tensor:
-        """
-        Prepend zero register/class tokens to the diffused healpix-cell tokens so the output has
-        the encoder layout expected downstream (decoders, latent loss, rollout conditioning).
-        The decoders and the latent loss discard them, and the denoiser ignores the register
-        slots of the conditioning (see denoise), so their value does not matter.
-        """
+        """Prepend zero aux tokens to restore the encoder token layout expected downstream."""
         if self.num_aux_tokens == 0:
             return x_cells
         aux = x_cells.new_zeros(x_cells.shape[0], self.num_aux_tokens, x_cells.shape[2])
@@ -386,8 +436,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         net_input = c_in * x
 
-        # The denoiser ignores the encoder's register/class tokens (A): x already holds only the
-        # H healpix-cell tokens; strip them from the conditioning tokens and RoPE coords, too.
+        # Strip the encoder's aux tokens from conditioning and RoPE coords (x holds cells only).
         n_aux = self.num_aux_tokens
         n_reg = self.num_diffusion_registers
         if self.conditioning == "forecast" and c is not None:
@@ -403,8 +452,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             if c is not None and self.conditioning_type not in {"ada_ln"}:
                 c = self.latent_proj_up(c)
 
-        # Prepend the R learnable diffusion registers: (B, H, D') -> (B, R+H, D'). Like the
-        # encoder's registers, they get zero RoPE coords.
+        # Prepend the learnable diffusion registers (zero RoPE coords): (B, H) -> (B, R+H).
         coords_x = coords_c
         if n_reg > 0:
             registers = self.diffusion_registers.to(dtype=net_input.dtype)
@@ -413,9 +461,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 coords_x = torch.cat(
                     [coords_c.new_zeros(coords_c.shape[0], n_reg, 2), coords_c], dim=1
                 )
-            # Conditioning types that pair x and c token-wise (or use c as queries) need c at
-            # R+H tokens: pad the register slots with zeros. concatenate (own coords) and
-            # cross_attn (c is only key/value) keep the H conditioning tokens.
+            # Token-wise conditioning types need c at R+H tokens: zero-pad the register slots.
             if (
                 self.conditioning == "forecast"
                 and c is not None
@@ -528,8 +574,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 num_steps=num_steps,
                 coords=coords,
                 batch_size=num_ensemble_members,
-                log_diagnostics=True,
-                return_trajectory=False,
+                return_diffusion_steps=False,
             )
             return final_x
 
@@ -539,8 +584,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             fstep=fstep,
             num_steps=num_steps,
             coords=coords,
-            log_diagnostics=True,
-            return_trajectory=True,
+            return_diffusion_steps=True,
         )
         return intermediate_x
 
@@ -585,8 +629,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         num_steps: int,
         coords: torch.Tensor | None,
         batch_size: int = 1,
-        log_diagnostics: bool = True,
-        return_trajectory: bool = False,
+        return_diffusion_steps: bool = False,
     ) -> "tuple[torch.Tensor, list[torch.Tensor] | None]":
         """Run one complete ODE denoising trajectory from pure noise.
 
@@ -598,21 +641,17 @@ class DiffusionForecastEngine(torch.nn.Module):
             coords: Optional spatial coordinates for :meth:`denoise`.
             batch_size: Number of independent noise realisations to denoise in
                 parallel.  Defaults to 1 (trajectory / single-sample mode).
-            log_diagnostics: Whether to emit the sigma-schedule log message and
-                save the diagnostic plot.
-            return_trajectory: When ``True``, also return the list of intermediate
+            return_diffusion_steps: When ``True``, also return the list of intermediate
                 states (one per ODE step).  Set to ``False`` in ensemble mode to
                 avoid storing the full trajectory N times.
 
         Returns:
             ``(final_x, intermediate_x)`` where *final_x* has shape
-            ``(batch_size, num_aux_tokens + num_healpix_cells, embed_dim)`` (aux tokens
-            prepended) and *intermediate_x*
-            is either a list of per-step tensors (when ``return_trajectory=True``)
+            ``(batch_size, num_aux_tokens + num_healpix_cells, embed_dim)`` and *intermediate_x*
+            is either a list of per-step tensors (when ``return_diffusion_steps=True``)
             or ``None``.
         """
-        # Only the healpix-cell tokens are diffused; register/class tokens are prepended to the
-        # returned states (see _prepend_aux_tokens).
+        # Only the healpix-cell tokens are diffused.
         x = torch.randn(batch_size, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(
             device="cuda"
         )
@@ -651,22 +690,21 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
         sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
-        if log_diagnostics:
-            _churn = (
-                f", stochastic churn: s_churn={self.s_churn}, s_min={self.s_min}, "
-                f"s_max={self.s_max}, s_noise={self.s_noise}"
-                if self.s_churn > 0
-                else " (deterministic Heun sampler)"
-            )
-            logger.info(
-                f"Inference sigma schedule ({self.noise_distribution}): "
-                f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, "
-                f"train_max={sigma_max_train:.4f}), "
-                f"sigma_min_eff={sigma_min_eff:.4f} "
-                f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/"
-                f"{sigma_min_from_dist:.4f}), "
-                f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn}"
-            )
+        _churn_msg = (
+            f", stochastic churn: s_churn={self.s_churn}, s_min={self.s_min}, "
+            f"s_max={self.s_max}, s_noise={self.s_noise}"
+            if self.s_churn > 0
+            else " (deterministic Heun sampler)"
+        )
+        logger.debug(
+            f"Inference sigma schedule ({self.noise_distribution}): "
+            f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
+            f"train_max={sigma_max_train:.4f}), "
+            f"sigma_min_eff={sigma_min_eff:.4f} "
+            f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
+            f"{sigma_min_from_dist:.4f}), "
+            f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn_msg}"
+        )
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -690,17 +728,25 @@ class DiffusionForecastEngine(torch.nn.Module):
             "d_cur_norm": [],
             "d_cur_step_norm": [],
             "residual_std": [],
-            "x": [x.cpu()],
+            "latent_states": [x.cpu()],
         }
 
         # Per-step intermediate denoised states (one per ODE step).
-        # Only populated when return_trajectory=True.
-        intermediate_x: list[torch.Tensor] = [] if return_trajectory else None
+        intermediate_x: list[torch.Tensor] = [] if return_diffusion_steps else None
 
-        # Main sampling loop.
+        # Main sampling loop. position=1 nests this bar below the per-sample/batch bar
+        # (position=0) in trainer.py's validation loop, so progress is visible at both
+        # levels during inference.
         x_next = x * t_steps[0]
+        step_pairs = list(zip(t_steps[:-1], t_steps[1:], strict=False))
         for i, (t_cur, t_next) in enumerate(
-            zip(t_steps[:-1], t_steps[1:], strict=False)
+            tqdm.tqdm(
+                step_pairs,
+                desc="denoising step",
+                position=1,
+                leave=False,
+                disable=self.cf.rank > 0,
+            )
         ):  # 0, ..., N-1
             t_cur = torch.tensor([t_cur], device="cuda").float()
             t_next = torch.tensor([t_next], device="cuda").float()
@@ -732,116 +778,65 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["d_cur_norm"].append(d_cur.norm().item())
                 track["d_cur_step_norm"].append(((t_next - t_post) * d_cur).norm().item())
                 track["residual_std"].append((x_post - denoised).std().item())
-                track["x"].append(x_next.cpu())
+                track["latent_states"].append(x_next.cpu())
                 if target_cells is not None:
                     track["l2_to_target"].append((x_next - target_cells).norm().item())
-                    track["x"].append(target_cells.cpu())
+                    track["latent_states"].append(target_cells.cpu())
 
-            if return_trajectory:
+            if return_diffusion_steps:
                 intermediate_x.append(self._prepend_aux_tokens(x_next))
 
-        if log_diagnostics:
-            self._plot_sampling_diagnostics(track, num_steps)
+        # Drop the full latent tensors (see "latent_states" above) before writing: the
+        # diagnostics file only stores per-step scalars, and self._diagnostics_writer is
+        # None outside inference, and no-ops unless fe_diffusion_log_analytics is enabled.
+        if self._diagnostics_writer is not None:
+            scalar_track = {k: v for k, v in track.items() if k != "latent_states"}
+            self._diagnostics_writer.write(scalar_track)
 
         return self._prepend_aux_tokens(x_next), intermediate_x
 
-    def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
-        """Save a diagnostic plot of the sampling trajectory."""
-        import matplotlib
 
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+def _decode_diffusion_steps(
+    model: "Model",
+    model_params: "ModelParams",
+    step: int,
+    tokens: list[torch.Tensor],
+    source_samples: "BatchSamples",
+    forecast_offset: int,
+    cond: torch.Tensor,
+    predict_residual: bool,
+) -> "ModelOutput":
+    """
+    Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (only if
+    ``inference_logging.fe_diffusion_log_analytics``).
 
-        steps = list(range(len(track["sigma"])))
-        has_target = len(track["l2_to_target"]) > 0
-        n_plots = 7
+    The result is shaped like a forecast rollout of ``len(tokens)`` pseudo-steps, matching
+    the indexing ``predict_decoders``/``predict_latent`` expect, but it is written via the
+    dedicated ``DiffusionStepsZarrWriter`` independent of ``validation_io.write_output`` or
+    ``OutputBatchData`` and not readable by the ``evaluate`` package. It is never merged
+    into the real output returned by ``Model.forward``.
+    """
+    from weathergen.model.model import ModelOutput  # local import: avoids a model<->diffusion cycle
 
-        fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
-
-        # 1) Sigma schedule
-        axes[0].semilogy(steps, track["sigma"], "o-", markersize=3, label="sigma (schedule)")
-        if track.get("sigma_post") and track["sigma_post"] != track["sigma"]:
-            # Stochastic sampler: show the per-step noise bump from churn.
-            axes[0].semilogy(
-                steps,
-                track["sigma_post"],
-                "x--",
-                markersize=4,
-                color="tab:green",
-                label="sigma_post (post-churn)",
-            )
-        axes[0].set_ylabel("sigma (noise level)")
-        axes[0].set_title(
-            f"Sampling diagnostics  |  sigma_max_eff={track['sigma'][0]:.2f}, "
-            f"sigma_data={self.sigma_data}, steps={num_steps}"
+    analytics_output = ModelOutput(
+        list(range(forecast_offset, forecast_offset + len(tokens))),
+        forecast_offset,
+        source_samples,
+    )
+    for i, toks in enumerate(tokens):
+        toks_abs = cond + toks if predict_residual else toks
+        # out_step indexes analytics_output.physical/.latent directly (global forecast step, not
+        # chunk-local), so it must start at forecast_offset like the rest of the list, else
+        # the leading empty padding slot stays at the wrong end and write_output (which only
+        # reads steps >= forecast_offset) never sees the first ODE step.
+        out_step = forecast_offset + i
+        analytics_output = model.predict_decoders(
+            model_params, step, toks_abs, source_samples, analytics_output, out_step=out_step
         )
-        axes[0].axhline(
-            self.sigma_data, color="grey", ls="--", lw=0.8, label=f"sigma_data={self.sigma_data}"
+        analytics_output = model.predict_latent(
+            model_params, step, toks_abs, source_samples, analytics_output, out_step=out_step
         )
-        axes[0].legend(fontsize=8)
-        axes[0].grid(True, alpha=0.3)
-
-        # 2) Std of x_next and denoised estimate
-        axes[1].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
-        axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
-        if self.cur_token is not None:
-            target_std = self.cur_token[:, self.num_aux_tokens :].std().item()
-            axes[1].axhline(
-                target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}"
-            )
-        axes[1].set_ylabel("std")
-        axes[1].legend(fontsize=8)
-        axes[1].grid(True, alpha=0.3)
-
-        if has_target:
-            # 3) L2 error to target
-            axes[2].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
-            axes[2].set_ylabel("L2 error to target")
-            axes[2].grid(True, alpha=0.3)
-
-        # 4) d_cur norm and step norm
-        axes[3].semilogy(steps, track["d_cur_norm"], "o-", markersize=3, label="||d_cur||")
-        axes[3].semilogy(
-            steps,
-            track["d_cur_step_norm"],
-            "^-",
-            markersize=3,
-            label="||(t_next - t_post) * d_cur||",
-        )
-        axes[3].set_ylabel("norm (log scale)")
-        axes[3].set_title("ODE drift norms")
-        axes[3].legend(fontsize=8)
-        axes[3].grid(True, alpha=0.3)
-
-        # 5) Residual std: Std(x_post - denoised)
-        axes[4].semilogy(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[4].set_ylabel("std (log scale)")
-        axes[4].set_title("Std(x_post - denoised)")
-        axes[4].grid(True, alpha=0.3)
-
-        # 6) Residual std zoomed to [0, 1]
-        axes[5].plot(steps, track["residual_std"], "s-", markersize=3, color="tab:orange")
-        axes[5].set_ylim(0, 1)
-        axes[5].set_ylabel("std (clipped to 1)")
-        axes[5].set_title("Std(x_post - denoised)  [y ≤ 1]")
-        axes[5].grid(True, alpha=0.3)
-
-        # 7) Std of x_next over sampling steps
-        axes[6].semilogy(steps, track["x_std"], "o-", markersize=3, color="tab:blue")
-        axes[6].set_ylabel("std (log scale)")
-        axes[6].set_title("Std of x_next over denoising steps")
-        axes[6].grid(True, alpha=0.3)
-
-        axes[-1].set_xlabel("sampling step")
-        fig.tight_layout()
-
-        out_dir = get_path_run(self.cf)
-        out_dir.mkdir(exist_ok=True, parents=True)
-        out_path_base = out_dir / "plots" / "validation" / "plots"
-        out_path_base.mkdir(exist_ok=True, parents=True)
-        fig.savefig(out_path_base / "sampling_diagnostics.png", dpi=150)
-        plt.close(fig)
-        logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
+    return analytics_output
 
 
 class Preconditioner:
