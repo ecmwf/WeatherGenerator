@@ -1,0 +1,28 @@
+# Copy of gjl_repro_forecast_n320_iasi_channels_monitoring_pipeline.yml (upn1fq24 -> v4u1o1la)
+# with the optimizer changes from the 2026-10-29 monitoring analysis in both stages: adamw eps
+# 1e-10 (was 2e-8 pretrain / 1e-8 finetune) and no weight decay on norm parameters (incl. QK-norm
+# gains) and biases. Everything else unchanged.
+parallelize: false
+stages:
+  - name: pretrain
+    stage: train
+    base_config: ./config/config_gjl6a0kb_reproduction_n320_iasi_channels.yml
+    options:
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+      - train_logging.loss_spike_detection.enabled=False
+      - train_logging.loss_spike_detection.skip_batch=False
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.pretrain
+    config_files:
+      # optimizer and monitoring settings are in this copy of the finetune config instead of
+      # options: the launcher logs each config's top-level keys to MLflow, and a second
+      # train_logging (from the options yaml) clashes with the one in the finetune config
+      - ./config/config_gjl_repro_finetune_forecast_n320_iasi_channels_monitoring_optimfix.yml
+    chain_jobs: 4
+    nodes: 2
