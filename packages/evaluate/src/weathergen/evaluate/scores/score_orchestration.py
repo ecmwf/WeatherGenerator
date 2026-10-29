@@ -7,10 +7,23 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Score orchestration: per-fstep scoring, stream aggregation, and JSON output."""
+"""Score orchestration: per-fstep scoring, stream aggregation, and JSON output.
+
+``calc_scores_per_stream`` is the scoring entry point.  It scores the loaded data
+through ``compute_scores_for_region`` / ``_score_single_fstep`` with different
+``agg_dims``:
+
+* ``score``: aggregated over ``ipoint``; one value per (sample, forecast step, channel).
+* ``spatial``: aggregated over ``sample``; one value per (forecast step, point, channel).
+  Used for score maps.
+
+Scores by initialisation hour are computed in ``scores/init_hour.py``.  All outputs of
+one metric are held together in a :class:`MetricResult`.
+"""
 
 import json
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 import xarray as xr
@@ -24,6 +37,58 @@ from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatol
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MetricResult:
+    """One metric's outputs for one region of one stream of one run.
+
+    Attributes
+    ----------
+    name, region, stream, run_id
+        What the result belongs to.
+    score
+        Per-sample score, dims ``(sample, forecast_step, channel, ens)`` with a scalar
+        ``metric`` coordinate.  Its ``attrs`` are the metric parameters plus any
+        per-forecast-step payload a metric produced (``fstep_<n>/<key>``,
+        ``attr_fsteps``).  This is what the JSON score files store.
+    spatial
+        Score aggregated over samples, dims ``(ipoint, forecast_step, channel[, ens])``
+        with ``lat``/``lon`` on ``ipoint``.  ``None`` unless computed.
+    by_init_hour
+        Score aggregated over samples and points per initialisation hour of the day, dims
+        ``(init_hour, forecast_step, channel[, ens])``.  ``None`` unless computed
+        (``init_hour.compute_scores_by_init_hour``).
+
+    The three share the dim order after the first one (``sample`` / ``ipoint`` /
+    ``init_hour``).
+    """
+
+    name: str
+    region: str
+    stream: str
+    run_id: str
+    score: xr.DataArray
+    spatial: xr.DataArray | None = None
+    by_init_hour: xr.DataArray | None = None
+
+
+def results_to_dict(results: dict[str, dict[str, MetricResult]], field: str = "score") -> dict:
+    """``d[metric][region][stream][run_id] -> MetricResult.<field>`` (``None`` fields skipped).
+
+    With ``field="score"`` this is the nested shape ``plot_summary``, ``collect_channels``
+    and the MLflow upload consume, and that the readers' ``load_scores`` returns for
+    cached scores; with ``field="by_init_hour"`` it is what ``plot_init_hour_summary`` reads.
+    """
+    d: dict = {}
+    for region, by_metric in results.items():
+        for metric, r in by_metric.items():
+            value = vars(r)[field]
+            if value is not None:
+                d.setdefault(metric, {}).setdefault(region, {}).setdefault(r.stream, {})[
+                    r.run_id
+                ] = value
+    return d
 
 
 def get_next_fstep_data(fstep, da_preds, da_tars, fsteps):
@@ -130,7 +195,10 @@ def calc_scores_per_stream(
     regions: list[str],
     metrics_dict: dict,
     output_data: ReaderOutput | None = None,
-):
+    climatology: dict | None = None,
+    *,
+    compute_spatial: bool = False,
+) -> dict[str, dict[str, MetricResult]]:
     """Calculate scores for a given run and stream using the specified metrics.
 
     Parameters
@@ -146,13 +214,19 @@ def calc_scores_per_stream(
     output_data : ReaderOutput | None
         Pre-loaded data.  When provided, reader.get_data() is skipped — this
         avoids the double-load when data is already loaded for plotting.
+    climatology : dict | None
+        Climatology aligned to the targets (``get_climatology``).  Computed here when
+        not given and a metric needs it.
+    compute_spatial : bool
+        Also compute the sample-aggregated score per point (``MetricResult.spatial``),
+        used for score maps.  Gridded streams only.
 
     Returns
     -------
-    dict
-        Scores for each metric and stream.
+    dict[str, dict[str, MetricResult]]
+        ``results[region][metric] -> MetricResult``.
     """
-    local_scores = {}
+    results: dict[str, dict[str, MetricResult]] = {}
 
     available_data = reader.check_availability(stream, mode="evaluation")
     if not available_data.score_availability:
@@ -178,11 +252,13 @@ def calc_scores_per_stream(
     da_tars = output_data.target
     fsteps = sorted(list(da_preds.keys()))
 
-    needs_clim = needs_climatology(metrics_dict)
-    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
+    if climatology is None and needs_climatology(metrics_dict):
+        climatology = get_climatology(reader, da_tars, stream)
 
     max_workers = reader.eval_cfg.get("max_workers", None)
     agg_dims = reader.eval_cfg.get("agg_dims", "ipoint")
+
+    compute_spatial = compute_spatial and is_gridded_data
 
     for region in regions:
         bbox = RegionBoundingBox.from_region_name(region)
@@ -195,7 +271,7 @@ def calc_scores_per_stream(
             da_preds,
             da_tars,
             fsteps,
-            aligned_clim_data,
+            climatology,
             is_gridded_data,
             group_by_coord,
             bbox,
@@ -204,8 +280,7 @@ def calc_scores_per_stream(
             agg_dims,
         )
 
-        store_metrics_for_region(
-            local_scores,
+        results[region] = store_metrics_for_region(
             reader.run_id,
             stream,
             region,
@@ -219,7 +294,38 @@ def calc_scores_per_stream(
             da_preds,
         )
 
-    return local_scores
+        # PSD is a spectrum over space; it is not aggregated over samples.
+        sample_agg_metrics = {m: p for m, p in metrics.items() if m != "psd"}
+        if compute_spatial and sample_agg_metrics:
+            # Same scoring as above aggregated over samples; the per-fstep arrays carry a
+            # scalar `forecast_step` coordinate, so one concat stacks them.
+            per_fstep, _ = compute_scores_for_region(
+                reader.run_id,
+                stream,
+                region,
+                da_preds,
+                da_tars,
+                fsteps,
+                climatology,
+                is_gridded_data,
+                None,
+                bbox,
+                sample_agg_metrics,
+                max_workers,
+                "sample",
+            )
+            spatial = xr.concat(
+                [c for _, c, _ in per_fstep],
+                dim="forecast_step",
+                coords="different",
+                compat="equals",
+            )
+            # same dim order as score, with ipoint in place of sample
+            spatial = spatial.transpose("ipoint", "forecast_step", ...)
+            for metric in spatial.metric.values:
+                results[region][str(metric)].spatial = spatial.sel(metric=metric, drop=True)
+
+    return results
 
 
 def compute_scores_for_region(
@@ -322,7 +428,6 @@ def compute_scores_for_region(
 
 
 def store_metrics_for_region(
-    local_scores: dict,
     run_id: str,
     stream: str,
     region: str,
@@ -334,13 +439,11 @@ def store_metrics_for_region(
     channels: list[str],
     ensemble: list[str],
     da_preds: dict,
-) -> None:
-    """Populate the result data structure from computed per-fstep scores.
+) -> dict[str, MetricResult]:
+    """Build one MetricResult per metric from the computed per-fstep scores.
 
     Parameters
     ----------
-    local_scores : dict
-        Output dict, mutated in-place (metric → region → stream → run_id → DataArray).
     run_id : str
         Run identifier.
     stream : str
@@ -357,6 +460,11 @@ def store_metrics_for_region(
         Coordinate arrays for the output DataArray.
     da_preds : dict
         Prediction dict (used only to check for ``lead_time`` coord).
+
+    Returns
+    -------
+    dict[str, MetricResult]
+        ``{metric: MetricResult}`` with the ``score`` field filled.
     """
     metric_stream = xr.DataArray(
         np.full(
@@ -424,6 +532,7 @@ def store_metrics_for_region(
     _logger.info(f"Scores for run {run_id} - {stream} calculated successfully.")
     _logger.debug(f"all_metric_attrs keys: {list(all_metric_attrs.keys())}")
 
+    region_results: dict[str, MetricResult] = {}
     for metric, parameters in metrics.items():
         metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
 
@@ -441,9 +550,9 @@ def store_metrics_for_region(
             metric_data.attrs["attr_fsteps"] = attr_fsteps
             _logger.debug(f"Stored per-fstep attributes for {metric}: fsteps={attr_fsteps}")
 
-        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
-            run_id
-        ] = metric_data
+        region_results[metric] = MetricResult(metric, region, stream, run_id, metric_data)
+
+    return region_results
 
 
 # ---------------------------------------------------------------------------
@@ -452,9 +561,9 @@ def store_metrics_for_region(
 
 
 def metric_list_to_json(
-    reader: Reader, stream: str, metrics_dict: list[xr.DataArray], regions: list[str]
+    reader: Reader, stream: str, results: dict[str, dict[str, MetricResult]], regions: list[str]
 ):
-    """Write evaluation results to stream- and metric-specific JSON files.
+    """Write the ``score`` of every result to stream- and metric-specific JSON files.
 
     Parameters
     ----------
@@ -462,48 +571,48 @@ def metric_list_to_json(
         Reader object containing all info about the run_id.
     stream : str
         Stream name.
-    metrics_dict : dict
-        Metrics per stream (metric → region → stream → run_id → DataArray).
+    results : dict[str, dict[str, MetricResult]]
+        ``results[region][metric] -> MetricResult``.
     regions : list[str]
-        Region names.
+        Region names to write.
     """
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
     eval_settings = reader.get_eval_settings(stream)
 
-    for metric, metric_stream in metrics_dict.items():
-        for region in regions:
-            for run_id, metric_data in metric_stream[region][stream].items():
-                save_path = (
-                    reader.metrics_dir
-                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
-                )
-                metric_data_dict = metric_data.to_dict()
+    for region in regions:
+        for metric, result in results.get(region, {}).items():
+            run_id, metric_data = result.run_id, result.score
+            save_path = (
+                reader.metrics_dir
+                / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
+            )
+            metric_data_dict = metric_data.to_dict()
 
-                if save_path.exists():
-                    _logger.debug(f"{save_path} already present")
-                    with save_path.open("r") as f:
-                        data_dict = json.load(f)
-                    if "scores" not in data_dict:
-                        data_dict = {"scores": [data_dict]}
+            if save_path.exists():
+                _logger.debug(f"{save_path} already present")
+                with save_path.open("r") as f:
+                    data_dict = json.load(f)
+                if "scores" not in data_dict:
+                    data_dict = {"scores": [data_dict]}
 
-                    # Update eval_settings to current values
-                    data_dict["eval_settings"] = eval_settings
+                # Update eval_settings to current values
+                data_dict["eval_settings"] = eval_settings
 
-                    scores = data_dict.get("scores")
-                    for i, existing_score in enumerate(scores):
-                        if existing_score["attrs"] == metric_data.attrs:
-                            _logger.warning("Metric with same parameters found, replacing")
-                            scores[i] = metric_data_dict
-                            break
-                    else:
-                        scores.append(metric_data_dict)
-                        _logger.debug(f"Appending results to {save_path}")
+                scores = data_dict.get("scores")
+                for i, existing_score in enumerate(scores):
+                    if existing_score["attrs"] == metric_data.attrs:
+                        _logger.warning("Metric with same parameters found, replacing")
+                        scores[i] = metric_data_dict
+                        break
                 else:
-                    _logger.debug(f"Saving results to new file {save_path}")
-                    data_dict = {"eval_settings": eval_settings, "scores": [metric_data_dict]}
+                    scores.append(metric_data_dict)
+                    _logger.debug(f"Appending results to {save_path}")
+            else:
+                _logger.debug(f"Saving results to new file {save_path}")
+                data_dict = {"eval_settings": eval_settings, "scores": [metric_data_dict]}
 
-                with open(save_path, "w") as f:
-                    json.dump(data_dict, f, indent=4)
+            with open(save_path, "w") as f:
+                json.dump(data_dict, f, indent=4)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "

@@ -209,7 +209,7 @@ def get_plot_score_options(eval_cfg: dict) -> dict[str, bool]:
     return {
         "plot_score_maps": "score_map" in sp,
         "plot_score_animations": "score_animation" in sp,
-        "plot_score_init_time_series": "init_hour" in sp,
+        "plot_score_init_hour": "init_hour" in sp,
     }
 
 

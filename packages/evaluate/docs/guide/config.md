@@ -242,12 +242,14 @@ evaluation:
 | `bar` | Bar plots of scores. |
 | `score_map` | 2D spatial maps of scores per forecast step (zarr runs only). **Slows down evaluation significantly.** |
 | `score_animation` | Animations of the score maps across forecast steps. Needs `score_map` as well, since the animations are built from its frames. |
-| `init_hour` | Score vs the hour of day the forecast was initialised (0–23 h), one line per forecast step (zarr runs only). |
+| `init_hour` | Score vs the hour of day the forecast was initialised (0–23 h): one figure per metric × channel × region × stream and forecast step, with one line per run. Written to `<summary_dir>/score_by_init_hour/<metric>_<channel>_<region>_<stream>_<run_ids>_fstep_<n>_by_init_hour.<image_format>`. Gridded zarr streams only; `psd` is skipped. |
 
 `psd` and `qq_analysis` are metrics like any other: their plots need `metric_plots`. The other
 score plots (`ratio`, `heatmap`, …) do not apply to `psd`. An unknown value raises an error
 listing the supported ones. The earlier name `lead_time` is still read as `metric_plots`, with a
-deprecation warning.
+deprecation warning. The earlier name `timeseries` for the init-hour plots is not accepted any more:
+use `init_hour`. (`timeseries` remains a valid entry of a stream's `data_plots`, where it means the
+prediction and target over forecast steps, see below.)
 
 > **Deprecated boolean flags.** Older configs used one boolean per plot type. They are still
 > read when `score_plots` is absent (with a deprecation warning) and map as follows:
