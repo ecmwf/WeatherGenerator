@@ -31,13 +31,9 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenReader,
     WeatherGenZarrReader,
 )
-from weathergen.evaluate.plotting.plot_orchestration import (
-    plot_data,
-    plot_init_hour_summary,
-    plot_summary,
-    run_score_map_pipeline,
-)
+from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
 from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
@@ -232,7 +228,7 @@ def _process_stream(
     for option, name in (("plot_score_maps", "score_map"), ("plot_score_init_hour", "init_hour")):
         if plot_score_options.get(option, False) and not reads_data:
             _logger.warning(f"RUN {run_id} - {stream}: '{name}' not supported for type '{type_}'.")
-    plot_score_maps = plot_score_options.get("plot_score_maps", False) and reads_data
+    do_score_maps = plot_score_options.get("plot_score_maps", False) and reads_data
     plot_score_init_hour = plot_score_options.get("plot_score_init_hour", False) and reads_data
 
     recomputable_metrics = {}
@@ -242,7 +238,7 @@ def _process_stream(
     if needs_scoring:
         stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
         needs_score_recomputation = (
-            plot_score_maps or plot_score_init_hour or bool(recomputable_metrics)
+            do_score_maps or plot_score_init_hour or bool(recomputable_metrics)
         ) and reads_data
 
     # --- Load data only when necessary ---
@@ -259,9 +255,9 @@ def _process_stream(
             )
             _logger.info(f"RUN {run_id} - {stream}: Data loaded successfully.")
 
-    # Plotting: pass pre-loaded data if available, otherwise plot_data loads its own subset
+    # Field plots: pass pre-loaded data if available, otherwise plot_data loads its own subset
     if needs_plotting:
-        plot_data(reader, stream, global_plotting_opts, output_data=output_data)
+        plot_stream_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
     if not needs_scoring:
@@ -271,7 +267,7 @@ def _process_stream(
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif plot_score_maps or plot_score_init_hour:
+    elif do_score_maps or plot_score_init_hour:
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
@@ -291,7 +287,7 @@ def _process_stream(
         metrics_to_compute,
         output_data=output_data,
         climatology=climatology,
-        compute_spatial=plot_score_maps,
+        compute_spatial=do_score_maps,
     )
     if plot_score_init_hour and output_data is not None:
         compute_scores_by_init_hour(
@@ -300,8 +296,10 @@ def _process_stream(
     metric_list_to_json(reader, stream, results, regions_to_compute)
     scores_dict = merge(stream_loaded_scores, results_to_dict(results, "score"))
 
-    if plot_score_maps:
-        run_score_map_pipeline(
+    # Drawn here, where the spatial scores of this (run, stream) are, until _process_stream
+    # returns the MetricResults and plot_evaluation can draw them from the merged results.
+    if do_score_maps:
+        plot_score_maps(
             reader,
             stream,
             results,
@@ -417,11 +415,9 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                         channels_set,
                     )
 
-    # summary plots
+    # verification plots across runs
     if scores_dict:
-        plot_summary(cfg, scores_dict, summary_dir)
-    if init_hour_scores:
-        plot_init_hour_summary(cfg, init_hour_scores, summary_dir)
+        plot_evaluation(cfg, scores_dict, init_hour_scores, summary_dir)
 
 
 if __name__ == "__main__":
