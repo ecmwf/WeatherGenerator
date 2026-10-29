@@ -1,0 +1,86 @@
+# The deterministic long-rollout chain from the 2-step run rrvj7vjv, re-run with the optimizer
+# changes from the 2026-10-29 monitoring analysis (adamw eps 1e-10 instead of 1e-8, no weight decay
+# on norm parameters incl. QK-norm gains, and on biases) and training monitoring on. Every stage is
+# otherwise a copy of the original, so each one compares directly with it:
+#   ofnhv6t2 = nhv6tkln (8-step fixed rollout, 8 mini-epochs, from rrvj7vjv latest)
+#   ofseymb2 = seymbjh2 (B'': anchored pushforward + lead balancing, 5 mini-epochs, from
+#              nhv6tkln chkpt 8; config of long_rollout_2026-10-21/lead_balance_det.yml)
+#   ofch7py2 = ch7py82d (combo_det: B'' + z/msl x10 + trainable decoder, 4 mini-epochs, from
+#              seymbjh2 chkpt 5; config of long_rollout_2026-10-22/combo_det.yml)
+# with each load_chkpt pointing at the previous re-run stage instead of the original run.
+# nhv6tkln was a train_continue from rrvj7vjv with a fresh optimizer and step counter, which is
+# what load_chkpt does; its full config is config_nhv6tkln_chkpt8_base.yml (same as saved).
+# The encoder is frozen in all stages, so the changes act on the forecast engine (and the ERA5
+# decoder in the last stage).
+# Launch with --no-register: the launcher logs each config file's top-level keys as MLflow params,
+# and several files here set training_config (the original runs were launched with upload off).
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --no-register --pipeline config/pipelines/long_rollout_optimfix_2026-10-29/rollout_chain_optimfix.yml
+parallelize: false
+stages:
+  - name: rollout8
+    stage: train
+    run_id: ofnhv6t2
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    options:
+      - load_chkpt.run_id=rrvj7vjv
+      - load_chkpt.mini_epoch=-1
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 4
+    nodes: 8
+  - name: pfanchndlb
+    stage: train
+    run_id: ofseymb2
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - load_chkpt.run_id=ofnhv6t2
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=5
+      - train_logging.checkpoint=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 3
+    nodes: 8
+  - name: combodet
+    stage: train
+    run_id: ofch7py2
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - load_chkpt.run_id=ofseymb2
+      - load_chkpt.mini_epoch=5
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.0
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      - train_logging.checkpoint=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 3
+    nodes: 8

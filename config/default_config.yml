@@ -176,6 +176,9 @@ training_config:
   optimizer:
     grad_clip: 1.0
     weight_decay: 0.1
+    # parameters without weight decay, a subset of [norms, biases]: norms = all parameters of
+    # normalization layers (incl. QK-norm gains), biases = all parameters named `bias`
+    no_weight_decay: []
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers

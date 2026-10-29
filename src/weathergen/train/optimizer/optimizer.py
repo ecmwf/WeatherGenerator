@@ -13,9 +13,19 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
+from weathergen.model.norms import RMSNorm
 from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
+
+# modules whose (affine) parameters count as "norms" for optimizer.no_weight_decay
+_NORM_MODULES = (
+    torch.nn.LayerNorm,
+    torch.nn.RMSNorm,
+    torch.nn.GroupNorm,
+    RMSNorm,
+)
+_NO_WEIGHT_DECAY_KINDS = ("norms", "biases")
 
 
 def _adamw_betas_eps(optimizer_cfg, kappa: float) -> dict:
@@ -32,6 +42,49 @@ def _adamw_betas_eps(optimizer_cfg, kappa: float) -> dict:
     beta2 = max(0.9, 1.0 - kappa * (1.0 - optimizer_cfg.adamw.beta2))
     eps = optimizer_cfg.adamw.get("eps", 2e-08) / np.sqrt(kappa)
     return {"betas": (beta1, beta2), "eps": eps}
+
+
+def _no_weight_decay_param_ids(model: torch.nn.Module, optimizer_cfg) -> set[int]:
+    """
+    Ids of the parameters excluded from weight decay by optimizer.no_weight_decay, a list of
+    - "norms": all parameters of normalization layers (gains and biases, incl. QK-norms);
+    - "biases": all parameters named `bias`.
+    """
+    kinds = list(optimizer_cfg.get("no_weight_decay", None) or [])
+    unknown = set(kinds) - set(_NO_WEIGHT_DECAY_KINDS)
+    assert not unknown, (
+        f"Unsupported optimizer.no_weight_decay {sorted(unknown)}, "
+        f"expected a subset of {list(_NO_WEIGHT_DECAY_KINDS)}"
+    )
+    ids = set()
+    if "norms" in kinds:
+        for module in model.modules():
+            if isinstance(module, _NORM_MODULES):
+                ids.update(id(p) for p in module.parameters(recurse=False))
+    if "biases" in kinds:
+        ids.update(id(p) for n, p in model.named_parameters() if n.split(".")[-1] == "bias")
+    return ids
+
+
+def _weight_decay_param_groups(model: torch.nn.Module, params, optimizer_cfg) -> list[dict]:
+    """
+    Splits params into a decayed group (optimizer.weight_decay) and, if
+    optimizer.no_weight_decay selects any of them, a group without weight decay.
+    """
+    no_decay_ids = _no_weight_decay_param_ids(model, optimizer_cfg)
+    params = list(params)
+    decay = [p for p in params if id(p) not in no_decay_ids]
+    no_decay = [p for p in params if id(p) in no_decay_ids]
+    groups = [{"params": decay, "weight_decay": optimizer_cfg.weight_decay}]
+    if no_decay:
+        groups.append({"params": no_decay, "weight_decay": 0.0})
+        if is_root():
+            logger.info(
+                f"No weight decay ({list(optimizer_cfg.no_weight_decay)}) for {len(no_decay)} "
+                f"params ({sum(p.numel() for p in no_decay)} elements), weight decay "
+                f"{optimizer_cfg.weight_decay} for {len(decay)} params."
+            )
+    return groups
 
 
 def _scale_lr_cfg(lr_cfg, lr_max_override: float | None):
@@ -71,9 +124,8 @@ class AdamW:
 
     def __init__(self, model: torch.nn.Module, optimizer_cfg, shared_lr_cfg, kappa: float):
         optimizer = torch.optim.AdamW(
-            model.parameters(),
+            _weight_decay_param_groups(model, model.parameters(), optimizer_cfg),
             lr=shared_lr_cfg.lr_start,
-            weight_decay=optimizer_cfg.weight_decay,
             fused=True,
             **_adamw_betas_eps(optimizer_cfg, kappa),
         )
@@ -123,9 +175,8 @@ class Muon:
             adjust_lr_fn=muon_cfg.get("adjust_lr_fn", None),
         )
         adamw_optimizer = torch.optim.AdamW(
-            adamw_params,
+            _weight_decay_param_groups(model, adamw_params, optimizer_cfg),
             lr=shared_lr_cfg.lr_start,
-            weight_decay=optimizer_cfg.weight_decay,
             fused=True,
             **_adamw_betas_eps(optimizer_cfg, kappa),
         )
