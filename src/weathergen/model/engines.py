@@ -29,7 +29,7 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.layers import MLP
+from weathergen.model.layers import MLP, KwargLayerNorm
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -270,7 +270,9 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+            tokens_c = checkpoint(
+                block, tokens_c, x_lens=cell_lens_c, use_reentrant=use_reentrant
+            )
         return tokens_c
 
 
@@ -339,7 +341,12 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
             tokens_global_c = checkpoint(
-                block, tokens_global_c, tokens_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+                block,
+                tokens_global_c,
+                x_kv=tokens_c,
+                x_q_lens=q_cells_lens_c,
+                x_kv_lens=cell_lens_c,
+                use_reentrant=False,
             )
         return tokens_global_c
 
@@ -475,15 +482,9 @@ class QueryAggregationEngine(torch.nn.Module):
 
     def forward(self, tokens, batch_lens, use_reentrant, coords=None):
         for block in self.ae_aggregation_blocks:
-            aux_info = None
-            if isinstance(block, MultiSelfAttentionHeadVarlen):
-                tokens = checkpoint(
-                    block, tokens, x_lens=batch_lens, coords=coords, use_reentrant=False
-                )
-            else:
-                # MLP.forward accepts positional args only (def forward(self, *args)),
-                # so coords/aux_info must be passed positionally, not as keywords.
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+            tokens = checkpoint(
+                block, tokens, x_lens=batch_lens, coords=coords, use_reentrant=False
+            )
         return tokens
 
 
@@ -562,20 +563,14 @@ class GlobalAssimilationEngine(torch.nn.Module):
             )
         if self.cf.get("ae_global_trailing_layer_norm", False):
             self.ae_global_blocks.append(
-                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+                KwargLayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
     def forward(self, tokens, coords=None):
-        aux_info = None
         intermediates: list[torch.Tensor] = []
         logical_layer = 0
         for block in self.ae_global_blocks:
-            # The optional trailing LayerNorm (ae_global_trailing_layer_norm) takes a single
-            # input, unlike the attention/MLP blocks which also receive coords/aux_info.
-            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
-                tokens = checkpoint(block, tokens, use_reentrant=False)
-            else:
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+            tokens = checkpoint(block, tokens, coords=coords, use_reentrant=False)
             if isinstance(block, MLP):
                 if self.tap_global_layers and logical_layer in self.tap_global_layers:
                     intermediates.append(tokens)
@@ -609,9 +604,13 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
-        _concat_hd = (
-            self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
+        # local import: avoids a module-level cycle (diffusion.py imports ForecastingEngine)
+        from weathergen.model.diffusion import DiffusionForecastConditioning
+
+        self.conditioning = DiffusionForecastConditioning(
+            self.cf.get("fe_diffusion_model_conditioning_type", None)
         )
+        _concat_hd = self.conditioning == "concatenate_hiddendim"
         _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
         _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
 
@@ -635,8 +634,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                            == "ada_ln",
+                            dit_is_cond=self.conditioning == "ada_ln",
                         )
                     )
                 else:
@@ -657,8 +655,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                            == "ada_ln",
+                            dit_is_cond=self.conditioning == "ada_ln",
                         )
                     )
                 # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for
@@ -693,13 +690,12 @@ class ForecastingEngine(torch.nn.Module):
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         is_dit=self.cf.get("fe_diffusion_model", False),
-                        dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "ada_ln",
+                        dit_is_cond=self.conditioning == "ada_ln",
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
                 if i in self.cf.get("fe_layer_norm_after_blocks", []):
-                    self.fe_blocks.append(torch.nn.LayerNorm(_inner_dim, elementwise_affine=False))
+                    self.fe_blocks.append(KwargLayerNorm(_inner_dim, elementwise_affine=False))
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
@@ -741,73 +737,40 @@ class ForecastingEngine(torch.nn.Module):
             assert noise_emb is not None, (
                 "noise_emb must be provided for diffusion model conditioning"
             )
+            self.conditioning.validate(conditioning)
             for block in self.fe_blocks:
-                if isinstance(block, torch.nn.LayerNorm):
-                    tokens = checkpoint(block, tokens, use_reentrant=False)
-                elif isinstance(block, MultiCrossAttentionHead):
-                    assert conditioning is not None, (
-                        "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                if isinstance(block, MultiCrossAttentionHead):
+                    x_q, x_kv = (
+                        (conditioning, tokens)
+                        if self.conditioning == "cross_attn_rev"
+                        else (tokens, conditioning)
                     )
-                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
-                        tokens = checkpoint(
-                            block, tokens, conditioning, noise_emb, use_reentrant=False
-                        )
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "cross_attn_rev"
-                    ):
-                        tokens = checkpoint(
-                            block, conditioning, tokens, noise_emb, use_reentrant=False
-                        )
+                    tokens = checkpoint(
+                        block, x_q=x_q, x_kv=x_kv, emb=noise_emb, use_reentrant=False
+                    )
                 else:
-                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
-                        assert conditioning is not None, (
-                            "conditioning must be provided when enabled"
-                        )
-                        tokens = checkpoint(
-                            block, tokens, coords, noise_emb, conditioning, use_reentrant=False
-                        )
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
-                        assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) needed for cross_attn conditioning"
-                        )
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "cross_attn_rev"
+                    # additive conditioning is re-added at every block (but not a plain norm
+                    # layer, see fe_layer_norm_after_blocks), not just once.
+                    if self.conditioning == "additive" and not isinstance(
+                        block, KwargLayerNorm
                     ):
-                        assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) needed for cross_attn_rev conditioning"
-                        )
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "additive":
-                        assert conditioning is not None, (
-                            "conditioning (e.g. enc(X_t)) needed for additive conditioning"
-                        )
                         tokens = tokens + conditioning
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate":
-                        # Conditioning already baked into tokens via sequence concat
-                        # in DiffusionForecastEngine.denoise()
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    elif (
-                        self.cf.get("fe_diffusion_model_conditioning_type", None)
-                        == "concatenate_hiddendim"
-                    ):
-                        # Conditioning already baked into tokens via hidden-dim concat
-                        # in DiffusionForecastEngine.denoise()
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
-                    else:
-                        assert conditioning is None, (
-                            "conditioning should not be provided when conditioning is disabled"
-                        )
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    ada_ln_aux = conditioning if self.conditioning == "ada_ln" else None
+                    tokens = checkpoint(
+                        block,
+                        tokens,
+                        coords=coords,
+                        emb=noise_emb,
+                        ada_ln_aux=ada_ln_aux,
+                        use_reentrant=False,
+                    )
         else:
             for block in self.fe_blocks:
-                if isinstance(block, torch.nn.LayerNorm):
-                    tokens = block(tokens)
-                else:
-                    tokens = checkpoint(block, tokens, coords, conditioning, use_reentrant=False)
+                # conditioning is the ungated AdaLN aux signal (always None today, since
+                # dim_aux is only set for the diffusion "ada_ln" conditioning type above).
+                tokens = checkpoint(
+                    block, tokens, coords=coords, ada_ln_aux=conditioning, use_reentrant=False
+                )
 
         if self.out_proj is not None:
             # tokens = self.out_proj(tokens)  # (B, H, 2D) -> (B, H, D)
@@ -966,19 +929,17 @@ class TargetPredictionEngineClassic(nn.Module):
         tokens_lens = latent_lens
         tcs_aux = coordinates
 
-        for ib, block in enumerate(self.tte):
-            if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
-            else:
-                tc_tokens = checkpoint(
-                    block,
-                    tc_tokens,
-                    tokens_stream,
-                    tcs_lens,
-                    tokens_lens,
-                    tcs_aux,
-                    use_reentrant=False,
-                )
+        for block in self.tte:
+            tc_tokens = checkpoint(
+                block,
+                tc_tokens,
+                x_lens=tcs_lens,
+                x_kv=tokens_stream,
+                x_q_lens=tcs_lens,
+                x_kv_lens=tokens_lens,
+                ada_ln_aux=tcs_aux,
+                use_reentrant=False,
+            )
         return tc_tokens
 
 
