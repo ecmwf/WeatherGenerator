@@ -33,6 +33,7 @@ from weathergen.evaluate.plotting.plot_utils import (
     collect_channels,
     collect_streams,
     create_filename,
+    plotter_config,
 )
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
@@ -68,18 +69,14 @@ def plot_scores(cfg: dict, scores_dict: dict, init_hour_scores: dict, summary_di
     plt_opt = cfg.get("global_plotting_options", cfg)
     eval_opt = cfg.get("evaluation", {})
 
-    plot_cfg = {
-        "image_format": plt_opt.get("image_format", "png"),
-        "dpi_val": plt_opt.get("dpi_val", 300),
-        "fig_size": plt_opt.get("fig_size", (8, 10)),
-        "log_scale": eval_opt.get("log_scale", False),
-        "add_grid": eval_opt.get("add_grid", False),
-        "plot_ensemble": eval_opt.get("plot_ensemble", False),
-        "baseline": eval_opt.get("baseline", None),
-        "font_size": plt_opt.get("font_size"),
-        "font_type": plt_opt.get("font_type"),
-    }
-
+    plot_cfg = plotter_config(
+        plt_opt,
+        fig_size=plt_opt.get("fig_size", (8, 10)),
+        log_scale=eval_opt.get("log_scale", False),
+        add_grid=eval_opt.get("add_grid", False),
+        plot_ensemble=eval_opt.get("plot_ensemble", False),
+        baseline=eval_opt.get("baseline", None),
+    )
     apply_font_settings(plot_cfg)
     # Prefix the output directory with a run_ids identifier so that
     # different evaluation configs can coexist in the same base directory.
@@ -182,6 +179,35 @@ def plot_scores(cfg: dict, scores_dict: dict, init_hour_scores: dict, summary_di
 # ---------------------------------------------------------------------------
 
 
+def _select_runs(
+    scores_dict: dict, metric: str, region: str, stream: str, runs: dict, channel: str | None = None
+) -> list[tuple[str, xr.DataArray, str, str | None]]:
+    """The runs with data for (metric, region, stream[, channel]), in config order.
+
+    Returns ``[(run_id, data, label, color)]``: ``data`` is the run's score, reduced to
+    *channel* when given; runs without data, without the channel or with only NaNs are left
+    out.  ``label`` is ``"{run_id} - {label}"`` when the run config has a label, ``run_id``
+    otherwise; ``color`` the run config's colour, if any.
+    """
+    selected = []
+    for run_id, run_cfg in runs.items():
+        data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
+        if data is None:
+            continue
+        if channel is not None:
+            if channel not in np.atleast_1d(data.channel.values):
+                continue
+            if "channel" in data.dims:
+                data = data.sel(channel=channel)
+        if data.isnull().all():
+            continue
+        label = run_cfg.get("label", run_id)
+        if label != run_id:
+            label = f"{run_id} - {label}"
+        selected.append((run_id, data, label, run_cfg.get("color", None)))
+    return selected
+
+
 def lead_time_plot_metric_region(
     metric: str,
     region: str,
@@ -213,22 +239,9 @@ def lead_time_plot_metric_region(
 
     for stream in streams_set:
         for ch in channels_set:
-            selected_data, labels, run_ids, colors = [], [], [], []
-
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-                # skip if channel is missing or contains NaN
-                if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
-                    continue
-
-                selected_data.append(data.sel(channel=ch))
-                label = runs[run_id].get("label", run_id)
-                if label != run_id:
-                    label = f"{run_id} - {label}"
-                labels.append(label)
-                run_ids.append(run_id)
-                colors.append(runs[run_id].get("color", None))
-
-            if selected_data:
+            selected = _select_runs(scores_dict, metric, region, stream, runs, ch)
+            if selected:
+                run_ids, selected_data, labels, colors = map(list, zip(*selected, strict=True))
                 _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
 
                 name = create_filename(
@@ -284,23 +297,9 @@ def ratio_plot_metric_region(
     streams_set = collect_streams(runs)
 
     for stream in streams_set:
-        selected_data = []
-        labels = []
-        run_ids = []
-        colors = []
-        for run_id, run_data in runs.items():
-            data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data is None or data.isnull().all():
-                continue
-            selected_data.append(data)
-            label = run_data.get("label", run_id)
-            if label != run_id:
-                label = f"{run_id} - {label}"
-            labels.append(label)
-            run_ids.append(run_id)
-            colors.append(run_data.get("color", None))
-
-        if len(selected_data) > 0:
+        selected = _select_runs(scores_dict, metric, region, stream, runs)
+        if selected:
+            run_ids, selected_data, labels, colors = map(list, zip(*selected, strict=True))
             _logger.info(f"Creating ratio plot for {metric} - {stream}")
 
             name = create_filename(
@@ -345,22 +344,9 @@ def heat_maps_metric_region(
     streams_set = collect_streams(runs)
 
     for stream in streams_set:
-        selected_data = []
-        labels = []
-        run_ids = []
-        for run_id in runs:
-            data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data is None or data.isnull().all():
-                continue
-
-            selected_data.append(data)
-            label = runs[run_id].get("label", run_id)
-            if label != run_id:
-                label = f"{run_id} - {label}"
-            labels.append(label)
-            run_ids.append(run_id)
-
-        if len(selected_data) > 0:
+        selected = _select_runs(scores_dict, metric, region, stream, runs)
+        if selected:
+            run_ids, selected_data, labels, _ = map(list, zip(*selected, strict=True))
             _logger.info(f"Creating heat maps for {metric} - {stream}")
             name = create_filename(
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
@@ -403,18 +389,13 @@ def score_card_metric_region(
     channels_set = collect_channels(scores_dict, metric, region, runs)
 
     for stream in streams_set:
-        selected_data, run_ids = [], []
-        for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-            if data.isnull().all():
-                continue
-            selected_data.append(data)
-            run_ids.append(run_id)
-
-        if len(selected_data) >= 2:
+        selected = _select_runs(scores_dict, metric, region, stream, runs)
+        if len(selected) >= 2:
+            run_ids, selected_data, _, _ = map(list, zip(*selected, strict=True))
             _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
-        elif len(selected_data) == 1:
+        elif len(selected) == 1:
             _logger.info(
                 f"Skipping score card for {metric} - {region} - {stream}: "
                 f"only one run available (need at least 2 to compare)."
@@ -448,15 +429,9 @@ def bar_plot_metric_region(
     channels_set = collect_channels(scores_dict, metric, region, runs)
 
     for stream in streams_set:
-        selected_data, run_ids = [], []
-
-        for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-            if data.isnull().all():
-                continue
-            selected_data.append(data)
-            run_ids.append(run_id)
-
-        if selected_data:
+        selected = _select_runs(scores_dict, metric, region, stream, runs)
+        if selected:
+            run_ids, selected_data, _, _ = map(list, zip(*selected, strict=True))
             _logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
@@ -494,18 +469,9 @@ def quantile_plot_metric_region(
             selected_data, labels, run_ids = [], [], []
             qq_full_data = []  # Store full Q-Q datasets for detailed plotting
 
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-                # skip if channel is missing
-                if ch not in np.atleast_1d(data.channel.values):
-                    continue
-
-                # Select channel
-                data_for_channel = data.sel(channel=ch) if "channel" in data.dims else data
-
-                # Check for NaN
-                if data_for_channel.isnull().all():
-                    continue
-
+            for run_id, data_for_channel, label, _ in _select_runs(
+                scores_dict, metric, region, stream, runs, ch
+            ):
                 # For qq_analysis, extract Q-Q data from attributes
                 if metric == "qq_analysis" and "p_quantiles" in data_for_channel.attrs:
                     attrs = data_for_channel.attrs
@@ -537,9 +503,6 @@ def quantile_plot_metric_region(
                     qq_full_data.append(qq_dataset)
 
                 selected_data.append(data_for_channel)
-                label = runs[run_id].get("label", run_id)
-                if label != run_id:
-                    label = f"{run_id} - {label}"
                 labels.append(label)
                 run_ids.append(run_id)
 
@@ -626,19 +589,15 @@ def psd_plot_metric_region(
 
     for stream in streams_set:
         for ch in channels_set:
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-                if ch not in np.atleast_1d(data.channel.values):
-                    continue
-
-                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
-                if data_ch.isnull().all():
-                    continue
-
+            for run_id, data_ch, _, _ in _select_runs(
+                scores_dict, metric, region, stream, runs, ch
+            ):
                 attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
                 if not attr_fsteps:
                     _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
                     continue
 
+                # the plain label, one file per run: both go with the cross-run PSD plot
                 label = runs[run_id].get("label", run_id)
 
                 for fstep in attr_fsteps:
@@ -696,11 +655,12 @@ def init_hour_metric_region(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for stream, run_dict in init_hour_scores[metric][region].items():
-        if not run_dict:
+        selected = _select_runs(init_hour_scores, metric, region, stream, runs)
+        if not selected:
             continue
 
         # Determine fsteps and channels from first run
-        first_run_scores = next(iter(run_dict.values()))
+        first_run_scores = selected[0][1]
         fsteps = sorted(int(f) for f in first_run_scores.forecast_step.values)
         sample_score = first_run_scores.isel(forecast_step=0)
         channels = (
@@ -713,16 +673,16 @@ def init_hour_metric_region(
             for fstep in fsteps:
                 plt.figure(figsize=(10, 6), dpi=dpi_val)
 
-                for run_id, fstep_scores in run_dict.items():
+                for run_id, fstep_scores, _, color in selected:
                     if fstep not in fstep_scores.forecast_step.values:
                         continue
                     score = fstep_scores.sel(forecast_step=fstep)
                     score_vals = score.sel(channel=channel) if channel is not None else score
                     hours = score_vals.coords["init_hour"].values
                     values = score_vals.values.flatten()
+                    # own label format until the plot goes through LinePlots
                     run_label = runs[run_id].get("label", run_id)
                     label = f"{run_label} ({run_id})"
-                    color = runs[run_id].get("color", None)
                     plt.plot(
                         hours,
                         values,

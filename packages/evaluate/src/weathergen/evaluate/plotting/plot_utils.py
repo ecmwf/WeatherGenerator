@@ -467,3 +467,31 @@ def create_filename(
         )
 
     return sep.join(prefix + truncated_middle + suffix)
+
+
+def plotter_config(global_plotting_opts: dict, **extra) -> dict:
+    """Config dict of the plot classes: the global plotting options with their defaults.
+
+    *extra* holds the options of one caller (regions, log scales, ...) and overrides the
+    defaults.
+    """
+    return {
+        "image_format": global_plotting_opts.get("image_format", "png"),
+        "animation_format": global_plotting_opts.get("animation_format", "mp4"),
+        "dpi_val": global_plotting_opts.get("dpi_val", 300),
+        "fig_size": global_plotting_opts.get("fig_size"),
+        "fps": global_plotting_opts.get("fps", 2),
+        "font_size": global_plotting_opts.get("font_size"),
+        "font_type": global_plotting_opts.get("font_type"),
+    } | extra
+
+
+def ens_tag(prefix: str, ens, has_ens: bool) -> str:
+    """Tag of the frames of one ensemble selection: ``preds``, ``preds_ens_3``, ``preds_ens_mean``.
+
+    ``has_ens`` says whether the data carries an ``ens`` dimension; without one, a member
+    selection is the data itself and gets the bare *prefix*.
+    """
+    if ens in ("mean", "std") or has_ens:
+        return f"{prefix}_ens_{ens}"
+    return prefix

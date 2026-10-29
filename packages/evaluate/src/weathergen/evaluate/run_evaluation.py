@@ -31,9 +31,12 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenReader,
     WeatherGenZarrReader,
 )
-from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
+from weathergen.evaluate.plotting.plot_orchestration import (
+    plot_evaluation,
+    plot_stream_data,
+    plot_stream_results,
+)
 from weathergen.evaluate.plotting.plot_utils import collect_channels
-from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
@@ -260,54 +263,50 @@ def _process_stream(
         plot_stream_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
-    if not needs_scoring:
-        return run_id, stream, {}, {}
+    results: dict = {}
+    scores_dict: dict = {}
+    init_hour_scores: dict = {}
+    if needs_scoring:
+        scores_dict = stream_loaded_scores
+        if recomputable_metrics:
+            metrics_to_compute = recomputable_metrics
+            regions_to_compute = list(set(recomputable_metrics.keys()))
+        elif do_score_maps or plot_score_init_hour:
+            metrics_to_compute = {r: metrics for r in regions}
+            regions_to_compute = regions
+        else:
+            metrics_to_compute = {}
 
-    scores_dict = stream_loaded_scores
-    if recomputable_metrics:
-        metrics_to_compute = recomputable_metrics
-        regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif do_score_maps or plot_score_init_hour:
-        metrics_to_compute = {r: metrics for r in regions}
-        regions_to_compute = regions
-    else:
-        return run_id, stream, scores_dict, {}
+        if metrics_to_compute:
+            # The climatology is aligned once and shared by both scoring calls.
+            climatology = (
+                get_climatology(reader, output_data.target, stream)
+                if output_data is not None and needs_climatology(metrics_to_compute)
+                else None
+            )
+            # Per-sample scores plus, for the score maps, the sample-aggregated scores.
+            results = calc_scores_per_stream(
+                reader,
+                stream,
+                regions_to_compute,
+                metrics_to_compute,
+                output_data=output_data,
+                climatology=climatology,
+                compute_spatial=do_score_maps,
+            )
+            if plot_score_init_hour and output_data is not None:
+                compute_scores_by_init_hour(
+                    reader, stream, results, output_data, metrics_to_compute, climatology
+                )
+            metric_list_to_json(reader, stream, results, regions_to_compute)
+            scores_dict = merge(stream_loaded_scores, results_to_dict(results, "score"))
+            if plot_score_init_hour:
+                init_hour_scores = results_to_dict(results, "by_init_hour")
 
-    # The climatology is aligned once and shared by both scoring calls.
-    climatology = (
-        get_climatology(reader, output_data.target, stream)
-        if output_data is not None and needs_climatology(metrics_to_compute)
-        else None
-    )
-    # Per-sample scores plus, for the score maps, the sample-aggregated scores.
-    results = calc_scores_per_stream(
-        reader,
-        stream,
-        regions_to_compute,
-        metrics_to_compute,
-        output_data=output_data,
-        climatology=climatology,
-        compute_spatial=do_score_maps,
-    )
-    if plot_score_init_hour and output_data is not None:
-        compute_scores_by_init_hour(
-            reader, stream, results, output_data, metrics_to_compute, climatology
-        )
-    metric_list_to_json(reader, stream, results, regions_to_compute)
-    scores_dict = merge(stream_loaded_scores, results_to_dict(results, "score"))
-
-    # Drawn here, where the spatial scores of this (run, stream) are, until _process_stream
-    # returns the MetricResults and plot_evaluation can draw them from the merged results.
-    if do_score_maps:
-        plot_score_maps(
-            reader,
-            stream,
-            results,
-            global_plotting_options=global_plotting_opts,
-            plot_score_options=plot_score_options,
-        )
-
-    init_hour_scores = results_to_dict(results, "by_init_hour") if plot_score_init_hour else {}
+    # Score maps and videos need the complete (run, stream): here it is, in a serial run.
+    # Under MPI the master calls this once the chunks' results and frames are in.
+    if reads_data:
+        plot_stream_results(reader, stream, results, global_plotting_opts, plot_score_options)
 
     return run_id, stream, scores_dict, init_hour_scores
 
