@@ -7,11 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import concurrent.futures
 import logging
+import os
+import pathlib
+import shutil
 
 import astropy_healpix as hp
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 import torch
 
 import weathergen.common.config as config
@@ -462,3 +467,342 @@ def get_latent_output(batch, model_output):
             latents_all[-1].append(per_sample)
 
     return latents_all
+
+
+# ---------------------------------------------------------------------------
+# Temporal averaging of written output. Post-processing on the already written
+# full-resolution zarr store: read lazily, bin target/prediction in time per
+# sample (= per init time), and write per-bin means. Self-contained in this module.
+# ---------------------------------------------------------------------------
+
+_MEAN_OUTPUT_DATASETS = ("target", "prediction")
+
+
+def compute_time_means(cf, mode_cfg, mini_epoch):
+    """
+    Write temporally averaged target/prediction output datasets from the output store.
+
+    Opens the full-resolution store written by :func:`write_output`, bins time
+    per sample (init times are never pooled) and writes the per-bin mean with
+    the bin midpoint as representative time into a sibling ``*_means`` store.
+    ``source`` is left untouched.
+
+    Configuration (under ``validation_config.output`` / ``test_config.output``)::
+
+        output:
+          frequency: null              # off; or a timedelta (6h, 1D) or weekly/monthly
+          delete_full_resolution: false
+          time_means_workers: null    # off (sequential); or number of worker processes
+
+    When ``delete_full_resolution`` is true, the original store is removed and
+    the means store is renamed to the original filename.
+    """
+    output_cfg = mode_cfg.get("output", {}) or {}
+    freq = output_cfg.get("frequency", None)
+    n_workers = output_cfg.get("time_means_workers", None)
+
+    if (freq := _validate_frequency(freq)) is None:
+        return
+
+    if (paths := _validate_paths(cf, mini_epoch)) is None:
+        return
+    else:
+        store_path, means_path = paths
+
+    n_workers = _resolve_worker_count(n_workers)
+
+    _write_all_binned_means(store_path, means_path, freq, n_workers)
+
+    if output_cfg.get("delete_full_resolution", False):
+        _remove_store(store_path)
+        os.replace(means_path, store_path)
+        _logger.info(f"Replaced full-resolution store with binned means at {store_path}.")
+    else:
+        _logger.info(f"Wrote temporally averaged output to {means_path}.")
+
+
+def _write_all_binned_means(store_path, means_path, freq, n_workers):
+    """Bin target/prediction per stream of every sample into the means store."""
+    with io.zarrio_reader(store_path) as zio_r, io.zarrio_writer(means_path) as zio_w:
+        root = zio_r.data_root
+        for sample in list(root.group_keys()):
+            sample_grp = root.get(sample)
+            for stream in list(sample_grp.group_keys()):
+                if stream == io.LATENT_STREAM:
+                    continue
+                _write_binned_means(
+                    zio_w.data_root,
+                    f"{sample}/{stream}",
+                    sample_grp.get(stream),
+                    freq,
+                    store_path,
+                    n_workers,
+                )
+
+
+def _write_binned_means(zio_root_w, prefix, stream_grp, freq, store_path, n_workers):
+    """
+    Write per-bin means of target/prediction for one stream.
+
+    A point is written only if it is valid in every output dataset that has data for
+    that bin, so target and prediction stay row-aligned even when only one
+    of them is NaN-masked (e.g. land points for an ocean variable or stream).
+    """
+    dataset_bins, dataset_attrs = _accumulate_stream_bins(
+        store_path, prefix, stream_grp, freq, n_workers
+    )
+
+    if not any(dataset_attrs.values()):
+        return
+
+    for bin_ord, present, accs in _resolve_write_bins(dataset_bins, dataset_attrs):
+        for dataset, acc in accs.items():
+            if acc is not None:
+                _write_bin(
+                    zio_root_w,
+                    f"{prefix}/{bin_ord}/{dataset}",
+                    acc,
+                    present,
+                    dataset_attrs[dataset],
+                )
+
+
+def _accumulate_stream_bins(store_path, prefix, stream_grp, freq, n_workers):
+    """
+    Accumulate per-bin sum/count for both output datasets of one stream.
+
+    Runs sequentially, reusing the already-open `stream_grp`, unless
+    `n_workers` > 1 and there are enough forecast steps to be worth it: the
+    forecast steps are then split into contiguous chunks, each accumulated in
+    its own worker process (own read-only store handle, safe for both
+    ZipStore and LocalStore), and the partial per-bin sums/counts are merged.
+    """
+    fsteps = sorted(stream_grp.group_keys(), key=int)
+
+    if n_workers <= 1 or len(fsteps) < 2 * n_workers:
+        dataset_bins, dataset_attrs = {}, {}
+        for dataset in _MEAN_OUTPUT_DATASETS:
+            dataset_bins[dataset], dataset_attrs[dataset] = _accumulate_dataset_bins(
+                stream_grp, dataset, prefix, freq, fsteps
+            )
+        return dataset_bins, dataset_attrs
+    else:
+        return _dispatch_parallel_bins(store_path, prefix, fsteps, freq, n_workers)
+
+
+def _accumulate_dataset_bins(stream_grp, dataset, prefix, freq, fsteps):
+    """
+    NaN-aware sum/count accumulation of one dataset into per-bin buckets.
+
+    Each (forecast-step, dataset) group may hold data for multiple valid times
+    on a fixed set of points (e.g., intermediate hourly substeps for gridded
+    data). Points are grouped by their actual valid time and accumulated into
+    the appropriate time bin. This ensures correct binning when intermediate
+    times span frequency boundaries (e.g., times straddling a monthly edge).
+
+    Only the per-bin accumulators, never the full-resolution data, are held
+    in memory.
+
+    Returns the bins keyed by `_bin_key` and the (first seen) dataset attrs,
+    or `({}, None)` if `dataset` has no data at all for this stream.
+    """
+    bins: dict[object, dict[str, npt.NDArray]] = {}
+    attrs = None
+
+    for fstep in fsteps:
+        item_grp = stream_grp.get(fstep)
+        dsg = item_grp.get(dataset) if item_grp is not None else None
+        if dsg is None:
+            continue
+        times = np.asarray(dsg["times"]).astype("datetime64[ns]")
+        if times.size == 0:
+            continue
+        if attrs is None:
+            attrs = dict(dsg.attrs)
+
+        data = np.asarray(dsg["data"], dtype=np.float64)
+        coords = np.asarray(dsg["coords"])
+        uniq_times = np.unique(times)
+
+        # Process each unique time within this forecast step.
+        # For single-time forecast steps, this loop runs once.
+        # For multi-time (substeps), each intermediate time is binned separately.
+        for unique_time in uniq_times:
+            # Mask for points with this unique time
+            time_mask = times == unique_time
+
+            # Get bin key for this time
+            bin_key, mid = _bin_key(unique_time, freq)
+
+            # Initialize or retrieve accumulator for this bin
+            acc = bins.get(bin_key)
+            if acc is None:
+                acc = bins[bin_key] = {
+                    "sum": np.zeros_like(data),
+                    "count": np.zeros_like(data),
+                    "row_count": np.zeros(data.shape[0]),
+                    "coords": coords,
+                    "mid": mid,
+                }
+            else:
+                assert acc["sum"].shape == data.shape, (
+                    f"{prefix}/{fstep}/{dataset}: inconsistent point/channel count across "
+                    "forecast steps in the same time bin."
+                )
+
+            # Accumulate only the points with this unique time
+            data_for_time = data[time_mask]
+            valid = ~np.isnan(data_for_time)
+            acc["sum"][time_mask] += np.where(valid, data_for_time, 0.0)
+            acc["count"][time_mask] += valid
+            acc["row_count"][time_mask] += valid.reshape(valid.shape[0], -1).any(axis=1)
+
+    return bins, attrs
+
+
+def _dispatch_parallel_bins(store_path, prefix, fsteps, freq, n_workers):
+    """Split forecast steps across processes and merge partial per-bin accumulators."""
+    chunks = [chunk.tolist() for chunk in np.array_split(fsteps, n_workers) if len(chunk) > 0]
+    with concurrent.futures.ProcessPoolExecutor(max_workers=len(chunks)) as pool:
+        chunk_results = list(
+            pool.map(
+                _accumulate_dataset_bins_worker,
+                [store_path] * len(chunks),
+                [prefix] * len(chunks),
+                chunks,
+                [freq] * len(chunks),
+            )
+        )
+
+    dataset_bins: dict[str, dict[object, dict[str, npt.NDArray]]] = {
+        d: {} for d in _MEAN_OUTPUT_DATASETS
+    }
+    dataset_attrs: dict[str, dict | None] = {d: None for d in _MEAN_OUTPUT_DATASETS}
+    for chunk_bins, chunk_attrs in chunk_results:
+        for dataset in _MEAN_OUTPUT_DATASETS:
+            dataset_bins[dataset] = _merge_bins(dataset_bins[dataset], chunk_bins[dataset])
+            if dataset_attrs[dataset] is None:
+                dataset_attrs[dataset] = chunk_attrs[dataset]
+
+    return dataset_bins, dataset_attrs
+
+
+def _accumulate_dataset_bins_worker(store_path, prefix, fsteps, freq):
+    """Worker entry point: open an independent read handle for one chunk of forecast steps."""
+    with io.zarrio_reader(pathlib.Path(store_path)) as zio_r:
+        stream_grp = zio_r.data_root
+        for part in prefix.split("/"):
+            stream_grp = stream_grp.get(part)
+        dataset_bins, dataset_attrs = {}, {}
+        for dataset in _MEAN_OUTPUT_DATASETS:
+            dataset_bins[dataset], dataset_attrs[dataset] = _accumulate_dataset_bins(
+                stream_grp, dataset, prefix, freq, fsteps
+            )
+        return dataset_bins, dataset_attrs
+
+
+def _merge_bins(bins_a, bins_b):
+    """Combine two per-bin accumulator dicts produced from disjoint forecast steps."""
+    merged = dict(bins_a)
+    for bin_key, acc_b in bins_b.items():
+        acc_a = merged.get(bin_key)
+        if acc_a is None:
+            merged[bin_key] = acc_b
+            continue
+        acc_a["sum"] += acc_b["sum"]
+        acc_a["count"] += acc_b["count"]
+        acc_a["row_count"] += acc_b["row_count"]
+    return merged
+
+
+def _resolve_write_bins(dataset_bins, dataset_attrs):
+    """[(bin_ord, present, accs) for each bin worth writing], align target/pred."""
+    if not any(dataset_attrs.values()):
+        return
+    bin_keys = sorted({k for bins in dataset_bins.values() for k in bins})
+    for bin_ord, bin_key in enumerate(bin_keys):
+        accs = {d: dataset_bins[d].get(bin_key) for d in _MEAN_OUTPUT_DATASETS}
+        masks = [a["row_count"] > 0 for a in accs.values() if a is not None]
+        present = np.logical_and.reduce(masks) if masks else None
+        if present is not None and present.any():
+            yield bin_ord, present, accs
+
+
+def _write_bin(zio_root_w, ds_path, acc, present, attrs):
+    """Write the NaN-aware mean of one bin, restricted to the `present` points."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        counts = np.maximum(acc["count"], 1.0)
+        mean = np.where(acc["count"] > 0, acc["sum"] / counts, np.nan)
+    mean = mean[present].astype(np.float32)
+
+    group = zio_root_w.get(ds_path)
+    if group is None:
+        group = zio_root_w.create_group(
+            ds_path,
+            attributes={
+                "channels": attrs.get("channels", []),
+                "geoinfo_channels": attrs.get("geoinfo_channels", []),
+                "source_interval": attrs.get("source_interval"),
+            },
+        )
+    _write_array(group, "data", mean)
+    _write_array(group, "times", np.full(mean.shape[0], acc["mid"], dtype="datetime64[ns]"))
+    _write_array(group, "coords", acc["coords"][present])
+    _write_array(group, "geoinfo", np.zeros((mean.shape[0], 0), dtype=np.float32))
+
+
+def _bin_key(t: np.datetime64, freq) -> tuple[object, np.datetime64]:
+    """
+    Map a single valid time to a (sortable, hashable) bin key and its midpoint.
+    """
+
+    t = np.datetime64(t, "ns")
+    spec = str(freq).strip().lower()
+
+    if spec == "weekly":
+        period = pd.Timestamp(t).to_period("W")
+    elif spec == "monthly":
+        period = pd.Timestamp(t).to_period("M")
+    else:
+        raise ValueError(f"Unsupported output.frequency {freq!r}: expected 'weekly' or 'monthly'.")
+    start, end = period.start_time, (period + 1).start_time
+    mid = (start + (end - start) / 2).to_datetime64()
+    return period, mid
+
+
+def _remove_store(path: pathlib.Path):
+    path = pathlib.Path(path)
+    if path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+
+def _validate_frequency(freq) -> str | None:
+    """Validate output.frequency; return curated spec, or None to skip computing means."""
+    if freq is None or str(freq).strip().lower() in ("", "null", "none"):
+        return None
+    spec = str(freq).strip().lower()
+    if spec not in ("weekly", "monthly"):
+        _logger.debug(
+            f"Unsupported output.frequency {freq!r}: expected 'weekly' or 'monthly'. "
+            "Skipping time means computation."
+        )
+        return None
+    return spec
+
+
+def _validate_paths(cf, mini_epoch) -> tuple[pathlib.Path, pathlib.Path] | None:
+    """Resolve full-resolution and means store paths, clearing any stale means store."""
+    store_path = pathlib.Path(config.get_path_results(cf, mini_epoch))
+    if not store_path.exists():
+        _logger.debug(f"No store at {store_path}; skipping time means computation.")
+        return None
+    means_path = store_path.with_name(f"{store_path.stem}_means{store_path.suffix}")
+    _remove_store(means_path)
+    return store_path, means_path
+
+
+def _resolve_worker_count(configured) -> int:
+    """Resolve `time_means_workers`; parallelism is opt-in (default: sequential)."""
+    return max(1, int(configured)) if configured else 1
