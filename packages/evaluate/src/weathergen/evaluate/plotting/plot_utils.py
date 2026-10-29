@@ -12,11 +12,18 @@ import logging
 import re
 from collections.abc import Iterable, Sequence
 from enum import Enum
+from pathlib import Path
 
+import imageio
 import matplotlib as mpl
 import numpy as np
 import xarray as xr
+from joblib import delayed
 from numpy.typing import NDArray
+from PIL import Image
+from tqdm import tqdm
+
+from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 
 _logger = logging.getLogger(__name__)
 
@@ -311,24 +318,6 @@ class DefaultMarkerSize:
         return cls.compute_marker_size(base, scale, lat)
 
 
-def _flatten_or_average(arr: NDArray) -> NDArray:
-    """Flatten array or average across non-quantile dimensions.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Input array, possibly multi-dimensional.
-
-    Returns
-    -------
-    np.ndarray
-        Flattened 1D array, averaged across extra dimensions if needed.
-    """
-    if arr.ndim > 1:
-        return np.mean(arr, axis=tuple(range(1, arr.ndim))).flatten()
-    return arr
-
-
 def collect_streams(runs: dict):
     """Get all unique streams across runs, sorted.
 
@@ -373,79 +362,6 @@ def collect_channels(scores_dict: dict, metric: str, region: str, runs) -> list[
             values = run_data[run_id]["channel"].values
             channels.update([str(x) for x in np.atleast_1d(values)])
     return list(channels)
-
-
-def plot_metric_region(
-    metric: str,
-    region: str,
-    runs: dict,
-    scores_dict: dict,
-    plotter: object,
-    print_summary: bool,
-) -> None:
-    """Plot data for all streams and channels for a given metric and region.
-
-    Parameters
-    ----------
-    metric: str
-        String specifying the metric to plot
-    region: str
-        String specifying the region to plot
-    runs: dict
-        Dictionary containing the config for all runs
-    scores_dict : dict
-        The dictionary containing all computed metrics.
-    plotter:
-        Plotter object to handle the plotting part
-    print_summary: bool
-        Option to print plot values to screen
-
-    """
-    streams_set = collect_streams(runs)
-    channels_set = collect_channels(scores_dict, metric, region, runs)
-
-    for stream in streams_set:
-        for ch in channels_set:
-            selected_data, labels, run_ids, colors = [], [], [], []
-
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-                # skip if channel is missing or contains NaN
-                if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
-                    continue
-
-                selected_data.append(data.sel(channel=ch))
-                label = runs[run_id].get("label", run_id)
-                if label != run_id:
-                    label = f"{run_id} - {label}"
-                labels.append(label)
-                run_ids.append(run_id)
-                colors.append(runs[run_id].get("color", None))
-
-            if selected_data:
-                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
-
-                name = create_filename(
-                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
-                )
-
-                selected_data, time_dim = _assign_time_coord(selected_data)
-
-                title = f"{metric.upper()} | {stream} | {ch}"
-
-                ref_line_dict = {"ssr_adj": 1.0}
-                line = ref_line_dict.get(metric)
-
-                plotter.plot(
-                    selected_data,
-                    labels,
-                    tag=name,
-                    x_dim=time_dim,
-                    y_dim=metric,
-                    print_summary=print_summary,
-                    title=title,
-                    colors=colors,
-                    line=line,
-                )
 
 
 def _assign_time_coord(selected_data: list[xr.DataArray]) -> tuple[xr.DataArray, str]:
@@ -500,395 +416,6 @@ def _assign_time_coord(selected_data: list[xr.DataArray]) -> tuple[xr.DataArray,
             )
             time_dim = "forecast_step"
     return selected_data, time_dim
-
-
-def ratio_plot_metric_region(
-    metric: str,
-    region: str,
-    runs: dict,
-    scores_dict: dict,
-    plotter: object,
-    print_summary: bool,
-) -> None:
-    """Plot ratio data for all streams and channels for a given metric and region.
-
-    Parameters
-    ----------
-    metric: str
-        String specifying the metric to plot
-    region: str
-        String specifying the region to plot
-    runs: dict
-        Dictionary containing the config for all runs
-    scores_dict : dict
-        The dictionary containing all computed metrics.
-    plotter:
-        Plotter object to handle the plotting part
-    print_summary: bool
-        Option to print plot values to screen
-
-    """
-    streams_set = collect_streams(runs)
-
-    for stream in streams_set:
-        selected_data = []
-        labels = []
-        run_ids = []
-        colors = []
-        for run_id, run_data in runs.items():
-            data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data is None or data.isnull().all():
-                continue
-            selected_data.append(data)
-            label = run_data.get("label", run_id)
-            if label != run_id:
-                label = f"{run_id} - {label}"
-            labels.append(label)
-            run_ids.append(run_id)
-            colors.append(run_data.get("color", None))
-
-        if len(selected_data) > 0:
-            _logger.info(f"Creating ratio plot for {metric} - {stream}")
-
-            name = create_filename(
-                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
-            )
-            plotter.ratio_plot(
-                data=selected_data,
-                run_ids=run_ids,
-                labels=labels,
-                y_dim=metric,
-                tag=name,
-                print_summary=print_summary,
-                colors=colors,
-            )
-
-
-def heat_maps_metric_region(
-    metric: str,
-    region: str,
-    runs: dict,
-    scores_dict: dict,
-    plotter: object,
-) -> None:
-    """Plot heat map data for all streams and channels for a given metric and region.
-
-    Parameters
-    ----------
-    metric: str
-        String specifying the metric to plot
-    region: str
-        String specifying the region to plot
-    runs: dict
-        Dictionary containing the config for all runs
-    scores_dict : dict
-        The dictionary containing all computed metrics.
-    plotter:
-        Plotter object to handle the plotting part
-    print_summary: bool
-        Option to print plot values to screen
-
-    """
-    streams_set = collect_streams(runs)
-
-    for stream in streams_set:
-        selected_data = []
-        labels = []
-        run_ids = []
-        for run_id in runs:
-            data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data is None or data.isnull().all():
-                continue
-
-            selected_data.append(data)
-            label = runs[run_id].get("label", run_id)
-            if label != run_id:
-                label = f"{run_id} - {label}"
-            labels.append(label)
-            run_ids.append(run_id)
-
-        if len(selected_data) > 0:
-            _logger.info(f"Creating heat maps for {metric} - {stream}")
-            name = create_filename(
-                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
-            )
-            selected_data, time_dim = _assign_time_coord(selected_data)
-
-            plotter.heat_map(
-                selected_data,
-                labels,
-                metric=metric,
-                tag=name,
-                x_dim=time_dim,
-            )
-
-
-def score_card_metric_region(
-    metric: str,
-    region: str,
-    runs: dict,
-    scores_dict: dict,
-    sc_plotter: object,
-) -> None:
-    """
-    Create score cards for all streams and channels for a given metric and region.
-
-    Parameters
-    ----------
-    metric: str
-        String specifying the metric to plot
-    region: str
-        String specifying the region to plot
-    runs: dict
-        Dictionary containing the config for all runs
-    scores_dict : dict
-        The dictionary containing all computed metrics.
-    sc_plotter:
-        Plotter object to handle the plotting part
-    """
-    streams_set = collect_streams(runs)
-    channels_set = collect_channels(scores_dict, metric, region, runs)
-
-    for stream in streams_set:
-        selected_data, run_ids = [], []
-        for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-            if data.isnull().all():
-                continue
-            selected_data.append(data)
-            run_ids.append(run_id)
-
-        if len(selected_data) >= 2:
-            _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
-            name = "_".join([metric, region, stream])
-            sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
-        elif len(selected_data) == 1:
-            _logger.info(
-                f"Skipping score card for {metric} - {region} - {stream}: "
-                f"only one run available (need at least 2 to compare)."
-            )
-
-
-def bar_plot_metric_region(
-    metric: str,
-    region: str,
-    runs: dict,
-    scores_dict: dict,
-    br_plotter: object,
-) -> None:
-    """
-    Create bar plots for all streams and run_ids for a given metric and region.
-
-    Parameters
-    ----------
-    metric: str
-        String specifying the metric to plot
-    region: str
-        String specifying the region to plot
-    runs: dict
-        Dictionary containing the config for all runs
-    scores_dict : dict
-        The dictionary containing all computed metrics.
-    plotter:
-        Plotter object to handle the plotting part
-    """
-    streams_set = collect_streams(runs)
-    channels_set = collect_channels(scores_dict, metric, region, runs)
-
-    for stream in streams_set:
-        selected_data, run_ids = [], []
-
-        for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-            if data.isnull().all():
-                continue
-            selected_data.append(data)
-            run_ids.append(run_id)
-
-        if selected_data:
-            _logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
-            name = "_".join([metric, region, stream])
-            br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
-
-
-def quantile_plot_metric_region(
-    metric: str,
-    region: str,
-    runs: dict,
-    scores_dict: dict,
-    plotter: object,
-) -> None:
-    """
-    Create quantile-quantile (Q-Q) plots for extreme value analysis for all streams
-    and channels for a given metric and region.
-
-    Parameters
-    ----------
-    metric: str
-        String specifying the metric to plot (should be 'qq_analysis')
-    region: str
-        String specifying the region to plot
-    runs: dict
-        Dictionary containing the config for all runs
-    scores_dict : dict
-        The dictionary containing all computed metrics.
-    plotter:
-        Plotter object to handle the plotting part. Must have a qq_plot method.
-    """
-    streams_set = collect_streams(runs)
-    channels_set = collect_channels(scores_dict, metric, region, runs)
-
-    for stream in streams_set:
-        for ch in channels_set:
-            selected_data, labels, run_ids = [], [], []
-            qq_full_data = []  # Store full Q-Q datasets for detailed plotting
-
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-                # skip if channel is missing
-                if ch not in np.atleast_1d(data.channel.values):
-                    continue
-
-                # Select channel
-                data_for_channel = data.sel(channel=ch) if "channel" in data.dims else data
-
-                # Check for NaN
-                if data_for_channel.isnull().all():
-                    continue
-
-                # For qq_analysis, extract Q-Q data from attributes
-                if metric == "qq_analysis" and "p_quantiles" in data_for_channel.attrs:
-                    attrs = data_for_channel.attrs
-                    # Convert to numpy arrays once
-                    p_quantiles_arr = np.array(attrs["p_quantiles"])
-                    gt_quantiles_arr = np.array(attrs["gt_quantiles"])
-                    qq_deviation_arr = np.array(attrs["qq_deviation"])
-                    qq_deviation_norm_arr = np.array(attrs["qq_deviation_normalized"])
-                    quantile_levels = np.array(attrs["quantile_levels"])
-                    extreme_low_mse = float(np.mean(np.array(attrs["extreme_low_mse"])))
-                    extreme_high_mse = float(np.mean(np.array(attrs["extreme_high_mse"])))
-
-                    qq_dataset = xr.Dataset(
-                        {
-                            "quantile_levels": (["quantile"], quantile_levels),
-                            "p_quantiles": (["quantile"], _flatten_or_average(p_quantiles_arr)),
-                            "gt_quantiles": (["quantile"], _flatten_or_average(gt_quantiles_arr)),
-                            "qq_deviation": (["quantile"], _flatten_or_average(qq_deviation_arr)),
-                            "qq_deviation_normalized": (
-                                ["quantile"],
-                                _flatten_or_average(qq_deviation_norm_arr),
-                            ),
-                            "extreme_low_mse": ([], extreme_low_mse),
-                            "extreme_high_mse": ([], extreme_high_mse),
-                        }
-                    )
-                    # Store extreme percentiles for plotting
-                    qq_dataset.attrs["extreme_percentiles"] = tuple(attrs["extreme_percentiles"])
-                    qq_full_data.append(qq_dataset)
-
-                selected_data.append(data_for_channel)
-                label = runs[run_id].get("label", run_id)
-                if label != run_id:
-                    label = f"{run_id} - {label}"
-                labels.append(label)
-                run_ids.append(run_id)
-
-            if selected_data:
-                _logger.info(f"Creating Q-Q plot for {metric} - {region} - {stream} - {ch}.")
-
-                name = create_filename(
-                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
-                )
-
-                # Check if plotter has qq_plot method and Q-Q data is available
-                if hasattr(plotter, "qq_plot") and qq_full_data:
-                    _logger.info(f"Creating Q-Q plot with {len(qq_full_data)} dataset(s).")
-                    # Extract extreme_percentiles from dataset
-                    extreme_pct = qq_full_data[0].attrs["extreme_percentiles"]
-                    plotter.qq_plot(
-                        qq_full_data,
-                        labels,
-                        tag=name,
-                        metric=metric,
-                        extreme_percentiles=extreme_pct,
-                    )
-                else:
-                    # Skip plotting if no Q-Q data available
-                    _logger.warning(
-                        f"Q-Q data not available for {metric} - {region} - {stream} - {ch}. "
-                        f"Skipping plot generation."
-                    )
-
-
-def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict] | None:
-    """Extract PSD curve data from DataArray attrs for a given fstep/channel.
-
-    Returns a single-element list of dicts ready for the plotter, or None if keys are missing.
-    """
-    attrs = data_ch.attrs
-    fp = f"fstep_{fstep}/"
-
-    for prefix in (f"{fp}{ch}/", fp):
-        if f"{prefix}frequencies" in attrs and f"{prefix}psd_target" in attrs:
-            return [
-                {
-                    "frequencies": np.array(attrs[f"{prefix}frequencies"]),
-                    "psd_target": np.array(attrs[f"{prefix}psd_target"]),
-                    "psd_prediction": np.array(attrs[f"{prefix}psd_prediction"]),
-                    "psd_method": attrs.get(f"{fp}psd_method", attrs.get("psd_method", "sht")),
-                }
-            ]
-    return None
-
-
-def psd_plot_metric_region(
-    metric: str,
-    region: str,
-    runs: dict,
-    scores_dict: dict,
-    plotter: object,
-) -> None:
-    """Create PSD plots for all streams and channels for a given metric and region.
-
-    PSD curves (frequencies, target PSD, prediction PSD) are stored in
-    ``score.attrs`` by ``Scores.calc_psd`` and read back here.
-    """
-    streams_set = collect_streams(runs)
-    channels_set = collect_channels(scores_dict, metric, region, runs)
-
-    for stream in streams_set:
-        for ch in channels_set:
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-                if ch not in np.atleast_1d(data.channel.values):
-                    continue
-
-                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
-                if data_ch.isnull().all():
-                    continue
-
-                attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
-                if not attr_fsteps:
-                    _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
-                    continue
-
-                label = runs[run_id].get("label", run_id)
-
-                for fstep in attr_fsteps:
-                    psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
-                    if psd_datasets is None:
-                        continue
-
-                    method_tag = psd_datasets[0].get("psd_method", "sht")
-                    name = create_filename(
-                        prefix=[metric, method_tag, region],
-                        middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
-                    )
-                    plotter.psd_plot(
-                        psd_datasets,
-                        [label],
-                        tag=name,
-                        variable=ch,
-                        forecast_step=str(fstep),
-                    )
-    _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 
 def create_filename(
@@ -947,3 +474,226 @@ def create_filename(
         )
 
     return sep.join(prefix + truncated_middle + suffix)
+
+
+# ---------------------------------------------------------------------------
+# Animations
+# ---------------------------------------------------------------------------
+
+
+def _build_single_animation(
+    output_dir: Path,
+    run_id: str,
+    tag: str,
+    stream: str,
+    region: str | None,
+    var: str,
+    sample: object,
+    fsteps: list,
+    image_format: str,
+    animation_format: str,
+    duration_ms: int,
+    prefix: str = "map",
+) -> list[str]:
+    """Build one animation for a single (region, sample/ens, variable) combination.
+
+    All work is I/O + Pillow — no matplotlib state involved.
+
+    The function scans ``output_dir`` for per-sample map/histogram frames whose filenames follow:
+
+        {prefix}_{run_id}_{tag}_{sample}_{valid_time}_{stream}_{region}_{var}_{fstep:03d}
+
+    Score-map frames follow the same pattern without the sample and valid time
+    (``map_{run_id}_score_maps[_ens_{ens}]_{metric}_{stream}_{region}_{var}_{fstep:03d}``):
+    pass ``tag="score_maps[_ens_{ens}]_{metric}"`` and ``sample=None``.
+
+    Returns the list of source frame paths assembled into the animation, or an
+    empty list when no (or fewer than two for score maps) frames were found.
+    """
+    if not output_dir.is_dir():
+        return []
+
+    region_part = region if region else ""
+    if sample is not None:
+        head = "_".join(filter(None, [prefix, run_id, tag, str(sample)]))
+    else:
+        head = "_".join(filter(None, [prefix, run_id, tag]))
+    tail = "_".join(filter(None, [stream, region_part, var]))
+    suffix = f".{image_format}"
+    fstep_strs = {str(f).zfill(3) for f in fsteps}
+    image_paths = sorted(
+        str(f)
+        for f in output_dir.iterdir()
+        if f.name.startswith(head + "_")
+        and f.name.endswith(suffix)
+        and f"_{tail}_" in f.name
+        and f.stem.rsplit("_", 1)[-1] in fstep_strs
+    )
+    if not image_paths:
+        return []
+    if sample is not None:
+        anim_parts = ["animation", run_id, tag, str(sample), stream]
+    else:
+        anim_parts = ["animation", run_id, tag, stream]
+    if region:
+        anim_parts.append(region)
+    anim_parts.append(var)
+    out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
+
+    if animation_format.lower() == "gif":
+        images = [Image.open(p).convert("RGB") for p in image_paths]
+        # GIF frames are palette-indexed (256 colors max) — this is a hard
+        # format limit, so gradients like colorbars can never be truly
+        # continuous here.
+        palette = images[0].quantize(colors=256, method=Image.Quantize.MAXCOVERAGE)
+        frames = [img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images]
+        frames[0].save(
+            out_path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=duration_ms,
+            loop=0,
+        )
+        for img in images:
+            img.close()
+    elif animation_format.lower() == "mp4":
+        frames = [imageio.imread(p) for p in image_paths]
+        fps = 1000 / duration_ms if duration_ms > 0 else 2
+        (
+            imageio.mimsave(
+                out_path,
+                frames,
+                fps=fps,
+                macro_block_size=8,
+                ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],
+                ffmpeg_log_level="error",
+            ),
+        )
+    else:
+        raise ValueError(
+            f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'."
+        )
+
+    _logger.debug(f"Saved animation to {out_path}")
+    return image_paths
+
+
+def _dispatch_field_animations(
+    plotter: object,
+    samples: list,
+    fsteps,
+    variables: list[str],
+    select: dict,
+    tag: str,
+    max_workers: int | None = None,
+    prefixes: tuple[str, ...] = ("map", "histogram"),
+) -> list[str]:
+    """Build GIF animations in parallel for all (region, sample, variable) combinations.
+
+    Animations are built from the frame types in *prefixes* (``"map"``, ``"histogram"``);
+    whichever image files exist on disk will be picked up automatically.
+
+    Parameters
+    ----------
+    plotter : Plotter
+        Plotter instance (used only for config: regions, fps, image_format, run_id, stream).
+    samples, fsteps, variables, select, tag
+        Same arguments that ``Plotter.animation`` used to accept.
+    prefixes : tuple[str, ...]
+        Frame types to animate: ``"map"`` and/or ``"histogram"``.
+
+    Returns
+    -------
+    list[str]
+        Paths of all source frames that were assembled into GIFs.
+    """
+    plotter.update_data_selection(select)
+
+    duration_ms = int(1000 / plotter.fps) if plotter.fps > 0 else 400
+
+    frame_dirs = {
+        "map": plotter.get_map_output_dir(tag),
+        "histogram": plotter.get_hist_output_dir(),
+    }
+
+    tasks = [
+        {
+            "output_dir": output_dir,
+            "run_id": plotter.run_id,
+            "tag": tag,
+            "stream": plotter.stream,
+            "region": region,
+            "var": var,
+            "sample": sample,
+            "fsteps": list(fsteps),
+            "image_format": plotter.image_format,
+            "animation_format": plotter.animation_format,
+            "duration_ms": duration_ms,
+            "prefix": prefix,
+        }
+        for prefix, output_dir in frame_dirs.items()
+        if prefix in prefixes
+        for region in plotter.regions
+        for sample in samples
+        for var in variables
+    ]
+
+    calls = [
+        delayed(_build_single_animation)(**t)
+        for t in tqdm(tasks, desc=f"Creating animations {plotter.stream} {tag}")
+    ]
+    results = dispatch_parallel(
+        calls,
+        n_workers=get_num_workers(max_workers=max_workers),
+        backend="loky",
+        desc="Animations",
+    )
+    return [p for r in results if r for p in r]
+
+
+def _dispatch_score_map_animations(
+    map_dir: Path,
+    plotter_cfg: dict,
+    run_id: str,
+    stream: str,
+    metrics: list[str],
+    regions: list[str],
+    variables: list[str],
+    ens_values: list,
+    fsteps: list,
+    n_workers: int | None = None,
+) -> list[str]:
+    """Build score-map animations in parallel for all (metric, region, variable[, ens]) combos.
+
+    Returns the paths of all source frames assembled into animations.
+    """
+    duration_ms = int(1000 / plotter_cfg["fps"]) if plotter_cfg["fps"] > 0 else 400
+
+    tasks = [
+        dict(
+            output_dir=map_dir,
+            run_id=run_id,
+            tag="score_maps" + (f"_ens_{ens_val}" if ens_val is not None else "") + f"_{metric}",
+            stream=stream,
+            region=region,
+            var=var,
+            sample=None,
+            fsteps=list(fsteps),
+            image_format=plotter_cfg["image_format"],
+            animation_format=plotter_cfg["animation_format"],
+            duration_ms=duration_ms,
+        )
+        for metric in metrics
+        for region in regions
+        for var in variables
+        for ens_val in ens_values
+    ]
+
+    calls = [delayed(_build_single_animation)(**t) for t in tasks]
+    results = dispatch_parallel(
+        calls,
+        n_workers=n_workers,
+        backend="loky",
+        desc=f"Score map animations {stream}",
+    )
+    return [p for r in results if r for p in r]

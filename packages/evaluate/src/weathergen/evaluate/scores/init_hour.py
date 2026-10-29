@@ -12,7 +12,7 @@
 For every forecast step, the metrics are aggregated over samples and points, grouped by
 the hour of day of the samples' initialisation time (``init_times``).  The result shows
 how skill depends on the time of day a forecast starts; it is plotted by
-``plot_init_hour_summary``.
+``init_hour_metric_region``.
 
 Scoring goes through ``compute_scores_for_region``, as for the per-sample scores; this
 module only attaches the ``init_hour`` coordinate it groups by and stacks the per-step
