@@ -816,7 +816,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 target_metadata = target_masks.metadata[tidx]
 
-                # Get first target step's times (using self.output_offset as the first output step index)
+                # Get first target step's times
+                # (using self.output_offset as the first output step index)
                 if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
                     target_times_array = sdata.target_times_raw[self.output_offset]
                     target_metadata.add_params(

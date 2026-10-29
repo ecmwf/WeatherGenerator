@@ -1024,7 +1024,7 @@ class Model(torch.nn.Module):
 
         step is the global forecast step, output converts it to the spaces it needs.
         """
-        chunk_idx = output.chunk_idx(step)
+        # chunk_idx = output.chunk_idx(step)
         fstep_idx = output.fstep_idx(step)
 
         if out_step is None:
@@ -1180,7 +1180,9 @@ class Model(torch.nn.Module):
                 # lens for varlen attention (replicate coords for ensemble members)
                 tcls = torch.cat(
                     [
-                        batch.samples[i_b % n_real].streams_data[stream_name].target_coords_lens[fstep_idx]
+                        batch.samples[i_b % n_real]
+                        .streams_data[stream_name]
+                        .target_coords_lens[fstep_idx]
                         for i_b in range(batch_size)
                     ]
                 )

@@ -45,6 +45,21 @@ class NamedLinear(torch.nn.Module):
         return self.linear(x)
 
 
+class KwargLayerNorm(torch.nn.Module):
+    """LayerNorm that discards block-call kwargs (coords, emb, ada_ln_aux, ...).
+
+    Lets a plain normalization layer share the uniform call signature used for MLP/attention
+    blocks in a checkpointed ModuleList, instead of being special-cased by isinstance checks.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.norm = torch.nn.LayerNorm(*args, **kwargs)
+
+    def forward(self, x, **kwargs):
+        return self.norm(x)
+
+
 class MLP(torch.nn.Module):
     def __init__(
         self,
@@ -126,45 +141,39 @@ class MLP(torch.nn.Module):
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
 
-    # TODO: expanded args, must check dependencies (previously aux = args[-1])
-    def forward(self, *args):
-        x, x_in = args[0], args[0]
-        if not self.is_dit:
-            if len(args) < 2 and self.with_aux:
-                raise ValueError("Auxiliary input required but not provided")
-            if len(args) == 2:
-                ada_ln_aux = args[1]
-            elif len(args) > 2:
-                ada_ln_aux = args[-1]
-        else:
-            if self.dit_is_cond:
-                assert len(args) == 4, "DIT with cond gets 4 args"
-                ada_ln_aux = args[-1]
-                noise_emb = args[-2]
-            else:
-                assert len(args) == 3, "DIT without cond gets 3 args"
-                noise_emb = args[-1]
+    def _apply_conditioning(self, x, *, emb, ada_ln_aux):
+        """Normalize x and, for DIT blocks, apply the AdaLN/noise gate.
 
-        if self.is_dit:
-            if self.dit_is_cond:
-                assert ada_ln_aux is not None, "Need auxiliary input for conditional DIT"
-                x, cond_gate = self.lnorm(x, ada_ln_aux)
-            else:
-                x = self.lnorm(x)
-                cond_gate = 1
-            assert noise_emb is not None, "Need noise embedding for noise conditioning in DIT"
-            x, noise_gate = self.noise_conditioning(x, noise_emb)
-            gate = cond_gate * noise_gate
+        Returns (x, gate); gate is the int 1 (no-op) unless this is a DIT block.
+        """
+        if not self.is_dit:
+            if self.with_aux and ada_ln_aux is None:
+                raise ValueError("Auxiliary input required but not provided")
+            return x, 1
+
+        if self.dit_is_cond:
+            assert ada_ln_aux is not None, "Need auxiliary input for conditional DIT"
+            x, cond_gate = self.lnorm(x, ada_ln_aux)
+        else:
+            x = self.lnorm(x)
+            cond_gate = 1
+        assert emb is not None, "Need noise embedding for noise conditioning in DIT"
+        x, noise_gate = self.noise_conditioning(x, emb)
+        return x, cond_gate * noise_gate
+
+    def forward(self, x, *, emb=None, ada_ln_aux=None, **kwargs):
+        # keyword-only, with **kwargs discarded: lets every block in a checkpointed
+        # ModuleList (MLP, attention, ...) be called with the same keyword arguments,
+        # regardless of which ones a given block actually uses (e.g. coords, x_lens).
+        x_in = x
+        x, gate = self._apply_conditioning(x, emb=emb, ada_ln_aux=ada_ln_aux)
 
         for layer in self.layers:
-            if isinstance(layer, AdaLayerNorm):
-                x = layer(x, ada_ln_aux)
-            else:
-                x = layer(x)
+            x = layer(x, ada_ln_aux) if isinstance(layer, AdaLayerNorm) else layer(x)
 
         if self.with_residual:
-            if self.is_dit:
-                x = x * gate
+            # gate is 1 (no-op) unless this is a DIT block, so this is unconditional.
+            x = x * gate
             if x.shape[-1] == x_in.shape[-1]:
                 x = x_in + x
             else:

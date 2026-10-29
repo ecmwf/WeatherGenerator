@@ -322,8 +322,6 @@ def plot_loss_avg(
 
     _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
-    print(runs_data[0].train)
-
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
@@ -523,8 +521,6 @@ def plot_loss_per_stream(
                 if x_lim is not None:
                     plt.xlim(x_lim)
 
-                # if len(title_col) == 0 :
-                # import code; code.interact( local=locals())
                 title_loss = (
                     ".".join(title_col.split(".")[:-1]) if title_col is not None else stream_name
                 )

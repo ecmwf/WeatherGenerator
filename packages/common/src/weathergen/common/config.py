@@ -755,10 +755,6 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
         "forecast steps over mini_epochs, such as, e.g., 'forecast.num_steps: [2, 2, 4, 4]'. "
     )
     valid_forecast_offset = f"'{mode}.forecast.offset' must be an integer of either value 0 or 1. "
-    valid_forecast_steps_offset0 = (
-        f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer of value "
-        f"either 0 or 1. "
-    )
     valid_forecast_steps_offset1 = (
         f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer greater "
         "than 1 or a non-empty list and all of its elements must be integers greater than 1."
@@ -768,10 +764,6 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     output_offset = forecast_cfg.get("offset", 0)
     assert isinstance(output_offset, int), TypeError(valid_forecast_offset)
     if output_offset == 0:
-        # if isinstance(forecast_cfg.num_steps, int):
-        #     assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
-        # else:
-        #     raise TypeError(valid_forecast_steps_offset0)
         pass
     elif output_offset == 1:
         assert forecast_cfg.policy, (provide_forecast_policy, valid_forecast_policies)
