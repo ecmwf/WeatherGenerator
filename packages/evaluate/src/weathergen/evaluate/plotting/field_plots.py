@@ -25,10 +25,8 @@ from joblib import delayed
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
-from weathergen.evaluate.plotting.plot_utils import (
-    _dispatch_field_animations,
-    apply_font_settings,
-)
+from weathergen.evaluate.plotting.animations import _dispatch_field_animations
+from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges

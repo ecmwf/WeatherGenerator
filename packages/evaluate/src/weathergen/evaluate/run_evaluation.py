@@ -33,7 +33,7 @@ from weathergen.evaluate.io.wegen_reader import (
 )
 from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
 from weathergen.evaluate.plotting.plot_utils import collect_channels
-from weathergen.evaluate.plotting.verification_plots import plot_score_maps
+from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
