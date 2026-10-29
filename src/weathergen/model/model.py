@@ -855,6 +855,12 @@ class Model(torch.nn.Module):
         if ensemble_size > 1:
             fe_train_modes = {m: m.training for m in self.forecast_engine.modules()}
             self.forecast_engine.train()
+        # Persistent dropout masks (test_config.forecast.dropout_persist_steps = N > 0): the forecast
+        # engine's random draws repeat for N steps, so each member keeps the same perturbed engine;
+        # the base seed is drawn once per rollout (first chunk), so samples still differ
+        dropout_persist_steps = self._get_dropout_persist_steps() if ensemble_size > 1 else 0
+        if dropout_persist_steps > 0 and len(samples_or_output.latent) == 0:
+            self._dropout_persist_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
@@ -875,12 +881,23 @@ class Model(torch.nn.Module):
 
             if self.forecast_engine:
                 # apply forecasting engine
-                tokens = self.forecast_engine(
-                    tokens,
-                    step,
-                    meta_info=source_samples.samples[0].meta_info,
-                    coords=model_params.rope_coords,
-                )
+                if dropout_persist_steps > 0:
+                    seed = self._dropout_persist_seed + (step - forecast_offset) // dropout_persist_steps
+                    with torch.random.fork_rng(devices=[tokens.device]):
+                        torch.manual_seed(seed)
+                        tokens = self.forecast_engine(
+                            tokens,
+                            step,
+                            meta_info=source_samples.samples[0].meta_info,
+                            coords=model_params.rope_coords,
+                        )
+                else:
+                    tokens = self.forecast_engine(
+                        tokens,
+                        step,
+                        meta_info=source_samples.samples[0].meta_info,
+                        coords=model_params.rope_coords,
+                    )
 
                 # Trajectory inspection mode: decode each ODE step as a separate forecast output
                 # so the full denoising trajectory can be inspected downstream.
@@ -995,6 +1012,18 @@ class Model(torch.nn.Module):
                 m.training = mode
 
         return output
+
+    def _get_dropout_persist_steps(self) -> int:
+        """
+        Number of steps for which the MC-dropout ensemble reuses its forecast-engine dropout masks,
+        test_config.forecast.dropout_persist_steps (0: new masks every step, as in training).
+        """
+        test_cfg = self.cf.get("test_config", None) or {}
+        n = (test_cfg.get("forecast", None) or {}).get("dropout_persist_steps", 0)
+        assert isinstance(n, int) and n >= 0, (
+            f"test_config.forecast.dropout_persist_steps must be a non-negative integer, got {n}."
+        )
+        return n
 
     def _get_inference_ensemble_size(self) -> int:
         """
