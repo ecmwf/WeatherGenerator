@@ -223,6 +223,27 @@ def mse(
     )
 
 
+def ens_var(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None = None,
+    weights_points: torch.Tensor | None = None,
+):
+    """
+    Ensemble variance (unbiased over members), averaged over data points as in lp_loss. A
+    diagnostic logged next to the ensemble-mean mse, so that error and spread can be separated.
+    pred : tensor of shape ( ens_dim , num_data_points , num_channels)
+    """
+    mask_nan = ~torch.isnan(target)
+    var = torch.where(mask_nan, pred.var(0, unbiased=True), 0)
+    if weights_points is not None:
+        var = (var.transpose(1, 0) * weights_points).transpose(1, 0)
+    loss_chs = var.mean(0)
+    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
+
+    return loss, loss_chs
+
+
 def rss(
     target: torch.Tensor,
     pred: torch.Tensor,

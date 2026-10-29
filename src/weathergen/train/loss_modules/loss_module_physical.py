@@ -343,6 +343,22 @@ class LossPhysical(LossModuleBase):
                         loss_st_corr = loss_st_corr + loss_cur_w
                         ctr_loss_fcts += 1 if (loss_cur_w > 0.0 and not is_spoof) else 0
 
+                    # diagnostic only, not part of the loss: ensemble variance per channel, logged
+                    # as ens_var next to the ensemble-mean mse
+                    if (
+                        ctr_loss_fcts > 0
+                        and pred.dim() == 3
+                        and pred.shape[0] > 1
+                        and pred.shape[1:] == target.shape
+                    ):
+                        with torch.no_grad():
+                            _, var_chs = self._loss_per_loss_function(
+                                loss_fns.ens_var, target, pred, substep_masks, None, weights_locations
+                            )
+                        losses_all[stream_name][str(timestep_idx)]["ens_var"] = dict(
+                            zip(target_channels, var_chs, strict=True)
+                        )
+
                     loss_timestep = loss_timestep + loss_st_corr
                     ctr_batch += 1 if ctr_loss_fcts > 0.0 else 0
 
