@@ -25,6 +25,7 @@
 
 import logging
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
@@ -32,9 +33,12 @@ import torch
 import tqdm
 
 from weathergen.common.config import Config
-from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
-from weathergen.datasets.batch import SampleMetaData
+from weathergen.datasets.batch import BatchSamples, SampleMetaData
 from weathergen.model.engines import ForecastingEngine
+from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
+
+if TYPE_CHECKING:
+    from weathergen.model.model import Model, ModelOutput, ModelParams
 
 logger = logging.getLogger(__name__)
 
@@ -239,9 +243,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
         # Target tokens for sampling diagnostics; only kept when analytics logging is enabled.
         self.cur_token: torch.Tensor | None = None
-        self._noised_tokens: torch.Tensor | None = None
-
-        self._noise = None
 
         # Log-space bounds of the training noise distribution (log_uniform).
         # noise_level_rn ~ Uniform[log(sigma_min), log(sigma_max)], so sigma = exp(noise_level_rn).
@@ -249,7 +250,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.train_log_max = math.log(self.sigma_max)
 
         # Inference-mode only: persists per-ODE-step sampling diagnostics to a JSONL file instead
-        # of plotting them inline. See scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py.
+        # of plotting them inline.
+        # See scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py.
         self._diagnostics_writer = None
         if cf.stage == "inference":
             self._diagnostics_writer = ScalarSeriesJSONLWriter(
@@ -371,8 +373,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         noise_stream = self.cf.get("diffusion", {}).get("noise_stream", "ERA5")
         noise_level_rn = torch.tensor(
-            [meta_info[noise_stream].params["noise_level_rn"]], 
-            device=tokens.device
+            [meta_info[noise_stream].params["noise_level_rn"]], device=tokens.device
         )
 
         # Compute sigma from noise_level_rn.
@@ -387,8 +388,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Only the healpix-cell tokens are diffused.
         y_cells = y[:, self.num_aux_tokens :]
         x_noisy = y_cells + torch.randn_like(y_cells) * sigma
-
-        self._noised_tokens = x_noisy.detach()
 
         denoised = self.denoise(x=x_noisy, c=c, sigma=sigma, fstep=fstep, coords=coords)
         return self._prepend_aux_tokens(denoised)
@@ -698,10 +697,10 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
         logger.debug(
             f"Inference sigma schedule ({self.noise_distribution}): "
-            f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
+            f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, "
             f"train_max={sigma_max_train:.4f}), "
             f"sigma_min_eff={sigma_min_eff:.4f} "
-            f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
+            f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/"
             f"{sigma_min_from_dist:.4f}), "
             f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn_msg}"
         )
@@ -728,7 +727,6 @@ class DiffusionForecastEngine(torch.nn.Module):
             "d_cur_norm": [],
             "d_cur_step_norm": [],
             "residual_std": [],
-            "latent_states": [x.cpu()],
         }
 
         # Per-step intermediate denoised states (one per ODE step).
@@ -767,31 +765,27 @@ class DiffusionForecastEngine(torch.nn.Module):
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_post + (t_next - t_post) * (0.5 * d_cur + 0.5 * d_prime)
 
-            # --- Record diagnostics ---
-            with torch.no_grad():
-                s = t_cur.item()
-                track["sigma"].append(s)
-                track["sigma_post"].append(t_post.item())
-                track["c_skip"].append(self.sigma_data**2 / (s**2 + self.sigma_data**2))
-                track["x_std"].append(x_next.std().item())
-                track["denoised_std"].append(denoised.std().item())
-                track["d_cur_norm"].append(d_cur.norm().item())
-                track["d_cur_step_norm"].append(((t_next - t_post) * d_cur).norm().item())
-                track["residual_std"].append((x_post - denoised).std().item())
-                track["latent_states"].append(x_next.cpu())
-                if target_cells is not None:
-                    track["l2_to_target"].append((x_next - target_cells).norm().item())
-                    track["latent_states"].append(target_cells.cpu())
+            # --- Record diagnostics (only written when analytics logging is enabled) ---
+            if self.log_analytics:
+                with torch.no_grad():
+                    s = t_cur.item()
+                    track["sigma"].append(s)
+                    track["sigma_post"].append(t_post.item())
+                    track["c_skip"].append(self.sigma_data**2 / (s**2 + self.sigma_data**2))
+                    track["x_std"].append(x_next.std().item())
+                    track["denoised_std"].append(denoised.std().item())
+                    track["d_cur_norm"].append(d_cur.norm().item())
+                    track["d_cur_step_norm"].append(((t_next - t_post) * d_cur).norm().item())
+                    track["residual_std"].append((x_post - denoised).std().item())
+                    if target_cells is not None:
+                        track["l2_to_target"].append((x_next - target_cells).norm().item())
 
             if return_diffusion_steps:
                 intermediate_x.append(self._prepend_aux_tokens(x_next))
 
-        # Drop the full latent tensors (see "latent_states" above) before writing: the
-        # diagnostics file only stores per-step scalars, and self._diagnostics_writer is
-        # None outside inference, and no-ops unless fe_diffusion_log_analytics is enabled.
+        # self._diagnostics_writer is None outside inference.
         if self._diagnostics_writer is not None:
-            scalar_track = {k: v for k, v in track.items() if k != "latent_states"}
-            self._diagnostics_writer.write(scalar_track)
+            self._diagnostics_writer.write(track)
 
         return self._prepend_aux_tokens(x_next), intermediate_x
 
