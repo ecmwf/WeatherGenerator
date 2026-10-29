@@ -120,6 +120,14 @@ train_logging:
   checkpoint: 250
   log_grad_norms: False
 
+# logging additional diagnostics to analyse inference beyond fast eval
+inference_logging:
+  # When True, additionally decode every ODE denoising step (not just the final one) and write
+  # it to <run>/analytics/diffusion_steps/ for offline inspection; see
+  # scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py and
+  # scripts/analytics/diffusion/plot_diffusion_steps.py.
+  fe_diffusion_log_analytics: False
+
 # parameters for data loading
 data_loading :
 

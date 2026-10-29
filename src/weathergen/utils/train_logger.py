@@ -13,6 +13,7 @@ import logging
 import math
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,7 @@ import weathergen.common.config as config
 # from weathergen.train.trainer import cfg_keys_to_filter
 from weathergen.train.utils import Stage, flatten_dict
 from weathergen.utils.distributed import ddp_average
+from weathergen.utils.inference_logger import AnalyticsOutputWriter
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
@@ -159,6 +161,38 @@ class TrainLogger:
         metrics_val = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
 
         return Metrics(run_id, "train", metrics_train, metrics_val, None)
+
+
+class ScalarMetricsJSONLWriter(AnalyticsOutputWriter):
+    """
+    Appends one JSON line per :meth:`write` call, each a flat ``dict[str, float]``.
+
+    This is a thin :class:`AnalyticsOutputWriter` adapter around :meth:`TrainLogger.log_metrics`,
+    the append-only metrics file already used for scalar training/validation metrics, so that
+    scalar dev metrics - e.g. SSL collapse indicators - follow the same enable-flag +
+    rank-0-only contract as the inference-only writers in
+    ``weathergen.utils.inference_logger``, without changing how ``CollapseMonitor`` itself
+    computes or caches metrics.
+    """
+
+    def __init__(
+        self,
+        cf: config.Config,
+        name: str,
+        log_fn,
+        enabled: bool,
+    ) -> None:
+        """
+        Args:
+            log_fn: Callable with the same signature as
+                ``TrainLogger.log_metrics(stage, metrics, step=None)``.
+        """
+        super().__init__(cf, name, enabled)
+        self._log_fn = log_fn
+
+    def _write(self, payload: tuple[str, Mapping[str, float]]) -> None:
+        stage, metrics = payload
+        self._log_fn(stage, metrics)
 
 
 def read_metrics(
