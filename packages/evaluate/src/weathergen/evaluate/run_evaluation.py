@@ -374,7 +374,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
             )
 
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    # init_hour_scores[metric][region][stream][run_id] = xr.DataArray(forecast_step, init_hour, ...)
+    # init_hour_scores[metric][region][stream][run_id] = xr.DataArray(init_hour, forecast_step, ...)
     init_hour_scores: dict = {}
     results = [_process_stream(**task) for task in tasks]
 

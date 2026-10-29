@@ -60,7 +60,7 @@ def compute_scores_by_init_hour(
 
     Notes
     -----
-    ``by_init_hour`` has dims ``(forecast_step, init_hour, channel[, ens])``.  Gridded
+    ``by_init_hour`` has dims ``(init_hour, forecast_step, channel[, ens])``.  Gridded
     streams only (the hour is attached to the ``sample`` dimension).  ``psd`` is
     skipped: it is a spectrum over space and is not aggregated over samples.
     """
@@ -103,6 +103,8 @@ def compute_scores_by_init_hour(
         )
         if "init_hour" not in scores.dims:  # a single init hour: get_score does not group
             scores = scores.expand_dims(init_hour=[int(hours[fsteps[0]].values[0])])
+        # same dim order as MetricResult.score, with init_hour in place of sample
+        scores = scores.transpose("init_hour", "forecast_step", ...)
         for metric in scores.metric.values:
             by_metric[str(metric)].by_init_hour = scores.sel(metric=metric, drop=True)
 

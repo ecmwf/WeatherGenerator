@@ -53,12 +53,15 @@ class MetricResult:
         per-forecast-step payload a metric produced (``fstep_<n>/<key>``,
         ``attr_fsteps``).  This is what the JSON score files store.
     spatial
-        Score aggregated over samples, dims ``(forecast_step, ipoint, channel[, ens])``
+        Score aggregated over samples, dims ``(ipoint, forecast_step, channel[, ens])``
         with ``lat``/``lon`` on ``ipoint``.  ``None`` unless computed.
     by_init_hour
         Score aggregated over samples and points per initialisation hour of the day, dims
-        ``(forecast_step, init_hour, channel[, ens])``.  ``None`` unless computed
+        ``(init_hour, forecast_step, channel[, ens])``.  ``None`` unless computed
         (``init_hour.compute_scores_by_init_hour``).
+
+    The three share the dim order after the first one (``sample`` / ``ipoint`` /
+    ``init_hour``).
     """
 
     name: str
@@ -80,10 +83,11 @@ def results_to_dict(results: dict[str, dict[str, MetricResult]], field: str = "s
     d: dict = {}
     for region, by_metric in results.items():
         for metric, r in by_metric.items():
-            if getattr(r, field) is not None:
+            value = vars(r)[field]
+            if value is not None:
                 d.setdefault(metric, {}).setdefault(region, {}).setdefault(r.stream, {})[
                     r.run_id
-                ] = getattr(r, field)
+                ] = value
     return d
 
 
@@ -316,6 +320,8 @@ def calc_scores_per_stream(
                 coords="different",
                 compat="equals",
             )
+            # same dim order as score, with ipoint in place of sample
+            spatial = spatial.transpose("ipoint", "forecast_step", ...)
             for metric in spatial.metric.values:
                 results[region][str(metric)].spatial = spatial.sel(metric=metric, drop=True)
 

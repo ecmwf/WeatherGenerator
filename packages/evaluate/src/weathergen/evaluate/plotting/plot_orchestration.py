@@ -82,7 +82,7 @@ def run_score_map_pipeline(
         _logger.debug(f"RUN {reader.run_id} - {stream}: Skipping score maps (non-gridded data).")
         return
 
-    # {region: {metric: spatial DataArray(forecast_step, ipoint, channel[, ens])}}
+    # {region: {metric: spatial DataArray(ipoint, forecast_step, channel[, ens])}}
     spatial = {
         region: {m: r.spatial for m, r in by_metric.items() if r.spatial is not None}
         for region, by_metric in results.items()
@@ -1009,7 +1009,7 @@ def plot_init_hour_summary(
         Configuration dictionary (used for runs, labels, colors, plotting options).
     init_hour_scores : dict
         Nested dict: ``init_hour_scores[metric][region][stream][run_id] = xr.DataArray``
-        with dims ``(forecast_step, init_hour[, channel])`` (``MetricResult.by_init_hour``).
+        with dims ``(init_hour, forecast_step[, channel])`` (``MetricResult.by_init_hour``).
     summary_dir : Path
         Directory to write summary plots to.
     """
