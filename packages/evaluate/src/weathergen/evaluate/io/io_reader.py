@@ -118,9 +118,15 @@ class Reader(ABC):
             "rank": self.eval_cfg.get("rank"),
             "agg_dims": self.eval_cfg.get("agg_dims"),
             "derived_channels": stream_cfg.get("derived_channels"),
+            "climatology_match": stream_cfg.get("climatology_match"),
         }
         # Defaults that should not trigger cache invalidation
-        defaults = {"ensemble": "all", "rank": "all", "agg_dims": "ipoint"}
+        defaults = {
+            "ensemble": "all",
+            "rank": "all",
+            "agg_dims": "ipoint",
+            "climatology_match": "hourly",
+        }
 
         settings: dict = {}
         for key, val in entries.items():
