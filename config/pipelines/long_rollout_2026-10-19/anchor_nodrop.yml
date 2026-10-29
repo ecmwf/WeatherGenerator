@@ -1,0 +1,44 @@
+# Long-rollout forecast training, follow-up of A-C (long_rollout_2026-10-17/abc.yml), same recipe:
+# from nhv6tkln (mini-epoch 8), only the forecast engine trains, lr_max 1e-4, fresh optimizer and
+# schedule, validation as nhv6tkln. Both runs without dropout in the forecast engine.
+#   ctrl8nd (A')  : A without forecast-engine dropout, 8 mini-epochs; isolates the effect of
+#                         dropout (A' vs A) and is the control for B'
+#   pfanchnd (B') : B (pushforward, K from [8, 16, 24, 32, 40], last 8 scored) plus the first
+#                         8 steps scored in every batch (rollout_anchor_steps), without
+#                         forecast-engine dropout, 5 mini-epochs; B' vs A' = anchored pushforward
+# chain_jobs 2 as a guard against the 12 h limit (B' does up to 16 steps with gradient).
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-19/anchor_nodrop.yml
+parallelize: true
+stages:
+  - name: ctrl8nd
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_fe_no_dropout.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=8
+    chain_jobs: 2
+    nodes: 8
+
+  - name: pfanchnd
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=5
+    chain_jobs: 2
+    nodes: 8

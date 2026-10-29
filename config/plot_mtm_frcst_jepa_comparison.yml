@@ -1,0 +1,23 @@
+train:
+  plot:
+    # fx276yn3 :
+    #   slurm_id : 0
+    #   description: "8 step JEPA (11-Aug)"
+    lvicwsxf :
+      slurm_id : 0
+      description: "8 step, forecast only model (82 epoch 2 step)"
+    etej1vsg :
+      slurm_id : 0
+      description: "MTM, forecast matched budget"
+    # cw6a4szu :
+    #   slurm_id : 0
+    #   description: "temporal JEPA (channel weighted)"
+    igsqdagc:
+      slurm_id : 0
+      description: "temporal JEPA, less training budget in epochs"
+    ifu34oup :
+      slurm_id : 0
+      description: "spatial JEPA, less training budget in epochs"
+    # j6nb50v9 :
+    #   slurm_id : 0
+    #   description: "8 FT from MTM 82 ep + 2 FT 64 ep (val 128)"

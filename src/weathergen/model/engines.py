@@ -9,6 +9,7 @@
 import dataclasses
 import math
 
+import pandas as pd
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
@@ -30,6 +31,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.norms import AdaLayerNorm
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -609,6 +611,27 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
+        # conditioning on the lead time of the step (AdaLN in all attention and MLP blocks),
+        # zero-initialised so that the engine starts as without conditioning; 0 disables it
+        self.lead_time_cond_dim = self.cf.get("fe_lead_time_cond_dim", 0)
+        if self.lead_time_cond_dim > 0:
+            assert self.lead_time_cond_dim % 2 == 0, "fe_lead_time_cond_dim has to be even."
+            assert not self.cf.get("fe_diffusion_model", False), (
+                "fe_lead_time_cond_dim is not supported for the diffusion forecast engine."
+            )
+            # the attention pre-norms then have no parameters, as in AdaLayerNorm
+            assert self.cf.norm_type == "LayerNorm", "fe_lead_time_cond_dim needs LayerNorm."
+            # loading a sharded checkpoint re-initialises the parameters missing in it (instead
+            # of keeping the zero init) and does not map the MLP norm weights into AdaLayerNorm
+            assert not (self.cf.get("with_ddp", False) and self.cf.get("with_fsdp", False)), (
+                "fe_lead_time_cond_dim is not supported with FSDP yet."
+            )
+            assert dim_aux is None
+            dim_aux = self.lead_time_cond_dim
+            time_step = mode_cfg.get("forecast", {}).get("time_step")
+            assert time_step is not None, "fe_lead_time_cond_dim needs forecast.time_step."
+            self.step_hours = pd.Timedelta(time_step).total_seconds() / 3600.0
+
         _concat_hd = (
             self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
         )
@@ -695,6 +718,7 @@ class ForecastingEngine(torch.nn.Module):
                         is_dit=self.cf.get("fe_diffusion_model", False),
                         dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
                         == "ada_ln",
+                        aux_norm_affine=self.lead_time_cond_dim > 0,
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -709,6 +733,12 @@ class ForecastingEngine(torch.nn.Module):
 
         for block in self.fe_blocks:
             block.apply(init_weights_final)
+
+        if self.lead_time_cond_dim > 0:
+            for module in self.fe_blocks.modules():
+                if isinstance(module, AdaLayerNorm):
+                    torch.nn.init.zeros_(module.embed_aux[-1].weight)
+                    torch.nn.init.zeros_(module.embed_aux[-1].bias)
 
         # For concatenate_hiddendim: project 2D -> D after the full forward pass
         self.out_proj = (
@@ -802,6 +832,17 @@ class ForecastingEngine(torch.nn.Module):
                             "conditioning should not be provided when conditioning is disabled"
                         )
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+        elif self.lead_time_cond_dim > 0:
+            assert conditioning is None
+            ada_ln_aux = self.lead_time_embedding(fstep, tokens.device)
+            for block in self.fe_blocks:
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = block(tokens)
+                else:
+                    # blocks take (x, coords, emb, ada_ln_aux); MLP takes ada_ln_aux last
+                    tokens = checkpoint(
+                        block, tokens, coords, None, ada_ln_aux, use_reentrant=False
+                    )
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
@@ -814,6 +855,30 @@ class ForecastingEngine(torch.nn.Module):
             tokens = checkpoint(self.out_proj, tokens, use_reentrant=False)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
+
+    def lead_time_embedding(self, fstep: int, device) -> torch.Tensor:
+        """
+        Sinusoidal embedding of the lead time of the state predicted at forecast step fstep,
+        shape [1, 1, fe_lead_time_cond_dim]. The lead time is in days with angular frequencies
+        from 1 to 1/100 per day, so that none aliases at 6 h steps and all vary over 0-15 days.
+        """
+        lead_time_days = torch.tensor([fstep * self.step_hours / 24.0], device=device)
+        emb = time_offset_embedding(lead_time_days, self.lead_time_cond_dim, max_period=100.0)
+        return emb.unsqueeze(1)
+
+
+def time_offset_embedding(time_offset_hours: torch.Tensor, dim: int, max_period: float = 10000.0):
+    """
+    Sinusoidal embedding of time offsets (in hours), shape [N] -> [N, dim]
+    """
+    half = dim // 2
+    freqs = torch.exp(
+        -math.log(max_period)
+        * torch.arange(half, dtype=torch.float32, device=time_offset_hours.device)
+        / half
+    )
+    args = time_offset_hours.float()[:, None] * freqs[None]
+    return torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
 
 
 class EnsPredictionHead(torch.nn.Module):
@@ -904,6 +969,8 @@ class TargetPredictionEngineClassic(nn.Module):
         self.tr_mlp_type = tr_mlp_type
         self.softcap = softcap
         self.tte = torch.nn.ModuleList()
+        # dropout in all blocks of the decoder (0.1 in configs from before the option existed)
+        dropout_rate = self.cf.get("pred_dropout_rate", 0.1)
 
         for i in range(len(self.dims_embed) - 1):
             # Multi-Cross Attention Head
@@ -915,7 +982,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
-                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    dropout_rate=dropout_rate,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
@@ -932,7 +999,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     MultiSelfAttentionHeadVarlen(
                         dim_embed=self.dims_embed[i],
                         num_heads=stream_config["target_readout"]["num_heads"],
-                        dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                        dropout_rate=dropout_rate,
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
                         use_xsa=self.cf.get("use_xsa", False),
@@ -951,7 +1018,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     self.dims_embed[i + 1],
                     with_residual=True,
                     hidden_factor=self.tr_mlp_hidden_factor,
-                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    dropout_rate=dropout_rate,
                     mlp_type=self.tr_mlp_type,
                     norm_type=self.cf.norm_type,
                     dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),

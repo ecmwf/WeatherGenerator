@@ -1,0 +1,45 @@
+# Continuation of gjl_repro_forecast_pipeline.yml for run wowepk86.
+#
+# wowepk86's pretrain chain burned all 4 jobs on 12h walltimes (3x TIMEOUT,
+# 1x NCCL watchdog abort) and only reached mini-epoch 20 of 96 before the
+# forecast fine-tuning stage started. This pipeline resumes that pre-training
+# instead of starting a fresh one.
+#
+# NOTE: despite living on the muon branch, wowepk86 was launched from the plain
+# gjl_repro_forecast_pipeline.yml -- its saved config has no `optimizer.name:
+# muon` and no muon block, just the baseline AdamW. The muon overlays are
+# deliberately absent below; use gjl_repro_forecast_muon_pipeline.yml if you
+# want a muon run instead.
+#
+# run_id == from_run_id == wowepk86 makes the launcher reuse the existing
+# /e/scratch/weatherai/slurm/slurm_weathergen_wowepk86_dir (it re-syncs the
+# .venv, which post_train.sh deleted) and continue in place from
+# wowepk86_latest.chkpt (istep 20340). That copy dir is a 2026-07-27 snapshot
+# of this checkout, so the continuation runs the code the run started with, not
+# whatever is in the working tree today. No base_config / config_files on the
+# continue stage on purpose: the config is reloaded from the run itself, so
+# num_mini_epochs stays 96 and the mini-epoch counter picks up where it stopped
+# rather than restarting at 0.
+#
+# Re-runnable: if 4 more jobs still are not enough, submit this file again and
+# it resumes from the then-latest checkpoint. Drop the forecastft stage if you
+# only want another round of pre-training.
+#
+# Submission (this launcher has no non-submitting dry-run mode), from
+# .../develop-ssl-diffusion-v1/WeatherGenerator:
+#   uv run ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/gjl_repro_forecast_pipeline_continue_wowepk86.yml
+parallelize: false
+stages:
+  - name: contpretrain
+    stage: train
+    run_id: wowepk86
+    from_run_id: wowepk86
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.contpretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast.yml
+    chain_jobs: 4
+    nodes: 2

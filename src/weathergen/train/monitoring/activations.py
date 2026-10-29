@@ -97,6 +97,9 @@ class ActivationStats(Monitor):
         k = self._keys(group)
 
         def hook(module, args, output):
+            # forward passes without gradient (pushforward rollout steps) are not recorded
+            if not torch.is_grad_enabled():
+                return
             x = _first_tensor(output)
             buf = self._buf
             if buf is None or x is None or not x.is_floating_point() or x.numel() == 0:

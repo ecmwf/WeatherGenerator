@@ -1,0 +1,31 @@
+# B'' (deterministic lead-balancing test): B' (xxlm80yw: anchored pushforward from nhv6tkln, every
+# batch scores steps 1-8 and the last 8 of K in [8, 16, 24, 32, 40], no forecast-engine dropout)
+# with lead balancing of the training MSE. B''s 40-step eval: it matches B at days 5-10 (z500
+# RMSE 0.83x A' at day 10) but is still 3-7% worse than A' at days 1-3, because the long lead times
+# dominate the summed loss (z_500 MSE grows ~200x from 6h to 10 days). Lead balancing at power 1
+# with B''s own MSE growth table makes every scored step count about as much as the first.
+# Signal: B'' vs B' RMSE at days 1-3 down towards A', days 5-10 unchanged (within ~2%).
+# Everything else as B' (same start, schedule and length: 5 mini-epochs), so B' is the control.
+# Launch from the WeatherGenerator root (smoke test first: lead_balance_det_smoke.yml):
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-21/lead_balance_det.yml
+parallelize: true
+stages:
+  - name: pfanchndlb
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=5
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 3
+    nodes: 8

@@ -1,0 +1,182 @@
+
+train:
+  
+  plot:
+
+    # old safe branch jepa pretrain runs that were precursors to n0t, srd, af90...
+    # gjl6a0kb:
+    #   slurm_id: 0
+    #   description: "good temporal JEPA, old branch"
+    # uahdb9yl:
+    #   slurm_id: 0
+    #   description: "cont., good temporal JEPA, old branch"
+
+
+    ### runs off the new develop-ssl-diffusion-v1-pre-muon branch and with muon changes merged in
+    # nzb4zf3n:
+    #   slurm_id: 1043776
+    #   description: "probably muon"
+    # bpvgcis0:
+    #   slurm_id: 1043761
+    #   description: "repro with muon changes merged"
+    # gxditlu4:
+    #   slurm_id: 1043751
+    #   description: "repro"
+
+
+    ### fixed the streams appending
+
+    e4yjoofn:
+      slurm_id: 0
+      description: "reproduce o96 results, fixed streams appending, 18 mini-epochs pre-train, 2 step forecast"
+    
+    # # with muon changes merged in
+    s6zwvfp2:
+      slurm_id: 0
+      description: "reproduce o96 results, fixed streams appending, 18 mini-epochs pre-train, 2 step forecast"
+
+    # kf5vjdj2:
+    #   slurm_id: 1043763
+    #   description: "repro, fixed streams appending, with muon changes merged in, muon"
+
+
+    # # Sophie's N320 runs
+
+    # de3z9l3a:
+    #   slurm_id: 1043764
+    #   description: "n320 space jepa, no swiglu or xsa"
+
+    # jc7v6b5d:
+    #   slurm_id: 1043765
+    #   description: "n320 space jepa"
+
+    # ladqrul6:
+    #   slurm_id: 0
+    #   description: "atmofs with Oper finetuning"
+
+    # dq0sq4ea:
+    #   slurm_id: 0
+    #   description: "atmofs, nominal time, 6h output, 2 step trained, 6h tws"
+
+    perrjey5:
+      slurm_id: 0
+      description: "N320, pure forecast training"
+
+    c71eo6pu:
+      slurm_id: 0
+      description: "perrjey5, cont."
+
+    o6w60xs5:
+      slurm_id: 0
+      description: "o96, pure forecast training"
+
+    ### christian very long 2-step runs 
+    skkbxfya:
+      slurm_id: 0
+      description: "n320, pure forecast training, 2 step, 8 node"
+
+    # funtz8kv:
+    #   slurm_id: 0
+    #   description: "Seb JEPA space masking, unfrozen, ERA5 input, 6h output, nominal time, 6h tws, 2 step, 512 target coords dim embed, increase grad clip to 1.0, 6h output"
+
+    # v9neivsd:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, fsdp forecasting, ci8dbx75"
+
+    qpf0zarq:
+      slurm_id: 0
+      description: "n320 forecasting, mini-epoch 20, si0krkxk"
+
+    b4yeti06:
+      slurm_id: 0
+      description: "n320 forecasting, mini-epoch 20, si0krkxk, more workers"
+
+    ci2t558k:
+      slurm_id: 0
+      description: "n320 forecasting, mini-epoch 24 (?), si0krkxk"
+
+    wejf33qv:
+      slurm_id: 0
+      description: "continue ci2t558k"
+
+    vem1md97:
+      slurm_id: 0
+      description: "n320 forecasting, mini-epoch 24 (?), si0krkxk, more workers"
+
+    # n320 but with more workers
+    xsy4n3ug:
+      slurm_id: 0
+      description: "n320 forecasting, mini-epoch 24 (?), si0krkxk, more workers"
+
+    riamnssv:
+      slurm_id: 0
+      description: "n320 8 step forecasting, mini-epoch 24 (?), si0krkxk, max num targets"
+
+    heztvrd7:
+      slurm_id: 0
+      description: "n320 8 step forecasting, mini-epoch 24 (?), si0krkxk, different max num targets"
+
+
+
+    rrvj7vjv:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels"
+
+    n5rtc8kk:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 8 nodes, no val loss"
+
+    wvg0virj:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 8 nodes, more val samples"
+    
+    ggru6j0j:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 8 nodes, more val samples, 1e-4 lr"
+
+
+
+    
+
+    # f9cg4mwz:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, mini-epoch 30?, fsdp forecasting, si0krkxk"
+
+    lecatz9n:
+      slurm_id: 0
+      description: "temporal jepa, o96 forecasting, mini-epoch 18, with muon"
+
+    n30m4d0t:
+      slurm_id: 0
+      description: "temporal jepa, o96 forecasting, mini-epoch 38"
+
+
+    ### Christian's 8 step models
+    
+    # nlwqm5vw :
+    #   slurm_id: 0
+    #   description: "fine-tuning, 8-step, fixed, 1979, smaller lr"
+    # fn98xwgv :
+    #   slurm_id : 0
+    #   description: "fine-tuning, 8-step, sequential, 1979, smaller lr, decay=cosine, fixed"
+    # rmcjxm0i :
+    #   slurm_id : 0
+    #   description: "dh00ll5c 8-step fine-tuning"
+    # lvicwsxf :
+    #   slurm_id : 0
+    #   description: "p2h3q0xw 8-step fine-tuning"
+    # # bnhjhi3v :
+    # #   slurm_id : 0
+    # #   description: "p2h3q0xw 8-step fine-tuning, with weighting"
+    # mofk265t :
+    #   slurm_id : 0
+    #   description: "rdovuscj 8-step fine-tuning"
+    # a9g3jtxs :
+    #   slurm_id : 0
+    #   description: "dkir9g0k 8-step fine-tuning"
+
+
+
+    
+
+    

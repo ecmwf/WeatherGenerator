@@ -1,0 +1,29 @@
+# Lead-time conditioned forecast engine (fe_lead_time_cond_dim, AdaLN, zero-initialised) on the
+# B' recipe (long_rollout_2026-10-19/anchor_nodrop.yml, pfanchnd): from nhv6tkln (mini-epoch 8),
+# only the forecast engine trains, pushforward with K from [8, 16, 24, 32, 40] and the last 8
+# steps scored, the first 8 steps also scored (anchor), no forecast-engine dropout, 5 mini-epochs.
+# The only difference to B' is the conditioning, so B' (sci2fxtn) is the control: does
+# conditioning on the lead time remove the trade-off between short and long lead times?
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-20/lead_cond.yml
+parallelize: true
+stages:
+  - name: pfanchcond
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_fe_lead_time_cond.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=5
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 2
+    nodes: 8

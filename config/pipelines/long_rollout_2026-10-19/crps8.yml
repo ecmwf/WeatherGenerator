@@ -1,0 +1,31 @@
+# CRPS + MC-dropout training on the plain 8-step objective (no pushforward), closer to U-Cast
+# (arXiv:2604.09041: CRPS stage of about 10-15k steps at batch 48, one 12 h step, AdamW lr 7e-5
+# for 1D parameters; we keep AdamW for all parameters). Separates "CRPS + MC dropout in our
+# model" from "CRPS while training out to 10 days" (C, pfcrps): if the ensemble mean is good at
+# short range here, C's short-range damage comes from the long-lead objective.
+# From nhv6tkln (mini-epoch 8) with its recipe (only the forecast engine trains, fixed 8-step
+# rollout, validation as nhv6tkln with 2 MC-dropout members), fair kernel CRPS over 2 members,
+# forecast-engine dropout kept (it is the ensemble mechanism), step checkpointing (8 steps with
+# gradient x 2 members do not fit otherwise), lr_max 5e-5, fresh optimizer and schedule.
+#   crps8 : 25 mini-epochs (204800 samples, 6400 steps at batch 32), ~48 h on 8 nodes at C's
+#           0.037 s/sec per GPU; chain_jobs 6 so that the run continues over the 12 h limit
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-19/crps8.yml
+parallelize: true
+stages:
+  - name: crps8
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_crps.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=25
+      - training_config.learning_rate_scheduling.lr_max=5.0e-05
+      - training_config.forecast.checkpoint_steps=true
+    chain_jobs: 6
+    nodes: 8

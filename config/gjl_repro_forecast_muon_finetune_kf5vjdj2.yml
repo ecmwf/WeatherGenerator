@@ -1,0 +1,38 @@
+# Resubmission of the Muon forecast fine-tuning that died as et39bm9u.
+#
+# et39bm9u was not a Muon failure: part1 trained normally (loss 0.718 -> 0.288
+# over 960 samples) and then died on `OSError: [Errno 116] Stale file handle`
+# reading the IASI-PC zarr. It had not yet reached its first checkpoint
+# (train_logging.checkpoint: 500 batches = 4000 samples), so parts 2-4 each
+# died in ~90s with FileNotFoundError on et39bm9u_latest.chkpt. Nothing to fix
+# in the config; this is a straight resubmit with a tighter save cadence.
+#
+# mini_epoch: 18 pins this to kf5vjdj2_chkpt00018 rather than kf5vjdj2_latest.
+# That matters: if the continuation pipeline
+# (gjl_repro_forecast_muon_pipeline_continue_kf5vjdj2.yml) is also queued, it
+# resumes kf5vjdj2 at mini-epoch 19 and rewrites kf5vjdj2_latest.* and
+# chkpt00019+ in place. Pinning to 18 makes this run reproducible and immune to
+# that race; the cost is ~500 steps of pretraining (latest is istep 19840 vs
+# 19340 for chkpt00018), which is well under half a mini-epoch.
+#
+# train_logging.checkpoint=100 is set via options rather than by editing
+# config_gjl_repro_finetune_forecast.yml, which other pipelines share. At the
+# observed ~9s/batch that puts a resumable checkpoint on disk ~15 min in
+# instead of ~75 min, so the next filesystem hiccup costs one job, not four.
+#
+# Submission (this launcher has no non-submitting dry-run mode), from
+# .../develop-ssl-diffusion-v1/WeatherGenerator:
+#   uv run ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/gjl_repro_forecast_muon_finetune_kf5vjdj2.yml
+parallelize: false
+stages:
+  - name: forecastft
+    stage: train
+    from_run_id: kf5vjdj2
+    mini_epoch: 18
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast.yml
+      - ./config/config_gjl_repro_finetune_forecast_muon.yml
+    options:
+      - train_logging.checkpoint=100
+    chain_jobs: 4
+    nodes: 2

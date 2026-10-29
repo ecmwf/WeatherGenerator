@@ -1394,7 +1394,11 @@ class Trainer(TrainerBase):
                     )
                     if self.log_grad_norms:
                         pstr += f"gradient norm={self.last_grad_norm:.3f}, "
-                    pstr += f"s/sec={(print_freq * self.batch_size_per_gpu) / dt:.3f})"
+                    pstr += f"s/sec={(print_freq * self.batch_size_per_gpu) / dt:.3f}"
+                    if torch.cuda.is_available():
+                        peak_gib = torch.cuda.max_memory_allocated() / 2**30
+                        pstr += f", peak GPU memory={peak_gib:.1f} GiB"
+                    pstr += ")"
                     logger.info(pstr)
                     logger.info("\t")
 

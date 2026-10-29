@@ -1,0 +1,37 @@
+# crps8long with an 8-step gradient window: anchor 4 + final 8 = 12 scored steps with gradient
+# x 2 members (crps8long: 4 + 4), so each K in [8, 12, ..., 40] trains 2 days of lead time instead
+# of 1. Tests whether crps8long's 4-step window limits what the CRPS model learns at long leads.
+# Everything else is crps8long's (klbklwf7 chkpt 12, anchor 4, lead balance power 0.5, 10
+# mini-epochs at lr_max 5e-5). Smoke crps8_w8_smoke.yml (lg71dii2): 85.8 GiB peak (crps8long smoke
+# 67.3), 0.027 samples/s (0.035). The no-anchor variant (s7pxarao) lost the short range in its smoke.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-26/crps8_w8.yml
+parallelize: true
+stages:
+  - name: crps8w8anch4
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - load_chkpt.run_id=klbklwf7
+      - load_chkpt.mini_epoch=12
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.lead_balance.power=0.5
+      # anchor 4 + final 8 scored steps with gradient (8 + 8 OOMed at 90 GiB in ioq8yjj6)
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=8
+      - training_config.forecast.rollout_loss_steps=8
+      # K in steps of 4, so that the final windows of 4 steps tile 6h - 10 days (K = 8 is crps8's objective)
+      - training_config.forecast.num_steps=[8,12,16,20,24,28,32,36,40]
+      - training_config.num_mini_epochs=10
+      - training_config.learning_rate_scheduling.lr_max=5.0e-05
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 4
+    nodes: 8

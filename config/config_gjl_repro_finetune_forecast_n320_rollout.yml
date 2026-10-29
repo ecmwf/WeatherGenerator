@@ -1,0 +1,27 @@
+# Eight-step continuation overlay for an existing N320 physical forecast run.
+# `train_continue` uses the saved ci2t558k config as its base, so retain only
+# rollout-specific overrides here.
+general:
+  # Start a new eight-step fine-tuning schedule rather than inherit completed
+  # two-step progress.
+  istep: 0
+
+# Keep the pretrained encoder and ERA5 decoding stack fixed while training the
+# forecast engine for the longer rollout objective.
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*|.*encoder.*"
+
+data_loading:
+  num_workers: 2
+  # Avoid DataLoader shared-memory transport during distributed validation.
+  num_workers_validation: 1
+
+fe_impute_latent_noise_std: 2e-5
+
+training_config:
+  num_mini_epochs: 8
+  learning_rate_scheduling:
+    lr_max: 3.5e-5
+    policy_decay: cosine
+  optimizer:
+    grad_clip: 1.0
+  forecast: {time_step: 06:00:00, num_steps: 8, offset: 1, policy: fixed}

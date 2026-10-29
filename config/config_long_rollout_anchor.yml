@@ -1,0 +1,8 @@
+# Anchored pushforward, applied on top of config_long_rollout_pushforward.yml: besides the last 8
+# of the K rollout steps, the first 8 steps from the analysis also get gradient and loss in every
+# batch, so the short range (6h - 2 days) is trained in every batch instead of 1 in 5 (pushforward
+# run B degraded z_500 by ~8% at days 1-2). K = 8 is unchanged (the nhv6tkln objective); for
+# K > 8, 16 steps are scored, with equal weight per step. See src/weathergen/utils/rollout.py.
+training_config:
+  forecast:
+    rollout_anchor_steps: 8

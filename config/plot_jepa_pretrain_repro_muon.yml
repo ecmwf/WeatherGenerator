@@ -1,0 +1,58 @@
+
+train:
+  plot:
+
+    # old safe branch jepa pretrain runs that were precursors to n0t, srd, af90...
+    gjl6a0kb:
+      slurm_id: 0
+      description: "good temporal JEPA, old branch"
+    uahdb9yl:
+      slurm_id: 0
+      description: "cont., good temporal JEPA, old branch"
+
+
+    ### runs off the new develop-ssl-diffusion-v1-pre-muon branch and with muon changes merged in
+    nzb4zf3n:
+      slurm_id: 1043776
+      description: "probably muon"
+    bpvgcis0:
+      slurm_id: 1043761
+      description: "repro with muon changes merged"
+    gxditlu4:
+      slurm_id: 1043751
+      description: "repro"
+
+
+    ### fixed the streams appending
+
+    cdgwhdoj:
+      slurm_id: 1043752
+      description: "repro pre-muon, fixed streams appending"
+    
+    # with muon changes merged in
+    wowepk86:
+      slurm_id: 1043762
+      description: "repro, fixed streams appending, with muon changes merged in"
+
+    kf5vjdj2:
+      slurm_id: 1043763
+      description: "repro, fixed streams appending, with muon changes merged in, muon"
+
+
+    # Sophie's N320 runs
+    # de3z9l3a:
+    #   slurm_id: 1043764
+    #   description: "n320 space jepa, no swiglu or xsa"
+
+    # jc7v6b5d:
+    #   slurm_id: 1043765
+    #   description: "n320 space jepa"
+
+    # My N320 runs
+    si0krkxk:
+      slurm_id: 1043766
+      description: "n320 temporal jepa"
+
+    ci8dbx75:
+      slurm_id: 1043767
+      description: "n320 temporal jepa, repeated"

@@ -118,6 +118,17 @@ class AdaLayerNorm(torch.nn.Module):
 
         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
 
+        # with an affine norm, load the weight and bias of a plain LayerNorm that this module
+        # replaces (e.g. conditioning added to a model trained without it)
+        if norm_elementwise_affine:
+            self._register_load_state_dict_pre_hook(self._load_plain_layer_norm)
+
+    @staticmethod
+    def _load_plain_layer_norm(state_dict, prefix, *args):
+        for name in ("weight", "bias"):
+            if prefix + name in state_dict and prefix + "norm." + name not in state_dict:
+                state_dict[prefix + "norm." + name] = state_dict.pop(prefix + name)
+
     def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
         for block in self.embed_aux:
             aux = block(aux)

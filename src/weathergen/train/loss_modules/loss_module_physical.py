@@ -18,6 +18,7 @@ import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
+from weathergen.train.loss_modules.lead_balance import get_lead_balance
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.train.utils import TRAIN, VAL, Stage
 
@@ -66,6 +67,11 @@ class LossPhysical(LossModuleBase):
             ]
             for name, params in loss_fcts.items()
         ]
+
+        # lead-time balancing of the training loss (validation stays unweighted)
+        self.lead_balance = (
+            get_lead_balance(self.mode_cfg.get("forecast", {})) if self.stage == TRAIN else None
+        )
 
     def _get_weights(self, stream_info):
         """
@@ -246,6 +252,18 @@ class LossPhysical(LossModuleBase):
 
                 output_step_weight = output_step_loss_weights[timestep_idx]
 
+                # channel weights at this output step, with lead-time balancing
+                weights_channels_step = weights_channels
+                if self.lead_balance is not None:
+                    weights_lead = self.lead_balance.weights(
+                        stream_name, list(target_channels), timestep_idx, self.device
+                    )
+                    weights_channels_step = (
+                        weights_lead
+                        if weights_channels is None
+                        else weights_channels * weights_lead
+                    )
+
                 # loss_timestep: loss for given timestep
                 loss_timestep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_batch = 0
@@ -310,7 +328,7 @@ class LossPhysical(LossModuleBase):
                             target,
                             pred,
                             substep_masks,
-                            weights_channels,
+                            weights_channels_step,
                             weights_locations,
                         )
 

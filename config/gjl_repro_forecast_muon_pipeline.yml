@@ -1,0 +1,23 @@
+# Muon counterpart of gjl_repro_forecast_pipeline.yml.
+# The baseline files are listed first; the Muon overlays only replace the
+# optimizer selection and Muon-specific hyperparameters.
+#
+# Submission (this launcher has no non-submitting dry-run mode):
+#   uv run ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/gjl_repro_forecast_muon_pipeline.yml
+parallelize: false
+stages:
+  - name: pretrain
+    stage: train
+    base_config: ./config/config_gjl6a0kb_reproduction.yml
+    config_files:
+      - ./config/config_gjl6a0kb_reproduction_muon.yml
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.pretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast.yml
+      - ./config/config_gjl_repro_finetune_forecast_muon.yml
+    chain_jobs: 4
+    nodes: 2

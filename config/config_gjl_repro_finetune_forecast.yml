@@ -1,0 +1,80 @@
+# Physical forecast fine-tuning overlay for a gjl6a0kb-style fresh pretraining run.
+# Used with train_continue: the preceding pipeline stage supplies the pretrained encoder.
+# Temporal JEPA has forecast.policy: null, so its ForecastingEngine has no blocks.
+# This recreates the historical 16-block fixed-rollout forecast engine from scratch.
+fe_num_blocks: 16
+streams_directory: ./config/streams/gjl_repro_forecast/
+freeze_modules: ""
+general:
+  # `num_mini_epochs` is an absolute target. The first forecast `train_continue`
+  # must begin a new stage at mini-epoch zero rather than inherit pretraining's
+  # completed step count. launch-slurm applies this overlay only to chain part 1.
+  istep: 0
+  multiprocessing_method: spawn
+data_loading:
+  num_workers: 6
+  repeat_data_in_mini_epoch: false
+  persistent_workers: false
+  prefetch_factor: 1
+  memory_pinning: false
+train_logging:
+  terminal: 100
+  metrics: 20
+  checkpoint: 500
+  log_grad_norms: true
+training_config:
+  training_mode: [masking]
+  teacher_time_offset: 0
+  deep_ssl:
+    enabled: false
+  context_loss:
+    enabled: false
+  num_mini_epochs: 24
+  samples_per_mini_epoch: 8192
+  shuffle: true
+  start_date: 1980-01-01T00:00
+  end_date: 2022-12-31T00:00
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+  window_offset_prediction: 0
+  learning_rate_scheduling:
+    lr_start: 1e-6
+    lr_max: 8e-5
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 512
+    policy_warmup: cosine
+    policy_decay: constant
+    policy_cooldown: linear
+    parallel_scaling_policy: sqrt
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: false
+    adamw: {beta1: 0.9875, beta2: 0.994, eps: 1e-8}
+  losses:
+    student-teacher: {enabled: false, type: Disabled}
+    forecast:
+      type: LossPhysical
+      loss_fcts: {mse: {}}
+  model_input:
+    random_easy: {enabled: false, masking_strategy: forecast, num_samples: 0, num_steps_input: 1, masking_strategy_config: {}}
+    forecasting: {masking_strategy: forecast}
+  target_input:
+    random_easy_target: {enabled: false, masking_strategy: forecast, num_samples: 1, masking_strategy_config: {}}
+  forecast: {time_step: 06:00:00, num_steps: 2, offset: 1, policy: fixed}
+validation_config:
+  samples_per_mini_epoch: 256
+  shuffle: false
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+  validate_with_ema: {enabled: true, ema_ramp_up_ratio: 0.09, ema_halflife_in_thousands: 600}
+  output: {num_samples: 0, normalized_samples: false, streams: null}
+  validate_before_training: false
+test_config:
+  samples_per_mini_epoch: 128
+  shuffle: false
+  start_date: 2023-06-01T00:00
+  end_date: 2023-08-31T00:00
+  output: {num_samples: 128, normalized_samples: false, streams: null}

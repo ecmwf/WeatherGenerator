@@ -5,12 +5,36 @@ We use our own simple json-based format to abstract away various backends
  (our own pipeline, mlflow, wandb, etc.).
 """
 
+import io
+import json
+import logging
 from pathlib import Path
 
 import polars as pl
 
 # Known columns that are not scalar metrics:
 _known_cols = {"weathergen.timestamp": pl.Int64, "weathergen.time": pl.Int64, "stage": pl.String}
+
+_logger = logging.getLogger(__name__)
+
+
+def _read_metrics_source(f: str | Path) -> str | Path | io.BytesIO:
+    """Return a readable NDJSON source, excluding a partial final write if necessary."""
+    path = Path(f)
+    data = path.read_bytes()
+    if not data or data.endswith(b"\n"):
+        return f
+
+    complete_data, separator, final_record = data.rpartition(b"\n")
+    if not separator:
+        return f
+
+    try:
+        json.loads(final_record)
+    except json.JSONDecodeError:
+        _logger.warning("Ignoring incomplete final metrics record in %s.", path)
+        return io.BytesIO(complete_data + b"\n")
+    return f
 
 
 def read_metrics_file(f: str | Path) -> pl.DataFrame:
@@ -33,15 +57,22 @@ def read_metrics_file(f: str | Path) -> pl.DataFrame:
     # 3. Read the numbers
     # 4. Merge the two dataframes
 
+    source = _read_metrics_source(f)
+
+    def read_ndjson(**kwargs) -> pl.DataFrame:
+        if isinstance(source, io.BytesIO):
+            return pl.read_ndjson(io.BytesIO(source.getvalue()), **kwargs)
+        return pl.read_ndjson(source, **kwargs)
+
     # Find the list of all columns (read everything)
-    df0 = pl.read_ndjson(f, infer_schema_length=None)
+    df0 = read_ndjson(infer_schema_length=None)
     # Read with the final schema:
     schema1 = dict([(n, _known_cols.get(n, pl.Float64)) for n in df0.columns])
-    df1 = pl.read_ndjson(f, schema=schema1)
+    df1 = read_ndjson(schema=schema1)
     # Read again as strings to find the NaN values:
     schema2 = dict([(n, _known_cols.get(n, pl.String)) for n in df0.columns])
     metrics_cols = [n for n in df0.columns if n not in _known_cols]
-    df2 = pl.read_ndjson(f, schema=schema2).cast(dict([(n, pl.Float64) for n in metrics_cols]))
+    df2 = read_ndjson(schema=schema2).cast(dict([(n, pl.Float64) for n in metrics_cols]))
 
     # Merge the two dataframes:
     for n in metrics_cols:

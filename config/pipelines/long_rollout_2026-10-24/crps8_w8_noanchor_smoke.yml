@@ -1,0 +1,35 @@
+# Memory smoke test for an 8-step gradient window in the CRPS line: crps8long's stage with
+# no anchor + final 8 = 8 scored steps with gradient x 2 members, as many as crps8long's
+# 4 + 4 (fallback if 4 + 8 does not fit; lead balancing alone then protects the short range), at the largest rollout (K = 40): 1 node, 24 steps, 32 validation samples. The long
+# windows test whether the 4-step window of crps8long (1 day of gradient per lead) limits what the
+# CRPS model learns at long lead times; B'' used anchor 8 + final 8.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-24/crps8_w8_noanchor_smoke.yml
+parallelize: true
+stages:
+  - name: smokew8noanch
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - load_chkpt.run_id=klbklwf7
+      - load_chkpt.mini_epoch=12
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.lead_balance.power=0.5
+      - training_config.forecast.rollout_anchor_steps=0
+      - training_config.forecast.rollout_grad_steps=8
+      - training_config.forecast.rollout_loss_steps=8
+      - training_config.forecast.num_steps=[40]
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=32
+      - train_logging.terminal=4
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]

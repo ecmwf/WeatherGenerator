@@ -15,6 +15,7 @@ import torch
 
 from weathergen.common.config import Config
 from weathergen.datasets.stream_data import StreamData
+from weathergen.utils.rollout import RolloutPlan
 
 
 @dataclass
@@ -174,6 +175,9 @@ class BatchSamples:
     tokens_lens: torch.Tensor | None
     output_steps: int
     output_idxs: list[int]
+    # set by the data sampler from the forecast config of its stage (see utils/rollout.py)
+    rollout_plan: RolloutPlan | None
+    ensemble_size: int
     device: str | None
 
     def __init__(
@@ -183,6 +187,8 @@ class BatchSamples:
         self.tokens_lens = None
         self.output_steps = output_steps
         self.output_idxs = output_idxs
+        self.rollout_plan = None
+        self.ensemble_size = 1
         self.device = None
         self.latent = []
 
@@ -354,6 +360,12 @@ class ModelBatch:
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+
+    def set_rollout(self, rollout_plan: RolloutPlan, ensemble_size: int) -> None:
+        """Set the rollout plan and ensemble size used by the model for this batch."""
+        for samples in (self.source_samples, self.target_samples):
+            samples.rollout_plan = rollout_plan
+            samples.ensemble_size = ensemble_size
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""

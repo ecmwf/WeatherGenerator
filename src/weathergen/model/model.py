@@ -42,6 +42,7 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
+from weathergen.utils.rollout import RolloutPlan, autocast_cache_disabled, get_rollout_plan
 from weathergen.utils.utils import get_dtype, is_stream_reconstructed
 
 logger = logging.getLogger(__name__)
@@ -814,7 +815,6 @@ class Model(torch.nn.Module):
         # output_idxs start with output_offset
         global_steps = source_samples.get_output_idxs()
         forecast_offset = global_steps[0]
-        final_step = global_steps[-1]
 
         if (
             self.cf.get("fe_diffusion_model", False)
@@ -875,26 +875,67 @@ class Model(torch.nn.Module):
         if posteriors is not None:
             output.add_latent_prediction(0, "posteriors", posteriors)
 
-        # Allow for pushforward trick
-        p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
+        # rollout plan (pushforward) and ensemble size, see utils/rollout.py
+        rollout_plan, ensemble_size = self._get_rollout(source_samples)
+        checkpoint_steps = self.cf.training_config.get("forecast", {}).get(
+            "checkpoint_steps", False
+        )
+        num_samples = tokens.shape[0]
+        if ensemble_size > 1:
+            assert not self.cf.get("fe_diffusion_model", False), (
+                "ensemble_size > 1 is not supported for diffusion forecast engines."
+            )
+            assert "student_teacher" not in self.cf.training_config.training_mode, (
+                "ensemble_size > 1 is only supported for forecasting (masking) training."
+            )
+            # a later chunk would start from the stacked members and repeat them again
+            assert list(forecast_steps) == list(global_steps), (
+                "ensemble_size > 1 is not supported with chunked rollouts (forecast.chunk_size)."
+            )
+            # members are stacked along the batch dimension: member m of sample b is m*B + b,
+            # matching the modular indexing of samples in predict_decoders
+            tokens = tokens.repeat(ensemble_size, *([1] * (tokens.dim() - 1)))
+        # ensembles in validation / inference: keep the stochasticity of the forecast engine
+        # (dropout, latent noise) as in training (MC dropout)
+        fe_train_modes = None
+        if ensemble_size > 1 and not self.training:
+            fe_train_modes = {m: m.training for m in self.forecast_engine.modules()}
+            self.forecast_engine.train()
 
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in forecast_steps:
-            without_grad = p_fwd and self.training and step != final_step
-            if without_grad:
-                # Pushforward mode: advance tokens without grad; no decoding
-                with torch.no_grad():
-                    tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            if step in rollout_plan.no_grad_steps:
+                # pushforward: advance the latent state without gradient and without decoding;
+                # casts of weights made without gradient must not be cached for the steps with
+                # gradient (see autocast_cache_disabled)
+                with torch.no_grad(), autocast_cache_disabled():
+                    tokens = self.forecast_engine(
+                        tokens,
+                        step,
+                        meta_info=source_samples.samples[0].meta_info,
+                        coords=model_params.rope_coords,
+                    )
                 continue
 
             if self.forecast_engine:
                 # apply forecasting engine
-                tokens = self.forecast_engine(
-                    tokens,
-                    step,
-                    meta_info=source_samples.samples[0].meta_info,
-                    coords=model_params.rope_coords,
-                )
+                if checkpoint_steps and torch.is_grad_enabled():
+                    # checkpoint the whole step so that only the latent state is kept per step
+                    tokens = checkpoint(
+                        self.forecast_engine,
+                        tokens,
+                        step,
+                        meta_info=source_samples.samples[0].meta_info,
+                        coords=model_params.rope_coords,
+                        use_reentrant=False,
+                    )
+                else:
+                    tokens = self.forecast_engine(
+                        tokens,
+                        step,
+                        meta_info=source_samples.samples[0].meta_info,
+                        coords=model_params.rope_coords,
+                    )
 
                 # Trajectory inspection mode: decode each ODE step as a separate forecast output
                 # so the full denoising trajectory can be inspected downstream.
@@ -982,6 +1023,10 @@ class Model(torch.nn.Module):
                     tokens = None
                     continue
 
+            # steps with gradient but without loss (pushforward with rollout_loss_steps)
+            if step not in rollout_plan.loss_steps:
+                continue
+
             if "masking" in self.cf.training_config.training_mode:
                 # decoder predictions
                 output.add_latent_prediction(
@@ -990,6 +1035,8 @@ class Model(torch.nn.Module):
                     self.tokens_to_latent_state(None, tokens),
                 )
                 output = self.predict_decoders(model_params, step, tokens, source_samples, output)
+                if ensemble_size > 1:
+                    self._stack_ensemble_members(output, step, num_samples, ensemble_size)
 
             if "student_teacher" in self.cf.training_config.training_mode:
                 # latent predictions (raw and with SSL heads)
@@ -997,7 +1044,37 @@ class Model(torch.nn.Module):
                     model_params, step, tokens, source_samples, output, intermediates
                 )
 
+        if fe_train_modes is not None:
+            for m, mode in fe_train_modes.items():
+                m.training = mode
+
         return output
+
+    def _get_rollout(self, source_samples: BatchSamples) -> tuple[RolloutPlan, int]:
+        """Rollout plan and ensemble size for the batch, as set by the data sampler."""
+        rollout_plan = getattr(source_samples, "rollout_plan", None)
+        if rollout_plan is None:
+            forecast_cfg = self.cf.training_config.get("forecast", {})
+            rollout_plan = get_rollout_plan(
+                forecast_cfg, source_samples.get_output_idxs(), self.training
+            )
+        return rollout_plan, getattr(source_samples, "ensemble_size", 1)
+
+    @staticmethod
+    def _stack_ensemble_members(
+        output: ModelOutput, step: int, num_samples: int, ensemble_size: int
+    ) -> None:
+        """
+        Turn the per-member predictions of predict_decoders (member m of sample b at m*B + b)
+        into one prediction per sample with the members along the ensemble dimension.
+        """
+        chunk_idx = output.chunk_idx(step)
+        for stream_name, preds in output.physical[chunk_idx].items():
+            assert len(preds) == num_samples * ensemble_size, (len(preds), num_samples)
+            output.physical[chunk_idx][stream_name] = tuple(
+                torch.cat([preds[m * num_samples + b] for m in range(ensemble_size)], dim=0)
+                for b in range(num_samples)
+            )
 
     @staticmethod
     def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:

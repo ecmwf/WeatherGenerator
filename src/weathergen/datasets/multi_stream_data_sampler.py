@@ -33,8 +33,9 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import Stage, get_batch_size_from_config
+from weathergen.train.utils import TRAIN, Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
+from weathergen.utils.rollout import ROLLOUT_DEFAULTS, get_ensemble_size, get_rollout_plan
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
@@ -48,6 +49,23 @@ FORECAST_DEFAULTS = {
     "policy": None,
     "num_steps": np.array([0], dtype=np.int32),
 }
+
+
+def draw_random_forecast_steps(
+    policy: str, list_num_forecast_steps: np.typing.NDArray, fsm: int, size: int, seed: int
+) -> np.typing.NDArray[np.int64]:
+    """
+    Number of forecast steps of each batch for the random forecast policies:
+        random, sequential_random : uniform in [min(num_steps), fsm]
+        random_choice : uniform over the values listed in num_steps, e.g. [8, 16, 24, 32, 40], so
+            that with pushforward the scored windows of 8 steps cover all lead times equally often
+    The RNG is seeded without rank dependence (see forecast_steps_rng_seed), so that all ranks
+    roll out the same number of steps.
+    """
+    rng = np.random.default_rng(seed)
+    if policy == "random_choice":
+        return rng.choice(np.asarray(list_num_forecast_steps, dtype=np.int64), size=size)
+    return rng.integers(low=list_num_forecast_steps.min(), high=fsm + 1, size=size, dtype=np.int64)
 
 
 def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
@@ -118,6 +136,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.forecast_policy = forecast_cfg["policy"]
         steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
         self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
+        # rollout options (pushforward, ensemble), see utils/rollout.py
+        self.forecast_cfg = ROLLOUT_DEFAULTS | forecast_cfg
+        self.ensemble_size = get_ensemble_size(self.forecast_cfg)
 
         # teacher_time_offset: number of time windows to shift the teacher's input
         # relative to the student's. When > 0 the teacher sees a future time window.
@@ -171,6 +192,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         rs = cf.data_loading.rng_seed
         nw = cf.data_loading.num_workers
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
+        # seed for the number of forecast steps with random policies: it has to be the same on
+        # all ranks, since all ranks have to roll out the same number of steps (FSDP)
+        self.forecast_steps_rng_seed = self.data_loader_rng_seed
 
         self.rng = None
 
@@ -331,12 +355,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         elif self.forecast_policy in ("fixed", "sequential"):
             fs = fsm * np.ones(len_dt, dtype=np.int64)
 
-        elif self.forecast_policy in ("random", "sequential_random"):
-            fs = self.rng.integers(
-                low=self.list_num_forecast_steps.min(),
-                high=fsm + 1,
-                size=len_dt,
-                dtype=np.int64,
+        elif self.forecast_policy in ("random", "sequential_random", "random_choice"):
+            fs = draw_random_forecast_steps(
+                self.forecast_policy,
+                self.list_num_forecast_steps,
+                fsm,
+                len_dt,
+                self.forecast_steps_rng_seed,
             )
         else:
             raise ValueError(f"Unknown forecast policy {self.forecast_policy}")
@@ -348,7 +373,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _get_fsm(self) -> int:
         """Obtain maximum number of forecast steps for current mini epoch."""
         # fixed number of forecast steps for this run
-        if self.forecast_policy != "random":
+        if self.forecast_policy not in ("random", "random_choice"):
             idx = min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
             fsm = self.list_num_forecast_steps[idx]
         else:
@@ -586,12 +611,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
+    def _get_data_windows(
+        self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds, target_steps=None
+    ):
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
 
+        target_steps: output steps for which targets are needed (None for all); the targets of
+        other steps are not read but spoofed (e.g. pushforward steps, which are not decoded)
         """
+        stream_ds = stream_ds.readers
 
         # source data: iterate overall input steps
         input_data = []
@@ -622,9 +652,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             for timestep_idx in range(self.output_offset, num_output_steps):
                 step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-                rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+                if target_steps is None or timestep_idx in target_steps:
+                    rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+                else:
+                    rdata = None
 
-                if rdata.is_empty():
+                if rdata is None or rdata.is_empty():
                     # work around for https://github.com/pytorch/pytorch/issues/158719
                     # create non-empty mean data instead of empty tensor
                     time_win = self.time_window_handler.window(step_forecast_dt)
@@ -711,6 +744,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             self.output_offset,
             num_output_steps,
         )
+        rollout_plan = get_rollout_plan(
+            self.forecast_cfg, batch.get_output_idxs(), training=self._stage == TRAIN
+        )
+        batch.set_rollout(rollout_plan, self.ensemble_size)
+        # only read targets that are scored (all, unless pushforward)
+        target_steps = (
+            None
+            if len(rollout_plan.loss_steps) == len(batch.get_output_idxs())
+            else rollout_plan.loss_steps
+        )
 
         # for all streams
         for stream_name, stream_ds in self.streams_datasets.items():
@@ -728,14 +771,18 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds.readers
+                idx, num_forecast_steps, i_max, stream_ds, target_steps
             )
 
             # When teacher_time_offset > 0, load a separate set of data windows
             # shifted forward in time for the teacher (target) samples.
             if self.teacher_time_offset > 0:
                 (input_data_target, output_data_target) = self._get_data_windows(
-                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds.readers
+                    idx + self.teacher_time_offset,
+                    num_forecast_steps,
+                    i_max,
+                    stream_ds,
+                    target_steps,
                 )
             else:
                 input_data_target = input_data
@@ -938,6 +985,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 * (self.mini_epoch + 13)
                 * 7
             )
+            # all ranks have the same workers and the data loader interleaves their batches in
+            # the same order, so a seed without the rank gives the same steps on all ranks
+            self.forecast_steps_rng_seed = self.get_forecast_steps_rng_seed(
+                self.forecast_steps_rng_seed, worker_info.id, self.mini_epoch
+            )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers
             iter_start = local_start + worker_info.id * per_worker
@@ -950,3 +1002,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             )
 
         return iter_start, iter_end
+
+    @staticmethod
+    def get_forecast_steps_rng_seed(base_seed: int, worker_id: int, mini_epoch: int) -> int:
+        """Seed for the number of forecast steps; unique per worker and mini epoch, not rank."""
+        return base_seed * ((worker_id + 1) * 37) * (mini_epoch + 13) * 7

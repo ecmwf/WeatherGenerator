@@ -268,6 +268,43 @@ def test_disabled_monitoring_returns_null_manager(as_dictconfig):
     assert train_logger.calls == []
 
 
+def test_forward_without_grad_is_not_monitored():
+    """Pushforward rollout steps run without gradient inside the monitored forward; activation
+    and attention stats must come from the forward pass with gradient only."""
+
+    def logged_forward(pushforward):
+        torch.manual_seed(0)
+        model = ToyModel()
+        opt = torch.optim.SGD(model.parameters(), lr=0.1)
+        train_logger = FakeTrainLogger()
+        manager = build_monitor_manager(
+            OmegaConf.create(MONITORING_CFG), model, [opt], train_logger
+        )
+        x, y = _make_batches(1)[0]
+        assert manager.begin_step(0)
+        with manager.forward():
+            if pushforward:
+                with torch.no_grad():
+                    model(3.0 * torch.randn(NUM_TOKENS, 4))
+            pred = model(x)
+        loss = torch.nn.functional.mse_loss(pred, y)
+        loss.backward()
+        manager.on_after_clip(torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP))
+        opt.step()
+        manager.end_step()
+        ((stage, metrics),) = train_logger.calls
+        return {
+            k: v for k, v in metrics.items() if k.startswith(("mon/activations/", "mon/attention/"))
+        }
+
+    ref, with_pushforward = logged_forward(False), logged_forward(True)
+    assert ref and ref.keys() == with_pushforward.keys()
+    for key, value in ref.items():
+        torch.testing.assert_close(
+            torch.tensor(float(with_pushforward[key])), torch.tensor(float(value)), **FP32_TOL
+        )
+
+
 def _explicit_probe_reference(q, k, scale, softcap):
     """fp32 per-head max logit (pre-softcap) and log(L_k)-normalised mean softmax entropy."""
     logits = torch.einsum("qhd,khd->hqk", q.float(), k.float()) * scale  # [H, Lq, Lk]

@@ -49,6 +49,7 @@ pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
+pred_dropout_rate: 0.1 # dropout in the PerceiverIOCoordConditioning decoder
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder

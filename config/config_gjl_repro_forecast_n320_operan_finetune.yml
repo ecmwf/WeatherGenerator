@@ -1,0 +1,28 @@
+general:
+  # Restart the lr schedule and the mini-epoch counter for a new fine-tuning run.
+  istep: 0
+
+
+streams_directory: ./config/streams/n320_new_channels_forecast_iasi_channels_mnt_cw_operan/
+
+freeze_modules: 'latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\.ae_.*|encoder\.ln.*|encoder\.q_cells.*|encoder\.q_aux.*|StreamEmbedder_(?!ERA5_in$).*|encoder\.embed_engine\.embeds\.(?!ERA5_in).*'
+
+validation_config:
+  validate_before_training: True
+
+training_config:
+  start_date: 2016-01-02T00:00
+  end_date: 2022-12-31T00:00
+
+
+  num_mini_epochs: 4
+
+  learning_rate_scheduling:
+    lr_max: 3e-5
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
+    policy_decay: cosine
+    parallel_scaling_policy: "const"
+
+train_logging:
+  checkpoint: 100

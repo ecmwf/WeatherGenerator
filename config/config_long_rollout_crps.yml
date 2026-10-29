@@ -1,0 +1,23 @@
+# CRPS training with an MC-dropout ensemble, applied on top of a forecast fine-tuning config
+# (e.g. after config_long_rollout_pushforward.yml), following Otter (arXiv:2606.26421) and
+# U-Cast (arXiv:2604.09041): fair CRPS with 2 members, the members differing through the
+# forecast engine's dropout (fe_dropout_rate) and latent noise (fe_impute_latent_noise_std).
+#
+# The members are separate rollouts of the latent state, so the spread can grow with lead time.
+# In validation and inference the forecast engine's dropout stays active when ensemble_size > 1.
+
+training_config:
+  forecast:
+    ensemble_size: 2
+  losses:
+    forecast:
+      type: LossPhysical
+      loss_fcts:
+        # fair CRPS (unbiased for any ensemble size)
+        kernel_crps: {}
+        # MSE of the ensemble mean, logged only
+        mse: {weight: 0.0}
+
+validation_config:
+  forecast:
+    ensemble_size: 2

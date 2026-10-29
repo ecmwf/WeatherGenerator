@@ -106,7 +106,9 @@ class _Probe:
 
     def __call__(self, q, k, scale, softcap, cu_seqlens_q, cu_seqlens_k):
         buf = self.monitor._buf
-        if self.fired or buf is None:
+        # forward passes without gradient (pushforward rollout steps) are not probed, so that
+        # the one sample per step comes from a step that is trained
+        if self.fired or buf is None or not torch.is_grad_enabled():
             return
         # no_grad: saving tensors for backward would break activation-checkpoint recompute
         with stats_context(q.device):
