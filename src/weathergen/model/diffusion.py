@@ -180,6 +180,18 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.s_max = math.inf if _s_max is None else float(_s_max)
         self.s_noise = float(self.cf.get("fe_diffusion_s_noise", 1.0))
 
+        # Register/class tokens prepended by the encoder. The diffusion engine ignores them: they
+        # are stripped from target, conditioning and coords, not diffused, and re-attached as
+        # zeros to the output only to keep the encoder token layout (see _prepend_aux_tokens).
+        self.num_aux_tokens = self.cf.num_register_tokens + self.cf.num_class_tokens
+        # Learnable registers of the denoiser itself, independent of the encoder's registers.
+        self.num_diffusion_registers = self.cf.get("fe_diffusion_num_register_tokens", 0) or 0
+        self.diffusion_registers = (
+            torch.nn.Parameter(torch.randn(1, self.num_diffusion_registers, _lat_dim) * 0.02)
+            if self.num_diffusion_registers > 0
+            else None
+        )
+
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
 
@@ -316,11 +328,27 @@ class DiffusionForecastEngine(torch.nn.Module):
             sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
         else:
             raise ValueError(f"Unsupported noise_distribution: {self.noise_distribution}")
-        n = torch.randn_like(y) * sigma
+        # Only the healpix-cell tokens are diffused; register/class tokens are dropped from x
+        # and re-attached (as zeros) to the output.
+        y_cells = y[:, self.num_aux_tokens :]
+        x_noisy = y_cells + torch.randn_like(y_cells) * sigma
 
-        self._noised_tokens = (y + n).detach()
+        self._noised_tokens = x_noisy.detach()
 
-        return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep, coords=coords)
+        denoised = self.denoise(x=x_noisy, c=c, sigma=sigma, fstep=fstep, coords=coords)
+        return self._prepend_aux_tokens(denoised)
+
+    def _prepend_aux_tokens(self, x_cells: torch.Tensor) -> torch.Tensor:
+        """
+        Prepend zero register/class tokens to the diffused healpix-cell tokens so the output has
+        the encoder layout expected downstream (decoders, latent loss, rollout conditioning).
+        The decoders and the latent loss discard them, and the denoiser ignores the register
+        slots of the conditioning (see denoise), so their value does not matter.
+        """
+        if self.num_aux_tokens == 0:
+            return x_cells
+        aux = x_cells.new_zeros(x_cells.shape[0], self.num_aux_tokens, x_cells.shape[2])
+        return torch.cat([aux, x_cells], dim=1)
 
     def denoise(
         self,
@@ -358,6 +386,14 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         net_input = c_in * x
 
+        # The denoiser ignores the encoder's register/class tokens (A): x already holds only the
+        # H healpix-cell tokens; strip them from the conditioning tokens and RoPE coords, too.
+        n_aux = self.num_aux_tokens
+        n_reg = self.num_diffusion_registers
+        if self.conditioning == "forecast" and c is not None:
+            c = c[:, n_aux:]
+        coords_c = coords[:, n_aux:] if coords is not None else None
+
         # Project input tokens and (where applicable) conditioning tokens from the encoder
         # latent space (ae_global_dim_embed) up to the diffusion latent space
         # (fe_diffusion_latent_dim).
@@ -367,12 +403,32 @@ class DiffusionForecastEngine(torch.nn.Module):
             if c is not None and self.conditioning_type not in {"ada_ln"}:
                 c = self.latent_proj_up(c)
 
+        # Prepend the R learnable diffusion registers: (B, H, D') -> (B, R+H, D'). Like the
+        # encoder's registers, they get zero RoPE coords.
+        coords_x = coords_c
+        if n_reg > 0:
+            registers = self.diffusion_registers.to(dtype=net_input.dtype)
+            net_input = torch.cat([registers.expand(net_input.shape[0], -1, -1), net_input], dim=1)
+            if coords_c is not None:
+                coords_x = torch.cat(
+                    [coords_c.new_zeros(coords_c.shape[0], n_reg, 2), coords_c], dim=1
+                )
+            # Conditioning types that pair x and c token-wise (or use c as queries) need c at
+            # R+H tokens: pad the register slots with zeros. concatenate (own coords) and
+            # cross_attn (c is only key/value) keep the H conditioning tokens.
+            if (
+                self.conditioning == "forecast"
+                and c is not None
+                and self.conditioning_type not in {"concatenate", "cross_attn"}
+            ):
+                c = torch.cat([c.new_zeros(c.shape[0], n_reg, c.shape[2]), c], dim=1)
+        coords = coords_x
+
         if self.conditioning_type == "concatenate":
             # Concatenate conditioning tokens along sequence dim:
-            # (B, H, D') cat (B, H, D') -> (B, 2H, D')
-            # Also double coords so 2D RoPE matches the doubled sequence length
+            # (B, R+H, D') cat (B, H, D') -> (B, R+2H, D'), with matching RoPE coords
             combined = torch.cat([net_input, c], dim=1)
-            coords_combined = torch.cat([coords, coords], dim=1) if coords is not None else None
+            coords_combined = torch.cat([coords, coords_c], dim=1) if coords is not None else None
             raw_out = self.net(
                 combined,
                 fstep=fstep,
@@ -380,37 +436,25 @@ class DiffusionForecastEngine(torch.nn.Module):
                 noise_emb=noise_emb,
                 conditioning=None,
             )
-            raw_out = raw_out[:, : x.shape[1], :]  # Slice back to (B, H, D')
-            if self.latent_proj_down is not None:
-                raw_out = self.latent_proj_down(raw_out)
-            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
-
-        if self.conditioning_type == "concatenate_hiddendim":
-            # Concatenate along hidden dim: (B, H, D') cat (B, H, D') -> (B, H, 2D')
+            raw_out = raw_out[:, : net_input.shape[1], :]  # Slice back to (B, R+H, D')
+        elif self.conditioning_type == "concatenate_hiddendim":
+            # Concatenate along hidden dim: (B, R+H, D') cat (B, R+H, D') -> (B, R+H, 2D')
             # ForecastingEngine runs at 2D' throughout and projects back to D' via out_proj
             combined = torch.cat([net_input, c], dim=2)
             raw_out = self.net(
                 combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
             )
-            if self.latent_proj_down is not None:
-                raw_out = self.latent_proj_down(raw_out)
-            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
-
-        if self.conditioning_type == "concatenate_hdMLP":
+        elif self.conditioning_type == "concatenate_hdMLP":
             # Concatenate along hidden dim then project back:
-            # (B, H, D') cat (B, H, D') -> (B, H, 2D') -> Linear -> (B, H, D')
+            # (B, R+H, D') cat (B, R+H, D') -> (B, R+H, 2D') -> Linear -> (B, R+H, D')
             combined = torch.cat([net_input, c], dim=2)
             projected = self.concat_hd_proj(combined)
             raw_out = self.net(
                 projected, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
             )
-            if self.latent_proj_down is not None:
-                raw_out = self.latent_proj_down(raw_out)
-            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
-
-        if self.conditioning_type == "spatial_ada_ln":
-            # Pre-modulate each HEALPix cell's token by the corresponding conditioning token.
-            # scale/shift/gate are (B, H, D') — per-cell and per-channel.
+        elif self.conditioning_type == "spatial_ada_ln":
+            # Pre-modulate each token by the corresponding conditioning token.
+            # scale/shift/gate are (B, R+H, D') — per-token and per-channel.
             # gate is applied to raw_out so the network can suppress or amplify each cell's
             # denoised contribution based on the conditioning quality at that cell.
             net_input_mod, spatial_gate = self.spatial_ada_ln(net_input, c)
@@ -418,13 +462,13 @@ class DiffusionForecastEngine(torch.nn.Module):
                 net_input_mod, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
             )
             raw_out = raw_out * spatial_gate
-            if self.latent_proj_down is not None:
-                raw_out = self.latent_proj_down(raw_out)
-            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
+        else:
+            raw_out = self.net(
+                net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
+            )
 
-        raw_out = self.net(
-            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
-        )
+        # Drop the diffusion registers: (B, R+H, D') -> (B, H, D')
+        raw_out = raw_out[:, n_reg:]
         if self.latent_proj_down is not None:
             raw_out = self.latent_proj_down(raw_out)
         return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
@@ -562,14 +606,19 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         Returns:
             ``(final_x, intermediate_x)`` where *final_x* has shape
-            ``(batch_size, num_healpix_cells, embed_dim)`` and *intermediate_x*
+            ``(batch_size, num_aux_tokens + num_healpix_cells, embed_dim)`` (aux tokens
+            prepended) and *intermediate_x*
             is either a list of per-step tensors (when ``return_trajectory=True``)
             or ``None``.
         """
-        # The encoder prepends register/class tokens to the healpix-cell latents,
-        # so the sampled latent must include them to match the target latent shape.
-        num_tokens = self.cf.num_register_tokens + self.cf.num_class_tokens + self.num_healpix_cells
-        x = torch.randn(batch_size, num_tokens, self.cf.ae_global_dim_embed).to(device="cuda")
+        # Only the healpix-cell tokens are diffused; register/class tokens are prepended to the
+        # returned states (see _prepend_aux_tokens).
+        x = torch.randn(batch_size, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(
+            device="cuda"
+        )
+        target_cells = (
+            self.cur_token[:, self.num_aux_tokens :] if self.cur_token is not None else None
+        )
 
         # --- Training-aligned sigma bounds ---
         # The network only learns to denoise reliably within the sigma range seen during
@@ -684,17 +733,17 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["d_cur_step_norm"].append(((t_next - t_post) * d_cur).norm().item())
                 track["residual_std"].append((x_post - denoised).std().item())
                 track["x"].append(x_next.cpu())
-                if self.cur_token is not None:
-                    track["l2_to_target"].append((x_next - self.cur_token).norm().item())
-                    track["x"].append(self.cur_token.cpu())
+                if target_cells is not None:
+                    track["l2_to_target"].append((x_next - target_cells).norm().item())
+                    track["x"].append(target_cells.cpu())
 
             if return_trajectory:
-                intermediate_x.append(x_next)
+                intermediate_x.append(self._prepend_aux_tokens(x_next))
 
         if log_diagnostics:
             self._plot_sampling_diagnostics(track, num_steps)
 
-        return x_next, intermediate_x
+        return self._prepend_aux_tokens(x_next), intermediate_x
 
     def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
         """Save a diagnostic plot of the sampling trajectory."""
@@ -736,7 +785,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         axes[1].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
         axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
         if self.cur_token is not None:
-            target_std = self.cur_token.std().item()
+            target_std = self.cur_token[:, self.num_aux_tokens :].std().item()
             axes[1].axhline(
                 target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}"
             )
