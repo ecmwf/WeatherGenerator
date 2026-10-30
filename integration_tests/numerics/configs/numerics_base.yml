@@ -1,0 +1,176 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Tiny, self-contained base config for the forward/backward numerics regression tests
+# (integration_tests/numerics). It is used as --base-config, i.e. it replaces
+# config/default_config.yml, so that edits to the default config do not change the test case.
+# All configurable dropout rates are 0; hard-coded ones are set to 0 by the harness, so that the
+# results do not depend on the RNG.
+
+embed_orientation: "channels"
+embed_unembed_mode: "block"
+embed_dropout_rate: 0.0
+
+ae_local_dim_embed: 64
+ae_local_num_blocks: 1
+ae_local_num_heads: 4
+ae_local_dropout_rate: 0.0
+ae_local_with_qk_lnorm: True
+
+ae_local_num_queries: 1
+ae_local_queries_per_cell: False
+ae_adapter_num_heads: 4
+ae_adapter_embed: 32
+ae_adapter_with_qk_lnorm: True
+ae_adapter_with_residual: True
+ae_adapter_dropout_rate: 0.0
+
+ae_global_dim_embed: 128
+ae_global_num_blocks: 2
+ae_global_num_heads: 4
+ae_global_dropout_rate: 0.0
+ae_global_with_qk_lnorm: True
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: False
+
+ae_aggregation_num_blocks: 0
+ae_aggregation_num_heads: 4
+ae_aggregation_dropout_rate: 0.0
+ae_aggregation_with_qk_lnorm: True
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
+decoder_type: PerceiverIOCoordConditioning
+pred_adapter_kv: False
+pred_self_attention: True
+pred_dyadic_dims: False
+pred_mlp_adaln: True
+
+fe_num_blocks: 2
+fe_num_heads: 4
+fe_dropout_rate: 0.0
+fe_with_qk_lnorm: True
+fe_layer_norm_after_blocks: []
+fe_impute_latent_noise_std: 0.0
+forecast_att_dense_rate: 1.0
+
+num_class_tokens: 0
+num_register_tokens: 0
+
+healpix_level: 4
+
+rope_2D: False
+
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: False
+ddp_find_unused_parameters: False
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
+
+latent_noise_kl_weight: 0.0
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True
+
+freeze_modules: ""
+load_chkpt: {}
+
+norm_type: "LayerNorm"
+qk_norm_type: null
+
+# resolved relative to integration_tests/numerics/ by the harness
+streams_directory: "streams/"
+streams: ???
+
+zarr_store: "zip"
+
+general:
+  istep: 0
+  rank: ???
+  world_size: ???
+  multiprocessing_method: "fork"
+  desc: "numerics regression test"
+  run_id: ???
+  run_history: []
+
+train_logging:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
+  log_grad_norms: False
+
+data_loading:
+  # no loader workers: the batch is drawn in-process with a fixed seed
+  num_workers: 0
+  rng_seed: 42
+  repeat_data_in_mini_epoch: False
+  memory_pinning: False
+
+training_config:
+  # training_mode, losses, model_input, target_input and forecast are set by the technique
+  # configs only (dicts would otherwise be merged with the overlay)
+
+  num_mini_epochs: 1
+  samples_per_mini_epoch: 1
+  shuffle: False
+
+  start_date: 2012-06-01T00:00
+  end_date: 2012-06-03T00:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
+  learning_rate_scheduling:
+    lr_start: 1e-6
+    lr_max: 5e-5
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 1
+    num_steps_cooldown: 1
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw:
+      beta1: 0.975
+      beta2: 0.9875
+      eps: 2e-08
+
+validation_config:
+  samples_per_mini_epoch: 1
+  shuffle: False
+  start_date: 2012-06-01T00:00
+  end_date: 2012-06-03T00:00
+  validate_with_ema:
+    enabled: False
+  output: {
+    num_samples: 0,
+    normalized_samples: False,
+    streams: null,
+    }
+  validate_before_training: False
+
+wgtags:
+  org: null
+  issue: 2948
+  exp: numerics_test
+  grid: null
