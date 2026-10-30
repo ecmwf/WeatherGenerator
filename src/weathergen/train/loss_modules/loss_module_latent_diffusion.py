@@ -43,11 +43,6 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.diff_cf = self.cf.diffusion
         self.sigma_data = self.diff_cf.sigma_data
-        noise_cf = self.diff_cf.noise
-        self.noise_distribution = noise_cf.get("distribution", "log_normal")
-        if self.noise_distribution == "log_normal":
-            self.p_mean = noise_cf.p_mean
-            self.p_std = noise_cf.p_std
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -61,12 +56,7 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.random_target = None
 
-    def _get_noise_weight(self, noise_level_rn):
-        if self.noise_distribution == "log_uniform":
-            sigma = noise_level_rn.exp()
-        else:
-            sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
-
+    def _get_noise_weight(self, sigma):
         # Select the per-noise-level loss weighting. The default "edm" weight is only
         # balanced when the denoiser uses EDM preconditioning (c_skip/c_out). When the
         # model predicts x0 directly (c_skip=0, c_out=1 in diffusion.denoise), that weight
@@ -104,16 +94,27 @@ class LossLatentDiffusion(LossModuleBase):
         loss_fct,
         target: torch.Tensor,
         pred: torch.Tensor,
-        noise_weight: torch.Tensor = 1.0,
+        noise_weight: torch.Tensor | None = None,
     ):
         """
-        Compute loss for given loss function
+        Compute loss for given loss function.
+
+        The loss is computed per sample (dim 0 of target and pred), weighted by the per-sample
+        noise_weight (if given) and averaged over samples.
         """
+        assert target.shape[0] == pred.shape[0], (
+            f"number of target ({target.shape[0]}) and predicted ({pred.shape[0]}) samples differ"
+        )
+        losses = torch.stack(
+            [
+                loss_fct(target=target[i : i + 1], pred=pred[i : i + 1])[0]
+                for i in range(target.shape[0])
+            ]
+        )
+        if noise_weight is not None:
+            losses = noise_weight * losses
 
-        loss, loss_chs = loss_fct(target=target, pred=pred)
-        loss = noise_weight * loss
-
-        return loss
+        return losses.mean()
 
     def compute_loss(self, preds: dict, targets: dict, **kwargs) -> LossValues:
         losses_all: dict[str, Tensor] = {
@@ -147,13 +148,14 @@ class LossLatentDiffusion(LossModuleBase):
                 stddev_all={"latent": nan},
             )
 
-        eta = torch.tensor(
-            [targets.aux_outputs["noise_level_rn"]], device=self.device, dtype=torch.float32
-        )
+        # noise level sigma, one per sample: (B,)
+        sigma = torch.as_tensor(
+            targets.aux_outputs["noise_level"], device=self.device, dtype=torch.float32
+        ).reshape(-1)
         fsteps = len(target_tokens_all)
 
         # During validation, use unweighted loss (no noise-level scaling)
-        noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta)
+        noise_weight = None if self.stage == "val" else self._get_noise_weight(sigma)
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)

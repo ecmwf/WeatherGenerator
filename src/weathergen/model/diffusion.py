@@ -32,8 +32,8 @@ import torch
 import tqdm
 
 from weathergen.common.config import Config
+from weathergen.datasets.masking import get_noise_level_cfg
 from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
-from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
 logger = logging.getLogger(__name__)
@@ -224,20 +224,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         # When False (default), the network predicts x0 directly (c_skip=0, c_out=1).
         self.edm_preconditioning = self.diff_cf.get("edm_preconditioning", False)
 
-        # Training noise distribution
-        noise_cf = self.diff_cf.noise
-        self.noise_distribution = noise_cf.get("distribution", "log_normal")
-        if self.noise_distribution == "log_uniform":
-            # noise_level_rn ~ Uniform[log(sigma_min), log(sigma_max)], sigma = exp(noise_level_rn)
-            self.train_log_min = math.log(noise_cf.sigma_min)
-            self.train_log_max = math.log(noise_cf.sigma_max)
-        elif self.noise_distribution == "log_normal":
-            # noise_level_rn = eta ~ N(0, 1), sigma = exp(eta * p_std + p_mean)
-            self.p_mean = noise_cf.p_mean
-            self.p_std = noise_cf.p_std
-        else:
-            raise ValueError(f"Unsupported diffusion.noise.distribution: {self.noise_distribution}")
-
         # Inference sampler (EDM Karras et al. 2022, Algorithm 2)
         sampler_cf = self.diff_cf.get("sampler", {})
         self.rho = sampler_cf.get("rho", 7.0)
@@ -271,8 +257,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         """
         Set the sigma range [sigma_min, sigma_max] of the inference schedule.
 
-        Values not set in diffusion.sampler are derived from the *training* noise distribution
-        (diffusion.noise): the network only learns to denoise reliably within the sigma range
+        Values not set in diffusion.sampler are derived from the *training* noise level
+        distribution (masking_strategy_config.noise_level of the target strategies in
+        training_config): the network only learns to denoise reliably within the sigma range
         seen during training. Using the wrong distribution here truncates the schedule and
         leaves the sample under-denoised (e.g. applying the log-normal p_mean/p_std formula to a
         model trained with log_uniform noise stops the ODE far above sigma_min).
@@ -282,29 +269,44 @@ class DiffusionForecastEngine(torch.nn.Module):
             sigma_data * 0.01 for numerical stability (avoids dividing by near-zero sigma in the
             ODE drift).
         """
-        q = self.sigma_min_quantile
-        if self.noise_distribution == "log_uniform":
-            # log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]; quantiles are linear
-            # in log-space, so sigma at quantile q is exp(log_min + q * (log_max - log_min)).
-            self.train_sigma_min = math.exp(self.train_log_min)
-            self.train_sigma_max = math.exp(self.train_log_max)
-            sigma_min_from_dist = math.exp(
-                self.train_log_min + q * (self.train_log_max - self.train_log_min)
+        noise_level_cfg = get_noise_level_cfg(self.cf.get("training_config", {}))
+        self.train_noise_distribution = None
+        self.train_sigma_min, self.train_sigma_max = None, None
+        if noise_level_cfg is None:
+            assert sigma_min is not None and sigma_max is not None, (
+                "diffusion.sampler.sigma_min and sigma_max have to be set if no target strategy "
+                "of training_config defines masking_strategy_config.noise_level"
             )
         else:
-            # log_normal: log(sigma) ~ N(p_mean, p_std). Range is taken as ~99.7% interval
-            # (p_mean -/+ 3 p_std); sigma at quantile q is exp(p_mean + Phi^-1(q) * p_std),
-            # with Phi^-1 approximated by standard z-scores (default q=0.05).
-            self.train_sigma_min = math.exp(self.p_mean - 3.0 * self.p_std)
-            self.train_sigma_max = math.exp(self.p_mean + 3.0 * self.p_std)
-            _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
-            _z = _z_scores.get(q, -1.645)
-            sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
+            q = self.sigma_min_quantile
+            self.train_noise_distribution = noise_level_cfg.get("distribution", "log_normal")
+            if self.train_noise_distribution == "log_uniform":
+                # log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]; quantiles are linear
+                # in log-space, so sigma at quantile q is exp(log_min + q * (log_max - log_min)).
+                log_min = math.log(noise_level_cfg["sigma_min"])
+                log_max = math.log(noise_level_cfg["sigma_max"])
+                self.train_sigma_min = math.exp(log_min)
+                self.train_sigma_max = math.exp(log_max)
+                sigma_min_from_dist = math.exp(log_min + q * (log_max - log_min))
+            elif self.train_noise_distribution == "log_normal":
+                # log(sigma) ~ N(p_mean, p_std). Range is taken as ~99.7% interval
+                # (p_mean -/+ 3 p_std); sigma at quantile q is exp(p_mean + Phi^-1(q) * p_std),
+                # with Phi^-1 approximated by standard z-scores (default q=0.05).
+                p_mean, p_std = noise_level_cfg["p_mean"], noise_level_cfg["p_std"]
+                self.train_sigma_min = math.exp(p_mean - 3.0 * p_std)
+                self.train_sigma_max = math.exp(p_mean + 3.0 * p_std)
+                _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
+                _z = _z_scores.get(q, -1.645)
+                sigma_min_from_dist = math.exp(p_mean + _z * p_std)
+            else:
+                raise ValueError(
+                    f"Unsupported noise_level distribution: {self.train_noise_distribution}"
+                )
 
-        if sigma_max is None:
-            sigma_max = self.train_sigma_max
-        if sigma_min is None:
-            sigma_min = max(sigma_min_from_dist, self.sigma_data * 0.01)
+            if sigma_max is None:
+                sigma_max = self.train_sigma_max
+            if sigma_min is None:
+                sigma_min = max(sigma_min_from_dist, self.sigma_data * 0.01)
         self.sigma_min = float(sigma_min)
         self.sigma_max = float(sigma_max)
 
@@ -312,18 +314,20 @@ class DiffusionForecastEngine(torch.nn.Module):
             "diffusion.sampler requires 0 < sigma_min < sigma_max "
             f"(got sigma_min={self.sigma_min}, sigma_max={self.sigma_max})"
         )
-        if self.sigma_min < self.train_sigma_min or self.sigma_max > self.train_sigma_max:
+        if noise_level_cfg is not None and (
+            self.sigma_min < self.train_sigma_min or self.sigma_max > self.train_sigma_max
+        ):
             logger.warning(
                 f"Inference sigma range [{self.sigma_min}, {self.sigma_max}] exceeds the "
                 f"training noise range [{self.train_sigma_min:.4f}, {self.train_sigma_max:.4f}] "
-                f"({self.noise_distribution})."
+                f"({self.train_noise_distribution})."
             )
 
     def forward(
         self,
         tokens: torch.Tensor = None,
         fstep: int = None,
-        meta_info: dict[str, SampleMetaData] = None,
+        meta_info: dict | None = None,
         coords: torch.Tensor = None,
         num_steps: int = 10,
     ) -> torch.Tensor:
@@ -342,7 +346,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         Args:
             tokens: Training tensor of shape (B, H, D) - required during training
             fstep: Forecast step index - required for both modes
-            meta_info: Sample metadata dict containing timestamps - required for both modes
+            meta_info: Stream-independent meta information: noise_level (training),
+                timestamp (date/time conditioning), conditioning_tokens (forecast conditioning)
             coords: Optional coordinate tensor
             num_steps: Number of diffusion steps for inference (default: 30)
 
@@ -397,7 +402,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self,
         tokens: torch.Tensor,
         fstep: int,
-        meta_info: dict[str, SampleMetaData],
+        meta_info: dict,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
         """
@@ -423,28 +428,24 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         c = None
         if self.conditioning in ["date_time", "date", "time"]:
-            c = meta_info["ERA5"].params["timestamp"]
+            c = meta_info["timestamp"]
         elif self.conditioning == "forecast":
             # c = meta_info["ERA5"].params["conditioning_tokens"]
             # X_{t-1} as conditioning (model.py extracts last step as target,
             # passes second-to-last here)
-            c = meta_info["LATENT_CONDITIONING_TOKENS"]
+            c = meta_info["conditioning_tokens"]
 
-        noise_stream = self.diff_cf.get("noise_stream", "ERA5")
-        noise_level_rn = torch.tensor(
-            [meta_info[noise_stream].params["noise_level_rn"]], 
-            device=tokens.device
+        assert "noise_level" in meta_info, (
+            "noise_level (sample meta_info, drawn by the Masker from "
+            "masking_strategy_config.noise_level) is required for training"
         )
-
-        # Compute sigma from noise_level_rn.
-        # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
-        # log_uniform: noise_level_rn is log_sigma directly; sigma = exp(noise_level_rn)
-        if self.noise_distribution == "log_uniform":
-            sigma = noise_level_rn.exp()
-        elif self.noise_distribution == "log_normal":
-            sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
-        else:
-            raise ValueError(f"Unsupported diffusion.noise.distribution: {self.noise_distribution}")
+        # noise level sigma, one per sample: (B,) -> (B, 1, 1) to broadcast over cells and channels
+        sigma = torch.as_tensor(
+            meta_info["noise_level"], dtype=torch.float32, device=tokens.device
+        ).reshape(-1, 1, 1)
+        assert sigma.shape[0] == y.shape[0], (
+            f"got {sigma.shape[0]} noise levels for {y.shape[0]} samples"
+        )
         n = torch.randn_like(y) * sigma
 
         self._noised_tokens = (y + n).detach()
@@ -455,14 +456,15 @@ class DiffusionForecastEngine(torch.nn.Module):
         self,
         x: torch.Tensor,
         c: torch.Tensor,
-        sigma: float,
+        sigma: torch.Tensor,
         fstep: int,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         The actual diffusion step, where the model removes noise from the input x under
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
-        noise level sigma.
+        noise level sigma: either a single noise level of shape (1,) or one noise level per sample
+        of shape (B, 1, 1).
         """
         # Scaling coefficients (EDM Eq. 7). With EDM preconditioning enabled, c_skip/c_out
         # keep the network output O(1) across all sigma and make the denoiser output D -> x
@@ -478,12 +480,15 @@ class DiffusionForecastEngine(torch.nn.Module):
         c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
         c_noise = sigma.log() / 4
 
-        # Embed noise level
-        noise_emb = self.noise_embedder(c_noise)
+        # Embed noise level: (1, D_emb) or (B, D_emb)
+        noise_emb = self.noise_embedder(c_noise.reshape(-1))
 
         # Precondition input and feed through network
         if self.conditioning in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
+            if c.ndim == 2:
+                # one timestamp per sample: (B, D_c) -> (B, 1, D_c) to broadcast over cells
+                c = c.unsqueeze(1)
 
         net_input = c_in * x
 
@@ -562,7 +567,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self,
         fstep: int,
         num_steps: int = 50,
-        meta_info: dict[str, SampleMetaData] = None,
+        meta_info: dict | None = None,
         coords: torch.Tensor = None,
     ) -> "list[torch.Tensor] | torch.Tensor":
         """
@@ -581,7 +586,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         Args:
             fstep: Forecast step index for the network
             num_steps: Number of diffusion denoising steps (default: 50)
-            meta_info: Optional sample metadata dict containing timestamps for temporal conditioning
+            meta_info: Stream-independent meta information containing the timestamp
+                (date/time conditioning) or conditioning_tokens (forecast conditioning)
             coords: Optional coordinate tensor for spatial conditioning
         Returns:
             list[Tensor]: ODE trajectory (one tensor per denoising step) when
@@ -593,9 +599,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Extract conditioning (mirrors training_forward).
         c = None
         if self.conditioning in ["date_time", "date", "time"]:
-            c = meta_info["ERA5"].params["timestamp"]
+            c = meta_info["timestamp"]
         elif self.conditioning == "forecast":
-            c = meta_info["LATENT_CONDITIONING_TOKENS"]
+            c = meta_info["conditioning_tokens"]
 
         num_ensemble_members: int = self.num_ensemble_members
 
@@ -706,8 +712,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
         logger.debug(
             f"Inference sigma schedule: sigma_max={sigma_max_eff:.4f}, "
-            f"sigma_min={sigma_min_eff:.4f} (training noise: {self.noise_distribution}, "
-            f"range {self.train_sigma_min:.4f}-{self.train_sigma_max:.4f}), "
+            f"sigma_min={sigma_min_eff:.4f} (training noise: {self.train_noise_distribution}, "
+            f"range {self.train_sigma_min}-{self.train_sigma_max}), "
             f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn_msg}"
         )
 

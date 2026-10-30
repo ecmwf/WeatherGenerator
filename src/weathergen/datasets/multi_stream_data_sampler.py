@@ -109,13 +109,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # initialise healpix
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(
-            cf.healpix_level,
-            stage,
-            cf.streams,
-            self.mode_cfg,
-            diffusion_noise_cfg=cf.get("diffusion", {}).get("noise"),
-        )
+        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
@@ -671,8 +665,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _get_source_target_masks(self, training_mode):
         """
         Generate source and target masks for all streams.
+
+        Returns the masks per stream, the number of source and target samples, and the index of
+        the corresponding target sample for each source sample (source_to_target). The numbers of
+        samples and source_to_target are identical for all streams.
         """
         masks = {}
+        source_to_target = None
         for stream_name, stream_info in self.streams.items():
             # Build source and target sample masks
             masks[stream_name] = self.tokenizer.build_samples_for_stream(
@@ -684,8 +683,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # identical for all streams
             num_target_samples = len(masks[stream_name][0])
             num_source_samples = len(masks[stream_name][1])
+            if source_to_target is None:
+                source_to_target = masks[stream_name][2]
+            assert np.array_equal(source_to_target, masks[stream_name][2]), (
+                "source to target mapping has to be identical for all streams"
+            )
 
-        return masks, num_source_samples, num_target_samples
+        return masks, num_source_samples, num_target_samples, source_to_target
 
     def _get_output_length(self, num_forecast_steps):
         # max(1, ...) : self.output_offset and num_forecast_steps are zero for pure masking
@@ -716,8 +720,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         source_cfgs = self.mode_cfg.get("model_input")
         target_cfgs = self.mode_cfg.get("target_input", {})
 
-        # get/coordinate masks
-        masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
+        # get/coordinate masks; source_to_target: index of the corresponding target sample for
+        # each source sample, identical for all streams
+        masks_streams, num_source_samples, num_target_samples, source_to_target = (
+            self._get_source_target_masks(mode)
+        )
 
         source_select, target_select = [], []
         if "masking" in mode:
@@ -739,11 +746,24 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             self.output_offset,
             num_output_steps,
         )
+        batch.set_source_target_matching(source_to_target)
+
+        # stream-independent masking parameters per sample (e.g. noise level)
+        target_params, source_params = self.masker.build_sample_params(masks_streams)
+        batch.update_sample_meta_info(source_params, target_params)
+        if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
+            # valid time of the first target step: start of its time window (stream independent)
+            target_base_idx = idx + self.teacher_time_offset
+            win_idx = target_base_idx + (self.time_step * self.output_offset) // self.step_timedelta
+            timestamp = self.time_window_handler.window(win_idx).start
+            for sample in batch.source_samples.samples + batch.target_samples.samples:
+                sample.update_sample_meta_info({"timestamp": timestamp})
 
         # for all streams
         for stream_name, stream_ds in self.streams_datasets.items():
             stream_info = self.streams[stream_name]
-            (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
+            # source to target mapping is identical for all streams, see above
+            (target_masks, source_masks, _) = masks_streams[stream_name]
 
             # max number of input steps
             input_steps = np.array([sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()])
@@ -810,7 +830,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     input_mask=source_mask,
                 )
 
-                batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
+                batch.add_source_stream(sidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
             input_data_target_orig = input_data_target
@@ -844,54 +864,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 target_metadata = target_masks.metadata[tidx]
 
-                # Get first target step's times
-                # (using self.output_offset as the first output step index)
-                if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
-                    target_times_array = sdata.target_times_raw[self.output_offset]
-                    target_metadata.add_params(
-                        {
-                            "timestamp": (
-                                target_times_array[0] if len(target_times_array) > 0 else None
-                            )
-                        }
-                    )
-
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
-                # Map target to all source students
-                student_indices = [
-                    s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx
-                ]
-                batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
+                batch.add_target_stream(tidx, stream_name, sdata, target_metadata)
 
         source_in_steps = input_steps.max().item()
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
-
-        # add target times in source for diffusion model date/time conditioning
-        if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
-            # TODO: Might need upgrading fro num_samples > 1
-
-            # Assert singular source and target samples
-            assert len(batch.source_samples.samples) == 1, (
-                "Only single source sample supported for diffusion model conditioning."
-            )
-            assert len(batch.target_samples.samples) == 1, (
-                "Only single target sample supported for diffusion model conditioning."
-            )
-
-            source_sample = batch.source_samples.samples[0]
-            target_sample = batch.target_samples.samples[0]
-
-            # Copy target timestamps to source metadata for all streams
-            for stream_name in [s["name"] for s in self.streams]:
-                if (
-                    stream_name in target_sample.meta_info
-                    and stream_name in source_sample.meta_info
-                ):
-                    target_timestamp = target_sample.meta_info[stream_name].params.get("timestamp")
-                    source_sample.meta_info[stream_name].add_params({"timestamp": target_timestamp})
 
         return batch
 

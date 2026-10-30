@@ -90,6 +90,49 @@ def validate_correspondence_mode(correspondence_mode, target_cfgs, source_cfgs):
         )
 
 
+def get_noise_level_cfg(mode_cfg) -> dict | None:
+    """
+    Get the noise level config (masking_strategy_config.noise_level) of the target strategies
+    of a stage config (e.g. training_config).
+
+    Returns None if no enabled target strategy defines a noise level. All target strategies that
+    define one have to use the same noise level config. As in Masker.merge_masking_config(), the
+    target strategies are the source strategies (model_input) if target_input is not specified.
+    """
+    target_cfgs = mode_cfg.get("target_input", None) or mode_cfg.get("model_input", None) or {}
+    noise_cfgs = [
+        t_cfg.get("masking_strategy_config", {}).get("noise_level", None)
+        for t_cfg in target_cfgs.values()
+        if t_cfg.get("enabled", True)
+    ]
+    noise_cfgs = [c for c in noise_cfgs if c is not None]
+    if len(noise_cfgs) == 0:
+        return None
+    assert all(c == noise_cfgs[0] for c in noise_cfgs), (
+        "all target strategies have to use the same masking_strategy_config.noise_level"
+    )
+    return noise_cfgs[0]
+
+
+def sample_noise_level(rng: np.random.Generator, noise_level_cfg: dict) -> float:
+    """
+    Draw the noise level, i.e. the noise standard deviation sigma, from the noise level
+    distribution.
+
+    log_uniform: log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
+    log_normal: log(sigma) ~ N(p_mean, p_std)
+    """
+    distribution = noise_level_cfg.get("distribution", "log_normal")
+    if distribution == "log_uniform":
+        log_sigma = rng.uniform(
+            np.log(noise_level_cfg["sigma_min"]), np.log(noise_level_cfg["sigma_max"])
+        )
+        return float(np.exp(log_sigma))
+    if distribution == "log_normal":
+        return float(np.exp(rng.normal(noise_level_cfg["p_mean"], noise_level_cfg["p_std"])))
+    raise ValueError(f"Unsupported noise_level distribution: {distribution}")
+
+
 # Convert to torch.bool
 def to_bool_tensor(arr):
     return torch.from_numpy(np.asarray(arr)).to(torch.bool)
@@ -124,18 +167,8 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(
-        self,
-        healpix_level: int,
-        stage: Stage,
-        streams=None,
-        mode_cfg=None,
-        diffusion_noise_cfg=None,
-    ):
+    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
-
-        # training noise distribution (diffusion.noise) used for streams with diffusion_rn
-        self.diffusion_noise_cfg = diffusion_noise_cfg or {}
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -352,6 +385,57 @@ class Masker:
 
         return corr_dict
 
+    def build_sample_params(
+        self, stream_masks: dict[str, tuple[MaskData, MaskData, np.typing.NDArray]]
+    ) -> tuple[list[dict], list[dict]]:
+        """
+        Generate stream-independent masking parameters, i.e. shared by all streams of a sample.
+
+        Parameters are drawn per target sample from the masking_strategy_config of its target
+        strategy (currently the noise level sigma, drawn from masking_strategy_config.noise_level
+        and stored as noise_level). Each source sample inherits the parameters of its
+        corresponding target sample, e.g. so that model and loss use the same noise level.
+
+        Parameters
+        ----------
+        stream_masks : dict[str, tuple[MaskData, MaskData, np.typing.NDArray]]
+            (target masks, source masks, source to target mapping) for each stream, as returned
+            by build_samples_for_stream().
+
+        Returns
+        -------
+        tuple[list[dict], list[dict]]
+            Parameters for each target sample and for each source sample.
+        """
+        # noise level config of the target strategy of each target sample
+        noise_level_cfgs, source_to_target = None, None
+        for target_masks, _, stream_source_to_target in stream_masks.values():
+            cfgs = [
+                md.params.get("masking_strategy_config", {}).get("noise_level", None)
+                for md in target_masks.metadata
+            ]
+            if noise_level_cfgs is None:
+                noise_level_cfgs, source_to_target = cfgs, stream_source_to_target
+            assert cfgs == noise_level_cfgs, (
+                "masking_strategy_config.noise_level has to be identical for all streams"
+            )
+        has_noise_level = [cfg is not None for cfg in noise_level_cfgs]
+        assert all(has_noise_level) or not any(has_noise_level), (
+            "either all or no target strategies have to define masking_strategy_config.noise_level"
+        )
+
+        target_params = [{} for _ in noise_level_cfgs]
+        for params, noise_level_cfg in zip(target_params, noise_level_cfgs, strict=True):
+            if noise_level_cfg is not None:
+                params["noise_level"] = sample_noise_level(self.rng, noise_level_cfg)
+
+        assert (np.asarray(source_to_target) >= 0).all(), (
+            "source sample without corresponding target sample"
+        )
+        source_params = [dict(target_params[tidx]) for tidx in source_to_target]
+
+        return target_params, source_params
+
     def build_samples_for_stream(
         self,
         training_mode: str,
@@ -478,16 +562,6 @@ class Masker:
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                         channel_names=source_channel_names,
                     )
-
-                # One noise level per source/target pair. diffusion.py reads it off the source
-                # metadata to noise the latents, the latent-diffusion loss reads it off the target
-                # metadata to weight the residual; they have to be the same draw. The target is
-                # authoritative, so any value drawn for the source above is discarded here. This
-                # also covers sources whose mask is forced empty (diagnostic streams, randomly
-                # dropped sources), which never draw a noise level of their own.
-                target_noise_level = target_masks.metadata[target_idx].params.get("noise_level_rn")
-                if target_noise_level is not None:
-                    mask_params["noise_level_rn"] = target_noise_level
 
                 corr = target_idx
                 source_masks.add_mask(
@@ -641,18 +715,6 @@ class Masker:
 
         elif "forecast" in strategy or strategy == "causal":
             mask = np.ones(num_cells, dtype=np.bool)
-
-            if "diffusion_rn" in masking_strategy_config:
-                noise_cfg = self.diffusion_noise_cfg
-                noise_dist = noise_cfg.get("distribution", "log_normal")
-                if noise_dist == "log_uniform":
-                    # Store log_sigma directly; the model interprets it via noise.distribution.
-                    masking_params["noise_level_rn"] = self.rng.uniform(
-                        np.log(noise_cfg["sigma_min"]),
-                        np.log(noise_cfg["sigma_max"]),
-                    )
-                else:  # log_normal (default): store eta ~ N(0,1)
-                    masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
 
         elif strategy == "healpix":
             # prepare healpix-based masking

@@ -41,6 +41,9 @@ class Sample:
     # keys: stream name, values: SampleMetaData
     meta_info: dict[str | SampleMetaData]
 
+    # stream-independent meta information of sample
+    sample_meta_info: dict
+
     # data for all streams
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
@@ -66,6 +69,7 @@ class Sample:
 
     def __init__(self, stream_names: list[str]) -> None:
         self.meta_info = {}
+        self.sample_meta_info = {}
 
         self.streams_data = {}
         for stream_name in stream_names:
@@ -157,6 +161,12 @@ class Sample:
 
         self.meta_info[stream_name] = meta_info
 
+    def update_sample_meta_info(self, params: dict) -> None:
+        """
+        Update stream-independent meta information of sample (existing keys are overwritten)
+        """
+        self.sample_meta_info.update(params)
+
     def get_stream_data(self, stream_name: str) -> StreamData:
         """
         Get data for stream @stream_name from sample
@@ -227,6 +237,31 @@ class BatchSamples:
 
     def get_samples(self) -> list[Sample]:
         return self.samples
+
+    def stack_sample_meta_info(self) -> dict[str, np.typing.NDArray]:
+        """
+        Stack the stream-independent meta information (e.g. diffusion noise level, timestamp) 
+        of all samples along the sample dim.
+        Returns one array of length num_samples per key; empty if there are no samples.
+        """
+        if len(self.samples) == 0:
+            return {}
+
+        keys = set(self.samples[0].sample_meta_info)
+        assert all(set(s.sample_meta_info) == keys for s in self.samples), (
+            "all samples have to provide the same sample meta info keys, got "
+            f"{[sorted(s.sample_meta_info) for s in self.samples]}"
+        )
+
+        stacked = {}
+        for key in sorted(keys):
+            values = [s.sample_meta_info[key] for s in self.samples]
+            assert all(np.ndim(v) == 0 for v in values), (
+                f"sample meta info '{key}' has to be a scalar per sample, "
+                f"got shapes {[np.shape(v) for v in values]}"
+            )
+            stacked[key] = np.array(values)
+        return stacked
 
     def get_subset(self, subset: list | None = None):
         if subset is None:
@@ -355,6 +390,34 @@ class ModelBatch:
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
+    def set_source_target_matching(self, source_to_target: np.typing.NDArray) -> None:
+        """
+        Set the correspondence between source and target samples (identical for all streams)
+
+        source_to_target: index of the corresponding target sample for each source sample
+        """
+        source_to_target = np.asarray(source_to_target, dtype=np.int32)
+        assert len(source_to_target) == len(self.source_samples), (
+            "source_to_target has to provide a target index for each source sample"
+        )
+        assert ((source_to_target >= 0) & (source_to_target < len(self.target_samples))).all(), (
+            "invalid target sample index in source_to_target"
+        )
+        self.source2target_matching_idxs = source_to_target.copy()
+        self.target2source_matching_idxs = [
+            [sidx for sidx, t in enumerate(source_to_target) if t == tidx]
+            for tidx in range(len(self.target_samples))
+        ]
+
+    def update_sample_meta_info(self, source_params: list[dict], target_params: list[dict]) -> None:
+        """
+        Update stream-independent meta information of all source and target samples
+        """
+        for sample, params in zip(self.source_samples.samples, source_params, strict=True):
+            sample.update_sample_meta_info(params)
+        for sample, params in zip(self.target_samples.samples, target_params, strict=True):
+            sample.update_sample_meta_info(params)
+
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
 
@@ -414,7 +477,6 @@ class ModelBatch:
     def add_source_stream(
         self,
         source_sample_idx: int,
-        target_sample_idx: int,
         stream_name: str,
         stream_data: StreamData,
         source_meta_info: SampleMetaData,
@@ -428,13 +490,9 @@ class ModelBatch:
         # add the meta_info
         self.source_samples.samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
 
-        assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
-        self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
-
     def add_target_stream(
         self,
         target_sample_idx: int,
-        source_sample_idx: int | list[int],
         stream_name: str,
         stream_data: StreamData,
         target_meta_info: SampleMetaData,
@@ -446,16 +504,6 @@ class ModelBatch:
 
         # add the meta_info -- for target we have different
         self.target_samples.samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
-
-        if isinstance(source_sample_idx, int):
-            assert source_sample_idx < len(self.source_samples), (
-                "invalid value for source_sample_idx"
-            )
-        else:
-            assert all(idx < len(self.source_samples) for idx in source_sample_idx), (
-                "invalid value for source_sample_idx"
-            )
-        self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
     def is_empty(self):
         """
