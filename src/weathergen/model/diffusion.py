@@ -437,7 +437,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Strip the encoder's aux tokens from conditioning and RoPE coords (x holds cells only).
         n_aux = self.num_aux_tokens
-        n_reg = self.num_diffusion_registers
+        n_registers = self.num_diffusion_registers
         if self.conditioning == "forecast" and c is not None:
             c = c[:, n_aux:]
         coords_c = coords[:, n_aux:] if coords is not None else None
@@ -453,12 +453,12 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Prepend the learnable diffusion registers (zero RoPE coords): (B, H) -> (B, R+H).
         coords_x = coords_c
-        if n_reg > 0:
+        if n_registers > 0:
             registers = self.diffusion_registers.to(dtype=net_input.dtype)
             net_input = torch.cat([registers.expand(net_input.shape[0], -1, -1), net_input], dim=1)
             if coords_c is not None:
                 coords_x = torch.cat(
-                    [coords_c.new_zeros(coords_c.shape[0], n_reg, 2), coords_c], dim=1
+                    [coords_c.new_zeros(coords_c.shape[0], n_registers, 2), coords_c], dim=1
                 )
             # Token-wise conditioning types need c at R+H tokens: zero-pad the register slots.
             if (
@@ -466,7 +466,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 and c is not None
                 and self.conditioning_type not in {"concatenate", "cross_attn"}
             ):
-                c = torch.cat([c.new_zeros(c.shape[0], n_reg, c.shape[2]), c], dim=1)
+                c = torch.cat([c.new_zeros(c.shape[0], n_registers, c.shape[2]), c], dim=1)
         coords = coords_x
 
         if self.conditioning_type == "concatenate":
@@ -513,7 +513,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
 
         # Drop the diffusion registers: (B, R+H, D') -> (B, H, D')
-        raw_out = raw_out[:, n_reg:]
+        raw_out = raw_out[:, n_registers:]
         if self.latent_proj_down is not None:
             raw_out = self.latent_proj_down(raw_out)
         return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
