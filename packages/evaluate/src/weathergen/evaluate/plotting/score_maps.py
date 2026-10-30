@@ -23,7 +23,6 @@ from joblib import delayed
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader
-from weathergen.evaluate.plotting.animations import _dispatch_score_map_animations
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.scores.score_orchestration import MetricResult
@@ -37,9 +36,10 @@ def plot_score_maps(
     stream: str,
     results: dict[str, dict[str, MetricResult]],
     global_plotting_options: dict | None = None,
-    plot_score_options: dict | None = None,
 ) -> None:
     """Plot spatial score maps for all regions and forecast steps.
+
+    The videos of the maps are built from them by ``animations.build_animations``.
 
     Parameters
     ----------
@@ -52,8 +52,6 @@ def plot_score_maps(
         (``calc_scores_per_stream(..., compute_spatial=True)``).
     global_plotting_options : dict | None
         Global plotting options. These can be passed to the plotter and can be used to set options.
-    plot_score_options : dict | None
-        Dictionary containing all common score calculation options.
     """
 
     if not reader.is_gridded_data(stream):
@@ -73,10 +71,6 @@ def plot_score_maps(
     map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
     map_dir.mkdir(parents=True, exist_ok=True)
     _logger.info(f"RUN {reader.run_id} - {stream}: Saving score maps to {map_dir}")
-
-    available_data = reader.check_availability(stream, mode="evaluation")
-    channels = available_data.channels
-    ensemble = available_data.ensemble
 
     n_plot_workers = get_num_workers(
         check_process_headroom=True,
@@ -145,21 +139,6 @@ def plot_score_maps(
 
     calls = [delayed(_plot_score_maps_per_stream)(**t) for t in fstep_tasks]
     dispatch_parallel(calls, n_workers=n_plot_workers, backend="loky", desc=f"Score maps {stream}")
-
-    plot_score_animations = (plot_score_options or {}).get("plot_score_animations", False)
-    if plot_score_animations:
-        _dispatch_score_map_animations(
-            map_dir=map_dir,
-            plotter_cfg=plotter_cfg,
-            run_id=run_id,
-            stream=stream,
-            metrics=list(dict.fromkeys(m for by_metric in spatial.values() for m in by_metric)),
-            regions=regions,
-            variables=channels,
-            ens_values=list(ensemble) if ensemble else [None],
-            fsteps=fsteps,
-            n_workers=n_plot_workers,
-        )
 
 
 def _plot_score_maps_per_stream(
