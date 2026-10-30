@@ -1645,43 +1645,23 @@ class Scores:
         n_bins = len(fcst_stacked[self._ens_dim]) + 1
         bins = np.arange(n_bins + 1)
 
-        # dims still remaining after pooling into "npoints" (typically just "channel")
-        preserve_dims = [d for d in rank.dims if d != "npoints"]
-
-        def _counts(rank_slice: xr.DataArray) -> np.ndarray:
-            return histogram(
-                rank_slice,
-                dim=["npoints"],
-                bins=bins,
-                block_size=None if rank_slice.chunks is None else "auto",
-            ).values.astype(np.float64)
-
         # histogram() builds a fresh DataArray and drops scalar coords (e.g. lead_time)
         # present on gt/p, so re-attach them here for downstream lead-time plotting.
-        scalar_coords = {
-            name: coord for name, coord in gt.coords.items() if coord.dims == ()
-        }
+        scalar_coords = {name: coord for name, coord in gt.coords.items() if coord.dims == ()}
 
-        if not preserve_dims:
-            counts_da = xr.DataArray(_counts(rank), dims=["rank_bin"], coords=scalar_coords)
-            counts_da.attrs["n_bins"] = n_bins
-            return counts_da
-
-        shape = tuple(rank.sizes[d] for d in preserve_dims)
-        counts_values = np.empty((*shape, n_bins))
-
-        for idx in np.ndindex(*shape):
-            sel = dict(zip(preserve_dims, idx, strict=False))
-            rank_slice = rank.isel(**sel)
-            rank_slice.name = "rank"
-            counts_values[idx] = _counts(rank_slice)
-
-        coords = {d: rank.coords[d] for d in preserve_dims if d in rank.coords}
-        coords.update(scalar_coords)
-        counts_da = xr.DataArray(counts_values, dims=[*preserve_dims, "rank_bin"], coords=coords)
-        counts_da.attrs["n_bins"] = n_bins
-        counts_da.attrs["preserve_dims"] = preserve_dims
-        return counts_da
+        # dims still remaining after pooling into "npoints" (typically just "channel") are kept
+        counts = histogram(
+            rank,
+            dim=["npoints"],
+            bins=bins,
+            block_size=None if rank.chunks is None else "auto",
+        ).astype(np.float64)
+        counts = counts.assign_coords(scalar_coords)
+        counts.attrs["n_bins"] = n_bins
+        preserve_dims = [d for d in counts.dims if d != "rank_bin"]
+        if preserve_dims:
+            counts.attrs["preserve_dims"] = preserve_dims
+        return counts.compute()
 
     @staticmethod
     def _rank_histogram_attrs(counts: xr.DataArray, n_bins: int) -> dict:
@@ -1733,14 +1713,7 @@ class Scores:
         expected = 1.0 / n_bins if norm else npoints / n_bins
         score = np.sqrt(((normed - expected) ** 2).mean(dim="rank_bin"))
 
-        attrs = Scores._rank_histogram_attrs(normed, n_bins)
-        if "preserve_dims" not in attrs:
-            # preserve scalar coords (e.g. lead_time) dropped by converting to a bare float
-            score_da = xr.DataArray(float(score.values), coords=score.coords)
-            score_da.attrs.update(attrs)
-            return score_da
-
-        score.attrs.update(attrs)
+        score.attrs.update(Scores._rank_histogram_attrs(normed, n_bins))
         return score
 
     def calc_rank_histogram(
@@ -1771,7 +1744,8 @@ class Scores:
             Magnitude of random noise to be added to the data if add_noise is True.
             Default is 1.0e-03. This value is only relevant if add_noise is True
         pool_n_fsteps: int | None
-            Number of consecutive forecast steps to pool into one histogram plot.
+            Number of consecutive forecast steps to pool into one histogram plot. Not used in
+            the computation; it is read from the metric parameters at plotting time.
 
         Returns
         -------
@@ -1783,13 +1757,7 @@ class Scores:
         n_bins = counts.attrs["n_bins"]
         npoints = counts.sum(dim="rank_bin")
 
-        attrs = self._rank_histogram_attrs(counts, n_bins)
-        if "preserve_dims" not in attrs:
-            result = xr.DataArray(float(npoints.values), coords=npoints.coords)
-            result.attrs.update(attrs)
-            return result
-
-        npoints.attrs.update(attrs)
+        npoints.attrs.update(self._rank_histogram_attrs(counts, n_bins))
         return npoints
 
     def calc_rank_histogram_flatness(
@@ -1798,7 +1766,7 @@ class Scores:
         gt: xr.DataArray,
         norm: bool = True,
         add_noise: bool = True,
-        noise_fac=1.0e-03,
+        noise_fac: float = 1.0e-03,
     ) -> xr.DataArray:
         """
         Calculate the rank histogram (Talagrand diagram) flatness score of forecast data
