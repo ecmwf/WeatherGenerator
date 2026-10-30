@@ -96,9 +96,10 @@ def get_noise_level_cfg(mode_cfg) -> dict | None:
     of a stage config (e.g. training_config).
 
     Returns None if no enabled target strategy defines a noise level. All target strategies that
-    define one have to use the same noise level config.
+    define one have to use the same noise level config. As in Masker.merge_masking_config(), the
+    target strategies are the source strategies (model_input) if target_input is not specified.
     """
-    target_cfgs = mode_cfg.get("target_input", None) or {}
+    target_cfgs = mode_cfg.get("target_input", None) or mode_cfg.get("model_input", None) or {}
     noise_cfgs = [
         t_cfg.get("masking_strategy_config", {}).get("noise_level", None)
         for t_cfg in target_cfgs.values()

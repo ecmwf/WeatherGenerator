@@ -13,12 +13,8 @@ diffusion:
   # must be 512: the noise conditioning in model/layers.py hard-codes noise_emb_dim=512
   embedding_dim: 512
   sigma_data: 0.7855
-  # training noise distribution
-  noise:
-    distribution: "log_normal"
-    p_mean: -1.2
-    p_std: 1.2
-  # inference sampler; sigma range derived from the training noise distribution
+  # inference sampler; sigma range derived from the training noise level distribution
+  # (masking_strategy_config.noise_level of the target strategy)
   sampler:
     rho: 7
 
@@ -45,7 +41,6 @@ training_config:
   model_input: {
     "forecasting" : {
       masking_strategy: "forecast",
-      masking_strategy_config: {diffusion_rn: True},
       # the older input step is the conditioning
       num_steps_input: 2,
       num_samples: 1
@@ -55,7 +50,10 @@ training_config:
   target_input: {
     "forecasting" : {
       masking_strategy: "forecast",
-      masking_strategy_config: {diffusion_rn: True},
+      masking_strategy_config: {
+        # diffusion noise level, one per sample: sigma = exp(log_sigma)
+        noise_level: {distribution: "log_normal", p_mean: -1.2, p_std: 1.2},
+        },
       num_steps_input: 1,
       num_samples: 1
       }
