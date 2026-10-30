@@ -121,9 +121,10 @@ def evaluate_multi_stream_results(run_id):
                             "plotting": {
                                 "sample": [0, 1],
                                 "forecast_step": [1],
-                                "plot_maps": True,
-                                "plot_histograms": True,
-                                "plot_animations": False,
+                                "data_plots": [
+                                    {"maps": {"predictions": ["image"]}},
+                                    {"histograms": ["image"]},
+                                ],
                             },
                         },
                         "SurfaceCombined": {
@@ -132,9 +133,10 @@ def evaluate_multi_stream_results(run_id):
                             "plotting": {
                                 "sample": [0, 1],
                                 "forecast_step": [1],
-                                "plot_maps": True,
-                                "plot_histograms": True,
-                                "plot_animations": False,
+                                "data_plots": [
+                                    {"maps": {"predictions": ["image"]}},
+                                    {"histograms": ["image"]},
+                                ],
                             },
                         },
                         "NPPATMS": {
@@ -143,9 +145,10 @@ def evaluate_multi_stream_results(run_id):
                             "plotting": {
                                 "sample": [0, 1],
                                 "forecast_step": [1],
-                                "plot_maps": True,
-                                "plot_histograms": True,
-                                "plot_animations": False,
+                                "data_plots": [
+                                    {"maps": {"predictions": ["image"]}},
+                                    {"histograms": ["image"]},
+                                ],
                             },
                         },
                     },
