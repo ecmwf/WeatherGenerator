@@ -259,7 +259,7 @@ class Trainer(TrainerBase):
                 )
 
             forecast_chunk.physical.clear()
-            forecast_chunk.latent = [forecast_chunk.latent[-1]]
+            forecast_chunk.latent[:-1] = [{} for _ in forecast_chunk.latent[:-1]]
             batch.clear_output_chunk_coordinates(chunk)
 
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):

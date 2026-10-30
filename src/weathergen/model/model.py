@@ -49,7 +49,7 @@ type StreamName = str
 
 class ModelOutput:
     """
-    Representation of model output
+    Model outputs with latent list positions counting engine calls; encoding is state 0.
     """
 
     physical: list[dict[StreamName, torch.Tensor]]
@@ -69,7 +69,7 @@ class ModelOutput:
         self.forecast_steps = list(range(base, forecast_steps[-1] + 1))
 
         self.physical: list[dict[StreamName, torch.Tensor]] = [{} for _ in self.forecast_steps]
-        self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
+        self.latent: list[dict[str, torch.Tensor | LatentState]] = []
         self.batch_samples = source_samples
         self.latent_deep = None
 
@@ -108,6 +108,7 @@ class ModelOutput:
         return pred
 
     def get_latent_prediction(self, fstep: int):
+        """Get a latent state by its ID: encoding is 0, each engine call advances it."""
         return self.latent[fstep]
 
 
@@ -733,18 +734,25 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        source_samples, tokens, posteriors = self.get_latent_from_input(batch, model_params)
+        source_samples, tokens, _ = self.get_latent_from_input(batch, model_params)
 
         # output_idxs start with output_offset
         global_steps = source_samples.get_output_idxs()
         forecast_offset = global_steps[0]
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
+        # Preserve earlier state positions without retaining their tensors.
+        output.latent = [{} for _ in batch.latent]
+        if not batch.latent:
+            output.latent.append(
+                {"latent_state": self.tokens_to_latent_state(self.latent_pre_norm(tokens), tokens)}
+            )
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in forecast_steps:
+            output.latent.append({})
             without_grad = p_fwd and self.training and step != forecast_steps[-1]
             if without_grad:
                 with torch.no_grad():
@@ -754,11 +762,6 @@ class Model(torch.nn.Module):
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
 
             # decoder predictions
-            output.add_latent_prediction(
-                output.chunk_idx(step),
-                "latent_state",
-                self.tokens_to_latent_state(None, tokens),
-            )
             output = self.predict_decoders(model_params, step, tokens, source_samples, output)
 
             # latent predictions (raw and with SSL heads)
@@ -781,11 +784,11 @@ class Model(torch.nn.Module):
         # safe latent prediction
         tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
-        output.add_latent_prediction(output.chunk_idx(step), "latent_state", latent_state)
+        output.add_latent_prediction(-1, "latent_state", latent_state)
 
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
-            output.add_latent_prediction(output.chunk_idx(step), name, head(latent_state))
+            output.add_latent_prediction(-1, name, head(latent_state))
 
         return output
 
