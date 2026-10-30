@@ -7,11 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Plots of the prediction and target fields: maps, histograms, timeseries and their videos.
+"""Plots of the prediction and target fields: maps, histograms and timeseries.
 
 They are drawn from the loaded data of one (run, stream) (``ReaderOutput``), so they can be
 drawn per chunk of samples and forecast steps.  The drawing itself is done by ``Plotter``
-and ``Timeseries``.
+and ``Timeseries``; the videos of the maps and histograms by ``animations``, once all the
+frames are written.
 """
 
 import logging
@@ -25,12 +26,11 @@ from joblib import delayed
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
-from weathergen.evaluate.plotting.animations import _dispatch_field_animations
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
-from weathergen.evaluate.utils.config_compat import MAP_KINDS, parse_data_plots
+from weathergen.evaluate.utils.config_compat import parse_data_plots
 
 _logger = logging.getLogger(__name__)
 
@@ -215,13 +215,42 @@ def _plot_histograms_across_samples(
     plotter.clean_data_selection()
 
 
+def _colour_ranges(
+    da_tars: dict, da_preds: dict, channels: list[str], stream_opts: oc.DictConfig
+) -> tuple[dict, dict, dict]:
+    """Colour ranges of the maps, the bias maps and the ensemble-std maps, per channel.
+
+    Computed over all forecast steps of the data given, unless *stream_opts* (the stream's
+    entry of the global plotting options) fixes them.
+    """
+    range_args = (da_tars, da_preds, channels, stream_opts)
+    maps_config_dict = oc.OmegaConf.to_container(common_ranges(*range_args), resolve=True)
+    bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*range_args), resolve=True)
+
+    has_ens = any("ens" in da.dims for da in da_preds.values())
+    if not has_ens:
+        return maps_config_dict, bias_config_dict, maps_config_dict
+
+    std_preds = {fs: da.std(dim="ens") for fs, da in da_preds.items()}
+    std_config_dict = oc.OmegaConf.to_container(
+        common_ranges(std_preds, std_preds, channels, stream_opts), resolve=True
+    )
+    for cfg in std_config_dict.values():
+        if isinstance(cfg, dict):
+            cfg["colormap"] = "YlOrRd"
+    return maps_config_dict, bias_config_dict, std_config_dict
+
+
 def plot_data(
     reader: Reader,
     stream: str,
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
 ) -> None:
-    """Plot prediction/target maps and histograms for a given run and stream.
+    """Plot prediction/target maps, histograms and timeseries for a given run and stream.
+
+    The frames of the videos are drawn here; the videos themselves are built from them by
+    ``animations.build_animations`` once all the frames of the run exist.
 
     Parameters
     ----------
@@ -258,7 +287,6 @@ def plot_data(
     }
 
     apply_font_settings(plotter_cfg)
-    plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")
     if not available_data.score_availability:
@@ -342,30 +370,9 @@ def plot_data(
 
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
-    _range_args = (da_tars, da_preds, available_data.channels, global_plotting_opts[stream])
-    maps_config_dict = oc.OmegaConf.to_container(common_ranges(*_range_args), resolve=True)
-    bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*_range_args), resolve=True)
-
-    has_ens = any("ens" in da.dims for da in da_preds.values())
-
-    if has_ens:
-        std_preds = {fs: da.std(dim="ens") for fs, da in da_preds.items()}
-
-        std_config_dict = oc.OmegaConf.to_container(
-            common_ranges(
-                std_preds,
-                std_preds,
-                available_data.channels,
-                global_plotting_opts[stream],
-            ),
-            resolve=True,
-        )
-
-        for cfg in std_config_dict.values():
-            if isinstance(cfg, dict):
-                cfg["colormap"] = "YlOrRd"
-    else:
-        std_config_dict = maps_config_dict
+    maps_config_dict, bias_config_dict, std_config_dict = _colour_ranges(
+        da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
+    )
 
     num_plot_workers = get_num_workers(
         check_process_headroom=True,
@@ -463,62 +470,10 @@ def plot_data(
             da_tars=da_tars,
             output_dir=output_dir,
             stream=stream,
-            regions=plotter.regions,
+            regions=plotter_cfg["regions"],
             run_id=run_id,
             samples=plot_sample_set,
             channels=plot_channel_set,
             ensemble=list(available_data.ensemble),
             n_workers=num_plot_workers,
         )
-
-    map_videos = spec.map_videos()
-    hist_videos = spec.histogram_videos()
-    if map_videos or hist_videos:
-        last_fstep = list(da_tars.keys())[-1]
-        last_preds = da_preds[last_fstep]
-        last_tars = da_tars[last_fstep]
-        has_ens = "ens" in last_preds.dims
-
-        _sel = lambda items, allowed: [x for x in items if x in allowed] if allowed else items
-        plot_chs = _sel(list(np.atleast_1d(last_tars.channel.values)), plot_channel_set)
-        plot_samples = _sel(list(np.unique(last_tars.sample.values)), plot_sample_set)
-
-        anim_kw = dict(
-            plotter=plotter,
-            fsteps=da_tars.keys(),
-            variables=plot_chs,
-            max_workers=reader.eval_cfg.get("max_workers", None),
-            select={"sample": plot_samples[-1], "stream": stream, "forecast_step": last_fstep},
-        )
-
-        # Frame tags per ensemble member, as written by _plot_single_sample.
-        def _ens_tags(prefix: str) -> list[str]:
-            tags = []
-            for ens in available_data.ensemble:
-                if ens in ("mean", "std"):
-                    tags.append(f"{prefix}_ens_{ens}")
-                else:
-                    tags.append(prefix if not has_ens else f"{prefix}_ens_{ens}")
-            return tags
-
-        map_tags = {
-            "predictions": _ens_tags("preds"),
-            "target": ["targets"],
-            "bias": _ens_tags("bias"),
-        }
-        for kind in MAP_KINDS:
-            if kind in map_videos:
-                for tag in map_tags[kind]:
-                    _dispatch_field_animations(
-                        **anim_kw, samples=plot_samples, tag=tag, prefixes=("map",)
-                    )
-
-        # Histogram frames are tagged like the predictions they compare.
-        hist_samples = (plot_samples if "per_sample" in hist_videos else []) + (
-            ["all_samples"] if "across_samples" in hist_videos else []
-        )
-        if hist_samples:
-            for tag in _ens_tags("preds"):
-                _dispatch_field_animations(
-                    **anim_kw, samples=hist_samples, tag=tag, prefixes=("histogram",)
-                )

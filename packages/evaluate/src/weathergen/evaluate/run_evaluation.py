@@ -31,9 +31,12 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenReader,
     WeatherGenZarrReader,
 )
-from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
+from weathergen.evaluate.plotting.plot_orchestration import (
+    plot_evaluation,
+    plot_stream_data,
+    plot_stream_results,
+)
 from weathergen.evaluate.plotting.plot_utils import collect_channels
-from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
     MetricResult,
@@ -268,61 +271,65 @@ def _process_stream(
         plot_stream_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
-    if not needs_scoring:
-        return run_id, stream, {}
-
-    # cached scores as MetricResults; the ones computed below override them
     results: dict[str, dict[str, MetricResult]] = {}
-    for metric, by_region in stream_loaded_scores.items():
-        for region, by_stream in by_region.items():
-            for stream_key, by_run in by_stream.items():
-                for run_key, score in by_run.items():
-                    results.setdefault(region, {})[metric] = MetricResult(
-                        metric, region, stream_key, run_key, score
-                    )
+    computed: dict[str, dict[str, MetricResult]] = {}
+    metrics_to_compute: dict = {}
+    regions_to_compute: list[str] = []
+    if needs_scoring:
+        # cached scores as MetricResults; the ones computed below override them
+        for metric, by_region in stream_loaded_scores.items():
+            for region, by_stream in by_region.items():
+                for stream_key, by_run in by_stream.items():
+                    for run_key, score in by_run.items():
+                        results.setdefault(region, {})[metric] = MetricResult(
+                            metric, region, stream_key, run_key, score
+                        )
 
-    if recomputable_metrics:
-        metrics_to_compute = recomputable_metrics
-        regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif do_score_maps or plot_score_init_hour:
-        metrics_to_compute = {r: metrics for r in regions}
-        regions_to_compute = regions
-    else:
-        return run_id, stream, results
+        if recomputable_metrics:
+            metrics_to_compute = recomputable_metrics
+            regions_to_compute = list(set(recomputable_metrics.keys()))
+        elif do_score_maps or plot_score_init_hour:
+            metrics_to_compute = {r: metrics for r in regions}
+            regions_to_compute = regions
 
-    # The climatology is aligned once and shared by both scoring calls.
-    climatology = (
-        get_climatology(reader, output_data.target, stream)
-        if output_data is not None and needs_climatology(metrics_to_compute)
-        else None
-    )
-    # Per-sample scores plus, for the score maps, the sample-aggregated scores.
-    computed = calc_scores_per_stream(
-        reader,
-        stream,
-        regions_to_compute,
-        metrics_to_compute,
-        output_data=output_data,
-        climatology=climatology,
-        compute_spatial=do_score_maps,
-    )
-    if plot_score_init_hour and output_data is not None:
-        compute_scores_by_init_hour(
-            reader, stream, computed, output_data, metrics_to_compute, climatology
+    if metrics_to_compute:
+        # The climatology is aligned once and shared by both scoring calls.
+        climatology = (
+            get_climatology(reader, output_data.target, stream)
+            if output_data is not None and needs_climatology(metrics_to_compute)
+            else None
         )
-    if write_scores:
-        metric_list_to_json(reader, stream, computed, regions_to_compute)
-
-    # Drawn here, where the spatial scores of this (run, stream) are complete in a serial
-    # run; a distributed run draws them on the master from the merged results.
-    if do_score_maps:
-        plot_score_maps(
+        # Per-sample scores plus, for the score maps, the sample-aggregated scores.
+        computed = calc_scores_per_stream(
             reader,
             stream,
-            computed,
-            global_plotting_options=global_plotting_opts,
-            plot_score_options=plot_score_options,
+            regions_to_compute,
+            metrics_to_compute,
+            output_data=output_data,
+            climatology=climatology,
+            compute_spatial=do_score_maps,
         )
+        if plot_score_init_hour and output_data is not None:
+            compute_scores_by_init_hour(
+                reader, stream, computed, output_data, metrics_to_compute, climatology
+            )
+        # Only the scores missing from the JSON files are written: the others were recomputed
+        # for the score maps / init-hour scores and are the cached ones again.
+        missing = {
+            region: {
+                m: r for m, r in by_metric.items() if m in recomputable_metrics.get(region, {})
+            }
+            for region, by_metric in computed.items()
+        }
+        missing = {region: by_metric for region, by_metric in missing.items() if by_metric}
+        if write_scores and missing:
+            metric_list_to_json(reader, stream, missing, list(missing))
+
+    # Score maps and videos, drawn here where the results and all the frames of this
+    # (run, stream) are complete in a serial run; a distributed run draws them once all
+    # its chunks are done.
+    if reads_data:
+        plot_stream_results(reader, stream, computed, global_plotting_opts, plot_score_options)
 
     for region, by_metric in computed.items():
         results.setdefault(region, {}).update(by_metric)

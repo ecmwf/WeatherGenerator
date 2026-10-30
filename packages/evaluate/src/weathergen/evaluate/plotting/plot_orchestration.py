@@ -7,19 +7,26 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Plotting orchestration: the two plotting steps of the evaluation run loop.
+"""Plotting orchestration: the plotting steps of the evaluation run loop.
 
-The counterpart of ``score_orchestration``.  Field plots (``field_plots``) are drawn from
-the loaded data of one (run, stream), and so can be drawn per chunk of samples and forecast
-steps; verification plots (``verification_plots``) are drawn from the scores of all runs,
-once they are complete.
+The counterpart of ``score_orchestration``.  Three steps, in the order of the run:
+
+1. ``plot_stream_data``: field plots (``field_plots``), drawn from the loaded data of one
+   (run, stream), so per chunk of samples and forecast steps.
+2. ``plot_stream_results``: score maps (``score_maps``) and all the videos (``animations``)
+   of one (run, stream), drawn once its results are complete and all its frames are written.
+3. ``plot_evaluation``: verification plots across runs (``verification_plots``), drawn once
+   all runs are evaluated.
 """
 
 from pathlib import Path
 
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
+from weathergen.evaluate.plotting.animations import build_animations
 from weathergen.evaluate.plotting.field_plots import plot_data
+from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.plotting.verification_plots import plot_scores
+from weathergen.evaluate.scores.score_orchestration import MetricResult
 
 
 def plot_stream_data(
@@ -28,7 +35,7 @@ def plot_stream_data(
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
 ) -> None:
-    """Field plots of one (run, stream): maps, histograms, timeseries and their videos.
+    """Field plots of one (run, stream): maps, histograms and timeseries.
 
     Parameters
     ----------
@@ -42,6 +49,33 @@ def plot_stream_data(
         Pre-loaded data; when provided ``reader.get_data()`` is skipped.
     """
     plot_data(reader, stream, global_plotting_opts, output_data=output_data)
+
+
+def plot_stream_results(
+    reader: Reader,
+    stream: str,
+    results: dict[str, dict[str, MetricResult]],
+    global_plotting_opts: dict,
+    plot_score_options: dict,
+) -> None:
+    """Score maps and videos of one (run, stream), from its complete results and frames.
+
+    Parameters
+    ----------
+    reader : Reader
+        Reader object containing all info about the run.
+    stream : str
+        Stream name.
+    results : dict[str, dict[str, MetricResult]]
+        ``results[region][metric]`` of the (run, stream); empty when nothing was scored.
+    global_plotting_opts : dict
+        Global plotting options (applies to all run_ids).
+    plot_score_options : dict
+        ``get_plot_score_options(...)``: ``plot_score_maps`` and ``plot_score_animations``.
+    """
+    if results and plot_score_options.get("plot_score_maps", False):
+        plot_score_maps(reader, stream, results, global_plotting_options=global_plotting_opts)
+    build_animations(reader, stream, results, global_plotting_opts, plot_score_options)
 
 
 def plot_evaluation(
