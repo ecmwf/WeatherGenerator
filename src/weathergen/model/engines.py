@@ -728,7 +728,16 @@ class ForecastingEngine(torch.nn.Module):
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
             if noise_std > 0.0:
-                tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+                # torch.norm(tokens) grows with the number of stacked samples/ensemble members;
+                # fe_impute_latent_noise_ref_members = R uses each sample's own norm times sqrt(R)
+                # instead, i.e. the noise of R stacked members, independent of the ensemble size
+                ref_members = self.cf.get("fe_impute_latent_noise_ref_members", None)
+                if ref_members:
+                    norm = tokens.flatten(1).norm(dim=1).view(-1, *([1] * (tokens.dim() - 1)))
+                    norm = norm * ref_members**0.5
+                else:
+                    norm = torch.norm(tokens)
+                tokens = tokens + torch.randn_like(tokens) * norm * noise_std
 
         # predict residual to last time step if requested
         forecast_residual = self.cf.get("forecast_residual", False)
