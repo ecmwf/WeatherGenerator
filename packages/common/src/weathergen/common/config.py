@@ -41,26 +41,32 @@ Config = DictConfig
 
 
 def get_healpix_level(config: Config) -> int:
-    """Find the shared tokenizer.healpix_level, falling back to the main config."""
-    streams = config.streams.values()
-    streams_without_level = [
-        stream for stream in streams if "healpix_level" not in stream.get("tokenizer", {})
-    ]
-
-    if "healpix_level" in config and streams_without_level:
-        _logger.warning(
-            "Setting healpix level in the main config is going to be deprecated. "
-            "Please set tokenizer.healpix_level in each stream instead."
-        )
-        for stream in streams_without_level:
-            stream.setdefault("tokenizer", {})
-            stream.tokenizer.healpix_level = config.healpix_level
-
-    # All streams must have the same level until multi-encoders are implemented.
-    levels = {stream.tokenizer.healpix_level for stream in streams}
-    assert len(levels) == 1, "All streams must use the same healpix_level."
-
+    """Return the shared grid used by the named encoders and downstream model."""
+    levels = {encoder.healpix_level for encoder in config.encoders.values()}
+    assert len(levels) == 1, "All encoders must use the same healpix_level."
     return levels.pop()
+
+
+def get_encoder_configs(cf: Config) -> dict[str, Config]:
+    """Resolve encoder settings and default stream tokenizer grids to their encoder grid."""
+    base = cf.copy()
+    settings = base.pop("encoders")
+    base.streams = {}
+    resolved = {name: OmegaConf.merge(base, overrides) for name, overrides in settings.items()}
+    for stream_name, stream in cf.streams.items():
+        name = stream.get("encoder", "default")
+        encoder = resolved[name]
+        encoder.streams[stream_name] = stream
+        encoder.streams[stream_name].setdefault("tokenizer", {})
+        tokenizer = encoder.streams[stream_name].tokenizer
+        level = tokenizer.setdefault("healpix_level", encoder.healpix_level)
+       #For now equal grids only, tokenizer and encoder to do.
+        if level != encoder.healpix_level:
+            raise ValueError(
+                f"Stream {stream_name!r} tokenizer.healpix_level ({level}) must match "
+                f"encoder {name!r} healpix_level ({encoder.healpix_level}); "
+            )
+    return resolved
 
 
 def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
@@ -287,7 +293,8 @@ def load_run_config(
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _apply_fixes(config)
+    config = _apply_fixes(config)
+    return config
 
 
 def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):

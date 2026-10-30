@@ -15,6 +15,7 @@ from typing import Any
 import torch
 
 from weathergen.common.config import Config, load_run_config, merge_configs
+from weathergen.datasets.batch import MultiBatch
 from weathergen.model.model import ModelParams
 from weathergen.model.model_interface import get_model
 from weathergen.model.ssl_target_processing import (
@@ -50,12 +51,15 @@ class EncoderTeacher(TargetAndAuxModuleBase):
         # TODO: support multiple LossLatentSSLStudentTeacher loss terms
         self.postprocess_targets = get_target_postprocessing(losses_cfg[0], training_cfg, **kwargs)
 
-    def forward_teacher(self, model_params, batch) -> Any:
+    def forward_teacher(self, model_params, batch: MultiBatch, target_idxs) -> Any:
         raise NotImplementedError("Subclasses must implement forward_teacher()")
 
-    def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
+    def compute(self, bidx, multi_batch, model_params, model, target_idxs) -> TargetAuxOutput:
         with torch.no_grad():
-            outputs = self.forward_teacher(model_params, batch).get_latent_prediction(0)
+            outputs = self.forward_teacher(
+                model_params, multi_batch, target_idxs
+            ).get_latent_prediction(0)
+            batch = multi_batch.batch.get_target_samples(target_idxs)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
@@ -91,8 +95,13 @@ class EMATeacher(EncoderTeacher):
         self.batch_size = batch_size
         self.reset()
 
-    def forward_teacher(self, model_params, batch):
-        return self.ema_model.forward_eval(model_params, batch)
+    def forward_teacher(self, model_params, batch: MultiBatch, target_idxs):
+        encoder_streams = {
+            name: list(encoder_cf.streams)
+            for name, encoder_cf in self.ema_model.ema_model.encoder_configs.items()
+        }
+        teacher_batch = MultiBatch(batch.batch.as_target_input(target_idxs), encoder_streams)
+        return self.ema_model.forward_eval(model_params, teacher_batch)
 
     def reset(self, batch_size=None):
         self.ema_model.reset()
@@ -157,11 +166,16 @@ class FrozenTeacher(EncoderTeacher):
 
         return cls(teacher_model, cf.training_config, teacher_model_params)
 
-    def forward_teacher(self, model_params, batch):
+    def forward_teacher(self, model_params, batch: MultiBatch, target_idxs):
+        encoder_streams = {
+            name: list(encoder_cf.streams)
+            for name, encoder_cf in self.teacher_model.encoder_configs.items()
+        }
+        teacher_batch = MultiBatch(batch.batch.as_target_input(target_idxs), encoder_streams)
         params = (
             self.teacher_model_params if self.teacher_model_params is not None else model_params
         )
-        return self.teacher_model(params, batch)
+        return self.teacher_model(params, teacher_batch)
 
     def reset(self, batch_size=None):
         pass
