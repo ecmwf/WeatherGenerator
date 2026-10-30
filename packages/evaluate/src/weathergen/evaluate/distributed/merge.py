@@ -10,8 +10,8 @@
 """Merging the results of the chunks of one (run, stream) into the results of the whole.
 
 A chunk is one ``_process_stream`` call on a window of samples × forecast steps; its results
-are ``results[region][metric] -> MetricResult`` like those of a whole run.  Merging is pure
-array work on them, no config and no MPI.
+are ``results[region][metric] -> MetricResult`` like those of a whole run, plus the colour
+bounds of its data.  Merging is pure array work on them, no config and no MPI.
 """
 
 import logging
@@ -66,6 +66,22 @@ def merge_results(
         region: {metric: _merge_metric(rs) for metric, rs in by_metric.items()}
         for region, by_metric in parts.items()
     }
+
+
+def merge_bounds(chunks: list[dict[str, dict]]) -> dict[str, dict]:
+    """The ``colour_bounds`` of the union of the chunks: min of the minima, max of the maxima.
+
+    Exact, since every bound is a min or a max over samples and points.  Channels and keys
+    missing from some chunks are taken from the ones that have them.
+    """
+    merged: dict[str, dict] = {}
+    for bounds in chunks:
+        for channel, by_key in bounds.items():
+            into = merged.setdefault(channel, {})
+            for key, value in by_key.items():
+                reduce = min if key.endswith("vmin") else max
+                into[key] = value if key not in into else reduce(into[key], value)
+    return merged
 
 
 def _in_window(r: MetricResult, window: list[int] | None) -> MetricResult:

@@ -29,7 +29,12 @@ from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.timeseries import Timeseries
-from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
+from weathergen.evaluate.utils.array_utils import (
+    bias_ranges,
+    colour_bounds,
+    common_ranges,
+    configured_bound,
+)
 from weathergen.evaluate.utils.config_compat import parse_data_plots
 
 _logger = logging.getLogger(__name__)
@@ -220,20 +225,26 @@ def _colour_ranges(
 ) -> tuple[dict, dict, dict]:
     """Colour ranges of the maps, the bias maps and the ensemble-std maps, per channel.
 
-    Computed over all forecast steps of the data given, unless *stream_opts* (the stream's
-    entry of the global plotting options) fixes them.
+    From *stream_opts* (the stream's entry of the global plotting options: ``vmin``,
+    ``vmax``, ``bias_vmax``, ``std_vmin``, ``std_vmax`` per channel, or per glob pattern);
+    what it lacks is computed over all forecast steps and samples of the data given.  A
+    chunked run puts the bounds of the whole (run, stream) into *stream_opts*, so the
+    data is not looked at here.
     """
-    range_args = (da_tars, da_preds, channels, stream_opts)
+    has_ens = any("ens" in da.dims for da in da_preds.values())
+    keys = ("vmin", "vmax", "bias_vmax") + (("std_vmin", "std_vmax") if has_ens else ())
+    if all(configured_bound(stream_opts, ch, k) is not None for ch in channels for k in keys):
+        bounds: dict = {}
+    else:
+        bounds = colour_bounds(da_tars, da_preds, channels)
+    range_args = (bounds, channels, stream_opts)
     maps_config_dict = oc.OmegaConf.to_container(common_ranges(*range_args), resolve=True)
     bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*range_args), resolve=True)
-
-    has_ens = any("ens" in da.dims for da in da_preds.values())
     if not has_ens:
         return maps_config_dict, bias_config_dict, maps_config_dict
 
-    std_preds = {fs: da.std(dim="ens") for fs, da in da_preds.items()}
     std_config_dict = oc.OmegaConf.to_container(
-        common_ranges(std_preds, std_preds, channels, stream_opts), resolve=True
+        common_ranges(*range_args, prefix="std_"), resolve=True
     )
     for cfg in std_config_dict.values():
         if isinstance(cfg, dict):

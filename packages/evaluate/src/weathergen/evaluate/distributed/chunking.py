@@ -21,11 +21,11 @@ Scoring chunk tasks cover the stream's ``evaluation`` windows, plotting chunk ta
         sample: all
 """
 
-import fnmatch
 import logging
 
 import omegaconf as oc
 
+from weathergen.evaluate.utils.array_utils import configured_bound
 from weathergen.evaluate.utils.config_compat import _split_entry, parse_data_plots
 
 _logger = logging.getLogger(__name__)
@@ -168,6 +168,7 @@ def build_plotting_chunk_tasks(
     channels: list[str],
     sample_size: int | None,
     fstep_size: int | None,
+    bounds: dict[str, dict] | None = None,
 ) -> list[dict]:
     """The ``_process_stream`` chunk tasks that draw the field plots of one (run, stream).
 
@@ -179,14 +180,16 @@ def build_plotting_chunk_tasks(
         The stream's plotting samples, forecast steps and channels (``check_availability``).
     sample_size, fstep_size:
         The chunk windows (``parse_distributed_config``).
+    bounds:
+        ``colour_bounds`` of the whole (run, stream), per channel.  They go into the tasks'
+        plotting options for the stream, where the config has not fixed a bound, so every
+        chunk draws with the same colour ranges.
 
     Notes
     -----
     Two data plots cannot be drawn by a chunk and are left out of the chunk configs, with a
     warning: ``timeseries`` whenever the stream is chunked (a chunk holds part of the steps),
-    and the across-samples histograms when the samples are chunked.  Until B3 the colour
-    ranges of a chunk come from its own data unless the config fixes them, so chunked
-    plotting warns about the channels without configured ``vmin`` / ``vmax``.
+    and the across-samples histograms when the samples are chunked.
     """
     run_id, stream = task["run_id"], task["stream"]
     sample_windows = windows(samples, sample_size)
@@ -207,22 +210,22 @@ def build_plotting_chunk_tasks(
             f"RUN {run_id} - {stream}: across-samples histograms are not drawn when the "
             "samples are chunked."
         )
-    if chunked:
-        stream_opts = task["global_plotting_opts"].get(stream) or {}
-        configured = [
-            key
-            for key, value in stream_opts.items()
-            if isinstance(value, dict | oc.DictConfig)
-            and all(isinstance(value.get(b), int | float) for b in ("vmin", "vmax"))
-        ]
-        unranged = [
-            ch for ch in channels if not any(fnmatch.fnmatch(ch, str(k)) for k in configured)
-        ]
-        if unranged:
-            _logger.warning(
-                f"RUN {run_id} - {stream}: no vmin / vmax configured for {unranged}; the frames "
-                "of different chunks may have different colour scales."
-            )
+    # the bounds of the whole (run, stream), under the config's own entries
+    global_plotting_opts = oc.OmegaConf.create(
+        oc.OmegaConf.to_container(task["global_plotting_opts"], resolve=True)
+        if isinstance(task["global_plotting_opts"], oc.DictConfig)
+        else task["global_plotting_opts"]
+    )
+    if bounds:
+        if stream not in global_plotting_opts:
+            global_plotting_opts[stream] = {}
+        stream_opts = global_plotting_opts[stream]
+        for channel, by_key in bounds.items():
+            for key, value in by_key.items():
+                if configured_bound(stream_opts, channel, key) is None:
+                    if channel not in stream_opts:
+                        stream_opts[channel] = {}
+                    stream_opts[channel][key] = value
 
     return [
         task
@@ -230,6 +233,7 @@ def build_plotting_chunk_tasks(
             "run": chunked_run_config(
                 task["run"], stream, "plotting", sample_window, fstep_window, frozenset(drop)
             ),
+            "global_plotting_opts": global_plotting_opts,
             "chunk": True,
         }
         for fstep_window in fstep_windows

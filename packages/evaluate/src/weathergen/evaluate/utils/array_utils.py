@@ -64,13 +64,8 @@ def calc_bounds(data_tars, data_preds, var, bound):
     return list_bound
 
 
-def common_ranges(
-    data_tars: dict,
-    data_preds: dict,
-    plot_chs: list[str],
-    global_plotting_opts_stream: oc.DictConfig,
-) -> oc.DictConfig:
-    """Calculate common colour ranges per variable across all fsteps.
+def colour_bounds(data_tars: dict, data_preds: dict, plot_chs: list[str]) -> dict[str, dict]:
+    """The data bounds the map colour ranges are built from, per variable.
 
     Parameters
     ----------
@@ -80,8 +75,81 @@ def common_ranges(
         Forecast step → prediction DataArray.
     plot_chs : list[str]
         Variables to include.
+
+    Returns
+    -------
+    dict[str, dict]
+        ``{var: {"vmin", "vmax", "bias_vmax", "std_vmin", "std_vmax"}}`` over all the
+        forecast steps and samples given: min / max of targets and predictions, the
+        absolute maximum of prediction − target, and the min / max of the ensemble
+        standard deviation (the two ``std_`` keys only when the predictions have an
+        ``ens`` dimension).  Pure numbers, so the bounds of chunks of the data combine
+        exactly (``merge_bounds``).
+    """
+    has_ens = any("ens" in da.dims for da in data_preds.values())
+    std_preds = {fs: da.std(dim="ens") for fs, da in data_preds.items()} if has_ens else {}
+    bounds = {}
+    for var in plot_chs:
+        bias_vals = np.concatenate(
+            [
+                (p - t).sel(channel=var).values.ravel()
+                for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
+            ]
+        )
+        bounds[var] = {
+            "vmin": _extreme(data_tars, data_preds, var, "min"),
+            "vmax": _extreme(data_tars, data_preds, var, "max"),
+            "bias_vmax": float(max(abs(bias_vals.max()), abs(bias_vals.min()))),
+        }
+        if has_ens:
+            bounds[var]["std_vmin"] = _extreme(std_preds, std_preds, var, "min")
+            bounds[var]["std_vmax"] = _extreme(std_preds, std_preds, var, "max")
+    return bounds
+
+
+def _extreme(data_tars: dict, data_preds: dict, var: str, bound: str) -> float:
+    """``calc_bounds`` reduced to one number, NaNs ignored."""
+    values = np.concatenate([np.ravel(a) for a in calc_bounds(data_tars, data_preds, var, bound)])
+    return float(np.nanmax(values) if bound == "max" else np.nanmin(values))
+
+
+def configured_bound(stream_opts: oc.DictConfig | dict, var: str, key: str) -> float | None:
+    """*key* (``vmin``, ``bias_vmax``, ...) of *var* in the stream's plotting options, or None.
+
+    An entry under the variable's own name wins over an entry under a glob pattern that
+    matches it (``"tp_*"``).
+    """
+    entry = stream_opts.get(var)
+    if isinstance(entry, oc.DictConfig | dict) and isinstance(entry.get(key), int | float):
+        return entry[key]
+    for pattern, entry in stream_opts.items():
+        pattern = str(pattern)
+        if not any(c in pattern for c in "*?[]") or not fnmatch.fnmatch(var, pattern):
+            continue
+        if isinstance(entry, oc.DictConfig | dict) and isinstance(entry.get(key), int | float):
+            return entry[key]
+    return None
+
+
+def common_ranges(
+    bounds: dict[str, dict],
+    plot_chs: list[str],
+    global_plotting_opts_stream: oc.DictConfig,
+    prefix: str = "",
+) -> oc.DictConfig:
+    """Colour range config per variable: ``vmin`` / ``vmax`` from the config, else from *bounds*.
+
+    Parameters
+    ----------
+    bounds : dict[str, dict]
+        ``colour_bounds(...)`` of the data; only consulted for the bounds the config lacks.
+    plot_chs : list[str]
+        Variables to include.
     global_plotting_opts_stream : oc.DictConfig
         Existing per-stream plotting config (used as base; may already contain ranges).
+    prefix : str
+        ``"std_"`` for the ensemble-std maps: their bounds are the ``std_vmin`` /
+        ``std_vmax`` of the config and of *bounds*, written as ``vmin`` / ``vmax``.
 
     Returns
     -------
@@ -92,42 +160,23 @@ def common_ranges(
     for var in plot_chs:
         if var not in maps_config:
             maps_config[var] = {}
-        # override empty bounds with matching glob bounds from config
-        for key, value in maps_config.items():
-            if not isinstance(value, oc.DictConfig | dict):
-                continue
-            k = str(key)
-            if any(c in k for c in "*?[]") and fnmatch.fnmatch(var, k):
-                for bound in ("vmin", "vmax"):
-                    if isinstance(value.get(bound), int | float):
-                        maps_config[var].setdefault(bound, value[bound])
-        # if vmax still missing, compute bound from data
-        if not isinstance(maps_config[var].get("vmax"), (int | float)):
-            list_max = calc_bounds(data_tars, data_preds, var, "max")
-            list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-            maps_config[var].update({"vmax": float(np.nanmax(list_max))})
-        # if vmin still missing, compute bound from data
-        if not isinstance(maps_config[var].get("vmin"), (int | float)):
-            list_min = calc_bounds(data_tars, data_preds, var, "min")
-            list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
-            maps_config[var].update({"vmin": float(np.nanmin(list_min))})
+        for bound in ("vmin", "vmax"):
+            value = configured_bound(global_plotting_opts_stream, var, prefix + bound)
+            maps_config[var][bound] = bounds[var][prefix + bound] if value is None else value
     return maps_config
 
 
 def bias_ranges(
-    data_tars: dict,
-    data_preds: dict,
+    bounds: dict[str, dict],
     plot_chs: list[str],
     global_plotting_opts_stream: oc.DictConfig,
 ) -> oc.DictConfig:
-    """Calculate symmetric bias colour ranges (preds − tars) per variable.
+    """Symmetric bias colour ranges (preds − tars) per variable.
 
     Parameters
     ----------
-    data_tars : dict
-        Forecast step → target DataArray.
-    data_preds : dict
-        Forecast step → prediction DataArray.
+    bounds : dict[str, dict]
+        ``colour_bounds(...)`` of the data; its ``bias_vmax`` is used unless the config has one.
     plot_chs : list[str]
         Variables to include.
     global_plotting_opts_stream : oc.DictConfig
@@ -140,13 +189,9 @@ def bias_ranges(
     """
     bias_config = global_plotting_opts_stream.copy()
     for var in plot_chs:
-        bias_vals = [
-            (p - t).sel(channel=var).values
-            for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
-        ]
-        abs_max = float(
-            max(abs(np.concatenate(bias_vals).max()), abs(np.concatenate(bias_vals).min()))
-        )
+        abs_max = configured_bound(global_plotting_opts_stream, var, "bias_vmax")
+        if abs_max is None:
+            abs_max = bounds[var]["bias_vmax"]
         bias_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
     return bias_config
 
