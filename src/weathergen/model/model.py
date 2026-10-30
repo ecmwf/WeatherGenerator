@@ -434,6 +434,10 @@ class Model(torch.nn.Module):
                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
                 )
         else:
+            assert not cf.get("diffusion", {}).get("enabled", False), (
+                "diffusion.enabled requires a forecast engine (fe_num_blocks > 0), "
+                f"got fe_num_blocks={cf.fe_num_blocks}"
+            )
             self.forecast_engine = IdentityEngine()
 
         # embed coordinates yielding one query token for each target token
@@ -905,7 +909,9 @@ class Model(torch.nn.Module):
                         "predict_residual", False
                     )
 
-                    if self.cf.get("inference_logging", {}).get("fe_diffusion_log_analytics", False):
+                    if self.cf.get("inference_logging", {}).get(
+                        "fe_diffusion_log_analytics", False
+                    ):
                         output.diffusion_steps_output = _decode_diffusion_steps(
                             self,
                             model_params,
