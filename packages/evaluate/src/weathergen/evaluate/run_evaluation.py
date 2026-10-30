@@ -36,6 +36,7 @@ from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
+    MetricResult,
     calc_scores_per_stream,
     metric_list_to_json,
     results_to_dict,
@@ -187,10 +188,14 @@ def _process_stream(
     regions: list[str],
     metrics: dict[str, object],
     plot_score_options: dict[str, object],
-) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
+    write_scores: bool = True,
+) -> tuple[str, str, dict[str, dict[str, MetricResult]]]:
     """
     Worker function for a single stream of a single run.
-    Returns a dictionary with the scores instead of modifying shared dict.
+
+    Returns ``(run_id, stream, results)`` with ``results[region][metric] -> MetricResult``:
+    the scores loaded from the JSON files, overridden by the ones computed here.  Empty
+    when the stream is not scored.
     Parameters
     ----------
 
@@ -210,6 +215,9 @@ def _process_stream(
         Dict of metrics to be processed and their parameters.
     plot_score_options:
         Dictionary containing all common score calculation options.
+    write_scores:
+        Write the computed scores to the JSON score files.  Off on the workers of a
+        distributed run, where the master writes the merged scores.
     """
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
@@ -217,14 +225,14 @@ def _process_stream(
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
-        return run_id, stream, {}, {}
+        return run_id, stream, {}
 
-    needs_plotting = stream_dict.get("plotting") and type_ in ("zarr", "anemoi-target")
+    # Data plots, score maps and init-hour scores need the data: readers that load it only
+    reads_data = type_ in ("zarr", "anemoi-target")
+    needs_plotting = stream_dict.get("plotting") and reads_data
     needs_scoring = stream_dict.get("evaluation", False)
 
     # --- Determine scoring state before loading any data ---
-    # score maps and init-hour scores are recomputed from the data: readers that load it only
-    reads_data = type_ in ("zarr", "anemoi-target")
     for option, name in (("plot_score_maps", "score_map"), ("plot_score_init_hour", "init_hour")):
         if plot_score_options.get(option, False) and not reads_data:
             _logger.warning(f"RUN {run_id} - {stream}: '{name}' not supported for type '{type_}'.")
@@ -261,9 +269,18 @@ def _process_stream(
 
     # Scoring per stream
     if not needs_scoring:
-        return run_id, stream, {}, {}
+        return run_id, stream, {}
 
-    scores_dict = stream_loaded_scores
+    # cached scores as MetricResults; the ones computed below override them
+    results: dict[str, dict[str, MetricResult]] = {}
+    for metric, by_region in stream_loaded_scores.items():
+        for region, by_stream in by_region.items():
+            for stream_key, by_run in by_stream.items():
+                for run_key, score in by_run.items():
+                    results.setdefault(region, {})[metric] = MetricResult(
+                        metric, region, stream_key, run_key, score
+                    )
+
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
@@ -271,7 +288,7 @@ def _process_stream(
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
-        return run_id, stream, scores_dict, {}
+        return run_id, stream, results
 
     # The climatology is aligned once and shared by both scoring calls.
     climatology = (
@@ -280,7 +297,7 @@ def _process_stream(
         else None
     )
     # Per-sample scores plus, for the score maps, the sample-aggregated scores.
-    results = calc_scores_per_stream(
+    computed = calc_scores_per_stream(
         reader,
         stream,
         regions_to_compute,
@@ -291,25 +308,25 @@ def _process_stream(
     )
     if plot_score_init_hour and output_data is not None:
         compute_scores_by_init_hour(
-            reader, stream, results, output_data, metrics_to_compute, climatology
+            reader, stream, computed, output_data, metrics_to_compute, climatology
         )
-    metric_list_to_json(reader, stream, results, regions_to_compute)
-    scores_dict = merge(stream_loaded_scores, results_to_dict(results, "score"))
+    if write_scores:
+        metric_list_to_json(reader, stream, computed, regions_to_compute)
 
-    # Drawn here, where the spatial scores of this (run, stream) are, until _process_stream
-    # returns the MetricResults and plot_evaluation can draw them from the merged results.
+    # Drawn here, where the spatial scores of this (run, stream) are complete in a serial
+    # run; a distributed run draws them on the master from the merged results.
     if do_score_maps:
         plot_score_maps(
             reader,
             stream,
-            results,
+            computed,
             global_plotting_options=global_plotting_opts,
             plot_score_options=plot_score_options,
         )
 
-    init_hour_scores = results_to_dict(results, "by_init_hour") if plot_score_init_hour else {}
-
-    return run_id, stream, scores_dict, init_hour_scores
+    for region, by_metric in computed.items():
+        results.setdefault(region, {}).update(by_metric)
+    return run_id, stream, results
 
 
 def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
@@ -322,12 +339,32 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     mlflow_client:
         Optional MLFlow client for uploading scores.
     """
+    tasks = build_stream_tasks(cfg)
+    results = [_process_stream(**task) for task in tasks]
+    finalise(cfg, *accumulate_stream_results(results), mlflow_client)
+
+
+def build_stream_tasks(cfg: dict) -> list[dict]:
+    """Parse the config and build one ``_process_stream`` task per (run, stream).
+
+    Readers are not built here; ``_process_stream`` builds its own.
+
+    Parameters
+    ----------
+    cfg:
+        Configuration input stored as dictionary; its metrics and plot options are
+        normalised in place.
+
+    Returns
+    -------
+    list[dict]
+        The keyword arguments of ``_process_stream``, one dict per (run, stream).
+    """
     with open_dict(cfg):
         cfg.evaluation.metrics = parse_metric_params(cfg.evaluation.metrics)
     runs = cfg.run_ids
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
-    summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
 
     # backward-compatibility with old way of specifying plotting options (bools) instead of lists:
@@ -342,9 +379,6 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     max_workers = cfg.get("max_workers")  # global hard cap for parallel workers
 
     tasks = []
-
-    # Build tasks per stream — avoid constructing heavyweight readers here;
-    # _process_stream will create its own reader when it actually needs one.
     for run_id, run in runs.items():
         if "streams" not in run:
             run["streams"] = default_streams
@@ -370,19 +404,55 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     "plot_score_options": plot_score_options,
                 }
             )
+    return tasks
 
+
+def accumulate_stream_results(
+    stream_results: list[tuple[str, str, dict[str, dict[str, MetricResult]]]],
+) -> tuple[dict, dict]:
+    """Nest the ``_process_stream`` results of all (run, stream) for the cross-run steps.
+
+    Parameters
+    ----------
+    stream_results:
+        ``(run_id, stream, results[region][metric] -> MetricResult)`` per (run, stream).
+
+    Returns
+    -------
+    tuple[dict, dict]
+        ``scores_dict[metric][region][stream][run_id] -> MetricResult.score`` and
+        ``init_hour_scores`` with the same nesting for ``MetricResult.by_init_hour``.
+    """
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     # init_hour_scores[metric][region][stream][run_id] = xr.DataArray(init_hour, forecast_step, ...)
     init_hour_scores: dict = {}
-    results = [_process_stream(**task) for task in tasks]
-
-    for _run_id, _stream, stream_scores, stream_init_hour_scores in results:
-        for metric, regions_dict in stream_scores.items():
+    for _run_id, _stream, results in stream_results:
+        for metric, regions_dict in results_to_dict(results, "score").items():
             for region, streams_dict in regions_dict.items():
                 for stream_key, runs_dict in streams_dict.items():
                     scores_dict[metric][region][stream_key].update(runs_dict)
 
-        merge(init_hour_scores, stream_init_hour_scores)
+        merge(init_hour_scores, results_to_dict(results, "by_init_hour"))
+    return scores_dict, init_hour_scores
+
+
+def finalise(
+    cfg: dict, scores_dict: dict, init_hour_scores: dict, mlflow_client: MlflowClient | None
+) -> None:
+    """Steps across runs, once all (run, stream) are done: MLflow upload and score plots.
+
+    Parameters
+    ----------
+    cfg:
+        Configuration input stored as dictionary.
+    scores_dict, init_hour_scores:
+        Output of ``accumulate_stream_results``.
+    mlflow_client:
+        Optional MLFlow client for uploading scores.
+    """
+    runs = cfg.run_ids
+    private_paths = cfg.get("private_paths")
+    summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
 
     # MLFlow logging
     if mlflow_client:
