@@ -57,7 +57,8 @@ class StreamData:
         idx: int,
         input_steps: int,
         output_steps: int,
-        healpix_cells: int,
+        source_healpix_cells: int,
+        target_healpix_cells: int,
     ) -> None:
         """
         StreamData object
@@ -71,8 +72,10 @@ class StreamData:
         output_steps : int
             Number of output steps
             Note -- Last input step and first output step always overlap.
-        healpix_cells : int
-            Number of healpix cells for source
+        source_healpix_cells : int
+            Number of native HEALPix cells for source
+        target_healpix_cells : int
+            Number of decoder HEALPix cells for targets
 
         Returns
         -------
@@ -83,7 +86,8 @@ class StreamData:
 
         self.input_steps = input_steps
         self.output_steps = output_steps
-        self.healpix_cells = healpix_cells
+        self.source_healpix_cells = source_healpix_cells
+        self.target_healpix_cells = target_healpix_cells
 
         self.source_is_spoof = [False for _ in range(self.input_steps)]
         self.target_is_spoof = [False for _ in range(self.output_steps)]
@@ -95,7 +99,7 @@ class StreamData:
         self.target_times_raw = [np.array([], dtype="datetime64[ns]") for _ in range(output_steps)]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [
-            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
+            torch.zeros(self.target_healpix_cells, dtype=torch.int32) for _ in range(output_steps)
         ]
         self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
@@ -104,7 +108,8 @@ class StreamData:
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = [
-            torch.zeros(self.healpix_cells, dtype=torch.int32) for _ in range(self.input_steps)
+            torch.zeros(self.source_healpix_cells, dtype=torch.int32)
+            for _ in range(self.input_steps)
         ]
         # unprocessed source (for logging)
         self.source_raw = [None for _ in range(self.input_steps)]

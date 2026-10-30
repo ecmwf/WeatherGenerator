@@ -14,7 +14,7 @@ GOES_ABI_IR:
   # Route this stream to encoders.goes in config_forecasting_geos.yml.
   encoder: goes
   # Omit tokenizer.healpix_level to inherit the selected encoder's grid.
-  # Must match for now; tokenizer-to-encoder resampling belongs in the next PR.
+  # Must match its encoder; tokenizer-to-encoder resampling remains future work.
   tokenizer:
     healpix_level: 5
   filenames: ['observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr']
