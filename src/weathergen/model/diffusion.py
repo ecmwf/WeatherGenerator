@@ -864,10 +864,10 @@ class NoiseEmbedder(torch.nn.Module):
 
     embedding_type:
       - "dit_legacy": DiT timestep embedding, frequencies 10000^(-k/half) in [1e-4, 1]. Should not
-        be used for new runs, only for backward compatibility with legacy checkpoints"
+        be used for new runs, only for backward compatibility with legacy checkpoints.
       - "log_fourier": log-spaced frequencies in [f_min, f_max] (rad per unit c_noise), fitted to
-        the c_noise range. Optionally the raw c_noise is appended as an extra, directly monotone channel.
-        Recommended: f_min=0.5, f_max=8*pi, include_raw (the f_* defaults here).
+        the c_noise range. Optionally the raw c_noise is appended as an extra, directly monotone
+        channel. Recommended: f_min=0.5, f_max=8*pi, include_raw (the f_* defaults here).
 
     The default embedding_type is "dit_legacy" only temporarily, for backward compatibility with
     checkpoints trained before this option existed; new runs should use "log_fourier".

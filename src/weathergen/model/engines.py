@@ -270,9 +270,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(
-                block, tokens_c, x_lens=cell_lens_c, use_reentrant=use_reentrant
-            )
+            tokens_c = checkpoint(block, tokens_c, x_lens=cell_lens_c, use_reentrant=use_reentrant)
         return tokens_c
 
 
@@ -751,9 +749,7 @@ class ForecastingEngine(torch.nn.Module):
                 else:
                     # additive conditioning is re-added at every block (but not a plain norm
                     # layer, see fe_layer_norm_after_blocks), not just once.
-                    if self.conditioning == "additive" and not isinstance(
-                        block, KwargLayerNorm
-                    ):
+                    if self.conditioning == "additive" and not isinstance(block, KwargLayerNorm):
                         tokens = tokens + conditioning
                     ada_ln_aux = conditioning if self.conditioning == "ada_ln" else None
                     tokens = checkpoint(
