@@ -90,6 +90,46 @@ def validate_correspondence_mode(correspondence_mode, target_cfgs, source_cfgs):
         )
 
 
+def get_noise_level_cfg(mode_cfg) -> dict | None:
+    """
+    Get the noise level config (masking_strategy_config.noise_level) of the target strategies
+    of a stage config (e.g. training_config).
+
+    Returns None if no enabled target strategy defines a noise level. All target strategies that
+    define one have to use the same noise level config.
+    """
+    target_cfgs = mode_cfg.get("target_input", None) or {}
+    noise_cfgs = [
+        t_cfg.get("masking_strategy_config", {}).get("noise_level", None)
+        for t_cfg in target_cfgs.values()
+        if t_cfg.get("enabled", True)
+    ]
+    noise_cfgs = [c for c in noise_cfgs if c is not None]
+    if len(noise_cfgs) == 0:
+        return None
+    assert all(c == noise_cfgs[0] for c in noise_cfgs), (
+        "all target strategies have to use the same masking_strategy_config.noise_level"
+    )
+    return noise_cfgs[0]
+
+
+def sample_log_sigma(rng: np.random.Generator, noise_level_cfg: dict) -> float:
+    """
+    Draw the log noise level log(sigma) from the noise level distribution.
+
+    log_uniform: log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
+    log_normal: log(sigma) ~ N(p_mean, p_std)
+    """
+    distribution = noise_level_cfg.get("distribution", "log_normal")
+    if distribution == "log_uniform":
+        return rng.uniform(
+            np.log(noise_level_cfg["sigma_min"]), np.log(noise_level_cfg["sigma_max"])
+        )
+    if distribution == "log_normal":
+        return rng.normal(noise_level_cfg["p_mean"], noise_level_cfg["p_std"])
+    raise ValueError(f"Unsupported noise_level distribution: {distribution}")
+
+
 # Convert to torch.bool
 def to_bool_tensor(arr):
     return torch.from_numpy(np.asarray(arr)).to(torch.bool)
@@ -124,16 +164,8 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(
-        self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None, diffusion_cfg=None
-    ):
+    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
-
-        # diffusion: training noise distribution, one noise level is drawn per sample
-        diffusion_cfg = diffusion_cfg or {}
-        self.diffusion_noise_cfg = (
-            diffusion_cfg.get("noise", {}) if diffusion_cfg.get("enabled", False) else None
-        )
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -351,31 +383,48 @@ class Masker:
         return corr_dict
 
     def build_sample_params(
-        self, num_target_samples: int, source_to_target: np.typing.NDArray
+        self, stream_masks: dict[str, tuple[MaskData, MaskData, np.typing.NDArray]]
     ) -> tuple[list[dict], list[dict]]:
         """
         Generate stream-independent masking parameters, i.e. shared by all streams of a sample.
 
-        Parameters are drawn per target sample. Each source sample inherits the parameters of its
-        corresponding target sample, e.g. so that model and loss use the same diffusion noise level.
+        Parameters are drawn per target sample from the masking_strategy_config of its target
+        strategy (currently the noise level, masking_strategy_config.noise_level, stored as
+        log_sigma). Each source sample inherits the parameters of its corresponding target sample,
+        e.g. so that model and loss use the same noise level.
 
         Parameters
         ----------
-        num_target_samples : int
-            Number of target samples.
-        source_to_target : np.typing.NDArray
-            Index of the corresponding target sample for each source sample.
+        stream_masks : dict[str, tuple[MaskData, MaskData, np.typing.NDArray]]
+            (target masks, source masks, source to target mapping) for each stream, as returned
+            by build_samples_for_stream().
 
         Returns
         -------
         tuple[list[dict], list[dict]]
             Parameters for each target sample and for each source sample.
         """
-        target_params = [{} for _ in range(num_target_samples)]
+        # noise level config of the target strategy of each target sample
+        noise_level_cfgs, source_to_target = None, None
+        for target_masks, _, stream_source_to_target in stream_masks.values():
+            cfgs = [
+                md.params.get("masking_strategy_config", {}).get("noise_level", None)
+                for md in target_masks.metadata
+            ]
+            if noise_level_cfgs is None:
+                noise_level_cfgs, source_to_target = cfgs, stream_source_to_target
+            assert cfgs == noise_level_cfgs, (
+                "masking_strategy_config.noise_level has to be identical for all streams"
+            )
+        has_noise_level = [cfg is not None for cfg in noise_level_cfgs]
+        assert all(has_noise_level) or not any(has_noise_level), (
+            "either all or no target strategies have to define masking_strategy_config.noise_level"
+        )
 
-        if self.diffusion_noise_cfg is not None:
-            for params in target_params:
-                params["noise_level_rn"] = self._sample_diffusion_noise_level()
+        target_params = [{} for _ in noise_level_cfgs]
+        for params, noise_level_cfg in zip(target_params, noise_level_cfgs, strict=True):
+            if noise_level_cfg is not None:
+                params["log_sigma"] = sample_log_sigma(self.rng, noise_level_cfg)
 
         assert (np.asarray(source_to_target) >= 0).all(), (
             "source sample without corresponding target sample"
@@ -383,18 +432,6 @@ class Masker:
         source_params = [dict(target_params[tidx]) for tidx in source_to_target]
 
         return target_params, source_params
-
-    def _sample_diffusion_noise_level(self) -> float:
-        """
-        Draw the diffusion noise level for a sample from the training noise distribution.
-
-        log_uniform: returns log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
-        log_normal: returns eta ~ N(0, 1); sigma = exp(eta * p_std + p_mean) in the model
-        """
-        noise_cfg = self.diffusion_noise_cfg
-        if noise_cfg.get("distribution", "log_normal") == "log_uniform":
-            return self.rng.uniform(np.log(noise_cfg["sigma_min"]), np.log(noise_cfg["sigma_max"]))
-        return self.rng.normal(0.0, 1.0)
 
     def build_samples_for_stream(
         self,

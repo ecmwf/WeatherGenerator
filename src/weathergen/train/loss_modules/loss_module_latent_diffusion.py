@@ -43,11 +43,6 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.diff_cf = self.cf.diffusion
         self.sigma_data = self.diff_cf.sigma_data
-        noise_cf = self.diff_cf.noise
-        self.noise_distribution = noise_cf.get("distribution", "log_normal")
-        if self.noise_distribution == "log_normal":
-            self.p_mean = noise_cf.p_mean
-            self.p_std = noise_cf.p_std
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -61,11 +56,8 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.random_target = None
 
-    def _get_noise_weight(self, noise_level_rn):
-        if self.noise_distribution == "log_uniform":
-            sigma = noise_level_rn.exp()
-        else:
-            sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
+    def _get_noise_weight(self, log_sigma):
+        sigma = log_sigma.exp()
 
         # Select the per-noise-level loss weighting. The default "edm" weight is only
         # balanced when the denoiser uses EDM preconditioning (c_skip/c_out). When the
@@ -159,13 +151,13 @@ class LossLatentDiffusion(LossModuleBase):
             )
 
         # one noise level per sample: (B,)
-        eta = torch.as_tensor(
-            targets.aux_outputs["noise_level_rn"], device=self.device, dtype=torch.float32
+        log_sigma = torch.as_tensor(
+            targets.aux_outputs["log_sigma"], device=self.device, dtype=torch.float32
         ).reshape(-1)
         fsteps = len(target_tokens_all)
 
         # During validation, use unweighted loss (no noise-level scaling)
-        noise_weight = None if self.stage == "val" else self._get_noise_weight(eta)
+        noise_weight = None if self.stage == "val" else self._get_noise_weight(log_sigma)
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)

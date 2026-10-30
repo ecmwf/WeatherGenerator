@@ -109,9 +109,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # initialise healpix
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(
-            cf.healpix_level, stage, cf.streams, self.mode_cfg, diffusion_cfg=cf.get("diffusion")
-        )
+        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
@@ -728,10 +726,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         )
         batch.set_source_target_matching(source_to_target)
 
-        # stream-independent masking parameters per sample (e.g. diffusion noise level)
-        target_params, source_params = self.masker.build_sample_params(
-            num_target_samples, source_to_target
-        )
+        # stream-independent masking parameters per sample (e.g. noise level)
+        target_params, source_params = self.masker.build_sample_params(masks_streams)
         batch.update_sample_meta_info(source_params, target_params)
         if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
             # valid time of the first target step: start of its time window (stream independent)

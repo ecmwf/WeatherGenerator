@@ -58,10 +58,11 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
     ) -> tuple[Any, Any]:
         # one noise level per target sample, drawn by the Masker
         sample_meta_info = batch.stack_sample_meta_info()
-        assert "noise_level_rn" in sample_meta_info, (
-            "noise_level_rn missing in sample meta info; is diffusion.enabled set?"
+        assert "log_sigma" in sample_meta_info, (
+            "log_sigma missing in sample meta info; set masking_strategy_config.noise_level of "
+            "the target strategy"
         )
-        noise_level_rn = sample_meta_info["noise_level_rn"]
+        log_sigma = sample_meta_info["log_sigma"]
 
         # TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():
@@ -85,6 +86,6 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         target_aux_output.add_latent_target(0, "diffusion_latent", tokens_multi[:, -1])
 
         # TODO: write function in TargetAuxOutput class
-        target_aux_output.aux_outputs = {"noise_level_rn": noise_level_rn}
+        target_aux_output.aux_outputs = {"log_sigma": log_sigma}
 
         return target_aux_output
