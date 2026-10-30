@@ -114,20 +114,22 @@ def get_noise_level_cfg(mode_cfg) -> dict | None:
     return noise_cfgs[0]
 
 
-def sample_log_sigma(rng: np.random.Generator, noise_level_cfg: dict) -> float:
+def sample_noise_level(rng: np.random.Generator, noise_level_cfg: dict) -> float:
     """
-    Draw the log noise level log(sigma) from the noise level distribution.
+    Draw the noise level, i.e. the noise standard deviation sigma, from the noise level
+    distribution.
 
     log_uniform: log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
     log_normal: log(sigma) ~ N(p_mean, p_std)
     """
     distribution = noise_level_cfg.get("distribution", "log_normal")
     if distribution == "log_uniform":
-        return rng.uniform(
+        log_sigma = rng.uniform(
             np.log(noise_level_cfg["sigma_min"]), np.log(noise_level_cfg["sigma_max"])
         )
+        return float(np.exp(log_sigma))
     if distribution == "log_normal":
-        return rng.normal(noise_level_cfg["p_mean"], noise_level_cfg["p_std"])
+        return float(np.exp(rng.normal(noise_level_cfg["p_mean"], noise_level_cfg["p_std"])))
     raise ValueError(f"Unsupported noise_level distribution: {distribution}")
 
 
@@ -390,9 +392,9 @@ class Masker:
         Generate stream-independent masking parameters, i.e. shared by all streams of a sample.
 
         Parameters are drawn per target sample from the masking_strategy_config of its target
-        strategy (currently the noise level, masking_strategy_config.noise_level, stored as
-        log_sigma). Each source sample inherits the parameters of its corresponding target sample,
-        e.g. so that model and loss use the same noise level.
+        strategy (currently the noise level sigma, drawn from masking_strategy_config.noise_level
+        and stored as noise_level). Each source sample inherits the parameters of its
+        corresponding target sample, e.g. so that model and loss use the same noise level.
 
         Parameters
         ----------
@@ -425,7 +427,7 @@ class Masker:
         target_params = [{} for _ in noise_level_cfgs]
         for params, noise_level_cfg in zip(target_params, noise_level_cfgs, strict=True):
             if noise_level_cfg is not None:
-                params["log_sigma"] = sample_log_sigma(self.rng, noise_level_cfg)
+                params["noise_level"] = sample_noise_level(self.rng, noise_level_cfg)
 
         assert (np.asarray(source_to_target) >= 0).all(), (
             "source sample without corresponding target sample"

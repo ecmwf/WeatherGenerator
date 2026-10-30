@@ -346,7 +346,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         Args:
             tokens: Training tensor of shape (B, H, D) - required during training
             fstep: Forecast step index - required for both modes
-            meta_info: Stream-independent meta information: log_sigma (training),
+            meta_info: Stream-independent meta information: noise_level (training),
                 timestamp (date/time conditioning), conditioning_tokens (forecast conditioning)
             coords: Optional coordinate tensor
             num_steps: Number of diffusion steps for inference (default: 30)
@@ -435,16 +435,14 @@ class DiffusionForecastEngine(torch.nn.Module):
             # passes second-to-last here)
             c = meta_info["conditioning_tokens"]
 
-        assert "log_sigma" in meta_info, (
-            "log_sigma (sample meta_info, drawn by the Masker from "
+        assert "noise_level" in meta_info, (
+            "noise_level (sample meta_info, drawn by the Masker from "
             "masking_strategy_config.noise_level) is required for training"
         )
-        # one noise level per sample: (B,) -> (B, 1, 1) to broadcast over cells and channels
-        sigma = (
-            torch.as_tensor(meta_info["log_sigma"], dtype=torch.float32, device=tokens.device)
-            .reshape(-1, 1, 1)
-            .exp()
-        )
+        # noise level sigma, one per sample: (B,) -> (B, 1, 1) to broadcast over cells and channels
+        sigma = torch.as_tensor(
+            meta_info["noise_level"], dtype=torch.float32, device=tokens.device
+        ).reshape(-1, 1, 1)
         assert sigma.shape[0] == y.shape[0], (
             f"got {sigma.shape[0]} noise levels for {y.shape[0]} samples"
         )

@@ -40,7 +40,7 @@ training_config:
     "forecasting" : {
       masking_strategy: "forecast",
       masking_strategy_config: {
-        # diffusion noise level, one per sample: sigma = exp(log_sigma)
+        # distribution of the diffusion noise level sigma, one draw per sample
         noise_level: {distribution: "log_normal", p_mean: -1.2, p_std: 1.2},
         },
       num_samples: 1
