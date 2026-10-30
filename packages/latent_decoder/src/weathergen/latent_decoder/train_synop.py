@@ -1,7 +1,7 @@
 """Train a simple decoder head on stored latents and SYNOP reports, then test it.
 
 usage: python -m weathergen.latent_decoder.train_synop LATENTS OBS OUT
-           --train FIRST LAST --test FIRST LAST [options]
+           --train FIRST LAST [--train FIRST LAST ...] --test FIRST LAST [options]
 
 Writes OUT/head.pt, OUT/predictions.npz (one row per test report: base, step, time, lat, lon,
 prediction and observation per channel) and OUT/scores.json (RMSE per step and channel).
@@ -51,7 +51,14 @@ def main():
     ap.add_argument("latents")
     ap.add_argument("obs")
     ap.add_argument("out")
-    ap.add_argument("--train", nargs=2, required=True, metavar=("FIRST", "LAST"), help="init range")
+    ap.add_argument(
+        "--train",
+        nargs=2,
+        action="append",
+        required=True,
+        metavar=("FIRST", "LAST"),
+        help="init range; repeat for several",
+    )
     ap.add_argument("--test", nargs=2, required=True, metavar=("FIRST", "LAST"), help="init range")
     ap.add_argument("--iters", type=int, default=20000, help="training states")
     ap.add_argument("--lr", type=float, default=3e-4)
@@ -69,16 +76,17 @@ def main():
     t0 = time.time()
 
     latents, obs = open_latents(args.latents), ObsStore(args.obs)
-    train_pairs = pairs(latents.bases, *args.train)
+    train_pairs = [p for first, last in args.train for p in pairs(latents.bases, first, last)]
     test_bases = latents.bases[
         (latents.bases >= np.datetime64(args.test[0], "s"))
         & (latents.bases <= np.datetime64(args.test[1], "s"))
     ][:: args.test_stride]
     test_pairs = pairs(test_bases, *args.test)
     # an init forecasts 41 windows ahead: test inits must not share verification times with training
-    last_train = max(b for b, _ in train_pairs)
-    if min(b for b, _ in test_pairs) < last_train + STEP * latents.steps:
-        raise ValueError("test inits start within 10 days of the last training init")
+    train_bases = np.unique([b for b, _ in train_pairs])
+    for b in np.unique([b for b, _ in test_pairs]):
+        if np.abs(train_bases - b).min() < STEP * latents.steps:
+            raise ValueError(f"test init {b} is within 41 steps of a training init")
     _logger.info("%d training states, %d test states", len(train_pairs), len(test_pairs))
 
     mean, std = channel_stats(obs, train_pairs)
