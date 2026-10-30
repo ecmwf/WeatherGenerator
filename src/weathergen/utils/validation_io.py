@@ -268,10 +268,16 @@ def write_output(
 
 @cache
 def _get_healpix_coords(healpix_level: int) -> npt.NDArray:
-    """Cache latitude/longitude coordinates for each HEALPix level."""
+    """Cache latitude/longitude coordinates for each HEALPix level, in the order of the tokens.
+
+    The tokenizer computes HEALPix indices with phi = lon + 180 deg (see
+    theta_phi_to_standard_coords), so token c lies at the centre of nested pixel c shifted by
+    -180 deg in longitude.
+    """
     ipix = np.arange(12 * 4**healpix_level)
     lon, lat = hp.healpix_to_lonlat(ipix, 2**healpix_level, order="nested")
-    return np.stack([lat.to_value("deg"), lon.to_value("deg")], axis=1).astype(np.float32)
+    lon = lon.to_value("deg") - 180.0
+    return np.stack([lat.to_value("deg"), lon], axis=1).astype(np.float32)
 
 
 def _get_latent_coords(cf, sample) -> npt.NDArray | None:
