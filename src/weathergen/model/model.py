@@ -850,9 +850,18 @@ class Model(torch.nn.Module):
         ensemble_size = self._get_inference_ensemble_size()
         if ensemble_size > 1 and len(samples_or_output.latent) == 0:
             tokens = tokens.repeat(ensemble_size, *([1] * (tokens.dim() - 1)))
-        # keep the stochasticity of the forecast engine (dropout, latent noise) as in training
+            # Twin experiment (test_config.forecast.twin_latent_noise_std = s > 0): members 1.. start
+            # from the initial latent state plus white noise of s x its RMS, member 0 is the control
+            twin_std = self._get_test_forecast_option("twin_latent_noise_std", 0.0)
+            if twin_std > 0.0:
+                n = tokens.shape[0] // ensemble_size
+                pert = tokens[n:]
+                noise = torch.randn_like(pert) * pert.pow(2).mean().sqrt() * twin_std
+                tokens = torch.cat([tokens[:n], pert + noise])
+        # keep the stochasticity of the forecast engine (dropout, latent noise) as in training, unless
+        # test_config.forecast.ensemble_dropout is false (deterministic members, e.g. twin experiments)
         fe_train_modes = None
-        if ensemble_size > 1:
+        if ensemble_size > 1 and self._get_test_forecast_option("ensemble_dropout", True):
             fe_train_modes = {m: m.training for m in self.forecast_engine.modules()}
             self.forecast_engine.train()
         # Persistent dropout masks (test_config.forecast.dropout_persist_steps = N > 0): the forecast
@@ -1012,6 +1021,11 @@ class Model(torch.nn.Module):
                 m.training = mode
 
         return output
+
+    def _get_test_forecast_option(self, name: str, default):
+        """test_config.forecast.<name>, or default if not set."""
+        test_cfg = self.cf.get("test_config", None) or {}
+        return (test_cfg.get("forecast", None) or {}).get(name, default)
 
     def _get_dropout_persist_steps(self) -> int:
         """
