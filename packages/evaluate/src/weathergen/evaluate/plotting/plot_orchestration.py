@@ -1341,7 +1341,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     # Map each resolved plot option to the subdir(s) it produces, so PDF merging
     # can reuse the same flags without re-deriving them from eval_opt.
     plot_option_subdirs = {
-        "lead_time": [
+        "metric_plots": [
             PlotSubdir.line_plots,
             PlotSubdir.psd_plots,
             PlotSubdir.qq_plots,
@@ -1381,7 +1381,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 rank_histogram_plot_metric_region(metric, region, runs, scores_dict, plotter)
                 continue
 
-            if do_lead_time:
+            if do_metric_plots:
                 if metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:
