@@ -31,12 +31,10 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenReader,
     WeatherGenZarrReader,
 )
-from weathergen.evaluate.plotting.plot_orchestration import (
-    plot_evaluation,
-    plot_stream_data,
-    plot_stream_results,
-)
+from weathergen.evaluate.plotting.animations import build_animations
+from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
 from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
     MetricResult,
@@ -328,8 +326,10 @@ def _process_stream(
     # Score maps and videos, drawn here where the results and all the frames of this
     # (run, stream) are complete in a serial run; a distributed run draws them once all
     # its chunks are done.
+    if do_score_maps and computed:
+        plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
     if reads_data:
-        plot_stream_results(reader, stream, computed, global_plotting_opts, plot_score_options)
+        build_animations(reader, stream, global_plotting_opts, plot_score_options)
 
     for region, by_metric in computed.items():
         results.setdefault(region, {}).update(by_metric)
