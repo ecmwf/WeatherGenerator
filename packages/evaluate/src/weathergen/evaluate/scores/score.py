@@ -1569,8 +1569,7 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        add_noise: bool = False,
-        noise_fac: float = 1.0e-03,
+        random_for_tied: bool = True,
         seed: int | None = None,
     ) -> xr.DataArray:
         """
@@ -1583,17 +1582,13 @@ class Scores:
             Forecast data array with ensemble dimension
         gt: xr.DataArray
             Ground truth data array
-        add_noise: bool
-            Flag if a small amount of random noise should be added to the data to avoid ties in the
-            rank histogram.
-            Off by default (ties are then counted as "obs above forecast"). Recommended for
-            data with many ties, e.g. precipitation, cf. Sec. 4.2.2 in Harris et al. 2022.
-        noise_fac: float
-            Half-width-scale of the zero-mean uniform noise, relative to the standard deviation
-            of the ground truth per channel. Default is 1.0e-03. Only relevant if add_noise is
-            True.
+        random_for_tied: bool
+            If True, the obs rank is drawn uniformly among the positions it ties with ensemble
+            members (Hamill 2001), as in ``xskillscore.rank_histogram``. If False, ties are
+            counted as "obs above forecast", which biases data with many ties (e.g. precipitation
+            zeros) towards the upper bins.
         seed: int | None
-            Seed for the noise generator (None for non-reproducible noise).
+            Seed for the tie-breaking random numbers (None for non-reproducible results).
 
         Returns
         -------
@@ -1625,29 +1620,19 @@ class Scores:
         obs_stacked = ground_truth.stack({"npoints": hist_dims})
         fcst_stacked = prediction.stack({"npoints": hist_dims})
 
-        if add_noise:
-            # jitter amplitude relative to the spread of the ground truth, one value per
-            # remaining dim (e.g. channel), so it is independent of the variable's units
-            spread = obs_stacked.std("npoints")
-            amplitude = noise_fac * spread.where(spread > 0, 1.0)
-            seeds = np.random.SeedSequence(seed).spawn(2)
-
-            def _jitter(x: xr.DataArray, seed_seq: np.random.SeedSequence) -> xr.DataArray:
-                # zero-mean uniform noise, added out of place so the inputs stay untouched
-                dtype = np.result_type(x.dtype, np.float32)
-                if x.chunks is None:
-                    rng = np.random.default_rng(seed_seq)
-                    noise = rng.random(size=x.shape, dtype=dtype)
-                else:
-                    rng = da.random.default_rng(seed_seq)
-                    noise = rng.random(size=x.shape, chunks=x.chunks).astype(dtype)
-                return x + (x.copy(data=noise) - 0.5) * amplitude
-
-            obs_stacked = _jitter(obs_stacked, seeds[0])
-            fcst_stacked = _jitter(fcst_stacked, seeds[1])
-
-        # calculate ranks for all data points
-        rank = (obs_stacked >= fcst_stacked).sum(dim=self._ens_dim)
+        # rank of the obs among the members: number of members below it, plus the ties
+        n_less = (fcst_stacked < obs_stacked).sum(dim=self._ens_dim)
+        n_tied = (fcst_stacked == obs_stacked).sum(dim=self._ens_dim)
+        if random_for_tied:
+            # draw the obs rank uniformly among its tied positions (Hamill 2001), so that ties
+            # contribute a flat histogram instead of piling up in the upper bins
+            if n_tied.chunks is None:
+                u = np.random.default_rng(seed).random(size=n_tied.shape)
+            else:
+                u = da.random.default_rng(seed).random(size=n_tied.shape, chunks=n_tied.chunks)
+            rank = n_less + np.floor(n_tied.copy(data=u) * (n_tied + 1)).astype(n_less.dtype)
+        else:
+            rank = n_less + n_tied
         rank.name = "rank"  # name for xr.DataArray is required for histogram-method
 
         n_bins = len(fcst_stacked[self._ens_dim]) + 1
@@ -1728,8 +1713,7 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        add_noise: bool = False,
-        noise_fac: float = 1.0e-03,
+        random_for_tied: bool = True,
         seed: int | None = None,
         pool_n_fsteps: int | None = None,
     ) -> xr.DataArray:
@@ -1745,17 +1729,13 @@ class Scores:
             Forecast data array with ensemble dimension
         gt: xr.DataArray
             Ground truth data array
-        add_noise: bool
-            Flag if a small amount of random noise should be added to the data to avoid ties in the
-            rank histogram.
-            Off by default (ties are then counted as "obs above forecast"). Recommended for
-            data with many ties, e.g. precipitation, cf. Sec. 4.2.2 in Harris et al. 2022.
-        noise_fac: float
-            Half-width-scale of the zero-mean uniform noise, relative to the standard deviation
-            of the ground truth per channel. Default is 1.0e-03. Only relevant if add_noise is
-            True.
+        random_for_tied: bool
+            If True, the obs rank is drawn uniformly among the positions it ties with ensemble
+            members (Hamill 2001), as in ``xskillscore.rank_histogram``. If False, ties are
+            counted as "obs above forecast", which biases data with many ties (e.g. precipitation
+            zeros) towards the upper bins.
         seed: int | None
-            Seed for the noise generator (None for non-reproducible noise).
+            Seed for the tie-breaking random numbers (None for non-reproducible results).
         pool_n_fsteps: int | None
             Number of consecutive forecast steps to pool into one histogram plot. Not used in
             the computation; it is read from the metric parameters at plotting time.
@@ -1766,9 +1746,7 @@ class Scores:
             Number of pooled verification points per preserved dimension (e.g. channel) -
             a placeholder value; the actual per-bin counts are stored in ``.attrs``.
         """
-        counts = self.calc_rank_histogram_counts(
-            p, gt, add_noise=add_noise, noise_fac=noise_fac, seed=seed
-        )
+        counts = self.calc_rank_histogram_counts(p, gt, random_for_tied=random_for_tied, seed=seed)
         n_bins = counts.attrs["n_bins"]
         npoints = counts.sum(dim="rank_bin")
 
@@ -1780,8 +1758,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         norm: bool = True,
-        add_noise: bool = False,
-        noise_fac: float = 1.0e-03,
+        random_for_tied: bool = True,
         seed: int | None = None,
     ) -> xr.DataArray:
         """
@@ -1797,26 +1774,20 @@ class Scores:
         norm: bool
             Flag if normalized counts should be returned. If True, the rank histogram will be
             normalized by the number of verification points.
-        add_noise: bool
-            Flag if a small amount of random noise should be added to the data to avoid ties in the
-            rank histogram.
-            Off by default (ties are then counted as "obs above forecast"). Recommended for
-            data with many ties, e.g. precipitation, cf. Sec. 4.2.2 in Harris et al. 2022.
-        noise_fac: float
-            Half-width-scale of the zero-mean uniform noise, relative to the standard deviation
-            of the ground truth per channel. Default is 1.0e-03. Only relevant if add_noise is
-            True.
+        random_for_tied: bool
+            If True, the obs rank is drawn uniformly among the positions it ties with ensemble
+            members (Hamill 2001), as in ``xskillscore.rank_histogram``. If False, ties are
+            counted as "obs above forecast", which biases data with many ties (e.g. precipitation
+            zeros) towards the upper bins.
         seed: int | None
-            Seed for the noise generator (None for non-reproducible noise).
+            Seed for the tie-breaking random numbers (None for non-reproducible results).
 
         Returns
         -------
         xr.DataArray
             Rank histogram flatness score, one value per preserved dimension (e.g. channel).
         """
-        counts = self.calc_rank_histogram_counts(
-            p, gt, add_noise=add_noise, noise_fac=noise_fac, seed=seed
-        )
+        counts = self.calc_rank_histogram_counts(p, gt, random_for_tied=random_for_tied, seed=seed)
         return self.calc_rank_histogram_flatness_score(counts, norm=norm)
 
     def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
