@@ -115,6 +115,200 @@ class DiffusionForecastConditioning:
             )
 
 
+class ParticleGuidance:
+    """Repulsion-only diverse ensemble sampling (particle guidance).
+
+    Only instantiated when ``diffusion_particle_guidance`` is enabled in the config (see
+    ``DiffusionForecastEngine.__init__``), so callers can treat ``self.particle_guidance``
+    itself as the enabled flag. The members are denoised jointly with a repulsive force
+    between them (see :meth:`correct_drift`); still a no-op when only one member is
+    sampled, since there is nothing to repel (guarded by the caller via ``batch_size``).
+    """
+
+    def __init__(self, cf: Config):
+        # Repulsion magnitude as a fraction of the ODE drift at sigma_max.
+        self.strength = cf.get("diffusion_particle_guidance_strength", 0.1)
+        # Annealing exponent p in alpha(sigma) = strength * (sigma / sigma_max_eff) ** p.
+        # Repulsion is strongest at high sigma, where the trajectory still decides which
+        # mode it falls into, and is annealed to zero so members land on-manifold.
+        self.sigma_power = cf.get("diffusion_particle_guidance_sigma_power", 1.0)
+        # Space in which pairwise member distances are measured: "x0" (denoiser output,
+        # recommended) or "xt" (the noisy state itself).
+        self.kernel_space = cf.get("diffusion_particle_guidance_kernel_space", "x0")
+        # Number of HEALPix cells whose particle systems are solved at once; 0 = all.
+        # Purely a memory/speed trade-off, the result is identical either way.
+        self.cell_chunk = cf.get("diffusion_particle_guidance_cell_chunk", 4096)
+        assert self.kernel_space in {"x0", "xt"}, (
+            f"diffusion_particle_guidance_kernel_space must be 'x0' or 'xt' "
+            f"(got '{self.kernel_space}')"
+        )
+        # Register/class tokens are not spatial and receive zero repulsive force.
+        self.n_special = cf.num_register_tokens + cf.num_class_tokens
+
+    def log_once(self, batch_size: int) -> None:
+        """Log why guidance is (in)active; call once per ``_run_ode`` invocation."""
+        if batch_size == 1:
+            logger.warning(
+                "diffusion_particle_guidance is enabled but only one sample is being "
+                "denoised, so it is inactive; it requires "
+                "fe_diffusion_num_ensemble_members > 1."
+            )
+        else:
+            logger.info(
+                f"Particle guidance active: strength={self.strength}, "
+                f"sigma_power={self.sigma_power}, kernel_space={self.kernel_space}, "
+                f"members={batch_size}"
+            )
+
+    @staticmethod
+    def _scale(drift: torch.Tensor, force: torch.Tensor, alpha: float) -> torch.Tensor:
+        """Scale factor putting the repulsion at ``alpha`` times the ODE drift magnitude.
+
+        The raw potential gradient has no natural scale: it depends on the kernel
+        bandwidth, the latent width and the member spread, so a bare strength constant
+        would need re-tuning for every configuration (and, with the median bandwidth,
+        would sit several orders of magnitude away from 1). Rescaling the whole force by
+        one scalar per step leaves the *direction* of the potential gradient untouched --
+        it only fixes the overall magnitude, which is exactly what the alpha(sigma)
+        schedule is for -- while making the strength knob dimensionless: 0.1 means the
+        repulsion perturbs each ODE step by ~10%.
+        """
+        return alpha * drift.norm() / force.norm().clamp_min(1e-12)
+
+    def _repulsion(
+        self,
+        x: torch.Tensor,
+        denoised: torch.Tensor,
+        sigma: torch.Tensor,
+        sigma_max_eff: float,
+    ) -> "tuple[torch.Tensor, float, float]":
+        """Repulsive force between ensemble members, computed per HEALPix cell.
+
+        Implements the repulsion-only ("fixed potential") variant of particle guidance
+        (Corso et al., 2024). The N members are drawn from the joint distribution
+
+            p(x^1, ..., x^N)  ~  prod_i p_sigma(x^i) * exp(-alpha(sigma) * Phi(x^1..x^N))
+
+        instead of independently, with the similarity potential
+
+            Phi = sum_cells sum_{i<j} k(z^i, z^j),    k = RBF kernel
+
+        so each member picks up the extra drift -alpha * grad_{x^i} Phi, pushing it away
+        from the other members. Note what is *not* done here: each member keeps its own
+        score untouched. That is what separates this from SVGD, which additionally
+        replaces every particle's score by a kernel-weighted average over all particles
+        and locks the driving and repulsive terms at a fixed relative weight. Keeping the
+        score intact means the members stay (approximately) marginal samples of p_sigma
+        and the strength is a free schedule; with alpha -> 0 the plain EDM ODE is
+        recovered exactly.
+
+        The kernel acts *per HEALPix cell*: for each cell the N member latents form their
+        own independent N-particle system in R^D. One kernel over the whole flattened
+        (num_tokens * D) state would be useless at this dimensionality -- with N ~ 10
+        particles in ~10^6 dimensions an RBF either saturates (k -> 0 for every pair, no
+        repulsion) or goes flat under the median bandwidth (a uniform push away from the
+        centroid). The per-cell form also produces *local* spread, which is what an
+        ensemble forecast actually wants.
+
+        Register and class tokens are not spatial, so they receive zero force.
+
+        Note on kernel_space="x0": the kernel is evaluated on the denoiser output
+        x0_hat = D(x; sigma) while the force is applied to x, i.e. the Jacobian
+        dx0_hat/dx is approximated by the identity. Taking it exactly would mean
+        backpropagating through the denoiser at every ODE step. x0-space is preferred
+        over xt-space because at high sigma the pairwise distances between the x^i are
+        dominated by their independent noise draws rather than by any real difference in
+        the forecast they encode -- repulsion there would push apart along noise
+        directions, which the next denoiser call simply undoes.
+
+        Args:
+            x: Current noisy state, shape (N, T, D).
+            denoised: Denoiser output D(x; sigma) at this step, shape (N, T, D).
+            sigma: Current noise level (scalar tensor).
+            sigma_max_eff: Upper bound of the sampling schedule, used to normalise the
+                annealing factor.
+
+        Returns:
+            ``(force, alpha, spread)``. *force* has shape (N, T, D) and points away from
+            the other members (zero on the register/class tokens); it is unnormalised, the
+            caller sets its magnitude. *alpha* is the annealing factor at this sigma.
+            *spread* is the RMS pairwise member distance in kernel space -- the quantity
+            particle guidance exists to increase, and the main diagnostic for tuning.
+        """
+        n_members = x.shape[0]
+        n_special = self.n_special
+
+        alpha = self.strength * (float(sigma.item()) / sigma_max_eff) ** self.sigma_power
+
+        # Kernel coordinates (N, H, D) with the non-spatial tokens dropped, transposed to
+        # (H, N, D) so that each HEALPix cell is one independent particle system.
+        z_src = denoised if self.kernel_space == "x0" else x
+        z_all = z_src[:, n_special:, :].detach().transpose(0, 1)
+        n_cells = z_all.shape[0]
+
+        out = torch.zeros_like(x, dtype=torch.float32)
+        out_spatial = out[:, n_special:, :]  # view: writes below land in `out`
+        off_diag = ~torch.eye(n_members, dtype=torch.bool, device=x.device)
+
+        d2_sum = torch.zeros((), device=x.device, dtype=torch.float64)
+        d2_count = 0
+
+        # The cells are independent, so chunking over them is exact -- unlike chunking over
+        # members, which would silently drop the couplings this whole method is about. It
+        # is worth doing: an fp32 copy of every cell at once is N * H * D * 4 bytes (~0.8 GB
+        # for 8 members at healpix level 5 and d2048), and the force doubles that.
+        chunk = self.cell_chunk or n_cells
+        for start in range(0, n_cells, chunk):
+            z = z_all[start : start + chunk].float()
+
+            # Pairwise squared distances per cell, (chunk, N, N). Expanded form rather than
+            # cdist, whose accurate mode would materialise a (chunk, N, N, D) tensor.
+            z_sq = z.pow(2).sum(dim=-1)
+            d2 = (
+                z_sq.unsqueeze(2) + z_sq.unsqueeze(1) - 2.0 * torch.bmm(z, z.transpose(1, 2))
+            ).clamp_min(0.0)
+
+            # Median heuristic on the off-diagonal entries: h = median(||zi - zj||^2) / log N,
+            # which makes sum_j k_ij ~ 1 and keeps the repulsion from either saturating or
+            # vanishing. Recomputed at every step and for every cell, because the member
+            # spread changes by orders of magnitude along the trajectory and across cells --
+            # any fixed bandwidth would be wrong almost everywhere.
+            med = d2[:, off_diag].median(dim=1).values  # (chunk,)
+            h = (med / math.log(n_members)).clamp_min(1e-12).view(-1, 1, 1)
+
+            k = torch.exp(-d2 / h)  # (chunk, N, N)
+
+            # -grad_{z_i} Phi = (2/h) * sum_j k_ij (z_i - z_j), pointing away from the other
+            # members. The i == j term vanishes, so leaving the diagonal of k in is harmless.
+            force = (2.0 / h) * (k.sum(dim=-1, keepdim=True) * z - torch.bmm(k, z))
+            out_spatial[:, start : start + chunk, :] = force.transpose(0, 1)
+
+            d2_sum += d2[:, off_diag].sum().double()
+            d2_count += d2.shape[0] * n_members * (n_members - 1)
+
+        spread = math.sqrt(d2_sum.item() / d2_count)
+        return out.to(x.dtype), alpha, spread
+
+    def correct_drift(
+        self,
+        drift: torch.Tensor,
+        x: torch.Tensor,
+        denoised: torch.Tensor,
+        sigma: torch.Tensor,
+        sigma_max_eff: float,
+    ) -> "tuple[torch.Tensor, float, float]":
+        """Adjust an ODE drift term by the repulsive force between ensemble members.
+
+        Only meaningful when more than one member is being jointly sampled; callers are
+        expected to guard the call site accordingly (e.g. via ``batch_size > 1``).
+
+        Returns:
+            ``(corrected_drift, alpha, spread)`` -- see :meth:`_repulsion` for *alpha*/*spread*.
+        """
+        force, alpha, spread = self._repulsion(x, denoised, sigma, sigma_max_eff)
+        return drift - self._scale(drift, force, alpha) * force, alpha, spread
+
+
 class DiffusionForecastEngine(torch.nn.Module):
     # Adopted from https://github.com/NVlabs/edm/blob/main/training/loss.py#L72
 
@@ -237,27 +431,10 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.s_max = math.inf if _s_max is None else float(_s_max)
         self.s_noise = float(self.cf.get("fe_diffusion_s_noise", 1.0))
 
-        # Particle guidance (repulsion-only diverse ensemble sampling)
-        # When enabled *and* more than one ensemble member is sampled, the members are
-        # denoised jointly with a repulsive force between them; see
-        # _particle_guidance_repulsion. Disabled by default, in which case the sampler is
-        # exactly the plain EDM ODE and no extra work is done.
-        self.particle_guidance = self.cf.get("diffusion_particle_guidance", False)
-        # Repulsion magnitude as a fraction of the ODE drift at sigma_max (see _run_ode).
-        self.pg_strength = self.cf.get("diffusion_particle_guidance_strength", 0.1)
-        # Annealing exponent p in alpha(sigma) = strength * (sigma / sigma_max_eff) ** p.
-        # Repulsion is strongest at high sigma, where the trajectory still decides which
-        # mode it falls into, and is annealed to zero so members land on-manifold.
-        self.pg_sigma_power = self.cf.get("diffusion_particle_guidance_sigma_power", 1.0)
-        # Space in which pairwise member distances are measured: "x0" (denoiser output,
-        # recommended) or "xt" (the noisy state itself).
-        self.pg_kernel_space = self.cf.get("diffusion_particle_guidance_kernel_space", "x0")
-        # Number of HEALPix cells whose particle systems are solved at once; 0 = all.
-        # Purely a memory/speed trade-off, the result is identical either way.
-        self.pg_cell_chunk = self.cf.get("diffusion_particle_guidance_cell_chunk", 4096)
-        assert self.pg_kernel_space in {"x0", "xt"}, (
-            f"diffusion_particle_guidance_kernel_space must be 'x0' or 'xt' "
-            f"(got '{self.pg_kernel_space}')"
+        # Particle guidance (repulsion-only diverse ensemble sampling); see ParticleGuidance.
+        # Only initialised when explicitly enabled, so its presence doubles as the flag.
+        self.particle_guidance = (
+            ParticleGuidance(cf) if cf.get("diffusion_particle_guidance", False) else None
         )
 
         self.cur_token = None  # TODO: re move after single sample experiments
@@ -621,135 +798,6 @@ class DiffusionForecastEngine(torch.nn.Module):
             x_cur
         )
         return x_post, t_post
-    
-    @staticmethod
-    def _pg_scale(drift: torch.Tensor, force: torch.Tensor, alpha: float) -> torch.Tensor:
-        """Scale factor putting the repulsion at ``alpha`` times the ODE drift magnitude.
-
-        The raw potential gradient has no natural scale: it depends on the kernel
-        bandwidth, the latent width and the member spread, so a bare strength constant
-        would need re-tuning for every configuration (and, with the median bandwidth,
-        would sit several orders of magnitude away from 1). Rescaling the whole force by
-        one scalar per step leaves the *direction* of the potential gradient untouched --
-        it only fixes the overall magnitude, which is exactly what the alpha(sigma)
-        schedule is for -- while making the strength knob dimensionless: 0.1 means the
-        repulsion perturbs each ODE step by ~10%.
-        """
-        return alpha * drift.norm() / force.norm().clamp_min(1e-12)
-
-    def _particle_guidance_repulsion(
-        self,
-        x: torch.Tensor,
-        denoised: torch.Tensor,
-        sigma: torch.Tensor,
-        sigma_max_eff: float,
-    ) -> "tuple[torch.Tensor, float, float]":
-        """Repulsive force between ensemble members, computed per HEALPix cell.
-
-        Implements the repulsion-only ("fixed potential") variant of particle guidance
-        (Corso et al., 2024). The N members are drawn from the joint distribution
-
-            p(x^1, ..., x^N)  ~  prod_i p_sigma(x^i) * exp(-alpha(sigma) * Phi(x^1..x^N))
-
-        instead of independently, with the similarity potential
-
-            Phi = sum_cells sum_{i<j} k(z^i, z^j),    k = RBF kernel
-
-        so each member picks up the extra drift -alpha * grad_{x^i} Phi, pushing it away
-        from the other members. Note what is *not* done here: each member keeps its own
-        score untouched. That is what separates this from SVGD, which additionally
-        replaces every particle's score by a kernel-weighted average over all particles
-        and locks the driving and repulsive terms at a fixed relative weight. Keeping the
-        score intact means the members stay (approximately) marginal samples of p_sigma
-        and the strength is a free schedule; with alpha -> 0 the plain EDM ODE is
-        recovered exactly.
-
-        The kernel acts *per HEALPix cell*: for each cell the N member latents form their
-        own independent N-particle system in R^D. One kernel over the whole flattened
-        (num_tokens * D) state would be useless at this dimensionality -- with N ~ 10
-        particles in ~10^6 dimensions an RBF either saturates (k -> 0 for every pair, no
-        repulsion) or goes flat under the median bandwidth (a uniform push away from the
-        centroid). The per-cell form also produces *local* spread, which is what an
-        ensemble forecast actually wants.
-
-        Register and class tokens are not spatial, so they receive zero force.
-
-        Note on kernel_space="x0": the kernel is evaluated on the denoiser output
-        x0_hat = D(x; sigma) while the force is applied to x, i.e. the Jacobian
-        dx0_hat/dx is approximated by the identity. Taking it exactly would mean
-        backpropagating through the denoiser at every ODE step. x0-space is preferred
-        over xt-space because at high sigma the pairwise distances between the x^i are
-        dominated by their independent noise draws rather than by any real difference in
-        the forecast they encode -- repulsion there would push apart along noise
-        directions, which the next denoiser call simply undoes.
-
-        Args:
-            x: Current noisy state, shape (N, T, D).
-            denoised: Denoiser output D(x; sigma) at this step, shape (N, T, D).
-            sigma: Current noise level (scalar tensor).
-            sigma_max_eff: Upper bound of the sampling schedule, used to normalise the
-                annealing factor.
-
-        Returns:
-            ``(force, alpha, spread)``. *force* has shape (N, T, D) and points away from
-            the other members (zero on the register/class tokens); it is unnormalised, the
-            caller sets its magnitude. *alpha* is the annealing factor at this sigma.
-            *spread* is the RMS pairwise member distance in kernel space -- the quantity
-            particle guidance exists to increase, and the main diagnostic for tuning.
-        """
-        n_members = x.shape[0]
-        n_special = self.cf.num_register_tokens + self.cf.num_class_tokens
-
-        alpha = self.pg_strength * (float(sigma.item()) / sigma_max_eff) ** self.pg_sigma_power
-
-        # Kernel coordinates (N, H, D) with the non-spatial tokens dropped, transposed to
-        # (H, N, D) so that each HEALPix cell is one independent particle system.
-        z_src = denoised if self.pg_kernel_space == "x0" else x
-        z_all = z_src[:, n_special:, :].detach().transpose(0, 1)
-        n_cells = z_all.shape[0]
-
-        out = torch.zeros_like(x, dtype=torch.float32)
-        out_spatial = out[:, n_special:, :]  # view: writes below land in `out`
-        off_diag = ~torch.eye(n_members, dtype=torch.bool, device=x.device)
-
-        d2_sum = torch.zeros((), device=x.device, dtype=torch.float64)
-        d2_count = 0
-
-        # The cells are independent, so chunking over them is exact -- unlike chunking over
-        # members, which would silently drop the couplings this whole method is about. It
-        # is worth doing: an fp32 copy of every cell at once is N * H * D * 4 bytes (~0.8 GB
-        # for 8 members at healpix level 5 and d2048), and the force doubles that.
-        chunk = self.pg_cell_chunk or n_cells
-        for start in range(0, n_cells, chunk):
-            z = z_all[start : start + chunk].float()
-
-            # Pairwise squared distances per cell, (chunk, N, N). Expanded form rather than
-            # cdist, whose accurate mode would materialise a (chunk, N, N, D) tensor.
-            z_sq = z.pow(2).sum(dim=-1)
-            d2 = (
-                z_sq.unsqueeze(2) + z_sq.unsqueeze(1) - 2.0 * torch.bmm(z, z.transpose(1, 2))
-            ).clamp_min(0.0)
-
-            # Median heuristic on the off-diagonal entries: h = median(||zi - zj||^2) / log N,
-            # which makes sum_j k_ij ~ 1 and keeps the repulsion from either saturating or
-            # vanishing. Recomputed at every step and for every cell, because the member
-            # spread changes by orders of magnitude along the trajectory and across cells --
-            # any fixed bandwidth would be wrong almost everywhere.
-            med = d2[:, off_diag].median(dim=1).values  # (chunk,)
-            h = (med / math.log(n_members)).clamp_min(1e-12).view(-1, 1, 1)
-
-            k = torch.exp(-d2 / h)  # (chunk, N, N)
-
-            # -grad_{z_i} Phi = (2/h) * sum_j k_ij (z_i - z_j), pointing away from the other
-            # members. The i == j term vanishes, so leaving the diagonal of k in is harmless.
-            force = (2.0 / h) * (k.sum(dim=-1, keepdim=True) * z - torch.bmm(k, z))
-            out_spatial[:, start : start + chunk, :] = force.transpose(0, 1)
-
-            d2_sum += d2[:, off_diag].sum().double()
-            d2_count += d2.shape[0] * n_members * (n_members - 1)
-
-        spread = math.sqrt(d2_sum.item() / d2_count)
-        return out.to(x.dtype), alpha, spread
 
     def _run_ode(
         self,
@@ -833,19 +881,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
 
         # Particle guidance couples the members, so it needs more than one of them.
-        pg_active = self.particle_guidance and batch_size > 1
-        if log_diagnostics and self.particle_guidance and batch_size == 1:
-            logger.warning(
-                "diffusion_particle_guidance is enabled but only one sample is being "
-                "denoised, so it is inactive; it requires "
-                "fe_diffusion_num_ensemble_members > 1."
-            )
-        if log_diagnostics and pg_active:
-            logger.info(
-                f"Particle guidance active: strength={self.pg_strength}, "
-                f"sigma_power={self.pg_sigma_power}, kernel_space={self.pg_kernel_space}, "
-                f"members={batch_size}"
-            )
+        pg_active = self.particle_guidance is not None and batch_size > 1
+        if self.particle_guidance is not None:
+            self.particle_guidance.log_once(batch_size)
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -903,10 +941,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             denoised = self.denoise(x=x_post, c=c, sigma=t_post, fstep=fstep, coords=coords)
             d_cur = (x_post - denoised) / t_post
             if pg_active:
-                pg_force, pg_alpha, pg_spread = self._particle_guidance_repulsion(
-                    x_post, denoised, t_post, sigma_max_eff
+                d_cur, pg_alpha, pg_spread = self.particle_guidance.correct_drift(
+                    d_cur, x_post, denoised, t_post, sigma_max_eff
                 )
-                d_cur = d_cur - self._pg_scale(d_cur, pg_force, pg_alpha) * pg_force
             x_next = x_post + (t_next - t_post) * d_cur
 
             # Apply 2nd order correction.
@@ -914,10 +951,9 @@ class DiffusionForecastEngine(torch.nn.Module):
                 denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords)
                 d_prime = (x_next - denoised) / t_next
                 if pg_active:
-                    pg_force_p, pg_alpha_p, _ = self._particle_guidance_repulsion(
-                        x_next, denoised, t_next, sigma_max_eff
+                    d_prime, pg_alpha_p, _ = self.particle_guidance.correct_drift(
+                        d_prime, x_next, denoised, t_next, sigma_max_eff
                     )
-                    d_prime = d_prime - self._pg_scale(d_prime, pg_force_p, pg_alpha_p) * pg_force_p
                 x_next = x_post + (t_next - t_post) * (0.5 * d_cur + 0.5 * d_prime)
 
             # --- Record diagnostics ---
