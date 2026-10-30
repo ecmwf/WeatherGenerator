@@ -24,6 +24,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from weathergen.common.logger import init_loggers
 from weathergen.common.paths import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
+from weathergen.evaluate.distributed.chunking import parse_distributed_config
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
@@ -189,10 +190,10 @@ def _process_stream(
     regions: list[str],
     metrics: dict[str, object],
     plot_score_options: dict[str, object],
-    write_scores: bool = True,
+    chunk: bool = False,
 ) -> tuple[str, str, dict[str, dict[str, MetricResult]]]:
     """
-    Worker function for a single stream of a single run.
+    Worker function for a single stream of a single run, or for one chunk of it.
 
     Returns ``(run_id, stream, results)`` with ``results[region][metric] -> MetricResult``:
     the scores loaded from the JSON files, overridden by the ones computed here.  Empty
@@ -216,9 +217,11 @@ def _process_stream(
         Dict of metrics to be processed and their parameters.
     plot_score_options:
         Dictionary containing all common score calculation options.
-    write_scores:
-        Write the computed scores to the JSON score files.  Off on the workers of a
-        distributed run, where the master writes the merged scores.
+    chunk:
+        The call is one chunk of samples × forecast steps of the (run, stream)
+        (``distributed.chunking``): the ``metrics`` given are computed for all ``regions``
+        without consulting the JSON score files, nothing is written to them, and the score
+        maps and videos are left to the end of the whole (run, stream).
     """
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
@@ -233,26 +236,23 @@ def _process_stream(
     needs_plotting = stream_dict.get("plotting") and reads_data
     needs_scoring = stream_dict.get("evaluation", False)
 
-    # --- Determine scoring state before loading any data ---
-    for option, name in (("plot_score_maps", "score_map"), ("plot_score_init_hour", "init_hour")):
-        if plot_score_options.get(option, False) and not reads_data:
-            _logger.warning(f"RUN {run_id} - {stream}: '{name}' not supported for type '{type_}'.")
     do_score_maps = plot_score_options.get("plot_score_maps", False) and reads_data
     plot_score_init_hour = plot_score_options.get("plot_score_init_hour", False) and reads_data
 
-    recomputable_metrics = {}
-    stream_loaded_scores: dict = {}
-    needs_score_recomputation = False
-
-    if needs_scoring:
-        stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
-        needs_score_recomputation = (
-            do_score_maps or plot_score_init_hour or bool(recomputable_metrics)
-        ) and reads_data
+    # --- Determine scoring state before loading any data ---
+    results: dict[str, dict[str, MetricResult]] = {}
+    metrics_to_compute: dict = {}
+    recomputable_metrics: dict = {}
+    if needs_scoring and chunk:
+        metrics_to_compute = {r: metrics for r in regions}
+    elif needs_scoring:
+        results, metrics_to_compute, recomputable_metrics = cached_scores_and_metrics_to_compute(
+            reader, stream, regions, metrics, plot_score_options, reads_data
+        )
 
     # --- Load data only when necessary ---
     output_data = None
-    if needs_score_recomputation:
+    if metrics_to_compute and reads_data:
         available_data = reader.check_availability(stream, mode="evaluation")
         if available_data.score_availability:
             output_data = reader.get_data(
@@ -269,27 +269,7 @@ def _process_stream(
         plot_stream_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
-    results: dict[str, dict[str, MetricResult]] = {}
     computed: dict[str, dict[str, MetricResult]] = {}
-    metrics_to_compute: dict = {}
-    regions_to_compute: list[str] = []
-    if needs_scoring:
-        # cached scores as MetricResults; the ones computed below override them
-        for metric, by_region in stream_loaded_scores.items():
-            for region, by_stream in by_region.items():
-                for stream_key, by_run in by_stream.items():
-                    for run_key, score in by_run.items():
-                        results.setdefault(region, {})[metric] = MetricResult(
-                            metric, region, stream_key, run_key, score
-                        )
-
-        if recomputable_metrics:
-            metrics_to_compute = recomputable_metrics
-            regions_to_compute = list(set(recomputable_metrics.keys()))
-        elif do_score_maps or plot_score_init_hour:
-            metrics_to_compute = {r: metrics for r in regions}
-            regions_to_compute = regions
-
     if metrics_to_compute:
         # The climatology is aligned once and shared by both scoring calls.
         climatology = (
@@ -301,7 +281,7 @@ def _process_stream(
         computed = calc_scores_per_stream(
             reader,
             stream,
-            regions_to_compute,
+            list(metrics_to_compute),
             metrics_to_compute,
             output_data=output_data,
             climatology=climatology,
@@ -311,29 +291,103 @@ def _process_stream(
             compute_scores_by_init_hour(
                 reader, stream, computed, output_data, metrics_to_compute, climatology
             )
-        # Only the scores missing from the JSON files are written: the others were recomputed
-        # for the score maps / init-hour scores and are the cached ones again.
-        missing = {
-            region: {
-                m: r for m, r in by_metric.items() if m in recomputable_metrics.get(region, {})
-            }
-            for region, by_metric in computed.items()
-        }
-        missing = {region: by_metric for region, by_metric in missing.items() if by_metric}
-        if write_scores and missing:
-            metric_list_to_json(reader, stream, missing, list(missing))
+        write_missing_scores(reader, stream, computed, recomputable_metrics)
 
     # Score maps and videos, drawn here where the results and all the frames of this
-    # (run, stream) are complete in a serial run; a distributed run draws them once all
-    # its chunks are done.
-    if do_score_maps and computed:
-        plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
-    if reads_data:
-        build_animations(reader, stream, global_plotting_opts, plot_score_options)
+    # (run, stream) are complete; a chunked run draws them once all its chunks are done.
+    if not chunk:
+        if do_score_maps and computed:
+            plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
+        if reads_data:
+            build_animations(reader, stream, global_plotting_opts, plot_score_options)
 
     for region, by_metric in computed.items():
         results.setdefault(region, {}).update(by_metric)
     return run_id, stream, results
+
+
+def cached_scores_and_metrics_to_compute(
+    reader,
+    stream: str,
+    regions: list[str],
+    metrics: dict[str, object],
+    plot_score_options: dict[str, object],
+    reads_data: bool,
+) -> tuple[dict[str, dict[str, MetricResult]], dict, dict]:
+    """What is already in the JSON score files of a scored (run, stream), and what to compute.
+
+    Parameters
+    ----------
+    reader:
+        Reader of the run.
+    stream:
+        Stream name.
+    regions, metrics:
+        Regions and ``{metric: parameters}`` requested.
+    plot_score_options:
+        ``get_plot_score_options(...)``: score maps and init-hour scores need the data, so
+        they force a recomputation of every metric.
+    reads_data:
+        Whether the reader loads data (zarr readers); the two options above are warned
+        about and ignored otherwise.
+
+    Returns
+    -------
+    tuple[dict, dict, dict]
+        ``cached[region][metric] -> MetricResult`` (the scores found in the files),
+        ``metrics_to_compute[region][metric] -> parameters`` (the missing ones, or all of
+        them when the score maps / init-hour scores are requested) and
+        ``recomputable_metrics[region][metric] -> parameters`` (the missing ones only: what
+        has to be written back).
+    """
+    for option, name in (("plot_score_maps", "score_map"), ("plot_score_init_hour", "init_hour")):
+        if plot_score_options.get(option, False) and not reads_data:
+            _logger.warning(
+                f"RUN {reader.run_id} - {stream}: '{name}' not supported for this run type."
+            )
+    needs_data = reads_data and (
+        plot_score_options.get("plot_score_maps", False)
+        or plot_score_options.get("plot_score_init_hour", False)
+    )
+    stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
+
+    # cached scores as MetricResults; the ones computed later override them
+    cached: dict[str, dict[str, MetricResult]] = {}
+    for metric, by_region in stream_loaded_scores.items():
+        for region, by_stream in by_region.items():
+            for stream_key, by_run in by_stream.items():
+                for run_key, score in by_run.items():
+                    cached.setdefault(region, {})[metric] = MetricResult(
+                        metric, region, stream_key, run_key, score
+                    )
+
+    if recomputable_metrics:
+        metrics_to_compute = recomputable_metrics
+    elif needs_data:
+        metrics_to_compute = {r: metrics for r in regions}
+    else:
+        metrics_to_compute = {}
+    return cached, metrics_to_compute, recomputable_metrics
+
+
+def write_missing_scores(
+    reader,
+    stream: str,
+    computed: dict[str, dict[str, MetricResult]],
+    recomputable_metrics: dict,
+) -> None:
+    """Write to the JSON score files the computed scores that were missing from them.
+
+    The others were recomputed for the score maps / init-hour scores and are the cached
+    ones again, so they are not written (and not reported as replaced).
+    """
+    missing = {
+        region: {m: r for m, r in by_metric.items() if m in recomputable_metrics.get(region, {})}
+        for region, by_metric in computed.items()
+    }
+    missing = {region: by_metric for region, by_metric in missing.items() if by_metric}
+    if missing:
+        metric_list_to_json(reader, stream, missing, list(missing))
 
 
 def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
@@ -346,6 +400,12 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     mlflow_client:
         Optional MLFlow client for uploading scores.
     """
+    if parse_distributed_config(cfg)[0]:
+        # the chunked run imports this module: imported here to avoid the cycle
+        from weathergen.evaluate.distributed.runner import run_chunked
+
+        run_chunked(cfg, mlflow_client)
+        return
     tasks = build_stream_tasks(cfg)
     results = [_process_stream(**task) for task in tasks]
     finalise(cfg, *accumulate_stream_results(results), mlflow_client)
