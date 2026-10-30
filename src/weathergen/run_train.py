@@ -19,6 +19,8 @@ import time
 import traceback
 from pathlib import Path
 
+from omegaconf import OmegaConf
+
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
@@ -182,7 +184,12 @@ def run_train(args):
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
-    cf.streams = config.load_streams(Path(cf.streams_directory))
+    # merge in freshly loaded streams, but keep any `streams.*` CLI/config overrides already in cf
+    loaded_streams = config.load_streams(Path(cf.streams_directory))
+    existing_streams = cf.get("streams", None)
+    cf.streams = (
+        OmegaConf.merge(loaded_streams, existing_streams) if existing_streams else loaded_streams
+    )
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
