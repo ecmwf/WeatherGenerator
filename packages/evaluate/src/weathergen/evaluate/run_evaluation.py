@@ -24,7 +24,13 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from weathergen.common.logger import init_loggers
 from weathergen.common.paths import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
-from weathergen.evaluate.distributed.chunking import parse_distributed_config
+from weathergen.evaluate.distributed.chunking import (
+    build_plotting_chunk_tasks,
+    build_scoring_chunk_tasks,
+    parse_distributed_config,
+    windows,
+)
+from weathergen.evaluate.distributed.merge import merge_results
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
@@ -293,8 +299,8 @@ def _process_stream(
             )
         write_missing_scores(reader, stream, computed, recomputable_metrics)
 
-    # Score maps and videos, drawn here where the results and all the frames of this
-    # (run, stream) are complete; a chunked run draws them once all its chunks are done.
+    # Score maps and videos need the whole (run, stream): a serial call is the whole, so it
+    # draws them here; a chunk is not, so _run_stream_in_chunks draws them after all chunks.
     if not chunk:
         if do_score_maps and computed:
             plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
@@ -401,14 +407,121 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
         Optional MLFlow client for uploading scores.
     """
     if parse_distributed_config(cfg)[0]:
-        # the chunked run imports this module: imported here to avoid the cycle
-        from weathergen.evaluate.distributed.runner import run_chunked
-
         run_chunked(cfg, mlflow_client)
         return
     tasks = build_stream_tasks(cfg)
     results = [_process_stream(**task) for task in tasks]
     finalise(cfg, *accumulate_stream_results(results), mlflow_client)
+
+
+def run_chunked(cfg: dict, mlflow_client: MlflowClient | None) -> None:
+    """``evaluate_from_config`` with every (run, stream) cut into chunks (``distributed``).
+
+    The chunk tasks run one after the other in this process; an MPI run drives the same
+    tasks from ``distributed.runner``.
+    """
+    _, sample_size, fstep_size = parse_distributed_config(cfg)
+    stream_results = [
+        _run_stream_in_chunks(task, sample_size, fstep_size) for task in build_stream_tasks(cfg)
+    ]
+    finalise(cfg, *accumulate_stream_results(stream_results), mlflow_client)
+
+
+def _run_stream_in_chunks(
+    task: dict, sample_size: int | None, fstep_size: int | None
+) -> tuple[str, str, dict[str, dict[str, MetricResult]]]:
+    """``_process_stream`` of one (run, stream), as chunk tasks.
+
+    Scoring chunk tasks first (their results merged, the missing scores written), then the
+    plotting chunk tasks, then the score maps and videos of the whole (run, stream).  A run
+    whose reader does not load data has nothing to chunk and goes through ``_process_stream``
+    as it is.
+    """
+    run_id, run, stream = task["run_id"], task["run"], task["stream"]
+    type_ = run.get("type", "zarr")
+    if type_ not in ("zarr", "anemoi-target"):
+        return _process_stream(**task)
+    reader = get_reader(type_, run, run_id, task["private_paths"], task["regions"], task["metrics"])
+    stream_cfg = reader.get_stream(stream)
+    if not stream_cfg:
+        return _process_stream(**task)
+    global_plotting_opts = task["global_plotting_opts"]
+    plot_score_options = dict(task["plot_score_options"])
+
+    results: dict[str, dict[str, MetricResult]] = {}
+    computed: dict[str, dict[str, MetricResult]] = {}
+    if stream_cfg.get("evaluation"):
+        available = reader.check_availability(stream, mode="evaluation")
+        if len(windows(available.samples, sample_size)) > 1:
+            # means over the samples: not merged across sample chunks (merge_results)
+            for option, name in (
+                ("plot_score_maps", "score maps"),
+                ("plot_score_init_hour", "init-hour scores"),
+            ):
+                if plot_score_options.get(option, False):
+                    _logger.warning(
+                        f"RUN {run_id} - {stream}: {name} are skipped when the samples are chunked."
+                    )
+                    plot_score_options[option] = False
+        task = task | {"plot_score_options": plot_score_options}
+        results, metrics_to_compute, recomputable_metrics = cached_scores_and_metrics_to_compute(
+            reader, stream, task["regions"], task["metrics"], plot_score_options, True
+        )
+        if metrics_to_compute:
+            tasks, responsible = build_scoring_chunk_tasks(
+                task,
+                available.samples,
+                available.fsteps,
+                metrics_to_compute,
+                sample_size,
+                fstep_size,
+            )
+            computed = merge_results(
+                [
+                    _process_stream(**_log_chunk(t, i, len(tasks), responsible[i]))[2]
+                    for i, t in enumerate(tasks)
+                ],
+                fsteps=responsible,
+            )
+            write_missing_scores(reader, stream, computed, recomputable_metrics)
+            for region, by_metric in computed.items():
+                results.setdefault(region, {}).update(by_metric)
+
+    if stream_cfg.get("plotting"):
+        available = reader.check_availability(stream, mode="plotting")
+        tasks = build_plotting_chunk_tasks(
+            task,
+            available.samples,
+            available.fsteps,
+            available.channels,
+            sample_size,
+            fstep_size,
+        )
+        for i, t in enumerate(tasks):
+            _process_stream(**_log_chunk(t, i, len(tasks)))
+
+    if plot_score_options.get("plot_score_maps", False) and computed:
+        plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
+    build_animations(reader, stream, global_plotting_opts, plot_score_options)
+    return run_id, stream, results
+
+
+def _log_chunk(task: dict, index: int, count: int, responsible: list[int] | None = None) -> dict:
+    """Log which chunk of the (run, stream) *task* is, and return it.
+
+    *responsible* are the forecast steps a scoring chunk answers for; the steps it is scored
+    on beyond them are the overlap that ``froct`` / ``troct`` need.
+    """
+    mode = "evaluation" if "evaluation" in task["run"].streams[task["stream"]] else "plotting"
+    window = task["run"].streams[task["stream"]][mode]
+    fsteps = list(window.forecast_step)
+    extra = [f for f in fsteps if responsible is not None and f not in responsible]
+    _logger.info(
+        f"RUN {task['run_id']} - {task['stream']}: {mode} chunk {index + 1}/{count}: "
+        f"samples {list(window.sample)}, forecast steps {[f for f in fsteps if f not in extra]}"
+        + (f" (+ step {extra[0]} for froct/troct)" if extra else "")
+    )
+    return task
 
 
 def build_stream_tasks(cfg: dict) -> list[dict]:
