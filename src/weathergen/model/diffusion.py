@@ -187,15 +187,18 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Optional MLP projections for an expanded diffusion latent space:
         # projects encoder tokens (ae_global_dim_embed -> fe_diffusion_latent_dim) before denoising
-        # and back (fe_diffusion_latent_dim -> ae_global_dim_embed) after.
+        # and back (fe_diffusion_latent_dim -> ae_global_dim_embed) after. The conditioning tokens
+        # get their own up-projection so the denoiser can tell them apart from the noisy tokens.
         # When fe_diffusion_latent_dim == ae_global_dim_embed (default), these are None (no-op).
         _enc_dim = self.cf.ae_global_dim_embed
         _lat_dim = self.cf.get("fe_diffusion_latent_dim", _enc_dim)
         if _lat_dim != _enc_dim:
             self.latent_proj_up = torch.nn.Linear(_enc_dim, _lat_dim, bias=False)
+            self.latent_proj_up_cond = torch.nn.Linear(_enc_dim, _lat_dim, bias=False)
             self.latent_proj_down = torch.nn.Linear(_lat_dim, _enc_dim, bias=False)
         else:
             self.latent_proj_up = None
+            self.latent_proj_up_cond = None
             self.latent_proj_down = None
 
         # Spatial AdaLN: per-cell modulation using the conditioning token at each HEALPix cell.
@@ -442,14 +445,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = c[:, n_aux:]
         coords_c = coords[:, n_aux:] if coords is not None else None
 
-        # Project input tokens and (where applicable) conditioning tokens from the encoder
-        # latent space (ae_global_dim_embed) up to the diffusion latent space
-        # (fe_diffusion_latent_dim).
+        # Project from `ae_global_dim_embed` to `fe_diffusion_latent_dim` with seperate projection
+        # for conditioning tokens (if applicable).
         # For ada_ln, `c` is an embedded scalar signal, not encoder tokens — skip its projection.
         if self.latent_proj_up is not None:
             net_input = self.latent_proj_up(net_input)
             if c is not None and self.conditioning_type not in {"ada_ln"}:
-                c = self.latent_proj_up(c)
+                c = self.latent_proj_up_cond(c)
 
         # Prepend the learnable diffusion registers (zero RoPE coords): (B, H) -> (B, R+H).
         coords_x = coords_c
