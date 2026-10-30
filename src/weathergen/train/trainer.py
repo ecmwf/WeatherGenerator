@@ -51,8 +51,13 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
+from weathergen.utils.inference_logger import EXTRA_INFERENCE_WRITERS
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
-from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
+from weathergen.utils.train_logger import (
+    ScalarMetricsJSONLWriter,
+    TrainLogger,
+    prepare_losses_for_logging,
+)
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
@@ -235,6 +240,12 @@ class Trainer(TrainerBase):
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
+        self.collapse_metrics_writer = ScalarMetricsJSONLWriter(
+            cf,
+            name="collapse_metrics",
+            log_fn=self.train_logger.log_metrics,
+            enabled=collapse_config.get("enabled", False),
+        )
 
         if cf.train_logging.get("track_performance_metrics"):
             self.perf_tracker = ThroughputTracker(
@@ -816,6 +827,8 @@ class Trainer(TrainerBase):
             with tqdm.tqdm(
                 total=len(self.data_loader_validation) * self.cf.world_size,
                 disable=self.cf.rank > 0,
+                desc="validation samples",
+                position=0,
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
@@ -855,11 +868,9 @@ class Trainer(TrainerBase):
                             targets_and_auxs,
                             is_diffusion,
                         )
-                        # Diffusion inference inflates the model output's fstep
-                        # dimension to one entry per ODE step (the denoising
-                        # trajectory). The physical target is identical for every
-                        # such step, so replicate target/aux entries to keep the
-                        # downstream loss calculator and validation IO aligned.
+                        # The diffusion target_aux calculator needs a single latent target
+                        # slot regardless of the number of real forecast steps; replicate it
+                        # to keep the downstream loss calculator and validation IO aligned.
                         if is_diffusion:
                             _expand_targets_to_match_preds(preds, targets_and_auxs)
 
@@ -887,6 +898,21 @@ class Trainer(TrainerBase):
                                 preds,
                                 targets_and_auxs,
                             )
+                            # Dedicated inference writers (see EXTRA_INFERENCE_WRITERS)
+                            if self.cf.stage == "inference":
+                                for flag, write_inference_output in EXTRA_INFERENCE_WRITERS:
+                                    if OmegaConf.select(self.cf, flag, default=False):
+                                        write_inference_output(
+                                            self.cf,
+                                            mode_cfg,
+                                            batch_size,
+                                            mini_epoch,
+                                            bidx,
+                                            denormalize_data_fct,
+                                            batch,
+                                            preds,
+                                            targets_and_auxs,
+                                        )
 
                     _ = self.loss_calculator_val.compute_loss(
                         preds=preds,
@@ -1389,6 +1415,6 @@ class Trainer(TrainerBase):
         Log cached collapse monitoring metrics.
         """
         metrics = self.collapse_monitor.get_cached_metrics()
-        if metrics and is_root():
+        if metrics:
             metrics["num_samples"] = self.cf.general.istep
-            self.train_logger.log_metrics(stage, metrics)
+            self.collapse_metrics_writer.write((stage, metrics))
