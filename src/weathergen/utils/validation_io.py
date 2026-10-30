@@ -17,7 +17,6 @@ import torch
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
-from weathergen.datasets.data_reader_base import TimeWindowHandler
 from weathergen.model.engines import LatentState
 
 _logger = logging.getLogger(__name__)
@@ -33,6 +32,7 @@ def write_output(
     batch,
     model_output,
     target_aux_out,
+    tw_handler,
 ):
     """
     Interface for writing model output
@@ -156,16 +156,8 @@ def write_output(
 
     # write output
 
-    start_date = val_cfg.start_date
-    end_date = val_cfg.end_date
-
-    twh = TimeWindowHandler(
-        start_date,
-        end_date,
-        val_cfg.time_window_len,
-        val_cfg.time_window_step,
-    )
-    source_windows = (twh.window(idx) for idx in sample_idxs)
+    # use the sampler's own handler
+    source_windows = (tw_handler.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
     latents_all = get_latent_output(batch, model_output) if write_latents else None
