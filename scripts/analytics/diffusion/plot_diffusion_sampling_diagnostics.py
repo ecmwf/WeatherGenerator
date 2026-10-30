@@ -53,7 +53,13 @@ def _resolve_store_path(run_id: str | None, path: str | None, mini_epoch: int | 
     return store_path
 
 
-def _plot_call(axes, steps: np.ndarray, series: dict[str, np.ndarray], label: str | None) -> None:
+def _plot_call(
+    axes,
+    steps: np.ndarray,
+    series: dict[str, np.ndarray],
+    label: str | None,
+    pg_axes: tuple | None = None,
+) -> None:
     kwargs = {"label": label} if label else {}
 
     axes[0].semilogy(steps, series["sigma"], "o-", markersize=3, **kwargs)
@@ -83,6 +89,20 @@ def _plot_call(axes, steps: np.ndarray, series: dict[str, np.ndarray], label: st
     axes[6].semilogy(steps, series["x_std"], "o-", markersize=3, color="tab:blue", **kwargs)
     axes[6].set_ylabel("std (log scale)")
 
+    # Particle guidance: member spread (what it tries to increase) against the annealing
+    # factor (how hard it is pushing), on a twin y-axis. Only present for ensemble runs
+    # with diffusion_particle_guidance enabled, hence the separate pg_axes/caller gating.
+    if pg_axes is not None and "pg_spread" in series and len(series["pg_spread"]) == len(steps):
+        ax_spread, ax_alpha = pg_axes
+        ax_spread.plot(
+            steps, series["pg_spread"], "o-", markersize=3, color="tab:green",
+            label=label or "member spread",
+        )
+        ax_alpha.plot(
+            steps, series["pg_alpha"], "--", lw=1, color="tab:purple",
+            label=f"{label} alpha" if label else "alpha(sigma)",
+        )
+
 
 def _read_calls(store_path: Path) -> list[dict[str, list[float]]]:
     """Read every JSON line (one dict of named 1D series per inference call)."""
@@ -94,7 +114,10 @@ def plot_diagnostics(calls: list[dict[str, list[float]]], call_indices: list[int
     num_steps = len(calls[call_indices[0]]["sigma"])
     steps = np.arange(num_steps)
 
-    n_plots = 7
+    selected_calls = [calls[i] for i in call_indices]
+    has_pg = any(len(call.get("pg_spread", [])) > 0 for call in selected_calls)
+
+    n_plots = 8 if has_pg else 7
     titles = [
         "Sigma schedule",
         "Std of x (noisy state) / denoised estimate",
@@ -104,7 +127,16 @@ def plot_diagnostics(calls: list[dict[str, list[float]]], call_indices: list[int
         "Std(x_post - denoised)  [y <= 1]",
         "Std of x_next over denoising steps",
     ]
+    if has_pg:
+        titles.append("Particle guidance")
     fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
+
+    pg_axes = None
+    if has_pg:
+        axes[7].set_ylabel("member spread")
+        ax_alpha = axes[7].twinx()
+        ax_alpha.set_ylabel("guidance strength")
+        pg_axes = (axes[7], ax_alpha)
 
     for call_idx in call_indices:
         call = calls[call_idx]
@@ -112,13 +144,16 @@ def plot_diagnostics(calls: list[dict[str, list[float]]], call_indices: list[int
         # call's dict may be missing some keys; _plot_call already handles that.
         series = {key: np.asarray(values) for key, values in call.items()}
         label = f"call {call_idx}" if len(call_indices) > 1 else None
-        _plot_call(axes, steps, series, label)
+        _plot_call(axes, steps, series, label, pg_axes=pg_axes)
 
     for ax, title in zip(axes, titles, strict=True):
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
         if len(call_indices) > 1:
             ax.legend(fontsize=8)
+    if pg_axes is not None:
+        pg_axes[0].legend(fontsize=8, loc="upper left")
+        pg_axes[1].legend(fontsize=8, loc="upper right")
     axes[-1].set_xlabel("sampling step")
     fig.tight_layout()
 
