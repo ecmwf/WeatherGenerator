@@ -48,11 +48,10 @@ def merge_results(
     -----
     - ``score``: the sample chunks of each window are concatenated along ``sample``, then
       the windows along ``forecast_step``.  Exact.
-    - ``spatial``: the windows are concatenated along ``forecast_step``; it is a mean over
-      the samples, so several sample chunks of one window cannot be merged (``ValueError``).
-    - ``by_init_hour``: the ``n_samples``-weighted mean over the sample chunks of a window
-      (exact for metrics linear in the samples, ``mae`` / ``bias``, approximate otherwise;
-      a warning says so), then the windows concatenated along ``forecast_step``.
+    - ``spatial`` and ``by_init_hour``: the windows are concatenated along
+      ``forecast_step``.  Both are means over the samples, so several sample chunks of one
+      window cannot be merged exactly (``ValueError``); a chunked run does not compute them
+      under sample chunking.
     - attrs: the metric parameters must agree between chunks (``ValueError``); the per-step
       payloads (``fstep_<n>/...``, ``attr_fsteps``) are the union over the windows, and
       within a window those of the first chunk, with a warning when the chunks disagree
@@ -108,24 +107,17 @@ def _merge_metric(parts: list[MetricResult]) -> MetricResult:
     score = _concat([_concat([r.score for r in w], "sample") for w in windows], "forecast_step")
     score.attrs = _merge_attrs([r.score.attrs for w in windows for r in w], first.name)
 
-    spatial = None
-    if any(r.spatial is not None for r in parts):
-        if any(len(w) > 1 for w in windows):
-            raise ValueError(
-                f"{first.name}: the spatial scores of several sample chunks cannot be merged "
-                "(mean over the samples)."
-            )
-        spatial = _concat([w[0].spatial for w in windows], "forecast_step")
-
-    by_init_hour = None
-    if any(r.by_init_hour is not None for r in parts):
-        by_init_hour = _concat(
-            [_weighted_by_hour([r.by_init_hour for r in w], first.name) for w in windows],
-            "forecast_step",
-        )
-    return MetricResult(
-        first.name, first.region, first.stream, first.run_id, score, spatial, by_init_hour
-    )
+    # means over the samples: one chunk per window, concatenated over the windows
+    aggregated = {}
+    for field in ("spatial", "by_init_hour"):
+        if any(vars(r)[field] is not None for r in parts):
+            if any(len(w) > 1 for w in windows):
+                raise ValueError(
+                    f"{first.name}: the {field} scores of several sample chunks cannot be merged "
+                    "(mean over the samples)."
+                )
+            aggregated[field] = _concat([vars(w[0])[field] for w in windows], "forecast_step")
+    return MetricResult(first.name, first.region, first.stream, first.run_id, score, **aggregated)
 
 
 def _concat(arrays: list[xr.DataArray], dim: str) -> xr.DataArray:
@@ -133,21 +125,6 @@ def _concat(arrays: list[xr.DataArray], dim: str) -> xr.DataArray:
     if len(arrays) == 1:
         return arrays[0]
     return xr.concat(arrays, dim=dim, coords="different", compat="equals").sortby(dim)
-
-
-def _weighted_by_hour(arrays: list[xr.DataArray], metric: str) -> xr.DataArray:
-    """``n_samples``-weighted mean over the sample chunks, per init hour; ``n_samples`` summed."""
-    if len(arrays) == 1:
-        return arrays[0]
-    _logger.warning(
-        f"{metric}: scores by init hour merged as the n_samples-weighted mean of {len(arrays)} "
-        "sample chunks; exact only for metrics linear in the samples (mae, bias)."
-    )
-    hours = sorted({int(h) for da in arrays for h in da.init_hour.values})
-    stacked = xr.concat([da.reindex(init_hour=hours) for da in arrays], dim="chunk")
-    weights = stacked.n_samples.fillna(0)
-    mean = (stacked * weights).sum("chunk") / weights.where(stacked.notnull()).sum("chunk")
-    return mean.assign_coords(n_samples=("init_hour", weights.sum("chunk").astype(int).values))
 
 
 def _merge_attrs(attrs_list: list[dict], metric: str) -> dict:
