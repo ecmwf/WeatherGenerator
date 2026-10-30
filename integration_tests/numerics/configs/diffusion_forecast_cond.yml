@@ -4,19 +4,23 @@
 
 ae_local_num_blocks: 0
 
-fe_diffusion_model: True
 with_step_conditioning: True
-fe_diffusion_model_conditioning: "forecast"
-fe_diffusion_model_conditioning_type: "concatenate"
-frequency_embedding_dim: 256
-# must be 512: the noise conditioning in model/layers.py hard-codes noise_emb_dim=512
-embedding_dim: 512
-sigma_min: 0.002
-sigma_max: 80
-sigma_data: 0.7855
-rho: 7
-p_mean: -1.2
-p_std: 1.2
+diffusion:
+  enabled: True
+  conditioning: "forecast"
+  conditioning_type: "concatenate"
+  frequency_embedding_dim: 256
+  # must be 512: the noise conditioning in model/layers.py hard-codes noise_emb_dim=512
+  embedding_dim: 512
+  sigma_data: 0.7855
+  # training noise distribution
+  noise:
+    distribution: "log_normal"
+    p_mean: -1.2
+    p_std: 1.2
+  # inference sampler; sigma range derived from the training noise distribution
+  sampler:
+    rho: 7
 
 training_config:
   training_mode: ["masking", "student_teacher"]
