@@ -278,16 +278,18 @@ class WeatherGenReader(Reader):
             if "scores" not in data_dict:
                 data_dict = {"scores": [data_dict]}
 
-            # Check eval_settings match current config
-            stored_settings = data_dict.get("eval_settings", {})
-            current_settings = self.get_eval_settings(stream)
-            if stored_settings != current_settings:
-                _logger.info(
-                    f"Eval settings changed for {score_path.name}: "
-                    f"stored={stored_settings}, current={current_settings}. "
-                    f"Forcing recomputation."
-                )
-                return None
+            # Check eval_settings match current config. Skipped while bootstrapping
+            # common_coords, since computing eval_settings itself needs common_coords.
+            if not getattr(self, "_bootstrapping_common_coords", False):
+                stored_settings = data_dict.get("eval_settings", {})
+                current_settings = self.get_eval_settings(stream)
+                if stored_settings != current_settings:
+                    _logger.info(
+                        f"Eval settings changed for {score_path.name}: "
+                        f"stored={stored_settings}, current={current_settings}. "
+                        f"Forcing recomputation."
+                    )
+                    return None
 
             for score_version in data_dict["scores"]:
                 if score_version["attrs"] == parameters:
@@ -350,7 +352,8 @@ class WeatherGenJsonReader(WeatherGenReader):
         metrics: dict[str, object] | None = None,
     ):
         super().__init__(eval_cfg, run_id, private_paths)
-        self.common_coords: dict = self._compute_common_coords(regions, metrics)
+        self.common_coords: dict = {}
+        self.common_coords = self._compute_common_coords(regions, metrics)
 
     def _compute_common_coords(self, regions: list[str], metrics: list[str]) -> dict:
         # Find common coordinates across streams, regions, metrics.
@@ -359,16 +362,22 @@ class WeatherGenJsonReader(WeatherGenReader):
         all_coords = {name: [] for name in coord_names}
         provenance = {name: defaultdict(list) for name in coord_names}
 
-        for stream in streams:
-            for region in regions:
-                for metric, parameters in metrics.items():
-                    score = self.load_single_score(stream, region, metric, parameters)
-                    if score is not None:
-                        for name in coord_names:
-                            vals = set(score[name].values)
-                            all_coords[name].append(vals)
-                            for val in vals:
-                                provenance[name][val].append((stream, region, metric))
+        # load_single_score() -> get_eval_settings() -> get_forecast_steps() needs
+        # common_coords, which is what we're computing here, so skip that check for now.
+        self._bootstrapping_common_coords = True
+        try:
+            for stream in streams:
+                for region in regions:
+                    for metric, parameters in metrics.items():
+                        score = self.load_single_score(stream, region, metric, parameters)
+                        if score is not None:
+                            for name in coord_names:
+                                vals = set(score[name].values)
+                                all_coords[name].append(vals)
+                                for val in vals:
+                                    provenance[name][val].append((stream, region, metric))
+        finally:
+            self._bootstrapping_common_coords = False
 
         common_coords = {name: set.intersection(*all_coords[name]) for name in coord_names}
 
