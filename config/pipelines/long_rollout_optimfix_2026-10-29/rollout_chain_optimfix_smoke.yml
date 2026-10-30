@@ -1,0 +1,62 @@
+# Smoke test of rollout_chain_optimfix.yml on 1 node: its first stage (8-step fixed rollout from
+# rrvj7vjv) and its last stage (combo_det at the largest rollout, K = 40, from the intermediate
+# seymbjh2 checkpoint 2 as combo_det_smoke.yml), both with the optimizer changes and monitoring
+# firing every 4 steps. 96 training and 32 validation samples each.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --no-register --pipeline config/pipelines/long_rollout_optimfix_2026-10-29/rollout_chain_optimfix_smoke.yml
+parallelize: true
+stages:
+  - name: smokerollout8
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    options:
+      - load_chkpt.run_id=rrvj7vjv
+      - load_chkpt.mini_epoch=-1
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=32
+      - train_logging.terminal=4
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.every=4
+      - train_logging.monitoring.monitors.attention.every=4
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+  - name: smokecombodet
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - load_chkpt.run_id=seymbjh2
+      - load_chkpt.mini_epoch=2
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.0
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.num_steps=[40]
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=32
+      - train_logging.terminal=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.every=4
+      - train_logging.monitoring.monitors.attention.every=4
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
