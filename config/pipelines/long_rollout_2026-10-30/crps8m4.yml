@@ -22,6 +22,9 @@ stages:
       - load_chkpt.mini_epoch=12
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
+      # latent noise of 2 stacked members per sample as in crps8long's training (torch.norm over the
+      # stacked tensor would give 4 members sqrt(2) more noise): only the member count changes
+      - fe_impute_latent_noise_ref_members=2
       - training_config.forecast.lead_balance.power=0.5
       # 4 + 4 scored steps with gradient (8 + 8 do not fit with 2 members: OOM at 90 GiB in the
       # smoke test ioq8yjj6), so the memory is that of crps8 and C
