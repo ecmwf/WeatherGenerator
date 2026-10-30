@@ -1,6 +1,6 @@
 # Control for rollout_chain_optimfix.yml: the same three stages, code (this branch) and monitoring,
 # without the optimizer changes (adamw eps stays 1e-8, weight decay 0.1 on all parameters):
-#   ctnhv6t2 = nhv6tkln, ctseymb2 = seymbjh2, ctch7py2 = ch7py82d (each loading the previous ct* stage).
+#   ctnhv6t3 = nhv6tkln, ctseymb3 = seymbjh2, ctch7py3 = ch7py82d (each loading the previous ct* stage).
 # Compare ofXXX vs ctXXX stage by stage; ctXXX vs the original runs shows the effect of the code
 # differences (upstream commits in the merge) and of monitoring.
 # Launch with --no-register (several config files set training_config, which clashes in MLflow):
@@ -9,7 +9,7 @@ parallelize: false
 stages:
   - name: rollout8
     stage: train
-    run_id: ctnhv6t2
+    run_id: ctnhv6t3
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     options:
       # the base config stores nhv6tkln's final step (2048): start a new schedule, as nhv6tkln did
@@ -24,7 +24,7 @@ stages:
     nodes: 8
   - name: pfanchndlb
     stage: train
-    run_id: ctseymb2
+    run_id: ctseymb3
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
@@ -33,7 +33,7 @@ stages:
       - ./config/config_fe_no_dropout.yml
       - ./config/config_lead_balance_xxlm80yw.yml
     options:
-      - load_chkpt.run_id=ctnhv6t2
+      - load_chkpt.run_id=ctnhv6t3
       - load_chkpt.mini_epoch=8
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
       - fe_impute_latent_noise_std=1.0e-05
@@ -45,7 +45,7 @@ stages:
     nodes: 8
   - name: combodet
     stage: train
-    run_id: ctch7py2
+    run_id: ctch7py3
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
@@ -55,7 +55,7 @@ stages:
       - ./config/config_lead_balance_xxlm80yw.yml
       - ./config/config_decoder_trainable.yml
     options:
-      - load_chkpt.run_id=ctseymb2
+      - load_chkpt.run_id=ctseymb3
       - load_chkpt.mini_epoch=5
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
       - pred_dropout_rate=0.0
