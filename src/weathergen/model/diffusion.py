@@ -25,6 +25,7 @@
 
 import logging
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
@@ -32,9 +33,12 @@ import torch
 import tqdm
 
 from weathergen.common.config import Config
-from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
-from weathergen.datasets.batch import SampleMetaData
+from weathergen.datasets.batch import BatchSamples, SampleMetaData
 from weathergen.model.engines import ForecastingEngine
+from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
+
+if TYPE_CHECKING:
+    from weathergen.model.model import Model, ModelOutput, ModelParams
 
 logger = logging.getLogger(__name__)
 
@@ -196,15 +200,18 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Optional MLP projections for an expanded diffusion latent space:
         # projects encoder tokens (ae_global_dim_embed -> fe_diffusion_latent_dim) before denoising
-        # and back (fe_diffusion_latent_dim -> ae_global_dim_embed) after.
+        # and back (fe_diffusion_latent_dim -> ae_global_dim_embed) after. The conditioning tokens
+        # get their own up-projection so the denoiser can tell them apart from the noisy tokens.
         # When fe_diffusion_latent_dim == ae_global_dim_embed (default), these are None (no-op).
         _enc_dim = self.cf.ae_global_dim_embed
         _lat_dim = self.cf.get("fe_diffusion_latent_dim", _enc_dim)
         if _lat_dim != _enc_dim:
             self.latent_proj_up = torch.nn.Linear(_enc_dim, _lat_dim, bias=False)
+            self.latent_proj_up_cond = torch.nn.Linear(_enc_dim, _lat_dim, bias=False)
             self.latent_proj_down = torch.nn.Linear(_lat_dim, _enc_dim, bias=False)
         else:
             self.latent_proj_up = None
+            self.latent_proj_up_cond = None
             self.latent_proj_down = None
 
         # Spatial AdaLN: per-cell modulation using the conditioning token at each HEALPix cell.
@@ -237,10 +244,21 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.s_max = math.inf if _s_max is None else float(_s_max)
         self.s_noise = float(self.cf.get("fe_diffusion_s_noise", 1.0))
 
-        self.cur_token = None  # TODO: re move after single sample experiments
-        self._noised_tokens: torch.Tensor | None = None
+        # Encoder register/class tokens are ignored by the diffusion engine (not diffused).
+        self.num_aux_tokens = self.cf.num_register_tokens + self.cf.num_class_tokens
+        # Learnable registers of the denoiser, independent of the encoder's registers.
+        self.num_diffusion_registers = self.cf.get("fe_diffusion_num_register_tokens", 0) or 0
+        self.diffusion_registers = (
+            torch.nn.Parameter(torch.randn(1, self.num_diffusion_registers, _lat_dim) * 0.02)
+            if self.num_diffusion_registers > 0
+            else None
+        )
 
-        self._noise = None
+        self.log_analytics = cf.get("inference_logging", {}).get(
+            "fe_diffusion_log_analytics", False
+        )
+        # Target tokens for sampling diagnostics; only kept when analytics logging is enabled.
+        self.cur_token: torch.Tensor | None = None
 
         # Log-space bounds of the training noise distribution (log_uniform).
         # noise_level_rn ~ Uniform[log(sigma_min), log(sigma_max)], so sigma = exp(noise_level_rn).
@@ -248,13 +266,14 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.train_log_max = math.log(self.sigma_max)
 
         # Inference-mode only: persists per-ODE-step sampling diagnostics to a JSONL file instead
-        # of plotting them inline. See scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py.
+        # of plotting them inline.
+        # See scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py.
         self._diagnostics_writer = None
         if cf.stage == "inference":
             self._diagnostics_writer = ScalarSeriesJSONLWriter(
                 cf,
                 name="diffusion_sampling_diagnostics",
-                enabled=cf.get("inference_logging", {}).get("fe_diffusion_log_analytics", False),
+                enabled=self.log_analytics,
             )
 
     def forward(
@@ -320,7 +339,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             elif self.cf.stage == "inference":
                 if fstep is None:
                     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
-                self.cur_token = tokens.detach() if tokens is not None else None
+                self.cur_token = (
+                    tokens.detach() if self.log_analytics and tokens is not None else None
+                )
                 # Allow the number of ODE denoising steps to be set from the config.
                 # Falls back to the `num_steps` argument default when not configured.
                 num_steps = self.cf.get("fe_diffusion_num_inference_steps", None) or num_steps
@@ -350,8 +371,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
 
-        self.cur_token = tokens.detach()
-
         # y is always the target to denoise (set by DiffusionLatentTargetEncoder.pre_compute)
         y = tokens
         assert y is not None, (
@@ -370,8 +389,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         noise_stream = self.cf.get("diffusion", {}).get("noise_stream", "ERA5")
         noise_level_rn = torch.tensor(
-            [meta_info[noise_stream].params["noise_level_rn"]], 
-            device=tokens.device
+            [meta_info[noise_stream].params["noise_level_rn"]], device=tokens.device
         )
 
         # Compute sigma from noise_level_rn.
@@ -383,11 +401,19 @@ class DiffusionForecastEngine(torch.nn.Module):
             sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
         else:
             raise ValueError(f"Unsupported noise_distribution: {self.noise_distribution}")
-        n = torch.randn_like(y) * sigma
+        # Only the healpix-cell tokens are diffused.
+        y_cells = y[:, self.num_aux_tokens :]
+        x_noisy = y_cells + torch.randn_like(y_cells) * sigma
 
-        self._noised_tokens = (y + n).detach()
+        denoised = self.denoise(x=x_noisy, c=c, sigma=sigma, fstep=fstep, coords=coords)
+        return self._prepend_aux_tokens(denoised)
 
-        return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep, coords=coords)
+    def _prepend_aux_tokens(self, x_cells: torch.Tensor) -> torch.Tensor:
+        """Prepend zero aux tokens to restore the encoder token layout expected downstream."""
+        if self.num_aux_tokens == 0:
+            return x_cells
+        aux = x_cells.new_zeros(x_cells.shape[0], self.num_aux_tokens, x_cells.shape[2])
+        return torch.cat([aux, x_cells], dim=1)
 
     def denoise(
         self,
@@ -425,21 +451,44 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         net_input = c_in * x
 
-        # Project input tokens and (where applicable) conditioning tokens from the encoder
-        # latent space (ae_global_dim_embed) up to the diffusion latent space
-        # (fe_diffusion_latent_dim).
+        # Strip the encoder's aux tokens from conditioning and RoPE coords (x holds cells only).
+        n_aux = self.num_aux_tokens
+        n_registers = self.num_diffusion_registers
+        if self.conditioning == "forecast" and c is not None:
+            c = c[:, n_aux:]
+        coords_c = coords[:, n_aux:] if coords is not None else None
+
+        # Project from `ae_global_dim_embed` to `fe_diffusion_latent_dim` with seperate projection
+        # for conditioning tokens (if applicable).
         # For ada_ln, `c` is an embedded scalar signal, not encoder tokens — skip its projection.
         if self.latent_proj_up is not None:
             net_input = self.latent_proj_up(net_input)
             if c is not None and self.conditioning_type not in {"ada_ln"}:
-                c = self.latent_proj_up(c)
+                c = self.latent_proj_up_cond(c)
+
+        # Prepend the learnable diffusion registers (zero RoPE coords): (B, H) -> (B, R+H).
+        coords_x = coords_c
+        if n_registers > 0:
+            registers = self.diffusion_registers.to(dtype=net_input.dtype)
+            net_input = torch.cat([registers.expand(net_input.shape[0], -1, -1), net_input], dim=1)
+            if coords_c is not None:
+                coords_x = torch.cat(
+                    [coords_c.new_zeros(coords_c.shape[0], n_registers, 2), coords_c], dim=1
+                )
+            # Token-wise conditioning types need c at R+H tokens: zero-pad the register slots.
+            if (
+                self.conditioning == "forecast"
+                and c is not None
+                and self.conditioning_type not in {"concatenate", "cross_attn"}
+            ):
+                c = torch.cat([c.new_zeros(c.shape[0], n_registers, c.shape[2]), c], dim=1)
+        coords = coords_x
 
         if self.conditioning_type == "concatenate":
             # Concatenate conditioning tokens along sequence dim:
-            # (B, H, D') cat (B, H, D') -> (B, 2H, D')
-            # Also double coords so 2D RoPE matches the doubled sequence length
+            # (B, R+H, D') cat (B, H, D') -> (B, R+2H, D'), with matching RoPE coords
             combined = torch.cat([net_input, c], dim=1)
-            coords_combined = torch.cat([coords, coords], dim=1) if coords is not None else None
+            coords_combined = torch.cat([coords, coords_c], dim=1) if coords is not None else None
             raw_out = self.net(
                 combined,
                 fstep=fstep,
@@ -447,37 +496,25 @@ class DiffusionForecastEngine(torch.nn.Module):
                 noise_emb=noise_emb,
                 conditioning=None,
             )
-            raw_out = raw_out[:, : x.shape[1], :]  # Slice back to (B, H, D')
-            if self.latent_proj_down is not None:
-                raw_out = self.latent_proj_down(raw_out)
-            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
-
-        if self.conditioning_type == "concatenate_hiddendim":
-            # Concatenate along hidden dim: (B, H, D') cat (B, H, D') -> (B, H, 2D')
+            raw_out = raw_out[:, : net_input.shape[1], :]  # Slice back to (B, R+H, D')
+        elif self.conditioning_type == "concatenate_hiddendim":
+            # Concatenate along hidden dim: (B, R+H, D') cat (B, R+H, D') -> (B, R+H, 2D')
             # ForecastingEngine runs at 2D' throughout and projects back to D' via out_proj
             combined = torch.cat([net_input, c], dim=2)
             raw_out = self.net(
                 combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
             )
-            if self.latent_proj_down is not None:
-                raw_out = self.latent_proj_down(raw_out)
-            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
-
-        if self.conditioning_type == "concatenate_hdMLP":
+        elif self.conditioning_type == "concatenate_hdMLP":
             # Concatenate along hidden dim then project back:
-            # (B, H, D') cat (B, H, D') -> (B, H, 2D') -> Linear -> (B, H, D')
+            # (B, R+H, D') cat (B, R+H, D') -> (B, R+H, 2D') -> Linear -> (B, R+H, D')
             combined = torch.cat([net_input, c], dim=2)
             projected = self.concat_hd_proj(combined)
             raw_out = self.net(
                 projected, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
             )
-            if self.latent_proj_down is not None:
-                raw_out = self.latent_proj_down(raw_out)
-            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
-
-        if self.conditioning_type == "spatial_ada_ln":
-            # Pre-modulate each HEALPix cell's token by the corresponding conditioning token.
-            # scale/shift/gate are (B, H, D') — per-cell and per-channel.
+        elif self.conditioning_type == "spatial_ada_ln":
+            # Pre-modulate each token by the corresponding conditioning token.
+            # scale/shift/gate are (B, R+H, D') — per-token and per-channel.
             # gate is applied to raw_out so the network can suppress or amplify each cell's
             # denoised contribution based on the conditioning quality at that cell.
             net_input_mod, spatial_gate = self.spatial_ada_ln(net_input, c)
@@ -485,13 +522,13 @@ class DiffusionForecastEngine(torch.nn.Module):
                 net_input_mod, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
             )
             raw_out = raw_out * spatial_gate
-            if self.latent_proj_down is not None:
-                raw_out = self.latent_proj_down(raw_out)
-            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
+        else:
+            raw_out = self.net(
+                net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
+            )
 
-        raw_out = self.net(
-            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
-        )
+        # Drop the diffusion registers: (B, R+H, D') -> (B, H, D')
+        raw_out = raw_out[:, n_registers:]
         if self.latent_proj_down is not None:
             raw_out = self.latent_proj_down(raw_out)
         return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
@@ -624,14 +661,17 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         Returns:
             ``(final_x, intermediate_x)`` where *final_x* has shape
-            ``(batch_size, num_healpix_cells, embed_dim)`` and *intermediate_x*
+            ``(batch_size, num_aux_tokens + num_healpix_cells, embed_dim)`` and *intermediate_x*
             is either a list of per-step tensors (when ``return_diffusion_steps=True``)
             or ``None``.
         """
-        # The encoder prepends register/class tokens to the healpix-cell latents,
-        # so the sampled latent must include them to match the target latent shape.
-        num_tokens = self.cf.num_register_tokens + self.cf.num_class_tokens + self.num_healpix_cells
-        x = torch.randn(batch_size, num_tokens, self.cf.ae_global_dim_embed).to(device="cuda")
+        # Only the healpix-cell tokens are diffused.
+        x = torch.randn(batch_size, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(
+            device="cuda"
+        )
+        target_cells = (
+            self.cur_token[:, self.num_aux_tokens :] if self.cur_token is not None else None
+        )
 
         # --- Training-aligned sigma bounds ---
         # The network only learns to denoise reliably within the sigma range seen during
@@ -672,10 +712,10 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
         logger.debug(
             f"Inference sigma schedule ({self.noise_distribution}): "
-            f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
+            f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, "
             f"train_max={sigma_max_train:.4f}), "
             f"sigma_min_eff={sigma_min_eff:.4f} "
-            f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
+            f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/"
             f"{sigma_min_from_dist:.4f}), "
             f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}{_churn_msg}"
         )
@@ -702,7 +742,6 @@ class DiffusionForecastEngine(torch.nn.Module):
             "d_cur_norm": [],
             "d_cur_step_norm": [],
             "residual_std": [],
-            "latent_states": [x.cpu()],
         }
 
         # Per-step intermediate denoised states (one per ODE step).
@@ -741,33 +780,29 @@ class DiffusionForecastEngine(torch.nn.Module):
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_post + (t_next - t_post) * (0.5 * d_cur + 0.5 * d_prime)
 
-            # --- Record diagnostics ---
-            with torch.no_grad():
-                s = t_cur.item()
-                track["sigma"].append(s)
-                track["sigma_post"].append(t_post.item())
-                track["c_skip"].append(self.sigma_data**2 / (s**2 + self.sigma_data**2))
-                track["x_std"].append(x_next.std().item())
-                track["denoised_std"].append(denoised.std().item())
-                track["d_cur_norm"].append(d_cur.norm().item())
-                track["d_cur_step_norm"].append(((t_next - t_post) * d_cur).norm().item())
-                track["residual_std"].append((x_post - denoised).std().item())
-                track["latent_states"].append(x_next.cpu())
-                if self.cur_token is not None:
-                    track["l2_to_target"].append((x_next - self.cur_token).norm().item())
-                    track["latent_states"].append(self.cur_token.cpu())
+            # --- Record diagnostics (only written when analytics logging is enabled) ---
+            if self.log_analytics:
+                with torch.no_grad():
+                    s = t_cur.item()
+                    track["sigma"].append(s)
+                    track["sigma_post"].append(t_post.item())
+                    track["c_skip"].append(self.sigma_data**2 / (s**2 + self.sigma_data**2))
+                    track["x_std"].append(x_next.std().item())
+                    track["denoised_std"].append(denoised.std().item())
+                    track["d_cur_norm"].append(d_cur.norm().item())
+                    track["d_cur_step_norm"].append(((t_next - t_post) * d_cur).norm().item())
+                    track["residual_std"].append((x_post - denoised).std().item())
+                    if target_cells is not None:
+                        track["l2_to_target"].append((x_next - target_cells).norm().item())
 
             if return_diffusion_steps:
-                intermediate_x.append(x_next)
+                intermediate_x.append(self._prepend_aux_tokens(x_next))
 
-        # Drop the full latent tensors (see "latent_states" above) before writing: the
-        # diagnostics file only stores per-step scalars, and self._diagnostics_writer is
-        # None outside inference, and no-ops unless fe_diffusion_log_analytics is enabled.
+        # self._diagnostics_writer is None outside inference.
         if self._diagnostics_writer is not None:
-            scalar_track = {k: v for k, v in track.items() if k != "latent_states"}
-            self._diagnostics_writer.write(scalar_track)
+            self._diagnostics_writer.write(track)
 
-        return x_next, intermediate_x
+        return self._prepend_aux_tokens(x_next), intermediate_x
 
 
 def _decode_diffusion_steps(
@@ -829,10 +864,10 @@ class NoiseEmbedder(torch.nn.Module):
 
     embedding_type:
       - "dit_legacy": DiT timestep embedding, frequencies 10000^(-k/half) in [1e-4, 1]. Should not
-        be used for new runs, only for backward compatibility with legacy checkpoints"
+        be used for new runs, only for backward compatibility with legacy checkpoints.
       - "log_fourier": log-spaced frequencies in [f_min, f_max] (rad per unit c_noise), fitted to
-        the c_noise range. Optionally the raw c_noise is appended as an extra, directly monotone channel.
-        Recommended: f_min=0.5, f_max=8*pi, include_raw (the f_* defaults here).
+        the c_noise range. Optionally the raw c_noise is appended as an extra, directly monotone
+        channel. Recommended: f_min=0.5, f_max=8*pi, include_raw (the f_* defaults here).
 
     The default embedding_type is "dit_legacy" only temporarily, for backward compatibility with
     checkpoints trained before this option existed; new runs should use "log_fourier".
