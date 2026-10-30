@@ -1569,7 +1569,7 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        add_noise: bool = True,
+        add_noise: bool = False,
         noise_fac: float = 1.0e-03,
     ) -> xr.DataArray:
         """
@@ -1585,7 +1585,9 @@ class Scores:
         add_noise: bool
             Flag if a small amount of random noise should be added to the data to avoid ties in the
             rank histogram.
-            This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
+            Off by default (the noise is absolute and unit-dependent, and ties are then counted
+            as "obs above forecast"). Recommended for data with many ties, e.g. precipitation,
+            cf. Sec. 4.2.2 in Harris et al. 2022.
         noise_fac: float
             Magnitude of random noise to be added to the data if add_noise is True.
             Default is 1.0e-03. This value is only relevant if add_noise is True
@@ -1720,7 +1722,7 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        add_noise: bool = True,
+        add_noise: bool = False,
         noise_fac: float = 1.0e-03,
         pool_n_fsteps: int | None = None,
     ) -> xr.DataArray:
@@ -1739,7 +1741,9 @@ class Scores:
         add_noise: bool
             Flag if a small amount of random noise should be added to the data to avoid ties in the
             rank histogram.
-            This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
+            Off by default (the noise is absolute and unit-dependent, and ties are then counted
+            as "obs above forecast"). Recommended for data with many ties, e.g. precipitation,
+            cf. Sec. 4.2.2 in Harris et al. 2022.
         noise_fac: float
             Magnitude of random noise to be added to the data if add_noise is True.
             Default is 1.0e-03. This value is only relevant if add_noise is True
@@ -1765,7 +1769,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         norm: bool = True,
-        add_noise: bool = True,
+        add_noise: bool = False,
         noise_fac: float = 1.0e-03,
     ) -> xr.DataArray:
         """
@@ -1784,7 +1788,9 @@ class Scores:
         add_noise: bool
             Flag if a small amount of random noise should be added to the data to avoid ties in the
             rank histogram.
-            This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
+            Off by default (the noise is absolute and unit-dependent, and ties are then counted
+            as "obs above forecast"). Recommended for data with many ties, e.g. precipitation,
+            cf. Sec. 4.2.2 in Harris et al. 2022.
         noise_fac: float
             Magnitude of random noise to be added to the data if add_noise is True.
             Default is 1.0e-03. This value is only relevant if add_noise is True
