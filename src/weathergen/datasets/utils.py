@@ -171,6 +171,12 @@ def locs_to_cell_coords_ctrs(
     return local_locs
 
 
+####################################################################################################
+def hp_level_to_num_cells(hp_level: int) -> int:
+    nside = 2**hp_level
+    return 12 * nside * nside
+
+
 def get_tokens_lens(
     streams_names: list[str], batch_data: BatchSamples, input_steps: int
 ) -> torch.Tensor:
