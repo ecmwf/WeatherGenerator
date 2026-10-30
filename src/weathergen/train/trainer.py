@@ -818,7 +818,7 @@ class Trainer(TrainerBase):
         cf = self.cf
         self.model.eval()
 
-        is_diffusion = cf.get("fe_diffusion_model", False)
+        is_diffusion = cf.get("diffusion", {}).get("enabled", False)
 
         dataset_val_iter = iter(self.data_loader_validation)
 

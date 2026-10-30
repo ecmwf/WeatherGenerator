@@ -15,7 +15,6 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.attention import (
     MultiCrossAttentionHead,
     MultiCrossAttentionHeadVarlen,
@@ -602,14 +601,13 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
+        diff_cf = self.cf.get("diffusion", {})
         # local import: avoids a module-level cycle (diffusion.py imports ForecastingEngine)
         from weathergen.model.diffusion import DiffusionForecastConditioning
 
-        self.conditioning = DiffusionForecastConditioning(
-            self.cf.get("fe_diffusion_model_conditioning_type", None)
-        )
+        self.conditioning = DiffusionForecastConditioning(diff_cf.get("conditioning_type"))
         _concat_hd = self.conditioning == "concatenate_hiddendim"
-        _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
+        _diffusion_latent_dim = diff_cf.get("latent_dim") or self.cf.ae_global_dim_embed
         _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
@@ -631,7 +629,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
+                            is_dit=diff_cf.get("enabled", False),
                             dit_is_cond=self.conditioning == "ada_ln",
                         )
                     )
@@ -652,7 +650,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
+                            is_dit=diff_cf.get("enabled", False),
                             dit_is_cond=self.conditioning == "ada_ln",
                         )
                     )
@@ -672,7 +670,7 @@ class ForecastingEngine(torch.nn.Module):
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            is_dit=self.cf.get("fe_diffusion_model", False),
+                            is_dit=diff_cf.get("enabled", False),
                         )
                     )
                 # Add MLP block
@@ -687,7 +685,7 @@ class ForecastingEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
-                        is_dit=self.cf.get("fe_diffusion_model", False),
+                        is_dit=diff_cf.get("enabled", False),
                         dit_is_cond=self.conditioning == "ada_ln",
                     )
                 )
@@ -713,7 +711,7 @@ class ForecastingEngine(torch.nn.Module):
         self,
         tokens: torch.Tensor,
         fstep: int,
-        meta_info: SampleMetaData = None,
+        meta_info: dict | None = None,
         noise_emb: torch.Tensor = None,
         conditioning: torch.Tensor = None,
         coords: torch.Tensor = None,
@@ -731,7 +729,8 @@ class ForecastingEngine(torch.nn.Module):
         if forecast_residual:
             tokens_in = tokens
 
-        if self.cf.get("fe_diffusion_model", False):
+        diff_cf = self.cf.get("diffusion", {})
+        if diff_cf.get("enabled", False):
             assert noise_emb is not None, (
                 "noise_emb must be provided for diffusion model conditioning"
             )
