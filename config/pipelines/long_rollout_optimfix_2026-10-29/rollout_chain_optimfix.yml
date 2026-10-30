@@ -23,6 +23,8 @@ stages:
     run_id: ofnhv6t2
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     options:
+      # the base config stores nhv6tkln's final step (2048): start a new schedule, as nhv6tkln did
+      - general.istep=0
       - load_chkpt.run_id=rrvj7vjv
       - load_chkpt.mini_epoch=-1
       - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
