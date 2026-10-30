@@ -269,9 +269,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(
-                block, tokens_c, x_lens=cell_lens_c, use_reentrant=use_reentrant
-            )
+            tokens_c = checkpoint(block, tokens_c, x_lens=cell_lens_c, use_reentrant=use_reentrant)
         return tokens_c
 
 
@@ -656,9 +654,9 @@ class ForecastingEngine(torch.nn.Module):
                             dit_is_cond=self.conditioning == "ada_ln",
                         )
                     )
-                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for
-                # cross_attn conditioning
-                if diff_cf.get("conditioning_type") == "cross_attn":
+                # Add cross-attention block for cross_attn (Q=noised tokens, KV=enc(X_t)) and
+                # cross_attn_rev (Q=enc(X_t), KV=noised tokens) conditioning
+                if self.conditioning in ("cross_attn", "cross_attn_rev"):
                     self.fe_blocks.append(
                         MultiCrossAttentionHead(
                             dim_embed_q=_diffusion_latent_dim,
@@ -750,9 +748,7 @@ class ForecastingEngine(torch.nn.Module):
                 else:
                     # additive conditioning is re-added at every block (but not a plain norm
                     # layer, see fe_layer_norm_after_blocks), not just once.
-                    if self.conditioning == "additive" and not isinstance(
-                        block, KwargLayerNorm
-                    ):
+                    if self.conditioning == "additive" and not isinstance(block, KwargLayerNorm):
                         tokens = tokens + conditioning
                     ada_ln_aux = conditioning if self.conditioning == "ada_ln" else None
                     tokens = checkpoint(
