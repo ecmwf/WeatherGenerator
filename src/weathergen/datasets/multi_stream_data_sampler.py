@@ -50,6 +50,41 @@ FORECAST_DEFAULTS = {
 }
 
 
+def samples_per_rank(samples_per_mini_epoch: int, world_size: int, batch_size: int) -> int:
+    """
+    Number of samples per DDP rank for a mini epoch.
+
+    samples_per_mini_epoch is split over the ranks in whole batches. All ranks get the same number
+    of batches (required for collectives); samples that cannot be split evenly are dropped. At
+    least one batch per rank is used, an empty mini epoch would deadlock the ranks.
+    """
+    batches_per_rank = samples_per_mini_epoch // (world_size * batch_size)
+    if batches_per_rank == 0:
+        logger.warning(
+            f"samples_per_mini_epoch={samples_per_mini_epoch} is smaller than "
+            f"world_size * batch_size = {world_size} * {batch_size}; using one batch per rank."
+        )
+        batches_per_rank = 1
+    return batches_per_rank * batch_size
+
+
+def worker_sample_range(
+    rank_start: int, rank_len: int, batch_size: int, worker_id: int, num_workers: int
+) -> tuple[int, int]:
+    """
+    Sample range [start, end) of a loader worker within the slice [rank_start, rank_start +
+    rank_len) of its rank.
+
+    Whole batches are distributed over the workers, the first workers get one extra batch if the
+    number of batches is not divisible by num_workers. Workers may get no batch at all.
+    """
+    base, rem = divmod(rank_len // batch_size, num_workers)
+    first_batch = worker_id * base + min(worker_id, rem)
+    num_worker_batches = base + (1 if worker_id < rem else 0)
+    start = rank_start + first_batch * batch_size
+    return start, start + num_worker_batches * batch_size
+
+
 def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
@@ -138,7 +173,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.teacher_time_offset = 0
 
         self.batch_size = get_batch_size_from_config(mode_cfg)
-        self.num_workers = cf.data_loading.num_workers
         self.shuffle = mode_cfg.shuffle
 
         self.len_timedelta = mode_cfg.time_window_len
@@ -206,15 +240,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         else:
             logger.info("Samples will be repeated within the time range")
 
-        # streamlined calculation of length
-        epoch_len = self.samples_per_mini_epoch
-        # adjust len to split loading across all workers and ensure it is multiple of batch_size;
-        # also account for num_workers so per-worker slice is a multiple of batch_size,
-        # preventing the range-loop in __iter__ from yielding extra batches via ceiling division
-        effective_workers = max(1, self.num_workers)
-        self.len = ((epoch_len // self.world_size) // (self.batch_size * effective_workers)) * (
-            self.batch_size * effective_workers
-        )
+        # loader workers split the rank's slice per batch in worker_workset(), so the number of
+        # loader workers does not change the length
+        self.len = samples_per_rank(self.samples_per_mini_epoch, self.world_size, self.batch_size)
 
         n_duplicates = self.len * self.world_size - available_samples
         if not self.repeat_data:
@@ -933,12 +961,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             iter_end = local_end
 
         else:
-            # split workload
-            per_worker = (local_end - local_start) // worker_info.num_workers
-            iter_start = local_start + worker_info.id * per_worker
-            iter_end = iter_start + per_worker
-            if worker_info.id + 1 == worker_info.num_workers:
-                iter_end = local_end
+            iter_start, iter_end = worker_sample_range(
+                local_start, self.len, self.batch_size, worker_info.id, worker_info.num_workers
+            )
             logger.info(
                 f"{self.rank}::{worker_info.id}"
                 + f" : dataset [{local_start},{local_end}) : [{iter_start},{iter_end})"
