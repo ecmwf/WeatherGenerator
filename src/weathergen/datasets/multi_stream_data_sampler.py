@@ -55,8 +55,7 @@ def samples_per_rank(samples_per_mini_epoch: int, world_size: int, batch_size: i
     Number of samples per DDP rank for a mini epoch.
 
     samples_per_mini_epoch is split over the ranks in whole batches. All ranks get the same number
-    of batches (required for collectives); samples that cannot be split evenly are dropped. At
-    least one batch per rank is used, an empty mini epoch would deadlock the ranks.
+    of batches; samples that cannot be split evenly are dropped. At least one batch per rank.
     """
     batches_per_rank = samples_per_mini_epoch // (world_size * batch_size)
     if batches_per_rank == 0:
@@ -240,8 +239,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         else:
             logger.info("Samples will be repeated within the time range")
 
-        # loader workers split the rank's slice per batch in worker_workset(), so the number of
-        # loader workers does not change the length
         self.len = samples_per_rank(self.samples_per_mini_epoch, self.world_size, self.batch_size)
 
         n_duplicates = self.len * self.world_size - available_samples
