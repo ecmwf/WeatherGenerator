@@ -24,7 +24,11 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import DiffusionForecastEngine, _decode_diffusion_steps
+from weathergen.model.diffusion import (
+    DiffusionForecastEngine,
+    DiffusionRegisters,
+    _decode_diffusion_steps,
+)
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -689,7 +693,7 @@ class Model(torch.nn.Module):
 
     def reset_parameters(self):
         def _reset_params(module):
-            if isinstance(module, nn.Linear | nn.LayerNorm):
+            if isinstance(module, nn.Linear | nn.LayerNorm | DiffusionRegisters):
                 module.reset_parameters()
             else:
                 pass

@@ -44,6 +44,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class DiffusionRegisters(torch.nn.Module):
+    """Learnable register tokens of the denoiser, shape (1, R, D).
+
+    Kept in their own module (rather than as a bare Parameter on DiffusionForecastEngine) so that
+    checkpoint loading can (re)initialize them via reset_parameters() without treating the whole
+    diffusion engine as a new module. Initialized like the encoder's register tokens
+    (EncoderModule.q_aux): uniform in [0, 1/D).
+    """
+
+    def __init__(self, num_registers: int, dim: int):
+        super().__init__()
+        self.dim = dim
+        self.tokens = torch.nn.Parameter(torch.empty(1, num_registers, dim))
+        self.reset_parameters()
+
+    @torch.no_grad()
+    def reset_parameters(self):
+        torch.nn.init.uniform_(self.tokens, 0.0, 1.0 / self.dim)
+
+
 class SpatialAdaLN(torch.nn.Module):
     """Per-token (spatial) AdaLN-Zero for forecast conditioning.
 
@@ -251,7 +271,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Learnable registers of the denoiser, independent of the encoder's registers.
         self.num_diffusion_registers = self.diff_cf.get("num_register_tokens", 0) or 0
         self.diffusion_registers = (
-            torch.nn.Parameter(torch.randn(1, self.num_diffusion_registers, _lat_dim) * 0.02)
+            DiffusionRegisters(self.num_diffusion_registers, _lat_dim)
             if self.num_diffusion_registers > 0
             else None
         )
@@ -538,7 +558,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Prepend the learnable diffusion registers (zero RoPE coords): (B, H) -> (B, R+H).
         coords_x = coords_c
         if n_registers > 0:
-            registers = self.diffusion_registers.to(dtype=net_input.dtype)
+            registers = self.diffusion_registers.tokens.to(dtype=net_input.dtype)
             net_input = torch.cat([registers.expand(net_input.shape[0], -1, -1), net_input], dim=1)
             if coords_c is not None:
                 coords_x = torch.cat(
