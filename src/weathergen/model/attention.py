@@ -25,6 +25,22 @@ coordinates aligned with the token order (lat, lon in radians).
 """
 
 
+def _probe_dense(probe, qs, ks, softcap):
+    """Call a monitoring probe on dense q [L_q, H, D], k [L_k, H, D] of one sequence.
+
+    Probes (see `weathergen.train.monitoring.attention`) take varlen layout plus cu_seqlens;
+    for a single dense sequence these are [0, L] (on the host, so no device sync).
+    """
+    probe(
+        qs,
+        ks,
+        qs.shape[-1] ** -0.5,
+        softcap,
+        torch.tensor([0, qs.shape[0]]),
+        torch.tensor([0, ks.shape[0]]),
+    )
+
+
 def _apply_xsa(attn_out: torch.Tensor, self_values: torch.Tensor) -> torch.Tensor:
     attn_out_float = attn_out.float()
     self_values_float = self_values.float()
@@ -97,6 +113,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+        self.probe = None  # training-time monitoring hook, set only on monitor steps
 
         assert with_flash, "Only flash attention supported at the moment"
 
@@ -121,6 +138,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         dropout_rate = self.dropout_rate if self.training else 0.0
 
         cum_x_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
+        if self.probe is not None:
+            self.probe(qs, ks, qs.shape[-1] ** -0.5, self.softcap, cum_x_lens, cum_x_lens)
         # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
         outs = flash_attn_varlen_func(
             qs,
@@ -196,6 +215,7 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
         self.dtype = attention_dtype
+        self.probe = None  # training-time monitoring hook, set only on monitor steps
 
         assert with_flash, "Only flash attention supported at the moment"
 
@@ -219,6 +239,8 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
         vs = self.proj_heads_v(x).reshape(s).permute([1, 2, 0, 3])
 
+        if self.probe is not None:
+            _probe_dense(self.probe, qs[0].transpose(0, 1), ks[0].transpose(0, 1), 0.0)
         outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
         if self.use_xsa:
@@ -310,6 +332,8 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+        self.block_factor = block_factor
+        self.probe = None  # training-time monitoring hook, set only on monitor steps
         assert with_flash, "Only flash attention supported."
 
         # define block mask
@@ -349,6 +373,11 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
                 raise ValueError("coords must be provided when with_2d_rope=True")
             qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
 
+        if self.probe is not None:
+            # first local window of the first batch element
+            q0 = qs[0, :, : self.block_factor].transpose(0, 1)
+            k0 = ks[0, :, : self.block_factor].transpose(0, 1)
+            _probe_dense(self.probe, q0, k0, 0.0)
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
         if self.use_xsa:
@@ -424,6 +453,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+        self.probe = None  # training-time monitoring hook, set only on monitor steps
         assert with_flash, "Only flash attention supported at the moment"
 
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None, **kwargs):
@@ -446,6 +476,9 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         if x_kv_lens is not None:
             cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
             cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
+            if self.probe is not None:
+                scale = qs.shape[-1] ** -0.5
+                self.probe(qs, ks, scale, self.softcap, cum_x_q_lens, cum_x_kv_lens)
             outs = flash_attn_varlen_func(
                 qs,
                 ks,
@@ -537,6 +570,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+        self.probe = None  # training-time monitoring hook, set only on monitor steps
         assert with_flash, "Only flash attention supported at the moment"
 
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None, **kwargs):
@@ -561,6 +595,9 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
 
         cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
         cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
+        if self.probe is not None:  # first query slice
+            scale = qs[0].shape[-1] ** -0.5
+            self.probe(qs[0], ks, scale, self.softcap, cum_x_q_lens, cum_x_kv_lens)
         outs = []
         for _i, qs_i in enumerate(qs):
             outs += [
@@ -666,6 +703,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+        self.probe = None  # training-time monitoring hook, set only on monitor steps
         if with_flash:
             self.att = torch.nn.functional.scaled_dot_product_attention
         else:
@@ -699,6 +737,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
             if coords is None:
                 raise ValueError("coords must be provided when with_2d_rope=True")
             qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=2)
+
+        if self.probe is not None:  # first batch element, [L, H, D]
+            _probe_dense(self.probe, qs[0], ks[0], self.softcap)
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
@@ -782,6 +823,7 @@ class MultiCrossAttentionHead(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+        self.probe = None  # training-time monitoring hook, set only on monitor steps
         self.att = torch.nn.functional.scaled_dot_product_attention
         self.softmax = torch.nn.Softmax(dim=-1)
 
@@ -804,6 +846,9 @@ class MultiCrossAttentionHead(torch.nn.Module):
         s = [x_kv.shape[0], -1, self.num_heads, self.dim_head_proj]
         ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype).transpose(-3, -2)
         vs = self.proj_heads_v(x_kv).reshape(s).transpose(-3, -2)
+
+        if self.probe is not None:  # first batch element, [B, H, L, D] -> [L, H, D]
+            _probe_dense(self.probe, qs[0].transpose(0, 1), ks[0].transpose(0, 1), 0.0)
 
         # correct ordering of tensors with seq dimension second but last is critical
         with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):

@@ -118,6 +118,16 @@ train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
+  # Training-time monitoring (mon/* metrics). small1 trains 64 steps (64 samples, batch size 1),
+  # so every: 5 gives ~13 monitor steps. Per-monitor `every` overrides the global one, so the
+  # monitors with a larger default cadence are pinned to 5 as well.
+  monitoring:
+    enabled: True
+    every: 5
+    monitors:
+      grads: {every: 5}
+      attention: {every: 5}
+      adam_state: {enabled: True}
 
 # parameters for data loading
 data_loading :
