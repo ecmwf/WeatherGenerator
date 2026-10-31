@@ -17,11 +17,10 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.model.attention import (
-    MultiCrossAttentionHeadVarlen,
+    Attention,
     MultiCrossAttentionHeadVarlenSlicedQ,
-    MultiSelfAttentionHead,
     MultiSelfAttentionHeadLocal,
-    MultiSelfAttentionHeadVarlen,
+    SeqLensFlash,
 )
 from weathergen.model.blocks import CrossAttentionBlock, OriginalPredictionBlock, SelfAttentionBlock
 from weathergen.model.embeddings import (
@@ -216,12 +215,11 @@ class LocalAssimilationEngine(torch.nn.Module):
 
         for _ in range(self.cf.ae_local_num_blocks):
             self.ae_local_blocks.append(
-                MultiSelfAttentionHeadVarlen(
+                Attention(
                     self.cf.ae_local_dim_embed,
                     num_heads=self.cf.ae_local_num_heads,
                     dropout_rate=self.cf.ae_local_dropout_rate,
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
-                    with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
@@ -240,8 +238,12 @@ class LocalAssimilationEngine(torch.nn.Module):
             )
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
+        seqlens = SeqLensFlash.from_lens(cell_lens_c)
         for block in self.ae_local_blocks:
-            tokens_c = block(tokens_c, cell_lens_c)
+            if isinstance(block, Attention):
+                tokens_c = block(tokens_c, seqlens=seqlens)
+            else:
+                tokens_c = block(tokens_c)
         return tokens_c
 
 
@@ -268,7 +270,6 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 with_residual=self.cf.ae_adapter_with_residual,
                 with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
                 dropout_rate=self.cf.ae_adapter_dropout_rate,
-                with_flash=self.cf.with_flash_attention,
                 norm_type=self.cf.norm_type,
                 qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                 norm_eps=self.cf.norm_eps,
@@ -298,7 +299,6 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     with_residual=self.cf.ae_adapter_with_residual,
                     with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
                     dropout_rate=self.cf.ae_adapter_dropout_rate,
-                    with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
@@ -400,12 +400,11 @@ class QueryAggregationEngine(torch.nn.Module):
             # Last block is always global attention
             if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
                 self.ae_aggregation_blocks.append(
-                    MultiSelfAttentionHeadVarlen(
+                    Attention(
                         self.cf.ae_global_dim_embed,
                         num_heads=self.cf.ae_aggregation_num_heads,
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
-                        with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -423,7 +422,6 @@ class QueryAggregationEngine(torch.nn.Module):
                         block_factor=self.cf.ae_aggregation_block_factor,
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
-                        with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -444,10 +442,11 @@ class QueryAggregationEngine(torch.nn.Module):
             )
 
     def forward(self, tokens, batch_lens, use_reentrant, coords=None):
+        seqlens = SeqLensFlash.from_lens(batch_lens)
         for block in self.ae_aggregation_blocks:
             aux_info = None
-            if isinstance(block, MultiSelfAttentionHeadVarlen):
-                tokens = block(tokens, x_lens=batch_lens, coords=coords)
+            if isinstance(block, Attention):
+                tokens = block(tokens, seqlens=seqlens, coords=coords)
             else:
                 tokens = block(tokens, coords, aux_info)
         return tokens
@@ -476,12 +475,11 @@ class GlobalAssimilationEngine(torch.nn.Module):
             # Last block is always global attention
             if i % global_rate == 0 or i + 1 == self.cf.ae_global_num_blocks:
                 self.ae_global_blocks.append(
-                    MultiSelfAttentionHead(
+                    Attention(
                         self.cf.ae_global_dim_embed,
                         num_heads=self.cf.ae_global_num_heads,
                         dropout_rate=self.cf.ae_global_dropout_rate,
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
-                        with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -498,7 +496,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         block_factor=self.cf.ae_global_block_factor,
                         dropout_rate=self.cf.ae_global_dropout_rate,
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
-                        with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -526,7 +523,12 @@ class GlobalAssimilationEngine(torch.nn.Module):
     def forward(self, tokens, coords=None):
         aux_info = None
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+            if isinstance(block, Attention):
+                tokens = checkpoint(
+                    block, tokens, coords=coords, ada_ln_aux=aux_info, use_reentrant=False
+                )
+            else:
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -562,12 +564,11 @@ class ForecastingEngine(torch.nn.Module):
                 # Alternate between global and local attention
                 if (i % global_rate == 0) or i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
-                        MultiSelfAttentionHead(
+                        Attention(
                             self.cf.ae_global_dim_embed,
                             num_heads=self.cf.fe_num_heads,
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
-                            with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
@@ -585,7 +586,6 @@ class ForecastingEngine(torch.nn.Module):
                             block_factor=self.cf.ae_global_block_factor,
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
-                            with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
@@ -632,6 +632,10 @@ class ForecastingEngine(torch.nn.Module):
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = checkpoint(block, tokens, use_reentrant=False)
+            elif isinstance(block, Attention):
+                tokens = checkpoint(
+                    block, tokens, coords=coords, ada_ln_aux=aux_info, use_reentrant=False
+                )
             else:
                 tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
@@ -723,20 +727,19 @@ class TargetPredictionEngineClassic(nn.Module):
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
         self.tte = torch.nn.ModuleList()
-        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1)
+        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1)  # Assuming dropout_rate is 0.1
 
         for i in range(len(self.dims_embed) - 1):
             # Multi-Cross Attention Head
             self.tte.append(
-                MultiCrossAttentionHeadVarlen(
-                    dim_embed_q=self.dims_embed[i],
+                Attention(
+                    dim_embed=self.dims_embed[i],
                     dim_embed_kv=self.cf.ae_global_dim_embed,
                     num_heads=stream_config["target_readout"]["num_heads"],
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
-                    dropout_rate=pred_dropout_rate,  # Assuming dropout_rate is 0.1
-                    with_flash=self.cf.with_flash_attention,
+                    dropout_rate=pred_dropout_rate,
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     softcap=self.softcap,
@@ -749,12 +752,11 @@ class TargetPredictionEngineClassic(nn.Module):
             # Optional Self-Attention Head
             if self.cf.pred_self_attention:
                 self.tte.append(
-                    MultiSelfAttentionHeadVarlen(
+                    Attention(
                         dim_embed=self.dims_embed[i],
                         num_heads=stream_config["target_readout"]["num_heads"],
                         dropout_rate=pred_dropout_rate,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
-                        with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         dim_aux=self.dim_coord_in,
@@ -784,9 +786,27 @@ class TargetPredictionEngineClassic(nn.Module):
         tokens_lens = latent_lens
         tcs_aux = coordinates
 
-        for ib, block in enumerate(self.tte):
-            if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
+        seqlens_ca = SeqLensFlash.from_lens(tcs_lens, tokens_lens)
+        seqlens_sa = SeqLensFlash.from_lens(tcs_lens) if self.cf.pred_self_attention else None
+
+        for _ib, block in enumerate(self.tte):
+            if isinstance(block, Attention) and block.lnorm_in_kv is not None:
+                tc_tokens = checkpoint(
+                    block,
+                    tc_tokens,
+                    x_kv=tokens_stream,
+                    seqlens=seqlens_ca,
+                    ada_ln_aux=tcs_aux,
+                    use_reentrant=False,
+                )
+            elif isinstance(block, Attention):
+                tc_tokens = checkpoint(
+                    block,
+                    tc_tokens,
+                    seqlens=seqlens_sa,
+                    ada_ln_aux=tcs_aux,
+                    use_reentrant=False,
+                )
             else:
                 tc_tokens = checkpoint(
                     block,
@@ -840,7 +860,7 @@ class TargetPredictionEngine(nn.Module):
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
-        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1)
+        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1)  # Assuming dropout_rate is 0.1
 
         # For backwards compatibility
 
@@ -850,8 +870,7 @@ class TargetPredictionEngine(nn.Module):
 
         attention_kwargs = {
             "with_qk_lnorm": True,
-            "dropout_rate": pred_dropout_rate,  # Assuming dropout_rate is 0.1
-            "with_flash": self.cf.with_flash_attention,
+            "dropout_rate": pred_dropout_rate,
             "norm_type": self.cf.norm_type,
             "qk_norm_type": self.cf.qk_norm_type,
             "softcap": self.softcap,
@@ -1031,12 +1050,11 @@ class LatentPredictionHeadTransformer(nn.Module):
 
         for _ in range(num_blocks):
             self.blocks.append(
-                MultiSelfAttentionHead(
+                Attention(
                     intermediate_dim,
                     num_heads=num_heads,
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=with_qk_lnorm,
-                    with_flash=self.global_cf.with_flash_attention,
                     norm_type=self.global_cf.norm_type,
                     qk_norm_type=self.global_cf.qk_norm_type,
                     # dim_aux=dim_aux,
