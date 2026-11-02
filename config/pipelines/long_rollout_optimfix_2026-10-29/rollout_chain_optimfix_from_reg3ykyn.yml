@@ -1,0 +1,79 @@
+# The optimizer-fix rollout chain (rollout_chain_optimfix.yml) started from reg3ykyn, the 2-step finetune of
+# the optimizer-fix pretrain u2kqf7ue, instead of rrvj7vjv. Same stages, configs and options otherwise, so it
+# tests whether the fix helps through the pretrain + 2-step finetune rather than through rollout training:
+#   rgnhv6t2 = ofnhv6t3, rgseymb2 = ofseymb3, rgch7py2 = ofch7py3
+# reg3ykyn has the same model architecture as rrvj7vjv (only training settings differ).
+# Two chain parts per stage: the earlier chains finished each stage within one or two parts.
+# Launch from the WeatherGenerator root, held until reg3ykyn's cleanup job has run:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --no-register --hold --pipeline config/pipelines/long_rollout_optimfix_2026-10-29/rollout_chain_optimfix_from_reg3ykyn.yml
+#   scontrol update JobId=<rgnhv6t2 part1> Dependency=afterany:<reg3ykyn cleanup>; then scontrol release the held jobs
+parallelize: false
+stages:
+  - name: rollout8
+    stage: train
+    run_id: rgnhv6t2
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    options:
+      # the base config stores nhv6tkln's final step (2048): start a new schedule, as nhv6tkln did
+      - general.istep=0
+      - load_chkpt.run_id=reg3ykyn
+      - load_chkpt.mini_epoch=-1
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8
+  - name: pfanchndlb
+    stage: train
+    run_id: rgseymb2
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - load_chkpt.run_id=rgnhv6t2
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=5
+      - train_logging.checkpoint=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8
+  - name: combodet
+    stage: train
+    run_id: rgch7py2
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - load_chkpt.run_id=rgseymb2
+      - load_chkpt.mini_epoch=5
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.0
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      - train_logging.checkpoint=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8
