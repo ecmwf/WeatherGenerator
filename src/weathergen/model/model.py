@@ -24,11 +24,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import (
-    DiffusionForecastEngine,
-    DiffusionRegisters,
-    _decode_diffusion_steps,
-)
+from weathergen.model.diffusion import DiffusionForecastEngine, _decode_diffusion_steps
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -43,7 +39,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
-from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.layers import MLP, NamedLinear, RegisterTokens
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_reconstructed
@@ -419,7 +415,7 @@ class Model(torch.nn.Module):
 
         # Initialize forecasting engine: standard or diffusion-wrapped
         mode_cfg = cf.training_config
-        if cf.fe_num_blocks > 0:
+        if cf.forecast_engine.num_blocks > 0:
             if cf.get("diffusion", {}).get("conditioning_type") == "ada_ln":
                 assert cf.diffusion.get("conditioning_embed_dim") is not None, (
                     "Diffusion conditioning embedding dimension must be specified when "
@@ -439,8 +435,8 @@ class Model(torch.nn.Module):
                 )
         else:
             assert not cf.get("diffusion", {}).get("enabled", False), (
-                "diffusion.enabled requires a forecast engine (fe_num_blocks > 0), "
-                f"got fe_num_blocks={cf.fe_num_blocks}"
+                "diffusion.enabled requires a forecast engine (forecast_engine.num_blocks > 0), "
+                f"got forecast_engine.num_blocks={cf.forecast_engine.num_blocks}"
             )
             self.forecast_engine = IdentityEngine()
 
@@ -693,7 +689,7 @@ class Model(torch.nn.Module):
 
     def reset_parameters(self):
         def _reset_params(module):
-            if isinstance(module, nn.Linear | nn.LayerNorm | DiffusionRegisters):
+            if isinstance(module, nn.Linear | nn.LayerNorm | RegisterTokens):
                 module.reset_parameters()
             else:
                 pass

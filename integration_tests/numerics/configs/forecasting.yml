@@ -1,7 +1,8 @@
 # Numerics test: physical forecasting (mirrors config/config_forecasting.yml at tiny scale)
 
 ae_local_num_blocks: 0
-fe_layer_norm_after_blocks: [0]
+forecast_engine:
+  layer_norm_after_blocks: [0]
 
 training_config:
   training_mode: ["masking"]

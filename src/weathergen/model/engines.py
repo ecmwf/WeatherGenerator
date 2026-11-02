@@ -28,7 +28,7 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.layers import MLP, KwargLayerNorm
+from weathergen.model.layers import MLP, KwargLayerNorm, RegisterTokens
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -598,6 +598,7 @@ class ForecastingEngine(torch.nn.Module):
         """
         super(ForecastingEngine, self).__init__()
         self.cf = cf
+        self.fe_cf = fe_cf = self.cf.forecast_engine
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
@@ -610,17 +611,18 @@ class ForecastingEngine(torch.nn.Module):
         _diffusion_latent_dim = diff_cf.get("latent_dim") or self.cf.ae_global_dim_embed
         _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
 
-        global_rate = int(1 / self.cf.forecast_att_dense_rate)
+        att_dense_rate = fe_cf.get("att_dense_rate", 1.0)
+        global_rate = int(1 / att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
-            for i in range(self.cf.fe_num_blocks):
+            for i in range(fe_cf.num_blocks):
                 # Alternate between global and local attention
-                if (i % global_rate == 0) or i + 1 == self.cf.fe_num_blocks:
+                if (i % global_rate == 0) or i + 1 == fe_cf.num_blocks:
                     self.fe_blocks.append(
                         MultiSelfAttentionHead(
                             _inner_dim,
-                            num_heads=self.cf.fe_num_heads,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+                            num_heads=fe_cf.num_heads,
+                            dropout_rate=fe_cf.dropout_rate,
+                            with_qk_lnorm=fe_cf.with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             use_xsa=self.cf.get("use_xsa", False),
                             norm_type=self.cf.norm_type,
@@ -637,11 +639,11 @@ class ForecastingEngine(torch.nn.Module):
                     self.fe_blocks.append(
                         MultiSelfAttentionHeadLocal(
                             _inner_dim,
-                            num_heads=self.cf.fe_num_heads,
+                            num_heads=fe_cf.num_heads,
                             qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
                             block_factor=self.cf.ae_global_block_factor,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+                            dropout_rate=fe_cf.dropout_rate,
+                            with_qk_lnorm=fe_cf.with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             use_xsa=self.cf.get("use_xsa", False),
                             norm_type=self.cf.norm_type,
@@ -661,10 +663,10 @@ class ForecastingEngine(torch.nn.Module):
                         MultiCrossAttentionHead(
                             dim_embed_q=_diffusion_latent_dim,
                             dim_embed_kv=_diffusion_latent_dim,
-                            num_heads=self.cf.fe_num_heads,
-                            dropout_rate=self.cf.fe_dropout_rate,
+                            num_heads=fe_cf.num_heads,
+                            dropout_rate=fe_cf.dropout_rate,
                             with_residual=True,
-                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+                            with_qk_lnorm=fe_cf.with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
@@ -680,7 +682,7 @@ class ForecastingEngine(torch.nn.Module):
                         _inner_dim,
                         num_layers=2,
                         with_residual=True,
-                        dropout_rate=self.cf.fe_dropout_rate,
+                        dropout_rate=fe_cf.dropout_rate,
                         mlp_type=self.cf.get("mlp_type", "mlp"),
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
@@ -690,7 +692,7 @@ class ForecastingEngine(torch.nn.Module):
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
-                if i in self.cf.get("fe_layer_norm_after_blocks", []):
+                if i in fe_cf.get("layer_norm_after_blocks", []):
                     self.fe_blocks.append(KwargLayerNorm(_inner_dim, elementwise_affine=False))
 
         def init_weights_final(m):
@@ -701,6 +703,15 @@ class ForecastingEngine(torch.nn.Module):
 
         for block in self.fe_blocks:
             block.apply(init_weights_final)
+
+        # Learnable register tokens, prepended in forward() and dropped before returning. In
+        # diffusion mode they live inside the wrapped engine and are never noised.
+        num_registers = fe_cf.get("num_register_tokens", 0) or 0
+        assert num_registers == 0 or att_dense_rate == 1.0, (
+            "forecast_engine.num_register_tokens > 0 requires att_dense_rate == 1.0 "
+            "(local attention expects exactly one token per cell)"
+        )
+        self.registers = RegisterTokens(num_registers, _inner_dim) if num_registers > 0 else None
 
         # For concatenate_hiddendim: project 2D -> D after the full forward pass
         self.out_proj = (
@@ -720,14 +731,24 @@ class ForecastingEngine(torch.nn.Module):
         # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         if self.training:
             # Impute noise to the latent state
-            noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
+            noise_std = self.fe_cf.get("impute_latent_noise_std", 0.0)
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
         # predict residual to last time step if requested
-        forecast_residual = self.cf.get("forecast_residual", False)
+        forecast_residual = self.fe_cf.get("residual", False)
         if forecast_residual:
             tokens_in = tokens
+
+        if self.registers is not None:
+            # conditioning that is paired token-wise with the tokens is zero-padded at the
+            # register slots; the other types use it as a whole (KV, ada_ln aux) or not at all
+            pad_conditioning = self.conditioning in ("additive", "cross_attn_rev")
+            tokens, coords, padded = self.registers.prepend(
+                tokens, coords, conditioning if pad_conditioning else None
+            )
+            if pad_conditioning:
+                conditioning = padded
 
         diff_cf = self.cf.get("diffusion", {})
         if diff_cf.get("enabled", False):
@@ -747,7 +768,7 @@ class ForecastingEngine(torch.nn.Module):
                     )
                 else:
                     # additive conditioning is re-added at every block (but not a plain norm
-                    # layer, see fe_layer_norm_after_blocks), not just once.
+                    # layer, see forecast_engine.layer_norm_after_blocks), not just once.
                     if self.conditioning == "additive" and not isinstance(block, KwargLayerNorm):
                         tokens = tokens + conditioning
                     ada_ln_aux = conditioning if self.conditioning == "ada_ln" else None
@@ -766,6 +787,9 @@ class ForecastingEngine(torch.nn.Module):
                 tokens = checkpoint(
                     block, tokens, coords=coords, ada_ln_aux=conditioning, use_reentrant=False
                 )
+
+        if self.registers is not None:
+            tokens = self.registers.strip(tokens)
 
         if self.out_proj is not None:
             # tokens = self.out_proj(tokens)  # (B, H, 2D) -> (B, H, D)

@@ -31,6 +31,58 @@ import torch.nn as nn
 from weathergen.model.norms import AdaLayerNorm, AdaLNZero, RMSNorm, SwiGLU
 
 
+class RegisterTokens(torch.nn.Module):
+    """Learnable register tokens, shape (1, R, D).
+
+    Kept in their own module (rather than as a bare Parameter on the owning engine) so that
+    checkpoint loading can (re)initialize them via reset_parameters() without treating the whole
+    owning engine as a new module. Initialized like the encoder's register tokens
+    (EncoderModule.q_aux): uniform in [0, 1/D).
+    """
+
+    def __init__(self, num_registers: int, dim: int):
+        super().__init__()
+        self.dim = dim
+        self.tokens = torch.nn.Parameter(torch.empty(1, num_registers, dim))
+        self.reset_parameters()
+
+    @property
+    def num_registers(self) -> int:
+        return self.tokens.shape[1]
+
+    @torch.no_grad()
+    def reset_parameters(self):
+        torch.nn.init.uniform_(self.tokens, 0.0, 1.0 / self.dim)
+
+    def prepend(
+        self,
+        tokens: torch.Tensor,
+        coords: torch.Tensor | None = None,
+        conditioning: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        """Prepend the registers to tokens (B, N, D) -> (B, R+N, D).
+
+        coords (B or 1, N, 2) get zero RoPE coordinates at the register slots. conditioning, if
+        given, has to be token-wise aligned with tokens and is zero-padded at the register slots.
+        """
+        num_registers = self.num_registers
+        registers = self.tokens.to(dtype=tokens.dtype).expand(tokens.shape[0], -1, -1)
+        tokens = torch.cat([registers, tokens], dim=1)
+        if coords is not None:
+            pad = coords.new_zeros(coords.shape[0], num_registers, coords.shape[2])
+            coords = torch.cat([pad, coords], dim=1)
+        if conditioning is not None:
+            pad = conditioning.new_zeros(
+                conditioning.shape[0], num_registers, conditioning.shape[2]
+            )
+            conditioning = torch.cat([pad, conditioning], dim=1)
+        return tokens, coords, conditioning
+
+    def strip(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Drop the registers again: (B, R+N, D) -> (B, N, D)."""
+        return tokens[:, self.num_registers :]
+
+
 class NamedLinear(torch.nn.Module):
     def __init__(self, name: str | None = None, **kwargs):
         super(NamedLinear, self).__init__()

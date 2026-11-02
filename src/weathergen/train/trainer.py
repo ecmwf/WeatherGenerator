@@ -30,6 +30,7 @@ from weathergen.model.ema import EMAModel
 from weathergen.model.model import ModelOutput
 from weathergen.model.model_interface import (
     init_model_and_shard,
+    rename_legacy_params,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
@@ -1124,6 +1125,7 @@ class Trainer(TrainerBase):
         named_state = torch.load(
             optim_file, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
+        named_state = rename_legacy_params(named_state)
         is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
 
         # map each parameter to the optimizer that owns it, so state is restored on the
