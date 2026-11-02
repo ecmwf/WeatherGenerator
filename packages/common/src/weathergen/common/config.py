@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
 import functools
 import io
 import json
@@ -315,63 +314,6 @@ def _apply_fixes(config: Config) -> Config:
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
     config = _check_streams(config)
-    config = migrate_forecast_engine_config(config)
-    return config
-
-
-# Legacy top-level forecast engine keys and their name in the `forecast_engine` config section.
-_LEGACY_FORECAST_ENGINE_KEYS = {
-    "fe_num_blocks": "num_blocks",
-    "fe_num_heads": "num_heads",
-    "fe_dropout_rate": "dropout_rate",
-    "fe_with_qk_lnorm": "with_qk_lnorm",
-    "fe_layer_norm_after_blocks": "layer_norm_after_blocks",
-    "fe_impute_latent_noise_std": "impute_latent_noise_std",
-    "forecast_att_dense_rate": "att_dense_rate",
-    "forecast_residual": "residual",
-    "with_step_conditioning": "with_step_conditioning",
-}
-
-
-def migrate_forecast_engine_config(config: Config) -> Config:
-    """
-    Move legacy forecast engine keys into the `forecast_engine` config section.
-
-    Handles the flat top-level `fe_*` keys (see _LEGACY_FORECAST_ENGINE_KEYS) and
-    `diffusion.num_register_tokens`, which became `forecast_engine.num_register_tokens`. Has to
-    be applied to every config source *before* merging so that the precedence of the sources is
-    kept (e.g. a legacy key in an overwrite still overrides the base config).
-
-    raises: ValueError if a source sets a value both under its legacy and its new key.
-    """
-    legacy_keys = [key for key in _LEGACY_FORECAST_ENGINE_KEYS if key in config]
-    diffusion_cfg = config.get("diffusion", None)
-    has_diffusion_registers = (
-        isinstance(diffusion_cfg, DictConfig | dict) and "num_register_tokens" in diffusion_cfg
-    )
-    if not legacy_keys and not has_diffusion_registers:
-        return config
-
-    config = copy.deepcopy(config)
-    moves = [(key, _LEGACY_FORECAST_ENGINE_KEYS[key]) for key in legacy_keys]
-    with open_dict(config):
-        if config.get("forecast_engine", None) is None:
-            config.forecast_engine = {}
-        values = {old: config.pop(old) for old, _ in moves}
-        if has_diffusion_registers:
-            moves.append(("diffusion.num_register_tokens", "num_register_tokens"))
-            values["diffusion.num_register_tokens"] = config.diffusion.pop("num_register_tokens")
-        for old, new in moves:
-            if new in config.forecast_engine:
-                raise ValueError(
-                    f"Config sets both '{old}' (legacy) and 'forecast_engine.{new}'; "
-                    f"remove '{old}'."
-                )
-            config.forecast_engine[new] = values[old]
-    _logger.info(
-        "Moved legacy forecast engine config keys into 'forecast_engine': "
-        + ", ".join(f"{old} -> {new}" for old, new in moves)
-    )
     return config
 
 
@@ -472,7 +414,7 @@ def load_merge_configs(
     Returns:
         Merged configuration object.
     """
-    private_config = migrate_forecast_engine_config(_load_private_conf(private_home))
+    private_config = _load_private_conf(private_home)
     overwrite_configs: list[Config] = []
     for overwrite in overwrites:
         if isinstance(overwrite, (str | Path)):
@@ -482,17 +424,15 @@ def load_merge_configs(
             for path in p:
                 c = _load_overwrite_conf(Path(path))
                 c = _load_streams_in_config(c)
-                c = migrate_forecast_engine_config(c)
                 overwrite_configs.append(c)
         else:
             # If it is a dict or DictConfig, we can directly use it
             c = _load_overwrite_conf(overwrite)
             c = _load_streams_in_config(c)
-            c = migrate_forecast_engine_config(c)
             overwrite_configs.append(c)
 
     if from_run_id is None:
-        base_config = migrate_forecast_engine_config(_load_base_conf(base))
+        base_config = _load_base_conf(base)
     else:
         base_config = load_run_config(from_run_id, mini_epoch, None)
         from_run_id = get_run_id_from_config(base_config)
