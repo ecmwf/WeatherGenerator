@@ -278,9 +278,9 @@ class WeatherGenReader(Reader):
             if "scores" not in data_dict:
                 data_dict = {"scores": [data_dict]}
 
-            # Check eval_settings match current config. Skipped while bootstrapping
+            # Check eval_settings match current config. Skipped while computing
             # common_coords, since computing eval_settings itself needs common_coords.
-            if not getattr(self, "_bootstrapping_common_coords", False):
+            if not getattr(self, "computing_common_coords", False):
                 stored_settings = data_dict.get("eval_settings", {})
                 current_settings = self.get_eval_settings(stream)
                 if stored_settings != current_settings:
@@ -363,21 +363,20 @@ class WeatherGenJsonReader(WeatherGenReader):
         provenance = {name: defaultdict(list) for name in coord_names}
 
         # load_single_score() -> get_eval_settings() -> get_forecast_steps() needs
-        # common_coords, which is what we're computing here, so skip that check for now.
-        self._bootstrapping_common_coords = True
-        try:
-            for stream in streams:
-                for region in regions:
-                    for metric, parameters in metrics.items():
-                        score = self.load_single_score(stream, region, metric, parameters)
-                        if score is not None:
-                            for name in coord_names:
-                                vals = set(score[name].values)
-                                all_coords[name].append(vals)
-                                for val in vals:
-                                    provenance[name][val].append((stream, region, metric))
-        finally:
-            self._bootstrapping_common_coords = False
+        # common_coords, which is what we're computing here. So computing_common_coords
+        # tells load_single_score() to skip here when it is already beeing computed.
+        self.computing_common_coords = True
+        for stream in streams:
+            for region in regions:
+                for metric, parameters in metrics.items():
+                    score = self.load_single_score(stream, region, metric, parameters)
+                    if score is not None:
+                        for name in coord_names:
+                            vals = set(score[name].values)
+                            all_coords[name].append(vals)
+                            for val in vals:
+                                provenance[name][val].append((stream, region, metric))
+        self.computing_common_coords = False
 
         common_coords = {name: set.intersection(*all_coords[name]) for name in coord_names}
 
