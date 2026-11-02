@@ -277,28 +277,6 @@ def _strip_module_prefix(key: str) -> str:
     return key[len("module.") :] if key.startswith("module.") else key
 
 
-# Renamed parameters: legacy checkpoint name -> current name (without "module." prefix).
-_LEGACY_PARAM_NAMES = {
-    # diffusion registers moved into the wrapped ForecastingEngine (RegisterTokens)
-    "forecast_engine.diffusion_registers": "forecast_engine.net.registers.tokens",
-    "forecast_engine.diffusion_registers.tokens": "forecast_engine.net.registers.tokens",
-}
-
-
-def rename_legacy_params(params: dict) -> dict:
-    """Rename parameters of legacy checkpoints to their current name (see _LEGACY_PARAM_NAMES)."""
-    renamed = {}
-    for key, value in params.items():
-        prefix = "module." if key.startswith("module.") else ""
-        new_name = _LEGACY_PARAM_NAMES.get(_strip_module_prefix(key))
-        if new_name is not None:
-            if is_root():
-                logger.info(f"Renaming legacy checkpoint parameter {key} -> {prefix}{new_name}")
-            key = prefix + new_name
-        renamed[key] = value
-    return renamed
-
-
 def _align_module_prefix(params: dict, model_sd) -> dict:
     """Match a checkpoint's ``module.`` key convention to the model's.
 
@@ -334,7 +312,6 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, with_fsdp: bool, 
     params = torch.load(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
-    params = rename_legacy_params(params)
 
     is_model_sharded = with_ddp and with_fsdp
     if is_model_sharded:
