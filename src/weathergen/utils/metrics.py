@@ -58,7 +58,11 @@ def get_train_metrics_path(base_path: Path, run_id: str) -> Path:
     `results/{RUN-ID}/{RUN-ID}_train_metrics.json` to disambiguate `metrics.json`.
     See https://github.com/ecmwf/WeatherGenerator/issues/590 for details.
     """
+    # Callers pass base_path = results/{RUN-ID}; the pre-rename metrics file
+    # (see #590) lives directly in it.
+    if (base_path / "metrics.json").exists():
+        return base_path / "metrics.json"
+    # Keep the historical lookup for callers passing the results parent.
     if (base_path / run_id / "metrics.json").exists():
         return base_path / run_id / "metrics.json"
-    else:
-        return base_path / f"{run_id}_train_metrics.json"
+    return base_path / f"{run_id}_train_metrics.json"
