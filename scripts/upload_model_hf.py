@@ -9,7 +9,8 @@
 """
 Upload a trained model (config + checkpoint) to Hugging Face.
 
-By default the files are taken from `models/<run_id>` in the root of this repository.
+By default the files are taken from `shared_working_dir/models/<run_id>` in the root of this
+repository, where a local run with `private_config.yaml` writes them.
 
 The files are uploaded to the `<run_id>/` folder of the repo with their original names, e.g.
 `<run_id>/model_<run_id>_latest.json` and `<run_id>/<run_id>_latest.chkpt`, so they can be
@@ -72,7 +73,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-dir",
         type=Path,
-        help="The directory containing the model files (default: <repo root>/models/<run-id>)",
+        help="The directory with the model files "
+        "(default: <repo root>/shared_working_dir/models/<run-id>)",
     )
     parser.add_argument(
         "--dry-run",
@@ -81,7 +83,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model_dir = (args.model_dir or _REPO_ROOT / "models" / args.run_id).expanduser().resolve()
+    model_dir = args.model_dir or _REPO_ROOT / "shared_working_dir" / "models" / args.run_id
+    model_dir = model_dir.expanduser().resolve()
     _logger.info(f"Using model directory {model_dir}")
 
     files = get_model_files(model_dir, args.run_id, args.mini_epoch)
