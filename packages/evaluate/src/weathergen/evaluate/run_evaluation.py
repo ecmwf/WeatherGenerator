@@ -85,6 +85,11 @@ def evaluate_from_args(argl: list[str]) -> None:
     """
     # configure logging
     init_loggers()
+    evaluate_from_config(*config_from_args(argl))
+
+
+def config_from_args(argl: list[str]) -> tuple[DictConfig, MlflowClient | None]:
+    """The evaluation config and the MLflow client of the command line (``evaluate --help``)."""
     parser = argparse.ArgumentParser(description="Fast evaluation of WeatherGenerator runs.")
     parser.add_argument(
         "--config",
@@ -159,8 +164,7 @@ def evaluate_from_args(argl: list[str]) -> None:
         existing = cf.get("run_ids", {})
         cf.run_ids = {k: existing.get(k, {}) for k in args.run_ids}
         _logger.info(f"Overwritten run_ids to: {args.run_ids}")
-
-    evaluate_from_config(cf, mlflow_client)
+    return cf, mlflow_client
 
 
 def get_reader(
@@ -430,39 +434,58 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
 def run_chunked(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     """``evaluate_from_config`` with every (run, stream) cut into chunks (``distributed``).
 
-    The chunk tasks run one after the other in this process; an MPI run drives the same
-    tasks from ``distributed.runner``.
+    The chunk tasks run one after the other in this process; an MPI run (``distributed.runner``)
+    hands the same tasks, from the same stages, to its workers.
     """
     _, sample_size, fstep_size = parse_distributed_config(cfg)
     stream_results = [
-        _run_stream_in_chunks(task, sample_size, fstep_size) for task in build_stream_tasks(cfg)
+        run_stages_here(stream_stages(task, sample_size, fstep_size))
+        for task in build_stream_tasks(cfg)
     ]
     finalise(cfg, *accumulate_stream_results(stream_results), mlflow_client)
 
 
-def _run_stream_in_chunks(
-    task: dict, sample_size: int | None, fstep_size: int | None
-) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict]:
-    """``_process_stream`` of one (run, stream), as chunk tasks.
+def run_stages_here(stages) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict]:
+    """Run the stages of one (run, stream) in this process, batch after batch."""
+    outputs = None
+    try:
+        while True:
+            batch = stages.send(outputs)
+            outputs = []
+            for fn, kwargs, description in batch:
+                _logger.info(description)
+                outputs.append(fn(**kwargs))
+    except StopIteration as done:
+        return done.value
 
-    Scoring chunk tasks first (their results merged, the missing scores written), then the
-    plotting chunk tasks with the colour ranges of the whole (run, stream), then the score
-    maps and videos.  A run whose reader does not load data has nothing to chunk and goes
-    through ``_process_stream`` as it is.
 
-    The colour ranges are those a serial run uses: the bounds of the evaluation samples over
-    the plotting forecast steps when the stream was scored here (returned by the scoring
-    chunk tasks), else the bounds of the plotting subset, loaded window by window; a bound
-    the config fixes is never computed.
+def stream_stages(task: dict, sample_size: int | None, fstep_size: int | None):
+    """The stages of one (run, stream) in chunks: a generator of batches of tasks.
+
+    Each stage yields a batch, ``[(function, kwargs, description), ...]``, whose calls are
+    independent of each other, and receives the list of their return values; the next stage
+    depends on them.  The description is the log line of the task, for whoever runs it.
+    Who runs the calls, and where, is up to the driver: ``run_stages_here`` runs them in
+    this process, the MPI master hands them to its workers.  The generator returns the
+    ``_process_stream`` tuple of the whole (run, stream).
+
+    Stages: the scoring chunk tasks (merged by ``merge_results``, missing scores written),
+    the colour bounds of the plotting windows if the stream was not scored here and the
+    config leaves a bound open, the plotting chunk tasks with the colour ranges of the whole
+    (run, stream), then ``finish_stream`` (score maps and videos).  A run whose reader does
+    not load data has nothing to chunk and is one ``_process_stream`` call.
     """
     run_id, run, stream = task["run_id"], task["run"], task["stream"]
     type_ = run.get("type", "zarr")
+    whole = f"RUN {run_id} - {stream}: the whole stream in one task (nothing to chunk)"
     if type_ not in ("zarr", "anemoi-target"):
-        return _process_stream(**task)
+        outputs = yield [(_process_stream, task, whole)]
+        return outputs[0]
     reader = get_reader(type_, run, run_id, task["private_paths"], task["regions"], task["metrics"])
     stream_cfg = reader.get_stream(stream)
     if not stream_cfg:
-        return _process_stream(**task)
+        outputs = yield [(_process_stream, task, whole)]
+        return outputs[0]
     global_plotting_opts = task["global_plotting_opts"]
     plot_score_options = dict(task["plot_score_options"])
 
@@ -495,8 +518,8 @@ def _run_stream_in_chunks(
                 sample_size,
                 fstep_size,
             )
-            outputs = [
-                _process_stream(**_log_chunk(t, i, len(tasks), responsible[i]))
+            outputs = yield [
+                (_process_stream, t, _chunk_description(t, i, len(tasks), responsible[i]))
                 for i, t in enumerate(tasks)
             ]
             computed = merge_results([o[2] for o in outputs], fsteps=responsible)
@@ -512,19 +535,32 @@ def _run_stream_in_chunks(
         )
         if not bounds and _bounds_missing(task, stream, available):
             # not scored here: the bounds of the plotting subset, one window at a time
-            for fsteps in windows(available.fsteps, fstep_size):
-                for samples in windows(available.samples, sample_size):
-                    data = reader.get_data(
-                        stream,
-                        fsteps=fsteps,
-                        samples=samples,
-                        channels=available.channels,
-                        ensemble=available.ensemble,
-                    )
-                    chunk_bounds.append(
-                        colour_bounds(data.target, data.prediction, available.channels)
-                    )
-            bounds = merge_bounds(chunk_bounds)
+            plot_windows = [
+                (samples, fsteps)
+                for fsteps in windows(available.fsteps, fstep_size)
+                for samples in windows(available.samples, sample_size)
+            ]
+            outputs = yield [
+                (
+                    bounds_of_window,
+                    {
+                        "run_id": run_id,
+                        "run": run,
+                        "stream": stream,
+                        "private_paths": task["private_paths"],
+                        "regions": task["regions"],
+                        "metrics": task["metrics"],
+                        "samples": samples,
+                        "fsteps": fsteps,
+                        "channels": available.channels,
+                        "ensemble": available.ensemble,
+                    },
+                    f"RUN {run_id} - {stream}: colour bounds {i + 1}/{len(plot_windows)}: "
+                    f"samples {samples}, forecast steps {fsteps}",
+                )
+                for i, (samples, fsteps) in enumerate(plot_windows)
+            ]
+            bounds = merge_bounds(outputs)
         tasks = build_plotting_chunk_tasks(
             task,
             available.samples,
@@ -534,13 +570,71 @@ def _run_stream_in_chunks(
             fstep_size,
             bounds,
         )
-        for i, t in enumerate(tasks):
-            _process_stream(**_log_chunk(t, i, len(tasks)))
+        yield [
+            (_process_stream, t, _chunk_description(t, i, len(tasks))) for i, t in enumerate(tasks)
+        ]
 
+    yield [
+        (
+            finish_stream,
+            {
+                "run_id": run_id,
+                "run": run,
+                "stream": stream,
+                "private_paths": task["private_paths"],
+                "regions": task["regions"],
+                "metrics": task["metrics"],
+                "computed": computed,
+                "global_plotting_opts": global_plotting_opts,
+                "plot_score_options": plot_score_options,
+            },
+            f"RUN {run_id} - {stream}: score maps and videos of the whole stream",
+        )
+    ]
+    return run_id, stream, results, {}
+
+
+def bounds_of_window(
+    run_id: str,
+    run: dict,
+    stream: str,
+    private_paths: dict[str, str],
+    regions: list[str],
+    metrics: dict[str, object],
+    samples: list[int],
+    fsteps: list[int],
+    channels: list[str],
+    ensemble: list[str],
+) -> dict[str, dict]:
+    """``colour_bounds`` of one window of a stream's data, loaded here and freed on return."""
+    reader = get_reader(run.get("type", "zarr"), run, run_id, private_paths, regions, metrics)
+    _logger.info(f"RUN {run_id} - {stream}: colour bounds of samples {samples}, steps {fsteps}")
+    data = reader.get_data(
+        stream, fsteps=fsteps, samples=samples, channels=channels, ensemble=ensemble
+    )
+    return colour_bounds(data.target, data.prediction, channels)
+
+
+def finish_stream(
+    run_id: str,
+    run: dict,
+    stream: str,
+    private_paths: dict[str, str],
+    regions: list[str],
+    metrics: dict[str, object],
+    computed: dict[str, dict[str, MetricResult]],
+    global_plotting_opts: dict[str, object],
+    plot_score_options: dict[str, object],
+) -> None:
+    """Score maps and videos of one (run, stream), once all its chunks are done.
+
+    What a serial ``_process_stream`` call does at its end; here with a reader of its own,
+    so that it can run wherever the chunk tasks ran.
+    """
+    reader = get_reader(run.get("type", "zarr"), run, run_id, private_paths, regions, metrics)
     if plot_score_options.get("plot_score_maps", False) and computed:
         plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
     build_animations(reader, stream, global_plotting_opts, plot_score_options)
-    return run_id, stream, results, {}
 
 
 def _bounds_missing(task: dict, stream: str, available) -> bool:
@@ -554,22 +648,27 @@ def _bounds_missing(task: dict, stream: str, available) -> bool:
     )
 
 
-def _log_chunk(task: dict, index: int, count: int, responsible: list[int] | None = None) -> dict:
-    """Log which chunk of the (run, stream) *task* is, and return it.
+def _chunk_description(
+    task: dict, index: int, count: int, responsible: list[int] | None = None
+) -> str:
+    """The log line of a chunk task: which chunk of the (run, stream) it is, and its window.
 
     *responsible* are the forecast steps a scoring chunk answers for; the steps it is scored
     on beyond them are the overlap that ``froct`` / ``troct`` need.
     """
-    mode = "evaluation" if "evaluation" in task["run"].streams[task["stream"]] else "plotting"
-    window = task["run"].streams[task["stream"]][mode]
+    stream_cfg = task["run"].streams[task["stream"]]
+    kind, window = (
+        ("scoring", stream_cfg.evaluation)
+        if "evaluation" in stream_cfg
+        else ("plotting", stream_cfg.plotting)
+    )
     fsteps = list(window.forecast_step)
     extra = [f for f in fsteps if responsible is not None and f not in responsible]
-    _logger.info(
-        f"RUN {task['run_id']} - {task['stream']}: {mode} chunk {index + 1}/{count}: "
+    return (
+        f"RUN {task['run_id']} - {task['stream']}: {kind} chunk {index + 1}/{count}: "
         f"samples {list(window.sample)}, forecast steps {[f for f in fsteps if f not in extra]}"
         + (f" (+ step {extra[0]} for froct/troct)" if extra else "")
     )
-    return task
 
 
 def build_stream_tasks(cfg: dict) -> list[dict]:
