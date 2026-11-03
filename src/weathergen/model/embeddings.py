@@ -31,6 +31,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         num_blocks,
         num_heads,
         dropout_rate=0.0,
+        dropout_final_rate=0.1,
         norm_type="LayerNorm",
         mlp_type="mlp",
         use_xsa=False,
@@ -61,6 +62,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.mlp_type = mlp_type
         self.use_xsa = use_xsa
         self.unembed_mode = unembed_mode
+        self.dropout_final_rate = dropout_final_rate
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
 
@@ -139,7 +141,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
-        self.dropout_final = torch.nn.Dropout(0.1)
+        self.dropout_final = torch.nn.Dropout(self.dropout_final_rate)
 
     def forward_channels(self, x_in):
         peh = positional_encoding_harmonic
