@@ -212,8 +212,13 @@ def main():
         if isinstance(item, list) and len(item) == 2:
             run_id, path = item
         else:
-            path = item
+            # A bare entry is the run directory itself; its name is the run_id.
+            # load_run_config appends run_id to model_path, so pass the entry's
+            # parent directory. Normalize separators first: a trailing separator
+            # would otherwise yield an empty basename-derived run_id.
+            path = str(Path(item))
             run_id = os.path.splitext(os.path.basename(path))[0]
+            path = os.path.dirname(path)
 
         logger.info(f"Loading config for run_id: {run_id} from {path}")
         try:
