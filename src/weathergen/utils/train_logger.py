@@ -58,8 +58,8 @@ class Metrics:
 
 class TrainLogger:
     #######################################
-    def __init__(self, cf, path_results: Path) -> None:
-        self.cf = cf
+    def __init__(self, run_id: RunId, path_results: Path) -> None:
+        self.run_id = run_id
         self.path_results = path_results
 
     def log_metrics(self, stage: Stage, metrics: dict[str, float], step: int | None = None) -> None:
@@ -85,9 +85,7 @@ class TrainLogger:
         # TODO: performance: we repeatedly open the file for each call. Better for multiprocessing
         # but we can probably do better and rely for example on the logging module.
 
-        metrics_path = get_train_metrics_path(
-            base_path=self.path_results, run_id=self.cf.general.run_id
-        )
+        metrics_path = get_train_metrics_path(base_path=self.path_results, run_id=self.run_id)
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
             f.write(s.encode("utf-8"))

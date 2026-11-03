@@ -159,7 +159,7 @@ class Trainer(TrainerBase):
             config.get_path_results(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
-        self.train_logger = TrainLogger(cf, config.get_path_results(self.cf))
+        self.train_logger = TrainLogger(self.cf.general.run_id, config.get_path_results(self.cf))
 
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
