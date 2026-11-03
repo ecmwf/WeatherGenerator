@@ -38,11 +38,12 @@ test_job:
         echo "Pytest version: $(pytest --version) path: $(which pytest)"
         echo "Run tests"
         ./scripts/actions.sh integration-test${STAGE_TYPE:-}
+        deactivate || true
         echo "Test installation"
         export TEST_DIR="$(mktemp -d)"
         cd $TEST_DIR
         uv venv "$TEST_DIR/.venv"
-        uv pip install "$WG_REPO"
+        uv pip install "$WG_REPO" --python $TEST_DIR/.venv/bin/python
         echo "Testing complete"
 
     variables:
