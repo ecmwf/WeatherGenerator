@@ -21,6 +21,7 @@ use queues between threads.
 
 import enum
 import logging
+import os
 import socket
 import traceback
 from pathlib import Path
@@ -54,7 +55,10 @@ def run_mpi(cfg: dict, mlflow_client: MlflowClient | None, comm) -> None:
     matplotlib.use("Agg")
     log_dir = Path(cfg.evaluation.get("summary_dir", ".")) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"evaluation_rank{comm.rank}.log"
+    # one set of files per run: the Slurm job and step ids (a new step per srun in an
+    # allocation), or the rank's pid outside Slurm
+    job = ".".join(filter(None, (os.environ.get("SLURM_JOB_ID"), os.environ.get("SLURM_STEP_ID"))))
+    log_file = log_dir / f"evaluation_{job or f'pid{os.getpid()}'}_rank{comm.rank}.log"
     handler = logging.FileHandler(log_file)
     handler.setLevel(logging.INFO)  # the root logger lets DEBUG through to its handlers
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)8s] %(message)s"))
