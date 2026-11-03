@@ -7,7 +7,7 @@
   `squashfuse_ll`, and the sharded Zarr 3 store? Read time per window, node throughput,
   `squashfuse_ll` CPU, cold vs re-read, 1 vs 4 tasks per node; plus build cost and inode
   count of each.
-- Code: WeatherGenerator `<pin after commit>`, WeatherGenerator-private
+- Code: WeatherGenerator [`9e257596`](https://github.com/florianscheidl/WeatherGenerator/commit/9e257596e51242c7d5c5bab27d11bed1c093d7b8), WeatherGenerator-private
   [`7fb48aba`](https://gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private/-/commit/7fb48aba885b2df117b1a9d0387e5c2103b8fec0)
   (private config only), weathergen-configs
   [`ab7a0c53`](https://github.com/florianscheidl/weathergen-configs/commit/ab7a0c535f8dceeb1631dcbf606f137ad161358f)
@@ -87,7 +87,7 @@ cd "$WG_ROOT/WeatherGenerator"
 git fetch \
 https://github.com/florianscheidl/WeatherGenerator.git \
 exp/anemoi-reader-zarr-benchmark
-git switch --detach <pin after commit>
+git switch --detach 9e257596e51242c7d5c5bab27d11bed1c093d7b8
 ./scripts/actions.sh sync
 cd "$WG_ROOT/WeatherGenerator-private"
 git fetch \
