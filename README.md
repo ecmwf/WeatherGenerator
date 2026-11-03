@@ -37,31 +37,19 @@ This software is licensed under the terms of the Apache Licence Version 2.0 whic
 In applying this licence, ECMWF does not waive the privileges and immunities granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
 
 
----
-
 ## Running WeatherGenerator on your machine
 
-This setup is WIP. This manual only works for machines compatible with torch 2.9.1 and cuda 12.9. Moreover, it only works for a single dataset configuration referenced below.
+This setup is WIP. It only works for machines compatible with torch 2.9.1 and CUDA 12.9, and
+only for the single dataset configuration below.
 
-### Installation and setup
-
-1. Install uv, see https://docs.astral.sh/uv/getting-started/installation/.
-2. Clone the repo and cd to `WeatherGenerator`
-3. Create output directories and run sync script:
-    ```bash
-    mkdir -p logs models output results
-    ./scripts/actions.sh sync
-    ```
-
-###  Download data
-- ERA5, 2020, 1-month.
+1. Install uv, see https://docs.astral.sh/uv/getting-started/installation/, clone the repo,
+   `cd WeatherGenerator` and run `./scripts/actions.sh sync`.
+2. Download one month (2020-01) of ERA5 O96:
     ```bash
     uv run --with "anemoi-datasets[remote]" anemoi-datasets create --overwrite datasets/download_configs/era5_o96_2020_1m.yaml datasets/era5-o96-2020-1pct-6h-v1.zarr
     ```
-
-
-### Training
-
-```bash
-WEATHERGEN_PRIVATE_CONF=./local_config.yml uv run train --base-config ./config/era5_local.yml
-```
+3. Train; models, results and logs are written to `shared_working_dir/`, as set in
+   `private_config.yaml`:
+    ```bash
+    WEATHERGEN_PRIVATE_CONF=./private_config.yaml uv run train --config ./config/era5_local.yml
+    ```
