@@ -1,15 +1,21 @@
 # Zarr reader benchmark
 
 Times `DataReaderAnemoi._get` per window on different Zarr encodings of the ERA5/AIFS
-datasets (Zarr 3, sharding, time range) on JUPITER. One record per dataset file in
-`experiments/`; each gives copy-paste commands for its prerequisites, the checkout of the
-pinned commits, and the run.
+datasets (Zarr 3, sharding, time range, squashfs image) on JUPITER. One record per dataset
+file in `experiments/`; each gives copy-paste commands for its prerequisites, the checkout of
+the pinned commits, and the run.
 
 - `benchmark_anemoi_reader.py` — the benchmark: times `_get` over a stream's windows and
   writes one JSONL line per window; `--nsys` re-launches it under nsys with NVTX ranges.
   Slurm wrapper: `hpc/jupiter/benchmark_anemoi_reader.sh` in WeatherGenerator-private.
 - `restore_zarr_attrs.py` — restores the metadata a Zarr 2 → 3 conversion dropped, from the
   Zarr 2 source, and checks that the result matches the data (see the known issue below).
+- `stage_v2_time_slice.py` — copies a Zarr 2 store with only a range of time steps of its
+  `data` chunks (all metadata unchanged), e.g. to pack one month into a squashfs image.
+- `with_squashfs.sh` — mounts a squashfs image with `squashfuse_ll` for one command (one
+  mount per task), reports the daemon's CPU time, and unmounts on every way out.
+- `summarize_benchmark.py` — one row per benchmark run (time per window, node throughput)
+  and a check that runs on different encodings read the same data.
 
 ## Repositories
 
@@ -43,3 +49,4 @@ and appends `a`, `b`, ...
 | --- | --- | --- | --- |
 | ZRB-E001 | N320 v2, sharded, March 2022 | Blocked: store's time metadata covers 1979–2024, data only March 2022; fix ready, needs the store owner | [`experiments/ZRB-E001-n320-sharded-month3-2022.md`](experiments/ZRB-E001-n320-sharded-month3-2022.md) |
 | ZRB-E001a | same, store not fixed | Planned: training range given in the store's wrong dates (January 1979) | [`experiments/ZRB-E001a-workaround-1979-range.md`](experiments/ZRB-E001a-workaround-1979-range.md) |
+| ZRB-E002 | N320 March 2022: Zarr 2, Zarr 2 in squashfs, Zarr 3 sharded | Planned | [`experiments/ZRB-E002-n320-v2-squashfs-v3-march-2022.md`](experiments/ZRB-E002-n320-v2-squashfs-v3-march-2022.md) |
