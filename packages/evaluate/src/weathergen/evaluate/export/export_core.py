@@ -373,7 +373,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     # --- Discover rank files ---
     # get_model_results accepts lists of epochs and ranks ("all" or list of ints).
     rank_arg = ["all"] if rank == "all" else (rank if isinstance(rank, list) else [rank])
-    rank_files = get_model_results(run_id, [epoch], rank_arg)
+    rank_files = get_model_results(run_id, [epoch], rank_arg, kwargs.results_path)
     if not rank_files:
         raise FileNotFoundError(
             f"No rank files found for run_id={run_id}, epoch={epoch}, rank={rank}"

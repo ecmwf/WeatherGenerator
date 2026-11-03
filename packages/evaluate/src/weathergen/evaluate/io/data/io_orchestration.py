@@ -44,6 +44,7 @@ from weathergen.evaluate.io.data.io_workers import (
     _read_coords_and_meta,
     _read_sample,
 )
+from weathergen.evaluate.io.data.target_sources import AnemoiTargetSource, TargetRequest
 from weathergen.evaluate.io.io_reader import ReaderOutput
 from weathergen.evaluate.utils.derived_channels import scale_z_channels
 
@@ -85,6 +86,7 @@ class IOState:
         None  # fallback offset in hours for init_time when source_interval is missing
     )
     sample_labels: list[int] | None = None  # global sample indices for coordinate labeling
+    target_source: AnemoiTargetSource | None = None  # if set, targets come from here, not zarr
 
     def get_sample_labels(self) -> list[int]:
         """Return global sample labels (falls back to local samples if not set)."""
@@ -261,6 +263,7 @@ def build_io_state(
     ens_select: EnsembleSelect,
     rank: str = "",
     sample_labels: list[int] | None = None,
+    target_source: AnemoiTargetSource | None = None,
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -309,6 +312,7 @@ def build_io_state(
         offset=offset,
         regridder=regridder,
         sample_labels=sample_labels,
+        target_source=target_source,
     )
 
 
@@ -324,6 +328,7 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
+    read_target: bool = True,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -341,6 +346,7 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
+        read_target=read_target,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -389,6 +395,24 @@ def _extract_init_times(
         else:
             si_list.append(np.datetime64("NaT", "ns"))
     return np.array(si_list)
+
+
+def _fill_external_targets(state: IOState, results: list) -> None:
+    """Fill the targets of worker *results* (left ``None``) from ``state.target_source``."""
+    requests = []
+    for ri, (preds_all, _, times_all, meta) in enumerate(results):
+        k = 0
+        for fi, n_sub in enumerate(meta["n_substeps"]):
+            for si in range(n_sub):
+                # Gridded fsteps hold one valid time per sub-step (none if empty).
+                times = (
+                    times_all[fi][si] if state.is_gridded and len(times_all[fi]) else times_all[fi]
+                )
+                requests.append(TargetRequest(ri, k, len(preds_all[k]), times))
+                k += 1
+    targets = state.target_source.fill_targets(requests, state.read_channels)
+    for req, target in zip(requests, targets, strict=True):
+        results[req.result_idx][1][req.target_idx] = target
 
 
 def _assemble_substep(
@@ -558,7 +582,10 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
+            read_target=state.target_source is None,
         )
+        if state.target_source is not None:
+            _fill_external_targets(state, results)
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
             n_workers = 1
@@ -631,6 +658,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
+        read_target=state.target_source is None,
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
@@ -644,6 +672,8 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         desc=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} (ZipStore)",
         verbose=5,
     )
+    if state.target_source is not None:
+        _fill_external_targets(state, flat_results)
 
     # --- Re-group: flat_results[sample_idx * n_fsteps + fstep_idx] --------
     n_fsteps = len(state.fsteps)

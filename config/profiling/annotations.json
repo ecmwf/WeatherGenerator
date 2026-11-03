@@ -4,7 +4,7 @@
       "domain": "WeatherGen",
       "color": "39AA13",
       "module": "weathergen.datasets.multi_stream_data_sampler",
-      "functions": ["MultiStreamDataSampler.__iter__","MultiStreamDataSampler.__init__","MultiStreamDataSampler._init_stream_datasets","MultiStreamDataSampler.check_samples","MultiStreamDataSampler._get_fsm","MultiStreamDataSampler._calc_baseperms","MultiStreamDataSampler.get_sources_size","MultiStreamDataSampler.get_sources_num_channels","MultiStreamDataSampler.get_targets_num_channels","MultiStreamDataSampler.get_targets_coords_size","MultiStreamDataSampler.__len__","MultiStreamDataSampler._get_batch","MultiStreamDataSampler._build_stream_data","MultiStreamDataSampler._get_data_windows","MultiStreamDataSampler._preprocess_model_batch","MultiStreamDataSampler.advance","MultiStreamDataSampler.denormalize_target_channels","MultiStreamDataSampler.worker_workset","MultiStreamDataSampler.reset","MultiStreamDataSampler._build_stream_data_input","MultiStreamDataSampler._build_stream_data_output","MultiStreamDataSampler._get_source_target_masks","MultiStreamDataSampler._get_output_length","collect_datasources"]
+      "functions": ["MultiStreamDataSampler.__iter__","MultiStreamDataSampler.__init__","MultiStreamDataSampler._init_stream_datasets","MultiStreamDataSampler.check_samples","MultiStreamDataSampler._get_fsm","MultiStreamDataSampler._calc_baseperms","MultiStreamDataSampler.get_sources_size","MultiStreamDataSampler.get_targets_num_channels","MultiStreamDataSampler.get_targets_coords_size","MultiStreamDataSampler.__len__","MultiStreamDataSampler._get_batch","MultiStreamDataSampler._build_stream_data","MultiStreamDataSampler._get_data_windows","MultiStreamDataSampler._preprocess_model_batch","MultiStreamDataSampler.advance","MultiStreamDataSampler.denormalize_target_channels","MultiStreamDataSampler.worker_workset","MultiStreamDataSampler.reset","MultiStreamDataSampler._build_stream_data_input","MultiStreamDataSampler._build_stream_data_output","MultiStreamDataSampler._get_source_target_masks","MultiStreamDataSampler._get_output_length","collect_datasources"]
     },
     {
       "domain": "WeatherGen",
@@ -16,7 +16,7 @@
       "domain": "WeatherGen",
       "color": "3AAF13",
       "module": "weathergen.datasets.stream_data",
-      "functions": ["StreamData.__init__","StreamData.to_device","StreamData.add_source","StreamData.add_target","StreamData.target_empty","StreamData.source_empty","StreamData.empty","StreamData.pin_memory","StreamData.add_target_coords","StreamData.add_target_values"]
+      "functions": ["StreamData.__init__","StreamData.to_device","StreamData.add_source","StreamData.target_empty","StreamData.source_empty","StreamData.empty","StreamData.pin_memory","StreamData.add_target_coords","StreamData.add_target_values"]
     },
     {
       "domain": "WeatherGen",
@@ -28,7 +28,7 @@
       "domain": "WeatherGen",
       "color": "41C216",
       "module": "weathergen.datasets.utils",
-      "functions": ["s2tor3","r3tos2","healpix_verts_rots","locs_to_cell_coords_ctrs","vecs_to_rots","healpix_verts","locs_to_cell_coords"]
+      "functions": ["s2tor3","r3tos2","healpix_verts_rots","locs_to_cell_coords_ctrs","vecs_to_rots"]
     },
     {
       "domain": "WeatherGen",
@@ -184,7 +184,7 @@
       "domain": "WeatherGen",
       "color": "3CB414",
       "module": "weathergen.datasets.tokenizer",
-      "functions": ["Tokenizer.__init__","Tokenizer.compute_source_centroids","Tokenizer.get_size_time_embedding"]
+      "functions": ["Tokenizer.__init__","Tokenizer.get_size_time_embedding"]
     },
     {
       "domain": "WeatherGen",
