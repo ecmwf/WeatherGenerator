@@ -30,7 +30,7 @@ from weathergen.evaluate.distributed.chunking import (
     parse_distributed_config,
     windows,
 )
-from weathergen.evaluate.distributed.merge import merge_results
+from weathergen.evaluate.distributed.merge import merge_bounds, merge_results
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
@@ -49,6 +49,7 @@ from weathergen.evaluate.scores.score_orchestration import (
     metric_list_to_json,
     results_to_dict,
 )
+from weathergen.evaluate.utils.array_utils import colour_bounds, configured_bound
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.config_compat import get_plot_score_options, parse_plot_config
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
@@ -197,13 +198,15 @@ def _process_stream(
     metrics: dict[str, object],
     plot_score_options: dict[str, object],
     chunk: bool = False,
-) -> tuple[str, str, dict[str, dict[str, MetricResult]]]:
+) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict[int, dict]]:
     """
     Worker function for a single stream of a single run, or for one chunk of it.
 
-    Returns ``(run_id, stream, results)`` with ``results[region][metric] -> MetricResult``:
-    the scores loaded from the JSON files, overridden by the ones computed here.  Empty
-    when the stream is not scored.
+    Returns ``(run_id, stream, results, bounds)`` with ``results[region][metric] ->
+    MetricResult``: the scores loaded from the JSON files, overridden by the ones computed
+    here, empty when the stream is not scored; and, for a chunk that loaded data, the
+    ``colour_bounds`` of that data per forecast step (empty otherwise), from which the
+    chunked run sets the colour ranges of the whole (run, stream).
     Parameters
     ----------
 
@@ -235,7 +238,7 @@ def _process_stream(
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
-        return run_id, stream, {}
+        return run_id, stream, {}, {}
 
     # Data plots, score maps and init-hour scores need the data: readers that load it only
     reads_data = type_ in ("zarr", "anemoi-target")
@@ -269,6 +272,16 @@ def _process_stream(
                 ensemble=available_data.ensemble,
             )
             _logger.info(f"RUN {run_id} - {stream}: Data loaded successfully.")
+
+    # the colour bounds of this chunk's data, per forecast step: the chunked run reduces
+    # them over the chunks and the plotting forecast steps (_run_stream_in_chunks)
+    bounds: dict[int, dict] = {}
+    if chunk and output_data is not None:
+        for fstep, target in output_data.target.items():
+            prediction = output_data.prediction[fstep]
+            bounds[fstep] = colour_bounds(
+                {fstep: target}, {fstep: prediction}, [str(c) for c in target.channel.values]
+            )
 
     # Field plots: pass pre-loaded data if available, otherwise plot_data loads its own subset
     if needs_plotting:
@@ -309,7 +322,7 @@ def _process_stream(
 
     for region, by_metric in computed.items():
         results.setdefault(region, {}).update(by_metric)
-    return run_id, stream, results
+    return run_id, stream, results, bounds
 
 
 def cached_scores_and_metrics_to_compute(
@@ -429,13 +442,18 @@ def run_chunked(cfg: dict, mlflow_client: MlflowClient | None) -> None:
 
 def _run_stream_in_chunks(
     task: dict, sample_size: int | None, fstep_size: int | None
-) -> tuple[str, str, dict[str, dict[str, MetricResult]]]:
+) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict]:
     """``_process_stream`` of one (run, stream), as chunk tasks.
 
     Scoring chunk tasks first (their results merged, the missing scores written), then the
-    plotting chunk tasks, then the score maps and videos of the whole (run, stream).  A run
-    whose reader does not load data has nothing to chunk and goes through ``_process_stream``
-    as it is.
+    plotting chunk tasks with the colour ranges of the whole (run, stream), then the score
+    maps and videos.  A run whose reader does not load data has nothing to chunk and goes
+    through ``_process_stream`` as it is.
+
+    The colour ranges are those a serial run uses: the bounds of the evaluation samples over
+    the plotting forecast steps when the stream was scored here (returned by the scoring
+    chunk tasks), else the bounds of the plotting subset, loaded window by window; a bound
+    the config fixes is never computed.
     """
     run_id, run, stream = task["run_id"], task["run"], task["stream"]
     type_ = run.get("type", "zarr")
@@ -450,6 +468,7 @@ def _run_stream_in_chunks(
 
     results: dict[str, dict[str, MetricResult]] = {}
     computed: dict[str, dict[str, MetricResult]] = {}
+    chunk_bounds: list[dict[int, dict]] = []  # per scoring chunk, per forecast step
     if stream_cfg.get("evaluation"):
         available = reader.check_availability(stream, mode="evaluation")
         if len(windows(available.samples, sample_size)) > 1:
@@ -476,19 +495,36 @@ def _run_stream_in_chunks(
                 sample_size,
                 fstep_size,
             )
-            computed = merge_results(
-                [
-                    _process_stream(**_log_chunk(t, i, len(tasks), responsible[i]))[2]
-                    for i, t in enumerate(tasks)
-                ],
-                fsteps=responsible,
-            )
+            outputs = [
+                _process_stream(**_log_chunk(t, i, len(tasks), responsible[i]))
+                for i, t in enumerate(tasks)
+            ]
+            computed = merge_results([o[2] for o in outputs], fsteps=responsible)
+            chunk_bounds = [o[3] for o in outputs]
             write_missing_scores(reader, stream, computed, recomputable_metrics)
             for region, by_metric in computed.items():
                 results.setdefault(region, {}).update(by_metric)
 
     if stream_cfg.get("plotting"):
         available = reader.check_availability(stream, mode="plotting")
+        bounds = merge_bounds(
+            [by_fstep[f] for by_fstep in chunk_bounds for f in available.fsteps if f in by_fstep]
+        )
+        if not bounds and _bounds_missing(task, stream, available):
+            # not scored here: the bounds of the plotting subset, one window at a time
+            for fsteps in windows(available.fsteps, fstep_size):
+                for samples in windows(available.samples, sample_size):
+                    data = reader.get_data(
+                        stream,
+                        fsteps=fsteps,
+                        samples=samples,
+                        channels=available.channels,
+                        ensemble=available.ensemble,
+                    )
+                    chunk_bounds.append(
+                        colour_bounds(data.target, data.prediction, available.channels)
+                    )
+            bounds = merge_bounds(chunk_bounds)
         tasks = build_plotting_chunk_tasks(
             task,
             available.samples,
@@ -496,6 +532,7 @@ def _run_stream_in_chunks(
             available.channels,
             sample_size,
             fstep_size,
+            bounds,
         )
         for i, t in enumerate(tasks):
             _process_stream(**_log_chunk(t, i, len(tasks)))
@@ -503,7 +540,18 @@ def _run_stream_in_chunks(
     if plot_score_options.get("plot_score_maps", False) and computed:
         plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
     build_animations(reader, stream, global_plotting_opts, plot_score_options)
-    return run_id, stream, results
+    return run_id, stream, results, {}
+
+
+def _bounds_missing(task: dict, stream: str, available) -> bool:
+    """Whether the config leaves a colour bound of the stream's plotted channels to the data."""
+    stream_opts = task["global_plotting_opts"].get(stream) or {}
+    # the ens dimension is dropped on loading only for an ensemble reduced to [mean] / [std]
+    has_ens = list(available.ensemble) not in (["mean"], ["std"])
+    keys = ("vmin", "vmax", "bias_vmax") + (("std_vmin", "std_vmax") if has_ens else ())
+    return any(
+        configured_bound(stream_opts, ch, k) is None for ch in available.channels for k in keys
+    )
 
 
 def _log_chunk(task: dict, index: int, count: int, responsible: list[int] | None = None) -> dict:
@@ -588,14 +636,15 @@ def build_stream_tasks(cfg: dict) -> list[dict]:
 
 
 def accumulate_stream_results(
-    stream_results: list[tuple[str, str, dict[str, dict[str, MetricResult]]]],
+    stream_results: list[tuple[str, str, dict[str, dict[str, MetricResult]], dict]],
 ) -> tuple[dict, dict]:
     """Nest the ``_process_stream`` results of all (run, stream) for the cross-run steps.
 
     Parameters
     ----------
     stream_results:
-        ``(run_id, stream, results[region][metric] -> MetricResult)`` per (run, stream).
+        ``(run_id, stream, results[region][metric] -> MetricResult, bounds)`` per
+        (run, stream), as ``_process_stream`` returns them.
 
     Returns
     -------
@@ -606,7 +655,7 @@ def accumulate_stream_results(
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     # init_hour_scores[metric][region][stream][run_id] = xr.DataArray(init_hour, forecast_step, ...)
     init_hour_scores: dict = {}
-    for _run_id, _stream, results in stream_results:
+    for _run_id, _stream, results, _bounds in stream_results:
         for metric, regions_dict in results_to_dict(results, "score").items():
             for region, streams_dict in regions_dict.items():
                 for stream_key, runs_dict in streams_dict.items():
