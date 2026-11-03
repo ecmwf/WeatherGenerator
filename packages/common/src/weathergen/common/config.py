@@ -545,6 +545,11 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     """
     Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
     """
+    try:
+        env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
+    except AssertionError:  # no private repository, e.g. on a local machine
+        env_script_path = None
+
     if private_home is not None and private_home.is_file():
         _logger.info(f"Loading private config from {private_home}.")
 
@@ -552,15 +557,7 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
         _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
 
-    else:
-        try:
-            env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
-        except Exception as e:
-            _logger.warning(f"Could not determine path to platform-env.py: {e}")
-            raise FileNotFoundError(
-                "Could not find private config. Please set the environment variable "
-                "WEATHERGEN_PRIVATE_CONF or run on a supported HPC."
-            ) from e
+    elif env_script_path is not None and env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
         # This code does many checks to ensure that any error message is surfaced.
         # Since it is a process call, it can be hard to diagnose the error.
@@ -587,6 +584,12 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
         )
         private_home = Path(result.stdout.strip())
         _logger.info(f"Loading private config from platform-env.py output: {private_home}.")
+    else:
+        _logger.info(f"Could not find platform script at {env_script_path}")
+        raise FileNotFoundError(
+            "Could not find private config. Please set the environment variable "
+            "WEATHERGEN_PRIVATE_CONF or provide a path."
+        )
     private_cf = OmegaConf.load(private_home)
 
     if "secrets" in private_cf:
