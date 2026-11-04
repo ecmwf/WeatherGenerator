@@ -583,6 +583,9 @@ class IdentityEngine(torch.nn.Module):
         super().__init__()
         self.fe_blocks = torch.nn.ModuleList()
 
+    def collapse_input_steps(self, tokens, meta_info, forecast_offset):
+        return tokens.sum(axis=1)
+
     def forward(self, tokens, *args, **kwargs):
         return tokens
 
@@ -707,6 +710,9 @@ class ForecastingEngine(torch.nn.Module):
         self.out_proj = (
             torch.nn.Linear(_inner_dim, _diffusion_latent_dim, bias=False) if _concat_hd else None
         )
+
+    def collapse_input_steps(self, tokens, meta_info, forecast_offset):
+        return tokens.sum(axis=1)
 
     def forward(
         self,

@@ -17,6 +17,7 @@ import torch.nn as nn
 
 from weathergen.common.config import get_path_model
 from weathergen.model.engines import (
+    IdentityEngine,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
@@ -70,9 +71,10 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
     2. Ensures latent_pre_norm exists
     3. Creates fresh latent_heads based on the student's SSL loss config
     """
-    # Strip non-encoder components
+    # Strip non-encoder components; IdentityEngine (not None) keeps Model.forward's forecast_engine
+    # calls uniform across student and teacher.
     teacher_dim_embed = override_cfg.ae_global_dim_embed
-    model.forecast_engine = None
+    model.forecast_engine = IdentityEngine()
     model.embed_target_coords = nn.ModuleDict()
     model.target_token_engines = nn.ModuleDict()
     model.pred_heads = nn.ModuleDict()

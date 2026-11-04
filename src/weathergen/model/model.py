@@ -27,7 +27,6 @@ from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.diffusion import (
     DiffusionForecastEngine,
     DiffusionRegisters,
-    _decode_diffusion_steps,
 )
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
@@ -824,53 +823,7 @@ class Model(torch.nn.Module):
         # per-sample meta info passed to the forecast engine (stacked along the sample dim)
         fe_meta_info = source_samples.stack_sample_meta_info()
 
-        diff_cf = self.cf.get("diffusion", {})
-        if diff_cf.get("enabled", False) and diff_cf.get("conditioning") == "forecast":
-            # tokens[:,0] = t (most recent), tokens[:,1] = t-1, ..., tokens[:,-1] = t-(T-1) (oldest)
-            if self.cf.stage == "inference" and tokens.shape[1] == 1 and forecast_offset == 1:
-                # Single-input-step inference path: test_config.model_input.forecasting.
-                # num_steps_input=1 paired with test_config.forecast.offset=1, so the
-                # diffusion model's single forecast step lines up with a deterministic
-                # offset=1 model's +1-step lead time. There is no older step to sum over —
-                # the sole loaded step IS the conditioning.
-                conditioning_tokens = tokens[:, 0]
-            elif self.cf.stage == "inference":
-                assert tokens.shape[1] > 1, (
-                    "Diffusion inference with diffusion.conditioning='forecast' got "
-                    f"only one loaded input step (tokens.shape[1]=1) but forecast.offset="
-                    f"{forecast_offset} != 1. The single-input-step inference path is only "
-                    "defined for offset=1, num_steps_input=1 (used to align the diffusion "
-                    "model's first forecast step with a deterministic offset=1 model's lead "
-                    "time). Check test_config.forecast.offset and "
-                    "test_config.model_input.forecasting.num_steps_input."
-                )
-                print("Using most recent steps as conditioning tokens for inference.")
-                # conditioning_tokens = tokens[:, :-1].sum(axis=1)
-                conditioning_tokens = tokens[:, 1:].sum(axis=1)
-            else:
-                assert tokens.shape[1] > 1, (
-                    "Diffusion training with diffusion.conditioning='forecast' "
-                    "requires at least 2 loaded input steps (one denoising target + one "
-                    f"conditioning step); got tokens.shape[1]={tokens.shape[1]}. Check "
-                    "training_config.model_input.forecasting.num_steps_input."
-                )
-                # Conditioning: all older context steps [t-1, ..., t-(T-1)];
-                # denoising target: t (newest)
-                conditioning_tokens = tokens[:, 1:].sum(axis=1)
-                conditioning_tokens = conditioning_tokens + torch.randn_like(
-                    conditioning_tokens
-                ) * diff_cf.get("impute_latent_noise_std", 0.0)
-                if np.random.rand() < diff_cf.get(
-                    "classifier_free_guidance_prob", 0.0
-                ):  # occasionally dropout conditioning for classifier free guidance
-                    conditioning_tokens = torch.zeros_like(conditioning_tokens)
-            # X_t (tokens[:, 0], most recent) is the diffusion denoising target;
-            # older steps are conditioning.
-            fe_meta_info["conditioning_tokens"] = conditioning_tokens
-            # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
-            tokens = tokens[:, 0]
-        else:
-            tokens = tokens.sum(axis=1)
+        tokens = self.forecast_engine.collapse_input_steps(tokens, fe_meta_info, forecast_offset)
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
@@ -894,92 +847,41 @@ class Model(torch.nn.Module):
                     )
                 continue
 
-            if self.forecast_engine:
-                # apply forecasting engine
-                tokens = self.forecast_engine(
-                    tokens,
-                    step,
-                    meta_info=fe_meta_info,
-                    coords=model_params.rope_coords,
-                )
+            tokens = self.forecast_engine(
+                tokens,
+                step,
+                meta_info=fe_meta_info,
+                coords=model_params.rope_coords,
+            )
+            output = self._decode_step(
+                tokens,
+                fe_meta_info.pop("decode_spec", None),
+                model_params,
+                step,
+                source_samples,
+                output,
+                intermediates,
+            )
 
-                # Diffusion denoising trajectory: by default only the final ODE state is a
-                # real forecast-step prediction, decoded once below like any other step.
-                # Not used when diffusion.rollout=True — that case is handled in the unified
-                # diffusion block below.
-                if isinstance(tokens, list) and not diff_cf.get("rollout", False):
-                    cond = fe_meta_info["conditioning_tokens"]
-                    predict_residual = diff_cf.get("enabled", False) and diff_cf.get(
-                        "predict_residual", False
-                    )
+        return output
 
-                    if self.cf.get("inference_logging", {}).get(
-                        "fe_diffusion_log_analytics", False
-                    ):
-                        output.diffusion_steps_output = _decode_diffusion_steps(
-                            self,
-                            model_params,
-                            step,
-                            tokens,
-                            source_samples,
-                            output.forecast_offset,
-                            cond,
-                            predict_residual,
-                        )
+    def _decode_step(
+        self,
+        tokens: torch.Tensor,
+        decode_spec,
+        model_params: ModelParams,
+        step: int,
+        batch: BatchSamples,
+        output: ModelOutput,
+        intermediates: list[torch.Tensor] | None,
+    ) -> ModelOutput:
+        """Physical/latent decode for one forecast step.
 
-                    # Only the final denoised state is a real forecast-step prediction.
-                    final_toks = tokens[-1]
-                    final_abs = cond + final_toks if predict_residual else final_toks
-                    output = self.predict_decoders(
-                        model_params, step, final_abs, source_samples, output
-                    )
-                    output = self.predict_latent(
-                        model_params, step, final_abs, source_samples, output
-                    )
-                    # Feed the final denoised state back as conditioning for the next step.
-                    fe_meta_info["conditioning_tokens"] = final_abs
-                    # NOTE: This is precautionary, might need to be handled differently.
-                    # It should not be the same as conditioning tokens.
-                    tokens = None
-                    continue
-
-                # Unified diffusion decoding path — handles both:
-                #  • rollout (diffusion.rollout=True): tokens is a list; take the final ODE state
-                #  • ensemble (N > 1): tokens is already a (N, healpix_cells, embed_dim) tensor
-                if diff_cf.get("enabled", False) and diff_cf.get("rollout", False):
-                    if isinstance(tokens, list):
-                        # diffusion.rollout=True: discard intermediate steps, keep the final state.
-                        tokens = tokens[-1]  # (1, healpix_cells, embed_dim)
-                    cond = fe_meta_info["conditioning_tokens"]
-                    predict_residual = diff_cf.get("predict_residual", False)
-                    # Apply residual correction; broadcasts cond (1, H, D) over all N members.
-                    member_final_tokens = cond + tokens if predict_residual else tokens
-                    # Decode all members (or the single rollout state) in one forward pass.
-                    # Use a single-slot ModelOutput for this temporary container.
-                    # forecast_offset != step ensures base=step so chunk_idx(step)==0.
-                    tmp_output = ModelOutput([step], step + 1, source_samples)
-                    tmp_output = self.predict_decoders(
-                        model_params,
-                        step,
-                        member_final_tokens,
-                        source_samples,
-                        tmp_output,
-                        out_step=0,
-                    )
-                    # pred_tuple has N entries (one per member / "batch" item).
-                    # Concatenate along dim 0: (N, n_points, channels),
-                    # wrap in 1-tuple (batch_size=1).
-                    for sname, pred_tuple in tmp_output.physical[0].items():
-                        output.add_physical_prediction(
-                            step, sname, (torch.cat(list(pred_tuple), dim=0),)
-                        )
-                    # Store per-member conditioning for the next rollout step.
-                    # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
-                    # calls expand(N, ...) which is a no-op when the dim already matches.
-                    fe_meta_info["conditioning_tokens"] = member_final_tokens
-                    tokens = None
-                    continue
-
+        decode_spec is only set (via meta_info) by diffusion's inference path; it bypasses the
+        generic training_mode gating below since diffusion decode decisions (which ODE state to
+        decode, whether to also predict latent, ensemble merging) don't map onto training_mode.
+        """
+        if decode_spec is None:
             if "masking" in self.cf.training_config.training_mode:
                 # decoder predictions
                 output.add_latent_prediction(
@@ -987,14 +889,37 @@ class Model(torch.nn.Module):
                     "latent_state",
                     self.tokens_to_latent_state(None, tokens),
                 )
-                output = self.predict_decoders(model_params, step, tokens, source_samples, output)
+                output = self.predict_decoders(model_params, step, tokens, batch, output)
 
             if "student_teacher" in self.cf.training_config.training_mode:
                 # latent predictions (raw and with SSL heads)
                 output = self.predict_latent(
-                    model_params, step, tokens, source_samples, output, intermediates
+                    model_params, step, tokens, batch, output, intermediates
                 )
+            return output
 
+        if decode_spec.trajectory is not None:
+            output.diffusion_steps_output = self.forecast_engine.decode_diffusion_steps(
+                self,
+                model_params,
+                step,
+                decode_spec.trajectory,
+                batch,
+                output.forecast_offset,
+                decode_spec.cond,
+                decode_spec.predict_residual,
+            )
+
+        output = self.predict_decoders(model_params, step, tokens, batch, output)
+        if decode_spec.merge_ensemble:
+            # fold the per-member batch dim into a single ensemble-dim tensor for this step
+            idx = output.chunk_idx(step)
+            output.physical[idx] = {
+                sname: (torch.cat(list(pred), dim=0),)
+                for sname, pred in output.physical[idx].items()
+            }
+        if decode_spec.decode_latent:
+            output = self.predict_latent(model_params, step, tokens, batch, output)
         return output
 
     def _get_initial_conditions(
