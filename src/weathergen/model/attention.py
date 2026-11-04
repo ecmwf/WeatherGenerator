@@ -53,6 +53,18 @@ def _apply_xsa(attn_out: torch.Tensor, self_values: torch.Tensor) -> torch.Tenso
     return (attn_out_float - (proj * self_values_float)).to(attn_out.dtype)
 
 
+def _apply_head_gate(attn_out: torch.Tensor, x: torch.Tensor, proj_gate) -> torch.Tensor:
+    """Headwise gated attention (Qiu et al. 2025): scale head h of each token by
+    sigmoid(x @ W_g^T)_h, with x the (normalised) input of the q projection.
+
+    attn_out [..., H, D] (any layout whose leading dims flatten like x's), x [..., dim_in].
+    """
+    if proj_gate is None:
+        return attn_out
+    gate = torch.sigmoid(proj_gate(x).float())
+    return (attn_out.float() * gate.reshape(*attn_out.shape[:-1], 1)).to(attn_out.dtype)
+
+
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
         self,
@@ -71,6 +83,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
         use_xsa=False,
+        use_gated_attention=False,
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -99,6 +112,9 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_out = torch.nn.Linear(dim_embed, dim_embed, bias=False)
+        self.proj_gate = (
+            torch.nn.Linear(dim_embed, num_heads, bias=False) if use_gated_attention else None
+        )
         self.dropout = (
             torch.nn.Dropout(p=dropout_rate) if dropout_rate > 0.0 else torch.nn.Identity()
         )
@@ -155,6 +171,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         if self.use_xsa:
             outs = _apply_xsa(outs, vs)
+        outs = _apply_head_gate(outs, x, self.proj_gate)
 
         out = self.proj_out(outs.flatten(-2, -1))
 
@@ -275,6 +292,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         with_2d_rope=False,
         is_dit=False,
         dit_is_cond=False,
+        use_gated_attention=False,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -319,6 +337,9 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_out = torch.nn.Linear(dim_embed, dim_embed, bias=False)
+        self.proj_gate = (
+            torch.nn.Linear(dim_embed, num_heads, bias=False) if use_gated_attention else None
+        )
         self.dropout = (
             torch.nn.Dropout(p=dropout_rate) if dropout_rate > 0.0 else torch.nn.Identity()
         )
@@ -383,6 +404,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         if self.use_xsa:
             outs = _apply_xsa(outs, vs.transpose(1, 2))
+        outs = _apply_head_gate(outs, x, self.proj_gate)
 
         out = self.proj_out(self.dropout(outs.flatten(-2, -1)))
 
@@ -409,6 +431,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        use_gated_attention=False,
     ):
         super(MultiCrossAttentionHeadVarlen, self).__init__()
 
@@ -440,6 +463,9 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         )
 
         self.proj_out = torch.nn.Linear(self.dim_head_proj * num_heads, dim_embed_q, bias=False)
+        self.proj_gate = (
+            torch.nn.Linear(dim_embed_q, num_heads, bias=False) if use_gated_attention else None
+        )
         self.dropout = (
             torch.nn.Dropout(p=dropout_rate) if dropout_rate > 0.0 else torch.nn.Identity()
         )
@@ -494,6 +520,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         else:
             assert False
 
+        outs = _apply_head_gate(outs, x_q, self.proj_gate)
         outs = self.proj_out(outs.flatten(-2, -1))
         if self.with_residual:
             outs = x_q_in + outs
@@ -519,6 +546,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        use_gated_attention=False,
     ):
         super(MultiCrossAttentionHeadVarlenSlicedQ, self).__init__()
 
@@ -557,6 +585,9 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         )
 
         self.proj_out = torch.nn.Linear(self.dim_head_proj * num_heads, dim_embed_q, bias=False)
+        self.proj_gate = (
+            torch.nn.Linear(dim_embed_q, num_heads, bias=False) if use_gated_attention else None
+        )
         self.dropout = (
             torch.nn.Dropout(p=dropout_rate) if dropout_rate > 0.0 else torch.nn.Identity()
         )
@@ -615,7 +646,8 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
                 )
             ]
 
-        outs = self.proj_out(torch.stack(outs).transpose(1, 0).flatten(-2, -1))
+        outs = _apply_head_gate(torch.stack(outs).transpose(1, 0), x_q, self.proj_gate)
+        outs = self.proj_out(outs.flatten(-2, -1))
         if self.with_residual:
             outs = x_q_in + outs.reshape(x_q_in.shape)
 
@@ -646,6 +678,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         # the diffusion model, and will control whether ada_ln_aux is applied to the input
         # or output of the attention layer
         dit_is_cond=False,
+        use_gated_attention=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -690,6 +723,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_out = torch.nn.Linear(dim_embed, dim_embed, bias=False)
+        self.proj_gate = (
+            torch.nn.Linear(dim_embed, num_heads, bias=False) if use_gated_attention else None
+        )
         self.dropout = (
             torch.nn.Dropout(p=dropout_rate) if dropout_rate > 0.0 else torch.nn.Identity()
         )
@@ -750,6 +786,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         if self.use_xsa:
             outs = _apply_xsa(outs, vs)
+        outs = _apply_head_gate(outs, x, self.proj_gate)
 
         out = self.proj_out(outs.flatten(-2, -1))
 
@@ -775,6 +812,7 @@ class MultiCrossAttentionHead(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         is_dit=False,
+        use_gated_attention=False,
     ):
         super(MultiCrossAttentionHead, self).__init__()
 
@@ -810,6 +848,9 @@ class MultiCrossAttentionHead(torch.nn.Module):
         )
 
         self.proj_out = torch.nn.Linear(self.dim_head_proj * num_heads, dim_embed_q, bias=False)
+        self.proj_gate = (
+            torch.nn.Linear(dim_embed_q, num_heads, bias=False) if use_gated_attention else None
+        )
         self.dropout = (
             torch.nn.Dropout(p=dropout_rate) if dropout_rate > 0.0 else torch.nn.Identity()
         )
@@ -854,6 +895,7 @@ class MultiCrossAttentionHead(torch.nn.Module):
         # correct ordering of tensors with seq dimension second but last is critical
         with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
             outs = self.att(qs, ks, vs).transpose(2, 1)
+        outs = _apply_head_gate(outs, x_q, self.proj_gate)
 
         outs = self.dropout(self.proj_out(outs.flatten(-2, -1)))
         if self.with_residual:

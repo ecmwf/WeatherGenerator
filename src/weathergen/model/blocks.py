@@ -238,6 +238,7 @@ class OriginalPredictionBlock(nn.Module):
                 dim_aux=dim_aux,
                 norm_eps=attention_kwargs["norm_eps"],
                 attention_dtype=get_dtype(self.cf.attention_dtype),
+                use_gated_attention=self.cf.get("use_gated_attention", False),
             )
         )
 
@@ -256,6 +257,7 @@ class OriginalPredictionBlock(nn.Module):
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                     use_xsa=self.cf.get("use_xsa", False),
+                    use_gated_attention=self.cf.get("use_gated_attention", False),
                 )
             )
 

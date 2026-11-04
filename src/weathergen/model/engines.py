@@ -72,6 +72,7 @@ class EmbeddingEngine(torch.nn.Module):
                     norm_type=self.cf.norm_type,
                     mlp_type=self.cf.get("mlp_type", "mlp"),
                     use_xsa=self.cf.get("use_xsa", False),
+                    use_gated_attention=self.cf.get("use_gated_attention", False),
                     unembed_mode=self.cf.embed_unembed_mode,
                     stream_name=stream_name,
                 )
@@ -256,6 +257,7 @@ class LocalAssimilationEngine(torch.nn.Module):
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
+                    use_gated_attention=self.cf.get("use_gated_attention", False),
                 )
             )
             self.ae_local_blocks.append(
@@ -304,6 +306,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                 norm_eps=self.cf.norm_eps,
                 attention_dtype=get_dtype(self.cf.attention_dtype),
+                use_gated_attention=self.cf.get("use_gated_attention", False),
             )
         )
 
@@ -335,6 +338,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
+                    use_gated_attention=self.cf.get("use_gated_attention", False),
                 )
             )
 
@@ -441,6 +445,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        use_gated_attention=self.cf.get("use_gated_attention", False),
                     )
                 )
             else:
@@ -459,6 +464,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        use_gated_attention=self.cf.get("use_gated_attention", False),
                     )
                 )
             # MLP block
@@ -529,6 +535,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        use_gated_attention=self.cf.get("use_gated_attention", False),
                     )
                 )
             else:
@@ -547,6 +554,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        use_gated_attention=self.cf.get("use_gated_attention", False),
                     )
                 )
             # MLP block
@@ -660,6 +668,7 @@ class ForecastingEngine(torch.nn.Module):
                             is_dit=self.cf.get("fe_diffusion_model", False),
                             dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
                             == "ada_ln",
+                            use_gated_attention=self.cf.get("use_gated_attention", False),
                         )
                     )
                 else:
@@ -682,6 +691,7 @@ class ForecastingEngine(torch.nn.Module):
                             is_dit=self.cf.get("fe_diffusion_model", False),
                             dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
                             == "ada_ln",
+                            use_gated_attention=self.cf.get("use_gated_attention", False),
                         )
                     )
                 # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for
@@ -701,6 +711,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             is_dit=self.cf.get("fe_diffusion_model", False),
+                            use_gated_attention=self.cf.get("use_gated_attention", False),
                         )
                     )
                 # Add MLP block
@@ -990,6 +1001,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dim_aux=self.dim_coord_in,
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
+                    use_gated_attention=self.cf.get("use_gated_attention", False),
                 )
             )
 
@@ -1008,6 +1020,7 @@ class TargetPredictionEngineClassic(nn.Module):
                         dim_aux=self.dim_coord_in,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        use_gated_attention=self.cf.get("use_gated_attention", False),
                     )
                 )
 
@@ -1108,6 +1121,7 @@ class TargetPredictionEngine(nn.Module):
             "dim_aux": self.dim_coord_in,
             "norm_eps": self.cf.norm_eps,
             "attention_dtype": get_dtype(self.cf.attention_dtype),
+            "use_gated_attention": self.cf.get("use_gated_attention", False),
         }
         self.tte = nn.ModuleList()
         self.output_in_norm = nn.LayerNorm(self.dims_embed[0])
@@ -1325,6 +1339,7 @@ class LatentPredictionHeadTransformer(nn.Module):
                     # dim_aux=dim_aux,
                     norm_eps=self.global_cf.norm_eps,
                     attention_dtype=get_dtype(self.global_cf.attention_dtype),
+                    use_gated_attention=self.global_cf.get("use_gated_attention", False),
                 )
             )
             # Add MLP block

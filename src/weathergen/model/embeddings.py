@@ -34,6 +34,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         norm_type="LayerNorm",
         mlp_type="mlp",
         use_xsa=False,
+        use_gated_attention=False,
         unembed_mode="full",
         stream_name="stream_embed",
     ):
@@ -60,6 +61,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.num_heads = num_heads
         self.mlp_type = mlp_type
         self.use_xsa = use_xsa
+        self.use_gated_attention = use_gated_attention
         self.unembed_mode = unembed_mode
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
@@ -74,6 +76,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     with_qk_lnorm=True,
                     with_flash=True,
                     use_xsa=self.use_xsa,
+                    use_gated_attention=self.use_gated_attention,
                 )
             )
             self.layers.append(
