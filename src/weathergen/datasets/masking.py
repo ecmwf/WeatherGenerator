@@ -165,10 +165,24 @@ class Masker:
         masking_strategy_config (dict): Configuration for the masking strategy, can include
                                         additional parameters like "hl_mask", etc.
                                         specific to the masking strategy. See above.
+                                        "shared_across_streams": True draws the mask once per
+                                        sample and reuses it for all streams, so that a cell is
+                                        hidden (or visible) in every stream at the same time.
+
+    Per target strategy (top level of the strategy, next to ``masking_strategy``):
+        time_offset (int | list[int]): time offset of the target (teacher) sample in time
+            windows, overriding training_config.teacher_time_offset. A list is a set of choices
+            drawn per sample (with ``time_offset_probs``, default uniform); the draw is shared by
+            all streams of the sample. The drawn value is stored in the sample parameters as
+            ``time_offset``.
     """
 
     def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
+
+        # masks and time offsets shared by all streams of the current sample (data item), see
+        # start_item()
+        self._item_cache: dict = {}
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -190,6 +204,46 @@ class Masker:
         Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
+
+    def start_item(self) -> None:
+        """
+        Start a new data item: forget the masks and time offsets shared across its streams.
+        Has to be called before build_samples_for_stream() is called for the first stream.
+        """
+        self._item_cache = {}
+
+    def _shared(self, key: tuple, shared: bool, fct, **kwargs):
+        """Return fct(**kwargs), drawn once per item and key if shared (else on every call)."""
+        if not shared:
+            return fct(**kwargs)
+        if key not in self._item_cache:
+            self._item_cache[key] = fct(**kwargs)
+        return self._item_cache[key]
+
+    def _draw_time_offset(self, target_cfg, key: tuple) -> int | None:
+        """
+        Time offset (in time windows) of a target sample from target_cfg.time_offset, drawn once
+        per item and target sample so that it is identical for all streams. None if not set.
+        """
+        choices = target_cfg.get("time_offset", None)
+        if choices is None:
+            return None
+        if isinstance(choices, int):
+            return choices
+        choices = [int(c) for c in choices]
+        assert len(choices) > 0 and min(choices) >= 0, f"invalid time_offset {choices}"
+        probs = target_cfg.get("time_offset_probs", None)
+        if probs is not None:
+            probs = np.asarray(list(probs), dtype=np.float64)
+            assert len(probs) == len(choices) and np.isclose(probs.sum(), 1.0), (
+                "time_offset_probs must have one entry per time_offset and sum to 1"
+            )
+
+        return self._shared(
+            ("time_offset", *key),
+            True,
+            lambda: int(choices[self.rng.choice(len(choices), p=probs)]),
+        )
 
     def merge_masking_config(self, mode_cfg, override):
         """Merge a stream's masking override into the base mode config.
@@ -472,8 +526,10 @@ class Masker:
         i_target = 0
         for i_cfg, (_, target_cfg) in enumerate(target_cfgs.items()):
             # different samples/view per strategy
-            for _ in range(target_cfg.get("num_samples", 1)):
+            for i_sample in range(target_cfg.get("num_samples", 1)):
                 masking_config = target_cfg.get("masking_strategy_config", {})
+                shared = masking_config.get("shared_across_streams", False)
+                key = ("target", i_cfg, i_sample)
                 # determine if forcing dataset => mask is empty
                 if is_stream_forcing(stream_info, self.stage):
                     # A forcing stream (e.g. observations with ``target: []``) produces no
@@ -490,7 +546,10 @@ class Masker:
                         "student_teacher" in training_mode or "latent_loss" in training_mode
                     )
                     if needs_target_network_input:
-                        target_mask, mask_params = self._get_mask(
+                        target_mask, mask_params = self._shared(
+                            key,
+                            shared,
+                            self._get_mask,
                             num_cells=num_cells,
                             strategy=target_cfg.get("masking_strategy"),
                             masking_strategy_config=masking_config,
@@ -501,13 +560,20 @@ class Masker:
                         target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
                     # targets are never randomly dropped
-                    target_mask, mask_params = self._get_mask(
+                    target_mask, mask_params = self._shared(
+                        key,
+                        shared,
+                        self._get_mask,
                         num_cells=num_cells,
                         strategy=target_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=("independent", None),
                         channel_names=source_channel_names,
                     )
+
+                time_offset = self._draw_time_offset(target_cfg, (i_cfg, i_sample))
+                if time_offset is not None:
+                    mask_params = {**mask_params, "time_offset": time_offset}
 
                 # get all losses and flatten
                 losses = [v[1][1] for _, v in corr_dict.items() if len(v) > 0 and v[0] == i_cfg]
@@ -555,11 +621,17 @@ class Masker:
                 if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
-                    source_mask, mask_params = self._get_mask(
+                    source_mask, mask_params = self._shared(
+                        ("source", i_src_cfg, i_sample),
+                        masking_config.get("shared_across_streams", False),
+                        self._get_mask,
                         num_cells=num_cells,
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
-                        target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
+                        target_relationship_mask=(
+                            relationship,
+                            target_masks.get_mask(target_idx),
+                        ),
                         channel_names=source_channel_names,
                     )
 

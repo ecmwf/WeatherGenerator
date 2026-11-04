@@ -1,0 +1,14 @@
+# jepa_pretrain overlay: fast EMA teacher (arms *F).
+# The base teacher (P0, j3i5wlky) has a half-life of 400k samples and no ramp-up, so after 24
+# mini-epochs it is still ~71 % its random initialisation and the JEPA target is mostly a random
+# encoder. Here the teacher tracks the student: EDM2-style ramp-up, half-life
+# min(40k samples, 0.09 x samples seen) -- ~2.2k steps (9 % of the run) at the end, cf. I-JEPA's
+# momentum 0.996 -> 1 (half-life ~170 steps early).
+# Units: ema_halflife_in_thousands is in samples (beta = 0.5 ** (batch_size / halflife)).
+training_config:
+  losses:
+    student-teacher:
+      target_and_aux_calc:
+        EMATeacher:
+          ema_ramp_up_ratio: 0.09
+          ema_halflife_in_thousands: 40000

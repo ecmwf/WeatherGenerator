@@ -158,18 +158,31 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # Only active when student_teacher mode is used; ignored in masking mode to
         # prevent stale offsets from JEPA pretraining leaking into forecasting
         # finetuning/inference (where it would shift all target times by one window).
+        # Target strategies can override it with their own time_offset (an int or a list of
+        # choices drawn per sample, see Masker); max_teacher_time_offset bounds the sample range.
         training_mode = mode_cfg.get("training_mode", [])
+        target_offsets = []
+        for t_cfg in (mode_cfg.get("target_input") or {}).values():
+            offset = t_cfg.get("time_offset", None) if t_cfg.get("enabled", True) else None
+            if offset is not None:
+                target_offsets += [
+                    int(o) for o in ([offset] if isinstance(offset, int) else offset)
+                ]
         if "student_teacher" in training_mode:
             self.teacher_time_offset = mode_cfg.get("teacher_time_offset", 0)
+            self.use_target_time_offsets = True
         else:
             configured_offset = mode_cfg.get("teacher_time_offset", 0)
-            if configured_offset != 0:
+            if configured_offset != 0 or any(o != 0 for o in target_offsets):
                 logger.warning(
-                    f"teacher_time_offset={configured_offset} is set but training_mode="
-                    f"{training_mode} does not include 'student_teacher'. "
-                    "Ignoring teacher_time_offset (setting to 0)."
+                    f"teacher_time_offset={configured_offset} / target time_offset="
+                    f"{target_offsets} is set but training_mode={training_mode} does not "
+                    "include 'student_teacher'. Ignoring the time offsets (setting to 0)."
                 )
             self.teacher_time_offset = 0
+            self.use_target_time_offsets = False
+            target_offsets = []
+        self.max_teacher_time_offset = max([self.teacher_time_offset, *target_offsets])
 
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.shuffle = mode_cfg.shuffle
@@ -210,12 +223,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        max_index = self.index_range.end - (
-            (  # max time units needed to make a forecast
-                self.time_step * (fsm + self.output_offset)  # translation due to forecasting
-                + self.len_timedelta  # length of forecasting window
+        max_index = (
+            self.index_range.end
+            - (
+                (  # max time units needed to make a forecast
+                    self.time_step * (fsm + self.output_offset)  # translation due to forecasting
+                    + self.len_timedelta  # length of forecasting window
+                )
+                // self.step_timedelta  # as number of indexs
             )
-            // self.step_timedelta  # as number of indexs
+            - self.max_teacher_time_offset  # teacher windows shifted forward in time
         )
 
         available_samples = max_index * self.batch_size  # as number of samples
@@ -250,6 +267,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
+        perms_len -= self.max_teacher_time_offset
 
         return np.arange(self.max_input_steps, perms_len)
 
@@ -697,6 +715,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
         masks = {}
         source_to_target = None
+        # masks with shared_across_streams and per-sample time offsets are drawn once per item
+        self.masker.start_item()
         for stream_name, stream_info in self.streams.items():
             # Build source and target sample masks
             masks[stream_name] = self.tokenizer.build_samples_for_stream(
@@ -715,6 +735,28 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             )
 
         return masks, num_source_samples, num_target_samples, source_to_target
+
+    def _get_target_time_offsets(self, masks_streams) -> list[int]:
+        """
+        Time offset (in time windows) of each target sample: the per-sample draw of the target
+        strategy's time_offset (Masker) if set, else training_config.teacher_time_offset.
+        Always 0 if training_mode does not include student_teacher.
+        """
+        offsets = None
+        for target_masks, _, _ in masks_streams.values():
+            stream_offsets = [md.params.get("time_offset", None) for md in target_masks.metadata]
+            stream_offsets = [
+                0
+                if not self.use_target_time_offsets
+                else (self.teacher_time_offset if o is None else int(o))
+                for o in stream_offsets
+            ]
+            if offsets is None:
+                offsets = stream_offsets
+            assert stream_offsets == offsets, (
+                "target time offsets have to be identical for all streams"
+            )
+        return offsets or []
 
     def _get_output_length(self, num_forecast_steps):
         # max(1, ...) : self.output_offset and num_forecast_steps are zero for pure masking
@@ -773,6 +815,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         )
         batch.set_source_target_matching(source_to_target)
 
+        # time offset (in windows) of each target sample, identical for all streams; stored in the
+        # target metadata (params["time_offset"]) for the loss
+        target_time_offsets = self._get_target_time_offsets(masks_streams)
+
         # stream-independent masking parameters per sample (e.g. noise level)
         target_params, source_params = self.masker.build_sample_params(masks_streams)
         batch.update_sample_meta_info(source_params, target_params)
@@ -804,30 +850,24 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 idx, num_forecast_steps, i_max, stream_ds.readers
             )
 
-            # When teacher_time_offset > 0, load a separate set of data windows
-            # shifted forward in time for the teacher (target) samples.
-            if self.teacher_time_offset > 0:
-                (input_data_target, output_data_target) = self._get_data_windows(
-                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds.readers
-                )
-            else:
-                input_data_target = input_data
-                output_data_target = output_data
-
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
             input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
-            if self.teacher_time_offset > 0:
-                input_tokens_target = self.tokenizer.get_tokens_windows(
-                    stream_info, input_data_target, True
+
+            # For time offsets > 0, load a separate set of data windows shifted forward in time
+            # for the teacher (target) samples; one set per distinct offset.
+            target_windows = {0: (input_data, output_data, input_tokens, output_tokens)}
+            for offset in sorted(set(target_time_offsets) - {0}):
+                (in_data, out_data) = self._get_data_windows(
+                    idx + offset, num_forecast_steps, i_max, stream_ds.readers
                 )
-                output_tokens_target = self.tokenizer.get_tokens_windows(
-                    stream_info, output_data_target, False
+                target_windows[offset] = (
+                    in_data,
+                    out_data,
+                    self.tokenizer.get_tokens_windows(stream_info, in_data, True),
+                    self.tokenizer.get_tokens_windows(stream_info, out_data, False),
                 )
-            else:
-                input_tokens_target = input_tokens
-                output_tokens_target = output_tokens
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
@@ -857,13 +897,18 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 batch.add_source_stream(sidx, stream_name, sdata, source_masks.metadata[sidx])
 
-            # for t_idx, mask in enumerate(source_masks):
-            input_data_target_orig = input_data_target
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
-                # Use time-offset data for teacher when teacher_time_offset > 0.
-                target_idx = idx + self.teacher_time_offset
+                # Use time-offset data for teacher when its time offset > 0.
+                offset = target_time_offsets[tidx]
+                target_idx = idx + offset
+                (
+                    input_data_target_orig,
+                    output_data_target,
+                    input_tokens_target,
+                    output_tokens_target,
+                ) = target_windows[offset]
 
                 # Apply self-flow noise to teacher data (handled by masker)
                 input_data_target = self.masker.apply_noise_to_data(
@@ -889,8 +934,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 target_metadata = target_masks.metadata[tidx]
 
-                # also want to add the mask to the metadata
+                # also want to add the mask and the effective time offset to the metadata
                 target_metadata.mask = target_mask
+                target_metadata.add_params({"time_offset": offset})
                 batch.add_target_stream(tidx, stream_name, sdata, target_metadata)
 
         source_in_steps = input_steps.max().item()

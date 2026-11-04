@@ -1,0 +1,21 @@
+# jepa_pretrain overlay: spatio-temporal JEPA (arms ST*).
+# Student: as the spatial arm (window t, HEALPix-level-4 blocks hidden in all streams, keep 0.5).
+# Teacher: per sample either the full window t (time_offset 0, spatial in-filling, loss at the
+# hidden cells) or the full window t+6h (time_offset 1, masked forecasting, loss at all cells),
+# with probability 0.5 each (temporal: auto picks the loss region per sample).
+# Same cost per step as the single-task arms (one student and one teacher pass per sample).
+training_config:
+  teacher_time_offset: 0
+  losses:
+    student-teacher:
+      loss_fcts:
+        JEPA:
+          loss_extra_args: {temporal: auto}
+  model_input:
+    random_easy:
+      masking_strategy: healpix
+      masking_strategy_config: {rate: 0.5, hl_mask: 4, shared_across_streams: true}
+  target_input:
+    random_easy_target:
+      time_offset: [0, 1]
+      time_offset_probs: [0.5, 0.5]

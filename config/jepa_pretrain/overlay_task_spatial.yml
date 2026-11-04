@@ -1,0 +1,19 @@
+# jepa_pretrain overlay: spatial JEPA (arms S*).
+# Student: the input window t with HEALPix-level-4 blocks (4 data cells, ~400 km) hidden in ALL
+# streams (shared_across_streams), keep rate 0.5. Teacher: the full window t (time_offset 0).
+# Loss (temporal: auto -> spatial for time_offset 0): only at the hidden cells. Forces the encoder
+# to keep the local structure needed to in-fill ~400 km blocks from their surroundings.
+training_config:
+  teacher_time_offset: 0
+  losses:
+    student-teacher:
+      loss_fcts:
+        JEPA:
+          loss_extra_args: {temporal: auto}
+  model_input:
+    random_easy:
+      masking_strategy: healpix
+      masking_strategy_config: {rate: 0.5, hl_mask: 4, shared_across_streams: true}
+  target_input:
+    random_easy_target:
+      time_offset: 0

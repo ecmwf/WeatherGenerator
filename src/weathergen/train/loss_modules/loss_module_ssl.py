@@ -247,6 +247,15 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [info.mask for info in metadata if "JEPA" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
+                # time offset (in time windows) of each teacher sample, see temporal="auto"
+                "teacher_time_offsets": torch.tensor(
+                    [
+                        int(info.params.get("time_offset", 0) or 0)
+                        for info in metadata
+                        if "JEPA" in info.global_params["loss"]
+                    ],
+                    dtype=torch.long,
+                ),
             }
         elif name == "iBOT":
             """
@@ -330,20 +339,39 @@ def _masked_l1_loss_per_sample(
 
 
 def jepa_loss(
-    student_patches_masked, student_masks, teacher_patches_masked, teacher_masks, temporal=False
+    student_patches_masked,
+    student_masks,
+    teacher_patches_masked,
+    teacher_masks,
+    teacher_time_offsets=None,
+    temporal=False,
 ):
+    """
+    JEPA loss: L1 between the student's prediction and the teacher's representation.
+
+    temporal: True: loss at all teacher-visible cells (temporal JEPA, the teacher sees a later
+    time window); False: loss at cells the teacher sees but the student doesn't (spatial JEPA);
+    "auto": per sample, temporal if the sample's teacher_time_offset > 0 else spatial (mixed
+    spatial / temporal targets, e.g. target_input.<strategy>.time_offset: [0, 1]).
+    """
     # TODO remove as we deal with batch dimension
     assert teacher_masks.shape[0] == 1 or teacher_masks.shape[0] == student_masks.shape[0]
     student_masks = student_masks.squeeze(dim=1)
     teacher_masks = teacher_masks.squeeze(dim=1)
 
-    if temporal:
+    # predict only at cells the teacher sees but the student doesn't
+    spatial_mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+    if temporal == "auto":
+        assert teacher_time_offsets is not None, 'temporal="auto" requires teacher_time_offsets'
+        assert teacher_time_offsets.shape[0] in (1, student_masks.shape[0])
+        is_temporal = (teacher_time_offsets > 0).to(student_masks.device).reshape(-1, 1)
+        mask = torch.where(is_temporal, teacher_masks, spatial_mask)
+    elif temporal:
         # Temporal JEPA: predict teacher's representation at ALL teacher-visible cells
         # (no spatial masking exclusion since the prediction task is across time, not space)
         mask = teacher_masks
     else:
-        # Standard JEPA: predict only at cells the teacher sees but the student doesn't
-        mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+        mask = spatial_mask
 
     return _masked_l1_loss_per_sample(
         student_patches_masked,
