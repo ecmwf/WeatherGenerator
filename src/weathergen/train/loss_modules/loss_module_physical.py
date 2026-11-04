@@ -110,16 +110,28 @@ class LossPhysical(LossModuleBase):
         self.dynamic_loss_cfg = loss_fcts.get("dynamic_loss")
         self.forecast_offset = self.mode_cfg.forecast.offset
 
-        # dynamically load loss functions based on configuration and stage
-        self.loss_fcts = [
-            [
-                getattr(loss_fns, name),
-                params.get("weight", 1.0),
-                name,
-            ]
-            for name, params in loss_fcts.items()
-            if name != "dynamic_loss"
-        ]
+        # dynamically load loss functions based on configuration and stage.
+        # custom losses (Haar wavelet) are handled by dedicated branches in
+        # compute_loss and do not follow the standard loss function signature;
+        # their extra config parameters are kept and forwarded to them.
+        _custom_losses = ("global_haar_wavelet_reshape_varweighted",)
+        self.loss_fcts = []
+        for name, params in loss_fcts.items():
+            if name == "dynamic_loss":
+                continue
+            fn = None if name in _custom_losses else getattr(loss_fns, name)
+            self.loss_fcts.append(
+                [
+                    fn,
+                    params.get("weight", 1.0),
+                    name,
+                    {
+                        k: v
+                        for k, v in params.items()
+                        if k not in ("weight", "target_source_correspondence")
+                    },
+                ]
+            )
 
         self.dynamic_loss_ema = DynamicLossEMA(
             self.dynamic_loss_cfg if self.stage == TRAIN else None,
@@ -237,6 +249,41 @@ class LossPhysical(LossModuleBase):
         loss_lfct = loss_lfct / (ctr_substeps if ctr_substeps > 0 else 1.0)
 
         return loss_lfct, losses_chs
+
+    @staticmethod
+    def _loss_global_haar_varweighted(
+        target,
+        pred,
+        target_coords_raw,
+        weights_channels,
+        stream_name="",
+        template_path="",
+        detail_weight=2.0,
+        num_levels=3,
+        var_weight_epsilon=1e-3,
+        regrid_method="nearest",
+        level_start=0,
+    ):
+        if target.shape[0] == 0:
+            return (
+                torch.tensor(0.0, device=target.device, requires_grad=True),
+                torch.zeros(target.shape[-1], device=target.device),
+            )
+        target_coords_raw = target_coords_raw.to(target.device)
+        return loss_fns.global_haar_wavelet_reshape_varweighted(
+            target,
+            pred,
+            target_coords_raw,
+            weights_channels=weights_channels,
+            weights_points=None,
+            template_path=template_path,
+            detail_weight=detail_weight,
+            num_levels=num_levels,
+            var_weight_epsilon=var_weight_epsilon,
+            stream_name=stream_name,
+            regrid_method=regrid_method,
+            level_start=level_start,
+        )
 
     def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
         """
@@ -357,7 +404,7 @@ class LossPhysical(LossModuleBase):
                     # loss_st_corr: loss for give source-target correspondence
                     loss_st_corr = torch.tensor(0.0, device=self.device, requires_grad=True)
                     ctr_loss_fcts = 0
-                    for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
+                    for loss_fct, loss_fct_weight, loss_fct_name, loss_fct_params in self.loss_fcts:
                         # skip is loss is not computed for this sample
                         if loss_fct_name not in pred_params.global_params["loss"]:
                             continue
@@ -382,14 +429,45 @@ class LossPhysical(LossModuleBase):
                         )
                         # loss_lfct: loss for given loss function aggregated over all channels
                         # loss_lfct_chs: loss for given loss function per channel
-                        loss_lfct, loss_lfct_chs = self._loss_per_loss_function(
-                            loss_fct,
-                            target,
-                            pred,
-                            substep_masks,
-                            weights_channels,
-                            weights_locations,
-                        )
+
+                        # ---- dispatch: custom (Haar wavelet) loss vs standard path ----
+
+                        if loss_fct_name == "global_haar_wavelet_reshape_varweighted":
+                            # Per-stream overrides: any key in the stream config's
+                            # `haar_overrides` block wins over the global loss config
+                            # (loss_fct_params). regrid_method may also be given at the
+                            # top level of the stream config for convenience. This lets
+                            # ERA5 (coarse) and MEPS (fine) run the SAME loss term with
+                            # different num_levels / detail_weight / regrid_method
+                            # in one training run.
+                            _ov = dict(loss_fct_params)
+                            _ov.update(stream_info.get("haar_overrides", {}))
+                            if "regrid_method" in stream_info:
+                                _ov["regrid_method"] = stream_info["regrid_method"]
+                            _regrid = _ov.pop("regrid_method", "nearest")
+                            _ov.pop("template_path", None)
+                            loss_lfct, loss_lfct_chs = self._loss_global_haar_varweighted(
+                                target,
+                                pred,
+                                targets_coords_batch[target_idx],
+                                weights_channels,
+                                stream_name=stream_name,
+                                template_path=stream_info.get("template_path", ""),
+                                regrid_method=_regrid,
+                                **_ov,
+                            )
+
+                        else:
+                            # standard pointwise loss functions
+                            loss_lfct, loss_lfct_chs = self._loss_per_loss_function(
+                                loss_fct,
+                                target,
+                                pred,
+                                substep_masks,
+                                weights_channels,
+                                weights_locations,
+                            )
+                        # ---- end dispatch ----
 
                         for ch_n, v in zip(target_channels, loss_lfct_chs, strict=True):
                             losses_all[stream_name][str(timestep_idx)][loss_fct_name][ch_n] = (
@@ -405,9 +483,24 @@ class LossPhysical(LossModuleBase):
                         ):
                             self.dynamic_loss_ema.update(stream_name, loss_lfct_chs)
 
+                        # Per-stream loss-weight override: a stream may scale the
+                        # contribution of an individual loss function via
+                        #   loss_weight_overrides: { <loss_fct_name>: <factor> }
+                        # in its stream config. Defaults to 1.0 (no change), so runs
+                        # without the block are unaffected. This is how ERA5 can down-
+                        # weight the detail-band haar while MEPS keeps it at full weight.
+                        _stream_lw = stream_info.get("loss_weight_overrides", {})
+                        _lw_factor = float(_stream_lw.get(loss_fct_name, 1.0))
+
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
-                        loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
+                        loss_cur_w = (
+                            spoof_weight
+                            * loss_fct_weight
+                            * _lw_factor
+                            * loss_lfct
+                            * output_step_weight
+                        )
                         loss_st_corr = loss_st_corr + loss_cur_w
                         ctr_loss_fcts += 1 if (loss_cur_w > 0.0 and not is_spoof) else 0
 
