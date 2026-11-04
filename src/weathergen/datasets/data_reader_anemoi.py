@@ -121,12 +121,15 @@ class DataReaderAnemoi(DataReaderTimestep):
             data_start_time,
             data_end_time,
         )
+        window_stride = stream_info.get("window_stride", 1)
+        assert window_stride >= 1, f"window_stride must be >= 1, got {window_stride}"
         super().__init__(
             tw_handler,
             stream_info,
             data_start_time,
             data_end_time,
             period,
+            window_stride,
         )
         # If there is no overlap with the time range, no need to keep the dataset.
         if tw_handler.t_start >= data_end_time or tw_handler.t_end <= data_start_time:
@@ -245,6 +248,12 @@ class DataReaderAnemoi(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
+        # with window_stride > 1, t_idxs is a strided (non-contiguous) selection within the
+        # contiguous [didx_start, didx_end) block fetched above; subselect in-memory to avoid a
+        # scattered zarr read.
+        if self.stride > 1:
+            data = data[t_idxs - didx_start]
+
         # coords-first representation and collapse multiple steps
         data = data.transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
 
@@ -266,7 +275,7 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
-        datetimes = np.repeat(self.ds.dates[didx_start:didx_end], len(data) // len(t_idxs))
+        datetimes = np.repeat(self.ds.dates[t_idxs], len(data) // len(t_idxs))
 
         rd = ReaderData(
             coords=coords,

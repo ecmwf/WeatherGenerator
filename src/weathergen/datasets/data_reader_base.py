@@ -696,6 +696,11 @@ class DataReaderTimestep(DataReaderBase):
     # The period of the dataset, i.e. the time interval between two consecutive samples.
     # It is also called 'frequency' in Anemoi.
     period: NPTDel64
+    # Stride (in units of `period`) applied when picking raw samples within a window; keeps
+    # every `stride`-th raw sample. Since the window's start index naturally cycles through
+    # all `stride` phases as idx advances (when time_window_step == period), this lets
+    # different samples draw from different phases (e.g. 00/06/12/18 UTC) of the same stream.
+    stride: int
 
     def __init__(
         self,
@@ -704,6 +709,7 @@ class DataReaderTimestep(DataReaderBase):
         data_start_time: NPDT64 | None = None,
         data_end_time: NPDT64 | None = None,
         period: NPTDel64 | None = None,
+        stride: int = 1,
     ) -> None:
         """
         Parameters
@@ -718,6 +724,8 @@ class DataReaderTimestep(DataReaderBase):
             end time of dataset
         period :
             period / frequency of dataset
+        stride :
+            keep every `stride`-th raw sample within a window (see `stride` field docstring)
 
         Returns
         -------
@@ -728,6 +736,7 @@ class DataReaderTimestep(DataReaderBase):
         self.data_start_time = data_start_time or tw_handler.t_start
         self.data_end_time = data_end_time
         self.period = period
+        self.stride = stride
 
     def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int64], DTRange]:
         """
@@ -749,6 +758,7 @@ class DataReaderTimestep(DataReaderBase):
             self.period,
             idx,
             self.time_window_handler,
+            self.stride,
         )
 
 
@@ -764,6 +774,7 @@ def get_dataset_indexes_timestep(
     period: NPTDel64,
     idx: TIndex,
     tw_handler: TimeWindowHandler,
+    stride: int = 1,
 ) -> tuple[NDArray[np.int64], DTRange]:
     """
     Get dataset indexes for a given time window index, when the dataset is periodic.
@@ -781,6 +792,8 @@ def get_dataset_indexes_timestep(
         Index of the time window.
     tw_handler : TimeWindowHandler
         Handler for time windows.
+    stride : int
+        Keep every `stride`-th raw sample within the window (default 1: keep all).
 
     Returns
     -------
@@ -818,4 +831,4 @@ def get_dataset_indexes_timestep(
 
     end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
 
-    return (np.arange(start_didx, end_didx + 1, dtype=np.int64), dtr)
+    return (np.arange(start_didx, end_didx + 1, stride, dtype=np.int64), dtr)
