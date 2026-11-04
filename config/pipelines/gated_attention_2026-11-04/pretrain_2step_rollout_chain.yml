@@ -1,0 +1,105 @@
+# Headwise gated attention (use_gated_attention, Qiu et al. 2025) on the whole optimizer-fix chain:
+#   pretrain        gatpt001 = u2kqf7ue  (gjl_repro_forecast_n320_iasi_channels_monitoring_optimfix_pipeline.yml)
+#   2-step forecast gatft001 = reg3ykyn
+#   rollout chain   gatro801 = rgnhv6t2, gatpf001 = rgseymb2, gatcd001 = rgch7py2
+#                   (long_rollout_optimfix_2026-10-29/rollout_chain_optimfix_from_reg3ykyn.yml)
+# Same configs and options as the baseline except use_gated_attention=True in every stage. The rollout
+# stages build the model from config_nhv6tkln_chkpt8_base.yml, which has no gate: without the option the
+# gate weights of the loaded checkpoint would be dropped (only an "Unused keys" warning).
+# Launch from the WeatherGenerator root of this branch and keep the checkout until all stages have started:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --no-register --pipeline config/pipelines/gated_attention_2026-11-04/pretrain_2step_rollout_chain.yml
+parallelize: false
+stages:
+  - name: pretrain
+    stage: train
+    run_id: gatpt001
+    base_config: ./config/config_gjl6a0kb_reproduction_n320_iasi_channels.yml
+    options:
+      - use_gated_attention=True
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+      - train_logging.loss_spike_detection.enabled=False
+      - train_logging.loss_spike_detection.skip_batch=False
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    run_id: gatft001
+    from_run_id: STAGE.pretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_iasi_channels_monitoring_optimfix_gated.yml
+    chain_jobs: 4
+    nodes: 2
+  - name: rollout8
+    stage: train
+    run_id: gatro801
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    options:
+      - use_gated_attention=True
+      # the base config stores nhv6tkln's final step (2048): start a new schedule, as nhv6tkln did
+      - general.istep=0
+      - load_chkpt.run_id=gatft001
+      - load_chkpt.mini_epoch=-1
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8
+  - name: pfanchndlb
+    stage: train
+    run_id: gatpf001
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - use_gated_attention=True
+      - load_chkpt.run_id=gatro801
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=5
+      - train_logging.checkpoint=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8
+  - name: combodet
+    stage: train
+    run_id: gatcd001
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - use_gated_attention=True
+      - load_chkpt.run_id=gatpf001
+      - load_chkpt.mini_epoch=5
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.0
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      - train_logging.checkpoint=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8
