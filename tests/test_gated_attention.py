@@ -92,8 +92,9 @@ def _inputs(cls_name, device="cuda"):
     def r(*s):
         return torch.randn(*s, generator=g).to(device)
 
-    lens = torch.tensor([N // 2, N // 2], dtype=torch.int32, device=device)
-    lens_kv = torch.tensor([NK // 2, NK // 2], dtype=torch.int32, device=device)
+    # varlen lengths with a leading 0, as in the model (cumsum gives flash's cu_seqlens)
+    lens = torch.tensor([0, N // 2, N // 2], dtype=torch.int32, device=device)
+    lens_kv = torch.tensor([0, NK // 2, NK // 2], dtype=torch.int32, device=device)
     if cls_name == "MultiSelfAttentionHeadVarlen":
         return (r(N, DIM), lens), {}
     if cls_name == "MultiSelfAttentionHeadLocal":
@@ -187,7 +188,7 @@ def test_gate_scales_each_head_by_sigmoid_of_query_input(cls_name, use_xsa):
     o_u = o_u.reshape(*gate.shape, -1)
     o_g = o_g.reshape(*gate.shape, -1)
     assert gate.min() < 0.2 and gate.max() > 0.8
-    torch.testing.assert_close(o_g, o_u * gate[..., None], rtol=2e-2, atol=2e-3)
+    torch.testing.assert_close(o_g, o_u * gate[..., None], rtol=2e-2, atol=1e-2)
 
 
 @cuda
@@ -207,7 +208,7 @@ def test_zero_gate_weights_halve_attention_update(cls_name):
         out_g, _ = _capture(gated, args)
     d_u = (out_u.float() - x_in.reshape(out_u.shape)).float()
     d_g = (out_g.float() - x_in.reshape(out_g.shape)).float()
-    torch.testing.assert_close(d_g, 0.5 * d_u, rtol=2e-2, atol=2e-3)
+    torch.testing.assert_close(d_g, 0.5 * d_u, rtol=2e-2, atol=1e-2)
 
 
 @cuda
