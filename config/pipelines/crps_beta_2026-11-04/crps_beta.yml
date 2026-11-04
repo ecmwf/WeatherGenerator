@@ -3,11 +3,11 @@
 # R = MSE_train / MSE_test, makes SSR_test = 1 if the spread has settled). Everything else is a copy
 # of long_rollout_2026-10-21/crps8_long.yml (same start klbklwf7 mini-epoch 12, same 10 mini-epochs,
 # same long-rollout package, no optimizer changes), so each stage compares directly with axhby5w8:
-#   cbfix001: fixed beta = 1.026, from R = 0.899 measured on axhby5w8 itself (same training length;
+#   cbetafx1: fixed beta = 1.026, from R = 0.899 measured on axhby5w8 itself (same training length;
 #             mean over the 81 ERA5 channels at 6 h and 12 h, 4 members, 8+8 inits Oct-Dec 2022/2023)
-#   cbdyn001: beta = sqrt(2/(1+R)) re-measured before training and at every validation, R from the
+#   cbetady1: beta = sqrt(2/(1+R)) re-measured before training and at every validation, R from the
 #             8-step validation protocol on Oct-Dec 2023 (val) vs Oct-Dec 2022 (train), clipped to
-#             [1, 1.2]; history in results/cbdyn001/crps_beta.jsonl
+#             [1, 1.2]; history in results/cbetady1/crps_beta.jsonl
 # Validation reports the proper CRPS (beta applies to the training loss only).
 # Signal: SSR on held-out inits (score_ens_members.py) and the validation CRPS vs axhby5w8.
 # Launch from the WeatherGenerator root:
@@ -16,7 +16,7 @@ parallelize: true
 stages:
   - name: crpsbfix
     stage: train
-    run_id: cbfix001
+    run_id: cbetafx1
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
@@ -42,7 +42,7 @@ stages:
     nodes: 8
   - name: crpsbdyn
     stage: train
-    run_id: cbdyn001
+    run_id: cbetady1
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
       - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
