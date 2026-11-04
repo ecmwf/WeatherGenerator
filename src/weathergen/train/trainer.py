@@ -995,9 +995,16 @@ class Trainer(TrainerBase):
 
         start = self.crps_beta_cfg.get("start_date", year_before(self.validation_cfg.start_date))
         end = self.crps_beta_cfg.get("end_date", year_before(self.validation_cfg.end_date))
+        # dates as datetime resolvers, like the start_date/end_date of the stage configs
         self.train_eval_cfg = merge_configs(
             self.validation_cfg,
-            OmegaConf.create({"start_date": start, "end_date": end, "output": {"num_samples": 0}}),
+            OmegaConf.create(
+                {
+                    "start_date": f"${{{config._DATETIME_TYPE_NAME}:{start}}}",
+                    "end_date": f"${{{config._DATETIME_TYPE_NAME}:{end}}}",
+                    "output": {"num_samples": 0},
+                }
+            ),
         )
         self.dataset_train_eval = MultiStreamDataSampler(cf, self.train_eval_cfg, stage=VAL)
         self.data_loader_train_eval = torch.utils.data.DataLoader(
