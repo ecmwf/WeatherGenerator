@@ -52,8 +52,10 @@ case "$FROM_RUN_ID" in
     ps71a3lb) MINI_EPOCH=${MINI_EPOCH:-9} ;;
     # crps8_w8 (8-step gradient window): 10 mini-epochs in 3 chain parts, chkpt 10 is the true final
     rs5zhuu1) MINI_EPOCH=${MINI_EPOCH:-10} ;;
+    # crps20d (20-day pushforward): chkpt 9, its chkpt 10 was re-saved from _latest by redundant chain parts
+    spqvzngg) MINI_EPOCH=${MINI_EPOCH:-9} ;;
     *)
-        echo "FROM_RUN_ID must be zmmj3eby, okfe03ir, cbqstu8f, klbklwf7, axhby5w8, q4gwmov3, nyscsarv, ci7g92ye, ps71a3lb or rs5zhuu1; got '$FROM_RUN_ID'." >&2
+        echo "FROM_RUN_ID must be zmmj3eby, okfe03ir, cbqstu8f, klbklwf7, axhby5w8, q4gwmov3, nyscsarv, ci7g92ye, ps71a3lb, rs5zhuu1 or spqvzngg; got '$FROM_RUN_ID'." >&2
         exit 2
         ;;
 esac
