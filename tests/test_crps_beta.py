@@ -116,22 +116,68 @@ def test_beta_from_r():
 
 def test_mse_ratio():
     val = {
-        "LossPhysical.ERA5.1.mse.a": [2.0, 2.0],
-        "LossPhysical.ERA5.1.mse.b": [4.0],
-        "LossPhysical.ERA5.1.kernel_crps.a": [1.0],
-        "LossPhysical.ERA5.2.mse.a": [float("nan")],
+        "LossPhysical.ERA5.mse.a.1": [2.0, 2.0],
+        "LossPhysical.ERA5.mse.b.1": [4.0],
+        "LossPhysical.ERA5.mse.avg": [3.0],
+        "LossPhysical.ERA5.kernel_crps.a.1": [1.0],
+        "LossPhysical.ERA5.mse.a.2": [float("nan")],
         "LossPhysical.loss_avg": [1.0],
     }
     train = {
-        "LossPhysical.ERA5.1.mse.a": [1.0, float("nan")],
-        "LossPhysical.ERA5.1.mse.b": [3.0, 5.0],
-        "LossPhysical.ERA5.1.kernel_crps.a": [0.1],
-        "LossPhysical.ERA5.2.mse.a": [1.0],
+        "LossPhysical.ERA5.mse.a.1": [1.0, float("nan")],
+        "LossPhysical.ERA5.mse.b.1": [3.0, 5.0],
+        "LossPhysical.ERA5.mse.avg": [1.0],
+        "LossPhysical.ERA5.kernel_crps.a.1": [0.1],
+        "LossPhysical.ERA5.mse.a.2": [1.0],
     }
     r, n = mse_ratio(train, val)
     assert n == 2
     assert abs(r - (0.5 + 1.0) / 2) < 1e-12
     assert mse_ratio({}, val)[1] == 0
+
+
+def test_mse_ratio_matches_loss_physical_keys():
+    """The keys mse_ratio parses are the ones LossPhysical logs."""
+    from weathergen.utils.train_logger import prepare_losses_for_logging
+
+    target, preds = _ens()
+    num_points = target.shape[0]
+    meta = {STREAM: SimpleNamespace(global_params={"idx": 0})}
+    preds_ns = SimpleNamespace(physical=[{}, {STREAM: [preds]}])
+    targets_ns = SimpleNamespace(
+        physical=[
+            {},
+            {
+                STREAM: {
+                    "target": [target],
+                    "target_coords": [torch.zeros(num_points, 2)],
+                    "target_times": [np.zeros(num_points, dtype="datetime64[ns]")],
+                    "target_metda_data": [meta],
+                    "is_spoof": [False],
+                }
+            },
+        ],
+        output_idxs=[1],
+    )
+    output_info = [SimpleNamespace(global_params={"correspondence": 0, "loss": ["mse"]})]
+    cf = OmegaConf.create(
+        {
+            "streams": {
+                STREAM: {
+                    "train_target_channels": CHANNELS,
+                    "val_target_channels": CHANNELS,
+                    "target_channel_weights": [1.0, 1.0, 1.0],
+                    "loss_weight": 1.0,
+                }
+            }
+        }
+    )
+    mod = LossPhysical(cf, OmegaConf.create({"forecast": {}}), VAL, "cpu", mse={"weight": 0.0})
+    out = mod.compute_loss(preds_ns, targets_ns, (None, output_info, None, None))
+    _, losses, _ = prepare_losses_for_logging([], [{mod.name: out.losses_all}], [])
+    r, n = mse_ratio(losses, losses)
+    assert n == len(CHANNELS)
+    assert r == 1.0
 
 
 def test_set_loss_extra_args():

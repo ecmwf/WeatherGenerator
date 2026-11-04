@@ -43,13 +43,14 @@ def mse_ratio(losses_train: dict, losses_test: dict, loss_fct: str = "mse") -> t
     """
     R = mean over (stream, step, channel) of mean(loss_train) / mean(loss_test).
 
-    losses_*: flattened logging dicts {"<module>.<stream>.<step>.<loss_fct>.<channel>": [values]}
-    (prepare_losses_for_logging). Returns R and the number of ratios averaged.
+    losses_*: flattened logging dicts {"<module>.<stream>.<loss_fct>.<channel>.<step>": [values]}
+    (LossPhysical via prepare_losses_for_logging; the "<module>.<stream>.<loss_fct>.avg" keys are
+    skipped). Returns R and the number of ratios averaged.
     """
     ratios = []
     for key, vals_test in losses_test.items():
         parts = key.split(".")
-        if len(parts) < 2 or parts[-2] != loss_fct or key not in losses_train:
+        if len(parts) < 3 or parts[-3] != loss_fct or key not in losses_train:
             continue
         with warnings.catch_warnings():  # all-NaN keys (e.g. spoofed targets) are skipped
             warnings.simplefilter("ignore", RuntimeWarning)
