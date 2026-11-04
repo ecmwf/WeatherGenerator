@@ -44,26 +44,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class DiffusionRegisters(torch.nn.Module):
-    """Learnable register tokens of the denoiser, shape (1, R, D).
-
-    Kept in their own module (rather than as a bare Parameter on DiffusionForecastEngine) so that
-    checkpoint loading can (re)initialize them via reset_parameters() without treating the whole
-    diffusion engine as a new module. Initialized like the encoder's register tokens
-    (EncoderModule.q_aux): uniform in [0, 1/D).
-    """
-
-    def __init__(self, num_registers: int, dim: int):
-        super().__init__()
-        self.dim = dim
-        self.tokens = torch.nn.Parameter(torch.empty(1, num_registers, dim))
-        self.reset_parameters()
-
-    @torch.no_grad()
-    def reset_parameters(self):
-        torch.nn.init.uniform_(self.tokens, 0.0, 1.0 / self.dim)
-
-
 class SpatialAdaLN(torch.nn.Module):
     """Per-token (spatial) AdaLN-Zero for forecast conditioning.
 
@@ -268,13 +248,6 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Encoder register/class tokens are ignored by the diffusion engine (not diffused).
         self.num_aux_tokens = self.cf.num_register_tokens + self.cf.num_class_tokens
-        # Learnable registers of the denoiser, independent of the encoder's registers.
-        self.num_diffusion_registers = self.diff_cf.get("num_register_tokens", 0) or 0
-        self.diffusion_registers = (
-            DiffusionRegisters(self.num_diffusion_registers, _lat_dim)
-            if self.num_diffusion_registers > 0
-            else None
-        )
 
         self.log_analytics = cf.get("inference_logging", {}).get(
             "fe_diffusion_log_analytics", False
@@ -541,11 +514,12 @@ class DiffusionForecastEngine(torch.nn.Module):
         net_input = c_in * x
 
         # Strip the encoder's aux tokens from conditioning and RoPE coords (x holds cells only).
+        # Learnable registers of the denoiser are added and removed inside self.net
+        # (ForecastingEngine, forecast_engine.num_register_tokens).
         n_aux = self.num_aux_tokens
-        n_registers = self.num_diffusion_registers
         if self.conditioning == "forecast" and c is not None:
             c = c[:, n_aux:]
-        coords_c = coords[:, n_aux:] if coords is not None else None
+        coords = coords[:, n_aux:] if coords is not None else None
 
         # Project from `ae_global_dim_embed` to `diffusion.latent_dim` with a separate projection
         # for conditioning tokens (if applicable).
@@ -555,29 +529,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             if c is not None and self.conditioning_type not in {"ada_ln"}:
                 c = self.latent_proj_up_cond(c)
 
-        # Prepend the learnable diffusion registers (zero RoPE coords): (B, H) -> (B, R+H).
-        coords_x = coords_c
-        if n_registers > 0:
-            registers = self.diffusion_registers.tokens.to(dtype=net_input.dtype)
-            net_input = torch.cat([registers.expand(net_input.shape[0], -1, -1), net_input], dim=1)
-            if coords_c is not None:
-                coords_x = torch.cat(
-                    [coords_c.new_zeros(coords_c.shape[0], n_registers, 2), coords_c], dim=1
-                )
-            # Token-wise conditioning types need c at R+H tokens: zero-pad the register slots.
-            if (
-                self.conditioning == "forecast"
-                and c is not None
-                and self.conditioning_type not in {"concatenate", "cross_attn"}
-            ):
-                c = torch.cat([c.new_zeros(c.shape[0], n_registers, c.shape[2]), c], dim=1)
-        coords = coords_x
-
         if self.conditioning_type == "concatenate":
             # Concatenate conditioning tokens along sequence dim:
-            # (B, R+H, D') cat (B, H, D') -> (B, R+2H, D'), with matching RoPE coords
+            # (B, H, D') cat (B, H, D') -> (B, 2H, D'), with matching RoPE coords
             combined = torch.cat([net_input, c], dim=1)
-            coords_combined = torch.cat([coords, coords_c], dim=1) if coords is not None else None
+            coords_combined = torch.cat([coords, coords], dim=1) if coords is not None else None
             raw_out = self.net(
                 combined,
                 fstep=fstep,
@@ -585,9 +541,9 @@ class DiffusionForecastEngine(torch.nn.Module):
                 noise_emb=noise_emb,
                 conditioning=None,
             )
-            raw_out = raw_out[:, : net_input.shape[1], :]  # Slice back to (B, R+H, D')
+            raw_out = raw_out[:, : net_input.shape[1], :]  # Slice back to (B, H, D')
         elif self.conditioning_type == "concatenate_hiddendim":
-            # Concatenate along hidden dim: (B, R+H, D') cat (B, R+H, D') -> (B, R+H, 2D')
+            # Concatenate along hidden dim: (B, H, D') cat (B, H, D') -> (B, H, 2D')
             # ForecastingEngine runs at 2D' throughout and projects back to D' via out_proj
             combined = torch.cat([net_input, c], dim=2)
             raw_out = self.net(
@@ -595,7 +551,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         elif self.conditioning_type == "concatenate_hdMLP":
             # Concatenate along hidden dim then project back:
-            # (B, R+H, D') cat (B, R+H, D') -> (B, R+H, 2D') -> Linear -> (B, R+H, D')
+            # (B, H, D') cat (B, H, D') -> (B, H, 2D') -> Linear -> (B, H, D')
             combined = torch.cat([net_input, c], dim=2)
             projected = self.concat_hd_proj(combined)
             raw_out = self.net(
@@ -603,7 +559,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         elif self.conditioning_type == "spatial_ada_ln":
             # Pre-modulate each token by the corresponding conditioning token.
-            # scale/shift/gate are (B, R+H, D') — per-token and per-channel.
+            # scale/shift/gate are (B, H, D') — per-token and per-channel.
             # gate is applied to raw_out so the network can suppress or amplify each cell's
             # denoised contribution based on the conditioning quality at that cell.
             net_input_mod, spatial_gate = self.spatial_ada_ln(net_input, c)
@@ -616,8 +572,6 @@ class DiffusionForecastEngine(torch.nn.Module):
                 net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
             )
 
-        # Drop the diffusion registers: (B, R+H, D') -> (B, H, D')
-        raw_out = raw_out[:, n_registers:]
         if self.latent_proj_down is not None:
             raw_out = self.latent_proj_down(raw_out)
         return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper

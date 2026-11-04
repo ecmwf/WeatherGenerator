@@ -55,13 +55,14 @@ pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
 
-fe_num_blocks: 2
-fe_num_heads: 4
-fe_dropout_rate: 0.0
-fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []
-fe_impute_latent_noise_std: 0.0
-forecast_att_dense_rate: 1.0
+forecast_engine:
+  num_blocks: 2
+  num_heads: 4
+  dropout_rate: 0.0
+  with_qk_lnorm: True
+  layer_norm_after_blocks: []
+  impute_latent_noise_std: 0.0
+  att_dense_rate: 1.0
 
 num_class_tokens: 0
 num_register_tokens: 0
