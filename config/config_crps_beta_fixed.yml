@@ -1,0 +1,13 @@
+# Kernel CRPS with the spread term scaled by a fixed beta (weathergen-research crps-underdispersion
+# note v7): E|X-y| - beta/2 E|X-X'|, applied on top of config_long_rollout_crps.yml. Training only;
+# validation reports the proper CRPS.
+# beta = sqrt(2 / (1 + R)) with R = MSE_train / MSE_test = 0.899, the mean over all 81 ERA5 channels
+# at 6 h and 12 h of crps8long (axhby5w8, mini-epoch 10, i.e. the same training length), 4
+# MC-dropout members, 8 inits Oct-Dec 2022 (train) vs the same dates 2023 (test).
+training_config:
+  losses:
+    forecast:
+      loss_fcts:
+        kernel_crps:
+          loss_extra_args:
+            beta: 1.026

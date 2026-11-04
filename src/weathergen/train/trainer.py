@@ -13,6 +13,7 @@ import json
 import logging
 import time
 from collections import deque
+from datetime import datetime
 from math import sqrt
 
 import numpy as np
@@ -32,6 +33,7 @@ from weathergen.model.model_interface import (
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
+from weathergen.train import crps_beta
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -50,6 +52,7 @@ from weathergen.train.utils import (
     get_active_stage_config,
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
+    merge_configs,
 )
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
@@ -124,6 +127,12 @@ class Trainer(TrainerBase):
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
+        # kernel CRPS beta set from R = MSE_train / MSE_val (training_config.crps_beta_from_r)
+        self.crps_beta_cfg = None
+        self.train_eval_cfg = None
+        self.dataset_train_eval: MultiStreamDataSampler | None = None
+        self.data_loader_train_eval: torch.utils.data.DataLoader | None = None
+        self.loss_calculator_train_eval: LossCalculator | None = None
         self.lr_schedulers: list[LearningRateScheduler] | None = None
         self.model = None
         self.model_params = None
@@ -483,6 +492,12 @@ class Trainer(TrainerBase):
             self.dataset_val, **loader_params, sampler=None
         )
 
+        self.crps_beta_cfg = self.training_cfg.get("crps_beta_from_r", None)
+        if self.crps_beta_cfg is not None and self.crps_beta_cfg.get("enabled", False):
+            self._init_train_eval(cf, loader_params)
+        else:
+            self.crps_beta_cfg = None
+
         self.model, self.model_params = init_model_and_shard(
             cf,
             self.dataset,
@@ -582,6 +597,10 @@ class Trainer(TrainerBase):
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
         val_cfg = self.validation_cfg
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
+        if self.crps_beta_cfg is not None:
+            self.loss_calculator_train_eval = LossCalculator(
+                cf, self.train_eval_cfg, VAL, device=self.device
+            )
 
         # recover mini_epoch when continuing run
         if self.world_size_original is None:
@@ -605,6 +624,17 @@ class Trainer(TrainerBase):
         # run validation before training if requested
         self.validate_before_training()
 
+        # spread scale of the kernel CRPS: restore it when continuing this run, else measure it
+        if self.crps_beta_cfg is not None:
+            beta = crps_beta.last_beta(self._crps_beta_path())
+            if beta is not None:
+                self._set_crps_beta(beta)
+            else:
+                val_losses = self.validate(
+                    -1, self.validation_cfg, self.batch_size_validation_per_gpu
+                )
+                self._update_crps_beta(-1, val_losses)
+
         # training loop
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
@@ -618,7 +648,11 @@ class Trainer(TrainerBase):
                 logger.info(
                     f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
                 )
-            self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
+            val_losses = self.validate(
+                mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu
+            )
+            if self.crps_beta_cfg is not None:
+                self._update_crps_beta(mini_epoch, val_losses)
 
             if is_root():
                 logger.info(
@@ -823,9 +857,15 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch, mode_cfg, batch_size):
+    def validate(
+        self, mini_epoch, mode_cfg, batch_size, data_loader=None, loss_calculator=None, log=True
+    ):
         """
         Perform validation / test computation as specified by mode_cfg.
+
+        data_loader, loss_calculator: default to the validation ones. With log=False the losses
+        are gathered across ranks but not logged (e.g. evaluation on a subset of training data).
+        Returns the gathered losses {key: [values]}.
         """
 
         cf = self.cf
@@ -833,12 +873,15 @@ class Trainer(TrainerBase):
 
         is_diffusion = cf.get("fe_diffusion_model", False)
 
-        dataset_val_iter = iter(self.data_loader_validation)
+        data_loader = self.data_loader_validation if data_loader is None else data_loader
+        if loss_calculator is None:
+            loss_calculator = self.loss_calculator_val
+        dataset_val_iter = iter(data_loader)
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
-                total=len(self.data_loader_validation) * self.cf.world_size,
+                total=len(data_loader) * self.cf.world_size,
                 disable=self.cf.rank > 0,
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
@@ -912,7 +955,7 @@ class Trainer(TrainerBase):
                                 targets_and_auxs,
                             )
 
-                    _ = self.loss_calculator_val.compute_loss(
+                    _ = loss_calculator.compute_loss(
                         preds=preds,
                         targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
@@ -922,11 +965,92 @@ class Trainer(TrainerBase):
                     if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                         break
 
-                self._log_terminal(0, mini_epoch, VAL)
-                self._log(VAL)
+                if log:
+                    self._log_terminal(0, mini_epoch, VAL)
+                    losses_all = self._log(VAL)
+                else:
+                    _, losses_all, _ = prepare_losses_for_logging(
+                        loss_calculator.loss_hist,
+                        loss_calculator.losses_unweighted_hist,
+                        loss_calculator.stddev_unweighted_hist,
+                    )
+                    loss_calculator.loss_hist = []
+                    loss_calculator.losses_unweighted_hist = []
+                    loss_calculator.stddev_unweighted_hist = []
 
         # avoid that there is a systematic bias in the validation subset
-        self.dataset_val.advance()
+        data_loader.dataset.advance()
+
+        return losses_all
+
+    def _init_train_eval(self, cf, loader_params):
+        """
+        Data on which MSE_train is measured for crps_beta_from_r: the validation protocol on a
+        period of the training data (default: the validation period one year earlier).
+        """
+
+        def year_before(date):
+            d = datetime.fromisoformat(str(date))
+            return d.replace(year=d.year - 1).isoformat(timespec="minutes")
+
+        start = self.crps_beta_cfg.get("start_date", year_before(self.validation_cfg.start_date))
+        end = self.crps_beta_cfg.get("end_date", year_before(self.validation_cfg.end_date))
+        self.train_eval_cfg = merge_configs(
+            self.validation_cfg,
+            OmegaConf.create({"start_date": start, "end_date": end, "output": {"num_samples": 0}}),
+        )
+        self.dataset_train_eval = MultiStreamDataSampler(cf, self.train_eval_cfg, stage=VAL)
+        self.data_loader_train_eval = torch.utils.data.DataLoader(
+            self.dataset_train_eval, **loader_params, sampler=None
+        )
+        if is_root():
+            logger.info(f"crps_beta_from_r: MSE_train measured on {start} - {end}.")
+
+    def _crps_beta_path(self):
+        return config.get_path_run(self.cf) / "crps_beta.jsonl"
+
+    def _set_crps_beta(self, beta: float):
+        found = False
+        for calc_term in self.loss_calculator.loss_calculators.values():
+            for _, calc in calc_term:
+                if hasattr(calc, "set_loss_extra_args"):
+                    found |= calc.set_loss_extra_args("kernel_crps", beta=beta)
+        assert found, "crps_beta_from_r requires kernel_crps among the training losses."
+        if is_root():
+            logger.info(f"kernel_crps beta = {beta:.4f}")
+
+    def _update_crps_beta(self, mini_epoch, val_losses):
+        """Measure R = MSE_train / MSE_val and set beta = sqrt(2 / (1 + R))."""
+        train_losses = self.validate(
+            mini_epoch,
+            self.train_eval_cfg,
+            self.batch_size_validation_per_gpu,
+            data_loader=self.data_loader_train_eval,
+            loss_calculator=self.loss_calculator_train_eval,
+            log=False,
+        )
+        loss_fct = self.crps_beta_cfg.get("loss_fct", "mse")
+        r, n = crps_beta.mse_ratio(train_losses, val_losses, loss_fct)
+        if not np.isfinite(r):
+            if is_root():
+                logger.warning("crps_beta_from_r: no common losses, beta unchanged.")
+            return
+        beta = crps_beta.beta_from_r(
+            r, self.crps_beta_cfg.get("beta_min", 1.0), self.crps_beta_cfg.get("beta_max", 1.2)
+        )
+        self._set_crps_beta(beta)
+        if is_root():
+            logger.info(f"crps_beta_from_r: R = {r:.4f} over {n} channels and steps.")
+            crps_beta.append_record(
+                self._crps_beta_path(),
+                {
+                    "mini_epoch": mini_epoch,
+                    "istep": self.cf.general.istep,
+                    "R": r,
+                    "n": n,
+                    "beta": beta,
+                },
+            )
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
@@ -1195,6 +1319,8 @@ class Trainer(TrainerBase):
         loss_calculator.loss_hist = []
         loss_calculator.losses_unweighted_hist = []
         loss_calculator.stddev_unweighted_hist = []
+
+        return losses_all
 
     def _get_tensor_item(self, tensor):
         """

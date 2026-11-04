@@ -73,6 +73,7 @@ def kernel_crps(
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
     fair=True,
+    beta: float = 1.0,
 ):
     """
     Compute kernel CRPS
@@ -82,6 +83,11 @@ def kernel_crps(
     pred : shape ( ens_dim , num_data_points , num_channels)
     weights_channels : shape = (num_channels,)
     weights_points : shape = (num_data_points)
+    beta : scale of the spread (repulsion) term, E|X-y| - beta/2 E|X-X'|. beta = 1 is the CRPS;
+        beta > 1 is not a proper score and inflates the ensemble spread by
+        kappa = beta / sqrt(2 - beta^2) relative to the training error (Gaussian members), so that
+        beta = sqrt(2 / (1 + R)), R = MSE_train / MSE_test, calibrates the test-set spread
+        (weathergen-research crps-underdispersion note v7, Sec. "Correcting it").
 
     Returns:
     loss: scalar - overall weighted CRPS
@@ -104,6 +110,7 @@ def kernel_crps(
     mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
 
     ens_n = -1.0 / (ens_size * (ens_size - 1)) if fair else -1.0 / (ens_size**2)
+    ens_n *= beta
     abs = torch.abs
     ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
     # loop to reduce memory usage

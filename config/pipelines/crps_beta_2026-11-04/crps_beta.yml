@@ -1,0 +1,68 @@
+# crps8long (axhby5w8) with the spread term of the kernel CRPS scaled by beta
+# (weathergen-research crps-underdispersion note v7: E|X-y| - beta/2 E|X-X'|; beta = sqrt(2/(1+R)),
+# R = MSE_train / MSE_test, makes SSR_test = 1 if the spread has settled). Everything else is a copy
+# of long_rollout_2026-10-21/crps8_long.yml (same start klbklwf7 mini-epoch 12, same 10 mini-epochs,
+# same long-rollout package, no optimizer changes), so each stage compares directly with axhby5w8:
+#   cbfix001: fixed beta = 1.026, from R = 0.899 measured on axhby5w8 itself (same training length;
+#             mean over the 81 ERA5 channels at 6 h and 12 h, 4 members, 8+8 inits Oct-Dec 2022/2023)
+#   cbdyn001: beta = sqrt(2/(1+R)) re-measured before training and at every validation, R from the
+#             8-step validation protocol on Oct-Dec 2023 (val) vs Oct-Dec 2022 (train), clipped to
+#             [1, 1.2]; history in results/cbdyn001/crps_beta.jsonl
+# Validation reports the proper CRPS (beta applies to the training loss only).
+# Signal: SSR on held-out inits (score_ens_members.py) and the validation CRPS vs axhby5w8.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --no-register --pipeline config/pipelines/crps_beta_2026-11-04/crps_beta.yml
+parallelize: true
+stages:
+  - name: crpsbfix
+    stage: train
+    run_id: cbfix001
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_crps_beta_fixed.yml
+    options:
+      - load_chkpt.run_id=klbklwf7
+      - load_chkpt.mini_epoch=12
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.lead_balance.power=0.5
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=4
+      - training_config.forecast.rollout_loss_steps=4
+      - training_config.forecast.num_steps=[8,12,16,20,24,28,32,36,40]
+      - training_config.num_mini_epochs=10
+      - training_config.learning_rate_scheduling.lr_max=5.0e-05
+      - train_logging.checkpoint=128
+    chain_jobs: 4
+    nodes: 8
+  - name: crpsbdyn
+    stage: train
+    run_id: cbdyn001
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_crps_beta_from_r.yml
+    options:
+      - load_chkpt.run_id=klbklwf7
+      - load_chkpt.mini_epoch=12
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.lead_balance.power=0.5
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=4
+      - training_config.forecast.rollout_loss_steps=4
+      - training_config.forecast.num_steps=[8,12,16,20,24,28,32,36,40]
+      - training_config.num_mini_epochs=10
+      - training_config.learning_rate_scheduling.lr_max=5.0e-05
+      - train_logging.checkpoint=128
+    chain_jobs: 4
+    nodes: 8

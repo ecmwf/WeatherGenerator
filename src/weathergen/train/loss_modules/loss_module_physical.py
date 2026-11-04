@@ -10,6 +10,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import functools
 import logging
 from collections import defaultdict
 
@@ -59,9 +60,15 @@ class LossPhysical(LossModuleBase):
         self.name = "LossPhysical"
 
         # dynamically load loss functions based on configuration and stage
+        # loss_extra_args (optional) are passed to the loss function as keyword arguments, in
+        # training only: validation inherits the training losses and reports the unmodified loss
+        # (e.g. the proper CRPS when training with a spread-scaled one, kernel_crps beta != 1)
         self.loss_fcts = [
             [
-                getattr(loss_fns, name),
+                functools.partial(
+                    getattr(loss_fns, name),
+                    **(params.get("loss_extra_args", {}) if self.stage == TRAIN else {}),
+                ),
                 params.get("weight", 1.0),
                 name,
             ]
@@ -72,6 +79,18 @@ class LossPhysical(LossModuleBase):
         self.lead_balance = (
             get_lead_balance(self.mode_cfg.get("forecast", {})) if self.stage == TRAIN else None
         )
+
+    def set_loss_extra_args(self, name: str, **kwargs) -> bool:
+        """
+        Update keyword arguments of loss function `name` (e.g. kernel_crps beta set during
+        training). Returns whether the loss function is used by this module.
+        """
+        found = False
+        for entry in self.loss_fcts:
+            if entry[2] == name:
+                entry[0] = functools.partial(entry[0], **kwargs)
+                found = True
+        return found
 
     def _get_weights(self, stream_info):
         """

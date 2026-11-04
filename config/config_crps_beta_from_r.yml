@@ -1,0 +1,11 @@
+# Kernel CRPS with the spread term scaled by beta = sqrt(2 / (1 + R)), re-measured at every
+# validation (weathergen-research crps-underdispersion note v7, src/weathergen/train/crps_beta.py):
+# R = MSE_train / MSE_val of the ensemble mean, mean over channels and validation steps, with
+# MSE_train from the validation protocol on the validation period one year earlier (in the training
+# data). Before the first mini-epoch the run measures R once (or restores the last beta of
+# results/<run_id>/crps_beta.jsonl when continuing). Applied on top of config_long_rollout_crps.yml.
+training_config:
+  crps_beta_from_r:
+    enabled: true
+    beta_min: 1.0
+    beta_max: 1.2
