@@ -368,9 +368,9 @@ _HEALPIX_COORDS_CACHE: dict[int, tuple[npt.NDArray, npt.NDArray]] = {}
 
 
 def _get_healpix_coords(cf) -> tuple[npt.NDArray, npt.NDArray] | None:
-    if cf is None or not hasattr(cf, "healpix_level"):
+    if cf is None or not hasattr(cf, "streams"):
         return None
-    healpix_level = int(cf.healpix_level)
+    healpix_level = config.get_healpix_level(cf)
     cached = _HEALPIX_COORDS_CACHE.get(healpix_level)
     if cached is not None:
         return cached
