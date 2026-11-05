@@ -1,8 +1,9 @@
 import argparse
 import os
 import sys
+import math
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 import numpy as np
 import zarr
 from zarr.storage import LocalStore
@@ -239,13 +240,34 @@ def main():
     arr.attrs["frequency"] = str(ds.frequency)
     arr.attrs["missing_indices"] = missing
 
+    # Number of chunks in the output array, over all dimensions
+    n_chunks = math.prod(math.ceil(s / c) for s, c in zip(ds.shape, chunks))
+
+    summary = [
+        "Conversion complete!",
+        f"Finished: {datetime.now():%Y-%m-%d %H:%M:%S}",
+        f"Output: {output_path}",
+        f"Timesteps written: {time_dim - len(missing)}/{time_dim}",
+        f"Chunks converted: {n_chunks}",
+    ]
+    if shards is not None:
+        n_shards = math.prod(math.ceil(s / c) for s, c in zip(ds.shape, shards))
+        summary.append(f"Shards written: {n_shards}")
+    summary += [
+        f"Copy time:  {format_duration(copy_time)}",
+        f"Per timestep: {copy_time / time_dim:.3f} s",
+        f"Total time: {format_duration(time.perf_counter() - total_start)}",
+    ]
+
     print("\n" + "="*60)
-    print("Conversion complete!")
-    print(f"Timesteps written: {time_dim - len(missing)}/{time_dim}")
-    print(f"Copy time:  {format_duration(copy_time)}")
-    print(f"Per timestep: {copy_time / time_dim:.3f} s")
-    print(f"Total time: {format_duration(time.perf_counter() - total_start)}")
+    print("\n".join(summary))
     print("="*60)
+
+    # Save the summary next to the output, e.g. <output name>.log
+    log_path = output_path.rstrip("/").removesuffix(".zarr") + ".log"
+    with open(log_path, "w") as f:
+        f.write("\n".join(summary) + "\n")
+    print(f"Summary written to {log_path}")
 
 
 if __name__ == "__main__":
