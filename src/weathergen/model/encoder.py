@@ -361,7 +361,7 @@ class EncoderModule(torch.nn.Module):
 
 
 class MultiEncoder(torch.nn.Module):
-    """Return independent named encoder latents and posteriors on a shared grid."""
+    """Return independent named encoder latents and posteriors on their native grids."""
 
     def __init__(self, cf: Config, sources_size):
         super().__init__()

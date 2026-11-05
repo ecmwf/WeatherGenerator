@@ -395,16 +395,19 @@ def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
     lon, lat = healpix_coords
     coords_base = np.stack([lat, lon], axis=1)
 
-    if batch is not None and sample_idx_in_batch < len(batch.get_source_samples().get_samples()):
+    # Full-grid latents remain full-grid even when their input observations were masked.
+    if (
+        npoints is not None
+        and npoints not in (len(coords_base), len(coords_base) + num_extra_tokens)
+        and batch is not None
+        and sample_idx_in_batch < len(batch.get_source_samples().get_samples())
+    ):
         sample = batch.get_source_samples().get_samples()[sample_idx_in_batch]
-        mask = None
-        for meta in sample.meta_info.values():
-            if hasattr(meta, "mask") and meta.mask is not None:
-                mask = meta.mask
-                break
+        mask = sample.get_latent_meta_info(len(coords_base)).mask
         if mask is not None:
             mask_np = mask.detach().cpu().numpy().astype(bool)
-            if mask_np.shape[0] == coords_base.shape[0]:
+            selected_count = int(mask_np.sum())
+            if npoints in (selected_count, selected_count + num_extra_tokens):
                 coords_base = coords_base[mask_np]
 
     coords_len = coords_base.shape[0]
@@ -447,6 +450,8 @@ def get_latent_output(batch, model_output):
         for i_sample in range(n_samples):
             per_sample: dict = {}
             for lname, lval in latent_pred.items():
+                if lname == "posteriors":
+                    continue
                 if isinstance(lval, LatentState):
                     fields = {
                         "tokens": lval.z_pre_norm,
