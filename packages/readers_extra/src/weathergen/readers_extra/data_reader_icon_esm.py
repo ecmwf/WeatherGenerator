@@ -54,7 +54,11 @@ class DataReaderIconEsm(DataReaderTimestep):
 
         # Load JSON references and initialize a virtual file system
         kerchunk_ref = json.loads(ref_path.read_text())
-        fs = fsspec.filesystem("reference", fo=kerchunk_ref)
+        # Newer fsspec skips generated references in simple template mode.
+        # Enable sandboxed Jinja rendering only for manifests containing `gen`.
+        fs = fsspec.filesystem(
+            "reference", fo=kerchunk_ref, simple_templates=not bool(kerchunk_ref.get("gen"))
+        )
         mapper = fs.get_mapper("")
 
         # Ensure metadata is consolidated for zarr-style access

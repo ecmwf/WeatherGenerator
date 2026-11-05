@@ -10,6 +10,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "xarray",
     "zarr",
+    "fsspec>=2026.6.0",  # GHSA-27vj-qcqg-25rc
     "weathergen-common",
 ]
 
