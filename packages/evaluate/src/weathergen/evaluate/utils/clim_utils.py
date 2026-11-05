@@ -20,7 +20,9 @@ from weathergen.evaluate.utils.derived_channels import scale_z_channels
 _logger = logging.getLogger(__name__)
 
 
-def match_climatology_time(target_datetime: pd.Timestamp, clim_data: xr.Dataset) -> int | None:
+def match_climatology_time(
+    target_datetime: pd.Timestamp, clim_data: xr.Dataset, match_mode: str = "hourly"
+) -> int | None:
     """
     Find matching climatology time index for target datetime.
 
@@ -30,6 +32,11 @@ def match_climatology_time(target_datetime: pd.Timestamp, clim_data: xr.Dataset)
         Target datetime to match
     clim_data : xr.Dataset
         Climatology dataset with time dimension
+    match_mode : str
+        Temporal matching granularity: ``"hourly"`` (default) matches on
+        day-of-year + hour, for sub-daily (e.g. 6h) target data against an
+        hourly/daily climatology. ``"monthly"`` matches on calendar month
+        only, for monthly-mean target data against a monthly climatology.
 
     Returns
     -------
@@ -41,22 +48,27 @@ def match_climatology_time(target_datetime: pd.Timestamp, clim_data: xr.Dataset)
     if isinstance(target_datetime, np.datetime64):
         target_datetime = pd.to_datetime(target_datetime)
 
-    target_doy = target_datetime.dayofyear
-    target_hour = target_datetime.hour
-
-    # EFFICIENT TIME MATCHING using vectorized operations
     clim_times = pd.to_datetime(clim_data.time.values)
-    clim_doys = clim_times.dayofyear
-    clim_hours = clim_times.hour
 
-    time_matches = (clim_doys == target_doy) & (clim_hours == target_hour)
+    if match_mode == "monthly":
+        target_month = target_datetime.month
+        time_matches = clim_times.month == target_month
+        match_desc = f"month: {target_month}"
+    else:
+        # EFFICIENT TIME MATCHING using vectorized operations
+        target_doy = target_datetime.dayofyear
+        target_hour = target_datetime.hour
+        clim_doys = clim_times.dayofyear
+        clim_hours = clim_times.hour
+        time_matches = (clim_doys == target_doy) & (clim_hours == target_hour)
+        match_desc = f"DOY: {target_doy}, Hour: {target_hour}"
+
     matching_indices = np.where(time_matches)[0]
 
     # To Do: leap years and other edge cases
     if len(matching_indices) == 0:
         _logger.warning(
-            f"No matching climatology time found for {target_datetime} (DOY: {target_doy}, "
-            f"Hour: {target_hour})"
+            f"No matching climatology time found for {target_datetime} ({match_desc}) "
             f"Please check that climatology data and stream input data filenames match."
         )
         return None
@@ -95,6 +107,7 @@ def build_climatology_indexer(clim_lats: np.typing.NDArray, clim_lons: np.typing
 def align_clim_data(
     target_output: dict,
     clim_data: xr.Dataset,
+    match_mode: str = "hourly",
 ) -> dict:
     """
     Align climatology data with target data structure.
@@ -106,6 +119,12 @@ def align_clim_data(
     - New format (with ``statistic`` dimension): the aligned DataArray keeps the
       full ``statistic`` dimension (e.g. ``['mean', 'q20', ..., 'q80']``), so that
       each score function can select the statistics it needs.
+
+    Parameters
+    ----------
+    match_mode : str
+        Temporal matching granularity passed through to
+        ``match_climatology_time`` (``"hourly"`` or ``"monthly"``).
 
     Returns
     -------
@@ -170,7 +189,7 @@ def align_clim_data(
             sel_mask = {sel_key: sel_val}
 
             timestamp = np.unique(target_data.sel(sel_mask).valid_time.values)[0]
-            matching_time_idx = match_climatology_time(timestamp, clim_data)
+            matching_time_idx = match_climatology_time(timestamp, clim_data, match_mode=match_mode)
 
             if matching_time_idx is None:
                 continue
@@ -254,7 +273,11 @@ def get_climatology(reader, da_tars, stream: str) -> dict | None:
     if clim_data_path is not None:
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
-        aligned = align_clim_data(da_tars, clim_data)
+        # "hourly" (default): day-of-year + hour matching, for sub-daily (e.g. 6h)
+        # target data. "monthly": calendar-month matching, for monthly-mean target
+        # data (e.g. a stream storing monthly means instead of 6h timesteps).
+        match_mode = reader.get_stream(stream).get("climatology_match", "hourly")
+        aligned = align_clim_data(da_tars, clim_data, match_mode=match_mode)
         return {fstep: scale_z_channels(da, stream) for fstep, da in aligned.items()}
 
     return None
