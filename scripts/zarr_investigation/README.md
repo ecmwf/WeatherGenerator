@@ -17,6 +17,10 @@ the pinned commits, and the run.
 - `summarize_benchmark.py` — one row per benchmark run (time per window, node throughput)
   and a check that runs on different encodings read the same data.
 
+- `recipes/ZRB-E003-check-converted-stores.md` — login-node commands for whoever converts a
+  store: metadata check plus a short benchmark run that compares its data with the Zarr 2
+  source (checksums).
+
 ## Repositories
 
 - WeatherGenerator: branch [`exp/anemoi-reader-zarr-benchmark`](https://github.com/florianscheidl/WeatherGenerator/tree/exp/anemoi-reader-zarr-benchmark)
