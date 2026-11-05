@@ -1,3 +1,5 @@
+encoders: {default: {healpix_level: 4}}
+
 streams_directory: "./integration_tests/streams/"
 run_path: "./results"
 model_path: "./models"

@@ -171,6 +171,7 @@ class BatchSamples:
     def __init__(
         self, stream_names: list[str], num_samples: int, output_steps, output_idxs
     ) -> None:
+        self.stream_names = list(stream_names)
         self.samples = [Sample(stream_names) for _ in range(num_samples)]
         self.tokens_lens = None
         self.output_steps = output_steps
@@ -201,11 +202,31 @@ class BatchSamples:
         else:
             assert len(list(set(subset))) == len(subset), "subset contains duplicates"
             # create copy and then select subset for samples and tokens_lens
-            bs = copy.deepcopy(self)
+            bs = copy.copy(self)
             bs.samples = [bs.samples[i] for i in subset]
             torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
             bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
+
+    def select_streams(self, stream_names: list[str]) -> "BatchSamples":
+        """Select streams without copying their observation data."""
+        original_names = self.stream_names
+        if stream_names == original_names:
+            return self
+
+        selected = copy.copy(self)
+        selected.stream_names = list(stream_names)
+        selected.samples = [copy.copy(sample) for sample in self.samples]
+        for sample in selected.samples:
+            sample.streams_data = {name: sample.streams_data[name] for name in stream_names}
+            sample.meta_info = {
+                name: sample.meta_info[name] for name in stream_names if name in sample.meta_info
+            }
+        indices = [original_names.index(name) for name in stream_names]
+        selected.tokens_lens = (
+            self.tokens_lens[:, :, indices] if self.tokens_lens is not None else None
+        )
+        return selected
 
     def get_num_source_steps(self) -> int:
         """
@@ -296,7 +317,7 @@ class ModelBatch:
     output_idxs: list[int]
 
     # device of the tensors in the batch
-    device: str | torch.device
+    device: str | torch.device | None
 
     def __init__(
         self,
@@ -313,6 +334,7 @@ class ModelBatch:
         self.output_steps = output_steps
         self.output_idxs = list(range(output_offset, output_steps))
 
+        self.device = None
         self.source_samples = BatchSamples(
             stream_names, num_source_samples, output_steps, self.output_idxs
         )
@@ -322,6 +344,22 @@ class ModelBatch:
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+
+    def select_streams(self, stream_names: list[str]) -> "ModelBatch":
+        """Select encoder streams while sharing observations and sample correspondence."""
+        selected = copy.copy(self)
+        selected.source_samples = self.source_samples.select_streams(stream_names)
+        selected.target_samples = self.target_samples.select_streams(stream_names)
+        return selected
+
+    def as_target_input(self, subset: list[int] | None = None) -> "ModelBatch":
+        """Use selected target views as inputs with one-to-one sample correspondence."""
+        selected = copy.copy(self)
+        selected.source_samples = selected.target_samples = self.get_target_samples(subset)
+        count = selected.len_sources()
+        selected.source2target_matching_idxs = np.arange(count, dtype=np.int32)
+        selected.target2source_matching_idxs = [[idx] for idx in range(count)]
+        return selected
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
@@ -504,3 +542,33 @@ class ModelBatch:
         Get number of target steps from smallest of all available streams
         """
         return self.target_samples.get_num_target_steps()
+
+
+class MultiBatch:
+    """Canonical all-stream data and encoder-named ModelBatch views."""
+
+    def __init__(self, batch: ModelBatch, encoder_streams: dict[str, list[str]]) -> None:
+        self.batch = batch
+        self.encoder_streams = {name: list(streams) for name, streams in encoder_streams.items()}
+        self._refresh_views()
+
+    def _refresh_views(self) -> None:
+        self.batches: dict[str, ModelBatch] = {
+            name: self.batch.select_streams(streams)
+            for name, streams in self.encoder_streams.items()
+        }
+
+    def pin_memory(self):
+        self.batch.pin_memory()
+        self._refresh_views()
+        # Advanced stream indexing allocates new length tensors, not observation data.
+        for batch in self.batches.values():
+            for samples in (batch.source_samples, batch.target_samples):
+                if samples.tokens_lens is not None and not samples.tokens_lens.is_pinned():
+                    samples.tokens_lens = samples.tokens_lens.pin_memory()
+        return self
+
+    def to_device(self, device):
+        self.batch.to_device(device)
+        self._refresh_views()
+        return self
