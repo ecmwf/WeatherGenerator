@@ -1,6 +1,8 @@
 import argparse
 import os
 import sys
+import time
+from datetime import timedelta
 import numpy as np
 import zarr
 from zarr.storage import LocalStore
@@ -35,7 +37,13 @@ def month_arg(value):
     return f"{year:04d}-{month:02d}"
 
 
+def format_duration(seconds):
+    return f"{seconds:.1f} s ({timedelta(seconds=round(seconds))})"
+
+
 def main():
+    total_start = time.perf_counter()
+
     parser = argparse.ArgumentParser(
         description="Convert a range of months of a Zarr v2 dataset to Zarr v3 with sharding and compression."
     )
@@ -204,6 +212,7 @@ def main():
     missing = []
 
     print(f"\nCopying data in blocks of {step} timesteps...")
+    copy_start = time.perf_counter()
     for t0 in range(0, time_dim, step):
         t1 = min(t0 + step, time_dim)
         print(f"Writing timesteps {t0}-{t1 - 1}/{time_dim - 1}")
@@ -222,6 +231,7 @@ def main():
                         raise
                     print(f"Skipping timestep {t} ({ds.dates[t]}): {e}")
                     missing.append(t)
+    copy_time = time.perf_counter() - copy_start
 
     # Record what was converted; missing timesteps are left as NaN
     arr.attrs["start_date"] = str(ds.dates[0])
@@ -232,6 +242,9 @@ def main():
     print("\n" + "="*60)
     print("Conversion complete!")
     print(f"Timesteps written: {time_dim - len(missing)}/{time_dim}")
+    print(f"Copy time:  {format_duration(copy_time)}")
+    print(f"Per timestep: {copy_time / time_dim:.3f} s")
+    print(f"Total time: {format_duration(time.perf_counter() - total_start)}")
     print("="*60)
 
 
