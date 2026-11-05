@@ -41,6 +41,28 @@ logger = logging.getLogger(__name__)
 type TrainingMode = str
 
 
+def _get_transformer_blocks(module):
+    """
+    Return the top-level transformer blocks (each containing one attention + one MLP)
+    """
+    blocks = []
+    attention_types = (
+        MultiSelfAttentionHeadLocal
+        | MultiSelfAttentionHead
+        | MultiCrossAttentionHeadVarlen
+        | MultiCrossAttentionHeadVarlenSlicedQ
+        | MultiSelfAttentionHeadVarlen
+    )
+
+    for child in module.children():
+        has_attn = any(isinstance(m, attention_types) for m in child.modules())
+        has_mlp = any(isinstance(m, MLP) for m in child.modules())
+        if has_attn and has_mlp:
+            blocks.append(child)
+
+    return blocks
+
+
 def init_model_and_shard(
     cf,
     dataset,
@@ -89,37 +111,21 @@ def init_model_and_shard(
                 else None
             ),
         }
-        modules_to_shard = (
-            MLP,
-            MultiSelfAttentionHeadLocal,
-            MultiSelfAttentionHead,
-            MultiCrossAttentionHeadVarlen,
-            MultiCrossAttentionHeadVarlenSlicedQ,
-            MultiSelfAttentionHeadVarlen,
-        )
 
-        for module in model.encoder.ae_local_engine.ae_local_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+        for block in _get_transformer_blocks(model.encoder.ae_local_engine.ae_local_blocks):
+            fully_shard(block, reshard_after_forward=False, **fsdp_kwargs)
 
-        for module in model.encoder.ae_local_global_engine.ae_adapter.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+        for block in _get_transformer_blocks(model.encoder.ae_local_global_engine.ae_adapter):
+            fully_shard(block, reshard_after_forward=False, **fsdp_kwargs)
 
-        for module in model.encoder.ae_global_engine.ae_global_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+        for block in _get_transformer_blocks(model.encoder.ae_global_engine.ae_global_blocks):
+            fully_shard(block, **fsdp_kwargs)
 
-        for module in model.forecast_engine.fe_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                # reshard_after_forward=False keeps FE parameters unsharded
-                # during the multi-step rollout loop.
-                # Needed for pushforward trick.
-                fully_shard(module, reshard_after_forward=False, **fsdp_kwargs)
+        for block in _get_transformer_blocks(model.forecast_engine.fe_blocks):
+            fully_shard(block, reshard_after_forward=False, **fsdp_kwargs)
 
-        for module in model.latent_heads.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+        for block in _get_transformer_blocks(model.latent_heads):
+            fully_shard(block, **fsdp_kwargs)
 
         full_precision_fsdp_kwargs = {
             "mp_policy": (
@@ -132,9 +138,8 @@ def init_model_and_shard(
             ),
         }
 
-        for module in model.target_token_engines.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **full_precision_fsdp_kwargs)
+        for block in _get_transformer_blocks(model.target_token_engines):
+            fully_shard(block, **full_precision_fsdp_kwargs)
 
     if with_ddp and with_fsdp:
         fully_shard(model)
