@@ -237,6 +237,10 @@ class OutputDataset:
     channels: list[str]
     geoinfo_channels: list[str]
 
+    # set to the output.aggregation_frequency spec (e.g. "24:00:00" or "monthly") if
+    # this dataset holds a temporal mean rather than a raw per-forecast-step value
+    aggregation_frequency: str | None = None
+
     @classmethod
     def create(
         cls, name: str, key: ItemKey, arrays: dict[str, ArrayType], attrs: dict[str, typing.Any]
@@ -267,11 +271,14 @@ class OutputDataset:
 
     @property
     def metadata(self) -> dict[str, typing.Any]:
-        return {
+        metadata = {
             "channels": self.channels,
             "geoinfo_channels": self.geoinfo_channels,
             "source_interval": self.source_interval.as_dict(),
         }
+        if self.aggregation_frequency is not None:
+            metadata["aggregation_frequency"] = self.aggregation_frequency
+        return metadata
 
     @functools.cached_property
     def datapoints(self) -> NDArray[np.int_]:

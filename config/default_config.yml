@@ -222,6 +222,11 @@ validation_config:
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
+    # temporal aggregation of written target/prediction output. A fixed-width
+    # duration in "HH:MM:SS" format, anchored to each sample's init time, e.g.
+    # "24:00:00" for daily or "168:00:00" for weekly means; or the string "monthly"
+    # for calendar-month means.
+    aggregation_frequency: null,
     }
 
   # run validation before training starts (mainly for model development)
