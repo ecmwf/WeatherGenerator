@@ -751,6 +751,22 @@ class WeatherGenZarrReader(WeatherGenReader):
         """Get the set of forecast steps (validated across all ranks at init)."""
         return self._validated_metadata["forecast_steps"]
 
+    def get_effective_forecast_steps(self, stream: str) -> set[int]:
+        """Forecast steps as they appear in saved score files.
+
+        For gridded streams with multiple valid_times per raw fstep (e.g.
+        4x6h models), each sub-step is assigned its own sequential forecast_step
+        label (1..N) when scores are built, rather than the raw rollout step
+        indices returned by ``get_forecast_steps()``. Reconstruct that expanded
+        range here so eval_settings match what's actually stored in score files.
+        """
+        if not self.is_gridded_data(stream):
+            return self.get_forecast_steps()
+        n_sub = len(self.get_forecast_substep_valid_times(stream))
+        if n_sub <= 1:
+            return self.get_forecast_steps()
+        return set(range(1, len(self.get_forecast_steps()) * n_sub + 1))
+
     def get_forecast_substep_valid_times(self, stream: str) -> set[str]:
         """Get the set of forecast times from a rank file."""
         if not self.is_gridded_data(stream):
@@ -759,7 +775,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         with self._open_any_rank_for_metadata() as zio:
             dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
-            unique_lead = np.unique(dummy.valid_time.data)
+            unique_lead = np.unique(np.asarray(dummy.prediction.times))
         return set(str(lt) for lt in unique_lead)
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:

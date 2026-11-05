@@ -132,9 +132,21 @@ class Reader(ABC):
 
         # Store the source (zarr) forecast steps so the cache is invalidated
         # when the underlying data changes (e.g. new rollout length).
-        settings["forecast_steps"] = sorted(int(f) for f in self.get_forecast_steps())
+        settings["forecast_steps"] = sorted(
+            int(f) for f in self.get_effective_forecast_steps(stream)
+        )
 
         return settings
+
+    def get_effective_forecast_steps(self, stream: str) -> set[int]:
+        """Forecast steps as they appear in saved score files.
+
+        Equal to ``get_forecast_steps()`` by default. Override this where
+        ``get_forecast_steps()`` returns raw/un-expanded step indices that
+        don't match the (possibly sub-step expanded) coordinates actually
+        stored in score files, e.g. for multi-step models (4x6h, etc.).
+        """
+        return self.get_forecast_steps()
 
     def get_stream(self, stream: str):
         """
