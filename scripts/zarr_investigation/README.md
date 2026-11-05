@@ -10,6 +10,9 @@ the pinned commits, and the run.
   Slurm wrapper: `hpc/jupiter/benchmark_anemoi_reader.sh` in WeatherGenerator-private.
 - `restore_zarr_attrs.py` — restores the metadata a Zarr 2 → 3 conversion dropped, from the
   Zarr 2 source, and checks that the result matches the data (see the known issue below).
+- `check_v3_store.py` — checks a sharded Zarr 3 store converted from a Zarr 2 source:
+  layout (shard size, inner chunks, codecs), every shard and time step present, metadata,
+  and sampled time steps bit-identical to the source. Read-only.
 - `stage_v2_time_slice.py` — copies a Zarr 2 store with only a range of time steps of its
   `data` chunks (all metadata unchanged), e.g. a one-month Zarr 2 baseline.
 - `with_squashfs.sh` — mounts a squashfs image with `squashfuse_ll` for one command (one
