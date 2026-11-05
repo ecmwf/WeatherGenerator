@@ -50,6 +50,10 @@ class WeatherGenReader(Reader):
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
         self.rank = eval_cfg.get("rank", "all")
 
+        # Set by WeatherGenJsonReader._compute_common_coords() to tell load_single_score()
+        # to skip the eval_settings check while common coords are being established.
+        self.computing_common_coords = False
+
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
 
@@ -280,7 +284,7 @@ class WeatherGenReader(Reader):
 
             # Check eval_settings match current config. Skipped while computing
             # common_coords, since computing eval_settings itself needs common_coords.
-            if not getattr(self, "computing_common_coords", False):
+            if not self.computing_common_coords:
                 stored_settings = data_dict.get("eval_settings", {})
                 current_settings = self.get_eval_settings(stream)
                 if stored_settings != current_settings:
