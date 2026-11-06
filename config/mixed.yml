@@ -1,2 +1,0 @@
-# The default configuration file for multi streams training.
-streams_directory: "./config/streams/streams_mixed/"
