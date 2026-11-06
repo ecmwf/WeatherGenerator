@@ -1,0 +1,67 @@
+parallelize: true
+
+# Smoke test of the jepa_pretrain sweep: the three code paths (temporal, spatial, spatio-temporal
+# with the fast-EMA teacher) for 2 mini-epochs x 64 samples on 1 node, checkpoint every mini-epoch.
+# Checks: losses finite, JEPA loss region / time offsets as configured, collapse metrics logged,
+# checkpoints readable by the v1 readout (CODE/jepa_hf_probe encoder_probe.py stats).
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipeline/jepa_pretrain/pipeline_jepa_pretrain_smoke.yml --no-register --account e-ext-2025e01-128
+
+stages:
+  - name: smkPF
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    config_files:
+      - config/jepa_pretrain/overlay_ema_fast.yml
+    options:
+      - wgtags.grid=smkPF
+      - training_config.num_mini_epochs=2
+      - training_config.samples_per_mini_epoch=64
+      - training_config.learning_rate_scheduling.num_steps_warmup=4
+      - training_config.learning_rate_scheduling.num_steps_cooldown=4
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.collapse_monitoring.compute_frequency=4
+      - train_logging.collapse_monitoring.log_frequency=4
+    chain_jobs: 1
+    nodes: 1
+    slurm_args:
+      - "--time=01:00:00"
+
+  - name: smkSF
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    config_files:
+      - config/jepa_pretrain/overlay_task_spatial.yml
+      - config/jepa_pretrain/overlay_ema_fast.yml
+    options:
+      - wgtags.grid=smkSF
+      - training_config.num_mini_epochs=2
+      - training_config.samples_per_mini_epoch=64
+      - training_config.learning_rate_scheduling.num_steps_warmup=4
+      - training_config.learning_rate_scheduling.num_steps_cooldown=4
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.collapse_monitoring.compute_frequency=4
+      - train_logging.collapse_monitoring.log_frequency=4
+    chain_jobs: 1
+    nodes: 1
+    slurm_args:
+      - "--time=01:00:00"
+
+  - name: smkSTF
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    config_files:
+      - config/jepa_pretrain/overlay_task_spatiotemporal.yml
+      - config/jepa_pretrain/overlay_ema_fast.yml
+    options:
+      - wgtags.grid=smkSTF
+      - training_config.num_mini_epochs=2
+      - training_config.samples_per_mini_epoch=64
+      - training_config.learning_rate_scheduling.num_steps_warmup=4
+      - training_config.learning_rate_scheduling.num_steps_cooldown=4
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.collapse_monitoring.compute_frequency=4
+      - train_logging.collapse_monitoring.log_frequency=4
+    chain_jobs: 1
+    nodes: 1
+    slurm_args:
+      - "--time=01:00:00"

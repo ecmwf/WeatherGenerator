@@ -1,0 +1,85 @@
+parallelize: true
+
+# ============================================================================================
+# JEPA pretraining sweep (jepa_pretrain): which pretraining knobs make the JEPA latent decodable
+# at small scales? Doc: CODE/notes/diffusion_jepa_hf_experiments.md, "JEPA pretraining sweep".
+#
+# 3 tasks x 2 EMA schedules, all from scratch, Muon, 24 mini-epochs x 8192 samples (~24.6k steps),
+# 2 nodes, 3 chained 12 h jobs (j3i5wlky: ~11 mini-epochs per 12 h job).
+#   task:  P = temporal (t -> t+6h, j3i5wlky) | S = spatial (in-fill hl4 blocks) |
+#          ST = 50/50 spatial / masked-forecast per sample
+#   EMA:   0 = slow (half-life 400k samples, no ramp-up: teacher ~71 % random init at the end) |
+#          F = fast (ramp-up 0.09, half-life <= 40k samples)
+# Readout (per arm, chkpt 23): encoder_probe.py stats + scratch decoder (ppdab1c2 recipe) + floor,
+# in CODE/jepa_hf_probe (v1 code).
+#
+# Launch from WeatherGenerator-wt-jepast/ (branch jk/develop-ssl-diffusion-v2/jepa-st-masking):
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipeline/jepa_pretrain/pipeline_jepa_pretrain_sweep.yml --no-register --account e-ext-2025e01-128
+# ============================================================================================
+
+stages:
+  # ---- P0: temporal JEPA (t -> t+6h), slow EMA: j3i5wlky recipe at 24 mini-epochs (control)
+  - name: ptP0
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    options:
+      - wgtags.grid=P0
+    chain_jobs: 3
+    nodes: 2
+
+  # ---- PF: temporal JEPA, fast EMA teacher
+  - name: ptPF
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    config_files:
+      - config/jepa_pretrain/overlay_ema_fast.yml
+    options:
+      - wgtags.grid=PF
+    chain_jobs: 3
+    nodes: 2
+
+  # ---- S0: spatial JEPA (in-fill hl4 blocks, all streams), slow EMA
+  - name: ptS0
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    config_files:
+      - config/jepa_pretrain/overlay_task_spatial.yml
+    options:
+      - wgtags.grid=S0
+    chain_jobs: 3
+    nodes: 2
+
+  # ---- SF: spatial JEPA, fast EMA
+  - name: ptSF
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    config_files:
+      - config/jepa_pretrain/overlay_task_spatial.yml
+      - config/jepa_pretrain/overlay_ema_fast.yml
+    options:
+      - wgtags.grid=SF
+    chain_jobs: 3
+    nodes: 2
+
+  # ---- ST0: spatio-temporal JEPA (50/50 in-fill / masked forecast), slow EMA
+  - name: ptST0
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    config_files:
+      - config/jepa_pretrain/overlay_task_spatiotemporal.yml
+    options:
+      - wgtags.grid=ST0
+    chain_jobs: 3
+    nodes: 2
+
+  # ---- STF: spatio-temporal JEPA, fast EMA
+  - name: ptSTF
+    stage: train
+    base_config: config/jepa_pretrain/config_jepa_pretrain_base.yml
+    config_files:
+      - config/jepa_pretrain/overlay_task_spatiotemporal.yml
+      - config/jepa_pretrain/overlay_ema_fast.yml
+    options:
+      - wgtags.grid=STF
+    chain_jobs: 3
+    nodes: 2
