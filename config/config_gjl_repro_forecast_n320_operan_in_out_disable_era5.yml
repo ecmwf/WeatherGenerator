@@ -1,0 +1,3 @@
+streams:
+  ERA5:
+    forcing: true

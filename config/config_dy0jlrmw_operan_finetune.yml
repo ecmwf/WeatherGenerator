@@ -1,0 +1,31 @@
+# Continue dy0jlrmw without replacing its checkpoint-compatible stream definitions.
+# In particular, ERA5_in must retain its 88 source channels, channel order,
+# geoinfo features and tokenizer; only its analysis dataset changes to OD.
+general:
+  istep: 0
+
+streams:
+  ERA5_in:
+    filenames: ['aifs-od-an-oper-0001-mars-n320-2016-2025-6h-v1-for-single-v2.zarr']
+
+# Adapt the encoder and operational-analysis embedder while keeping the
+# physical decoder, latent heads and auxiliary tokens frozen.
+freeze_modules: 'latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\.ln.*|encoder\.q_cells.*|encoder\.q_aux.*'
+
+validation_config:
+  validate_before_training: true
+
+training_config:
+  start_date: 2016-01-02T00:00
+  end_date: 2022-12-31T00:00
+  num_mini_epochs: 4
+  learning_rate_scheduling:
+    lr_max: 3e-5
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
+    policy_decay: cosine
+    # The dy0jlrmw Slurm snapshot's scheduler accepts "constant", not "const".
+    parallel_scaling_policy: constant
+
+train_logging:
+  checkpoint: 100

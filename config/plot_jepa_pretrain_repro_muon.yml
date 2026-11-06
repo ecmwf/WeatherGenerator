@@ -56,3 +56,54 @@ train:
     ci8dbx75:
       slurm_id: 1043767
       description: "n320 temporal jepa, repeated"
+
+    wduc34ev:
+      slurm_id: 0
+      description: "n320 temporal jepa, correct iasi"
+
+    odb86e30:
+      slurm_id: 0
+      description: "n320 temporal jepa, correct iasi, cont. wbuc34ev"
+
+    fh5zitew:
+      slurm_id: 0
+      description: "n320 temporal jepa, correct iasi, cont. odb86e30"
+
+    vf5q2lm1:
+      slurm_id: 0
+      description: "n320 temporal jepa, correct iasi, no swiglu, no xsa"
+
+    pc818ept:
+      slurm_id: 0
+      description: "n320 temporal jepa, new iasi dataset, no q_10"
+
+    ### same JEPA as wduc34ev, just with Muon optimiser
+    j3i5wlky:
+      slurm_id: 0
+      description: "same JEPA as wduc34ev, Muon optimiser"
+
+    vzb1gghv:
+      slurm_id: 0
+      description: "same JEPA as wduc34ev, but with variable latent timestep"
+
+    # need to remember to uncomment these when they start to cook
+    xvm3a57z:
+      slurm_id: 0
+      description: "as vzb1gghv, fast EMA teacher (half-life 16k samples, ramp-up 0.09), no regulariser"
+
+    e8ewmdl2:
+      slurm_id: 0
+      description: "as vzb1gghv, fast EMA teacher + kurtosis penalty 0.01"
+
+    mwmfmflj:
+      slurm_id: 0
+      description: "as vzb1gghv, fast EMA teacher + SIGReg over pairs of ranks 0.0002"
+
+    ### wduc34ev (original slow teacher) retrained with a latent regulariser, same code and config otherwise
+    mab2tl2b:
+      slurm_id: 0
+      description: "as wduc34ev, + kurtosis penalty 0.01"
+
+    gcx4vetm:
+      slurm_id: 0
+      description: "as wduc34ev, + SIGReg 5e-5"

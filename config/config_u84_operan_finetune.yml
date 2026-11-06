@@ -1,0 +1,73 @@
+# Operational-analysis fine-tuning of the 8/9-step rollout models:
+#   srl1jj3x (8-step, ours), datp7u95 / n1y6kc1o (9-step, lessig2), x17s8a5o (8-step).
+# Pick the parent with --from-run-id; this config is otherwise identical for all.
+#
+# Mirrors the sdnbfpve recipe (nhv6tkln -> sdnbfpve): the ONLY data change is the
+# ERA5_in stream switching from the ERA5 reanalysis zarr (ea-an) to the operational
+# analysis zarr (od-an). The ERA5 output/target stream stays on ea-an, i.e.
+# operational analysis IN, ERA5 OUT. Stream ids and channel lists are untouched,
+# so every one of these checkpoints loads without shape changes (verified: 9
+# streams, zero mismatches against each parent).
+#
+# training_config.forecast is deliberately NOT set here: num_steps inherits from
+# the parent (8 for srl1jj3x/x17s8a5o, 9 for datp7u95/n1y6kc1o), exactly as
+# sdnbfpve inherited num_steps=8 from nhv6tkln rather than changing the rollout.
+
+general:
+  # Restart the lr schedule and the mini-epoch counter for a new fine-tuning run.
+  istep: 0
+  # The 28 Sep attempts (snmfxu3a/gwll0n8j/e4o9cdmd) died with
+  #   "unable to write to file </torch_...>: No space left on device (28)"
+  # i.e. /dev/shm exhaustion in the DataLoader worker tensor IPC
+  # (torch's own diagnostic: "insufficient shared memory (shm)"), NOT a disk quota
+  # (/e/scratch was 64% used with 7.4P free). nhv6tkln ran this same setup fine with
+  # spawn; the u84 lineage inherited fork. Note prefetch_factor is NOT read by this
+  # codebase, so it is deliberately omitted - the real levers are spawn + num_workers.
+  multiprocessing_method: spawn
+
+data_loading:
+  # Halved from the inherited 8/4 to cut concurrent shm-backed tensors.
+  num_workers: 4
+  num_workers_validation: 2
+  memory_pinning: False
+  persistent_workers: False
+
+# Operan twin of u84eegh1's own streams dir. NOTE: weathergen-configs is not
+# git-tracked, so this dir is only staged if launch-slurm is given
+# --config-dir weathergen-configs
+streams_directory: ./weathergen-configs/streams_preops/operan_georing_avhrr_iasi_lowres_linear/
+
+# Same freeze set sdnbfpve actually ran with. Kept here so the config is correct
+# standalone; passing the identical value via --options is redundant but harmless.
+freeze_modules: 'latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\.ln.*|encoder\.q_cells.*|encoder\.q_aux.*'
+
+# Belt-and-braces: also pinned in the twin's era5_out.yml. Switching
+# streams_directory re-reads stream defs from disk and drops any inherited
+# per-stream --options, so state it explicitly here too.
+streams:
+  ERA5:
+    max_num_targets: 108416
+
+validation_config:
+  validate_before_training: True
+
+training_config:
+  # od-an zarr covers 2016-01-01 -> 2025-07-31 (6h); the ERA5 target zarr ends 2024,
+  # so end_date stays well inside both.
+  start_date: 2016-01-02T00:00
+  end_date: 2022-12-31T00:00
+
+  num_mini_epochs: 4
+
+  learning_rate_scheduling:
+    lr_max: 3e-5
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
+    policy_decay: cosine
+    parallel_scaling_policy: "const"
+
+train_logging:
+  # 512 steps/mini-epoch -> one mid-mini-epoch 'latest' save (was 100 = five).
+  # save_model(-1) at trainer.py:665 is the call that hung all 32 ranks on 25 Sep;
+  # 256 cuts total checkpoint writes over the run from 24 to 8.
+  checkpoint: 256

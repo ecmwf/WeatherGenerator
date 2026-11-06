@@ -1,0 +1,52 @@
+# Decoders for the latent diffusion runs on the latent-regulariser arms (pipeline e1qsxzu7, launched 2026-10-22
+# from the decoder-2aaae2cb worktree). Each decoder reads its frozen encoder's latent E(t) and rebuilds ERA5 of
+# the same window. Train loss is on noised latents (sigma ~ U(0, 0.3)); val decodes clean latents (decoder floor).
+# Forecast-group decoders start from the parent's forecast decoder, JEPA-group decoders from scratch: compare
+# within groups.
+# Usage:
+#   mkdir -p plots/decoder_reg_latent
+#   uv run plot_train -fy config/plot_decoder_reg_latent.yml -o plots/decoder_reg_latent \
+#     -s ERA5 --channels avg z_500 t_850 2t msl 10u --forecast-steps 0
+# A run that has not written any metrics yet makes plot_train fail: comment it out until it has started.
+train:
+
+  plot:
+
+    ### forecast group: encoders of the 8-step fine-tunes at checkpoint 8
+    ubkn48tg:
+      slurm_id: 0
+      description: "decR0: nhv6tkln@8 (ref, decodes lob8xd45)"
+
+    dxrev1q1:
+      slurm_id: 0
+      description: "decA0: l6tpst9s@8 (no regulariser, decodes fjiuehtw)"
+
+    ag325v7x:
+      slurm_id: 0
+      description: "decB0: o1nput4n@8 (kurtosis 0.01, decodes xv7e45tj)"
+
+    p2kc3ti7:
+      slurm_id: 0
+      description: "decF0: osu30g3y@8 (SIGReg pairs 2e-4, decodes xe8q997k)"
+
+    ### JEPA group: pre-trained JEPA encoders at checkpoint 18, decoder from scratch
+    gq55q05j:
+      slurm_id: 0
+      description: "decWR: wduc34ev@18 (ref, decodes qlzel1rn)"
+
+    c4tqun1r:
+      slurm_id: 0
+      description: "decW1: mab2tl2b@18 (kurtosis 0.01, decodes o5a6bc2o)"
+
+    ckrtgmpr:
+      slurm_id: 0
+      description: "decW2: gcx4vetm@18 (SIGReg pairs 5e-5, decodes l3szizao)"
+
+    ### colleague's decoders, same recipe but trained WITHOUT latent noise (option missing from their code)
+    zr5e8h50:
+      slurm_id: 0
+      description: "colleague, no noise: rrvj7vjv@22 (warm start)"
+
+    kxfv59e9:
+      slurm_id: 0
+      description: "colleague, no noise: wduc34ev@42 (from scratch)"

@@ -1,0 +1,35 @@
+# Fine-tune mmtjbd2z (mini-epoch 8) on operational-analysis inputs with the same recipe as the
+# nhv6tkln fine-tunes sdnbfpve and gzeqqa0q (config_gjl_repro_forecast_n320_operan_finetune.yml as
+# it was on 2026-09-16: 4 mini-epochs). That config's streams_directory holds nhv6tkln's streams
+# (17-channel IASI v1), which crashed the first attempt (sy0y88gd) on mmtjbd2z's 19-channel IASI v2
+# channel list. Here streams_directory is omitted so mmtjbd2z's own stream definitions are kept;
+# only ERA5_in's analysis dataset changes to OD.
+general:
+  # Restart the lr schedule and the mini-epoch counter for a new fine-tuning run.
+  istep: 0
+
+streams:
+  ERA5_in:
+    filenames: ['aifs-od-an-oper-0001-mars-n320-2016-2025-6h-v1-for-single-v2.zarr']
+
+# As passed on the command line for sdnbfpve, gzeqqa0q and sy0y88gd.
+freeze_modules: 'latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\.ln.*|encoder\.q_cells.*|encoder\.q_aux.*'
+
+validation_config:
+  validate_before_training: True
+
+training_config:
+  start_date: 2016-01-02T00:00
+  end_date: 2022-12-31T00:00
+
+  num_mini_epochs: 4
+
+  learning_rate_scheduling:
+    lr_max: 3e-5
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
+    policy_decay: cosine
+    parallel_scaling_policy: "const"
+
+train_logging:
+  checkpoint: 100

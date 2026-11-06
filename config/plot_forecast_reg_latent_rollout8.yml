@@ -1,0 +1,23 @@
+train:
+
+  plot:
+
+    nhv6tkln:
+      slurm_id: 0
+      description: "n320 8 step forecasting, proper iasi channels, with channel weights, 1e-5 noise (from rrvj7vjv)"
+
+    sjzc2e81:
+      slurm_id: 0
+      description: "8 step (nhv6tkln recipe) from grn2nsqq, no regulariser"
+
+    # l6tpst9s:
+    #   slurm_id: 0
+    #   description: "8 step (nhv6tkln recipe) from A0 wksp72tf, original AdamW, no regulariser"
+
+    o1nput4n:
+      slurm_id: 0
+      description: "8 step (nhv6tkln recipe) from B0 e57ap1cl, kurtosis penalty 0.01"
+
+    osu30g3y:
+      slurm_id: 0
+      description: "8 step (nhv6tkln recipe) from F0 tvl3rq7e, SIGReg over pairs of ranks 0.0002"

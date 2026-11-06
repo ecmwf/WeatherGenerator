@@ -1,0 +1,49 @@
+
+train:
+  
+  plot:
+
+    cw6a4szu:
+      slurm_id: 0
+      description: "n320 8 step forecasting, jepa, proper iasi channels, with channel weights"
+
+    dmopk23p:
+      slurm_id : 0
+      description: "n320 8 step forecasting, forecast, unfreeze encoder+fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr2"
+
+    kzdx0h4q:
+      slurm_id : 0
+      description: "n320 8 step forecasting, unweighted forecast, unfreeze encoder+fe, 8 nodes, finetune with operational analysis at the end of the ERA5, lr2"
+
+    qg6zvqgz:
+      slurm_id : 0
+      description: "n320 8 step forecasting from 8 node 2 step, era5 in, diff lr, unfreeze encoder+fe, all stream unfreeze"
+
+    sdnbfpve:
+      slurm_id : 0
+      description: "same but with better noise model, n320 8 step forecasting from 8 node 2 step, era5 in, diff lr, unfreeze encoder+fe, all stream unfreeze"
+
+    veozg2db:
+      slurm_id : 0
+      description: "FAILED, finetune oper in and out"
+
+    w2y4uq3v:
+      slurm_id : 0
+      description: "FAILED, finetune oper in and out, more epochs"
+
+    lpcle0te:
+      slurm_id : 0
+      description: "finetune oper in and out, remove old ERA5 decoder"
+
+    # ../WeatherGenerator-private/hpc/launch-slurm.py --from-run-id skkbxfya --config ./config/config_forecasting_finetuning.yml --options streams.ERA5.max_num_targets=108416 data_loading.num_workers=8 streams.ERA5_in.filenames=['aifs-od-an-oper-0001-mars-n320-2016-2025-6h-v1-for-single-v2.zarr'] --nodes 8 --time 12:00:00 --chain-jobs 8
+    adexgl64 :
+      slurm_id : 0
+      description: "skkbxfya 8-step ERA5"
+
+    dy0jlrmw :
+      slurm_id : 0
+      description: "skkbxfya 8-step ERA5, lr=4e-5"
+ 
+    
+
+    

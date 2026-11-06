@@ -1,0 +1,25 @@
+
+train:
+  
+  plot:
+
+    rrvj7vjv:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels"
+
+    i325yvtj:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 2 nodes, rm 2 geos chnls"
+
+    xuysbin5:
+      slurm_id: 0
+      description: "n320 forecasting, new IASI dataset, all channels, 2 nodes"
+
+    jtpj5shb:
+      slurm_id: 0
+      description: "n320 forecasting, era5 only, 8 nodes"
+
+    ps9k43kk:
+      slurm_id: 0
+      description: "n320 forecasting, era5 only, 2 nodes"
+

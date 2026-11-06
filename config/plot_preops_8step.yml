@@ -1,0 +1,215 @@
+train :
+  plot :
+    # perrjey5 :
+    #   slurm_id : 0
+    #   description: "N320-obs, with absolute coords, larger decoder, time_window_step=6h"
+    # c71eo6pu :
+    #   slurm_id : 0
+    #   description: "perrjey5 contd : N320-obs, with absolute coords, larger decoder, time_window_step=6h"
+    # linvvcte :
+    #  slurm_id : 0
+    #  description: "ERA5+Obs, forecast, streams_preprint, linear"
+    # p2h3q0xw :
+    #   slurm_id : 0
+    #   description: "linvvcte contd"
+    # nzl3mplp :
+    #   slurm_id : 0
+    #   description: "p2h3q0xw  contd 128 epochs"
+    # # xc1n4mw3 :
+    # #   slurm_id : 0
+    # #   description: "develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml"
+    # # kdl0orun :
+    # #   slurm_id : 0
+    # #   description: "develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml, streams_prepint, linear"
+    # # e4327u4h :
+    # #   slurm_id : 0
+    # #   description: "develop-ssl-diffusion-v1, config_forecasting_n320_obs.yml, streams_prepint, transformer"
+    # # d5nrjup6 :
+    # #   slurm_id : 0
+    # #   description: "develop"
+    # # iqbifydo :
+    # #   slurm_id : 0
+    # #   description: "develop-ssl-diffusion-v1"
+    # # fsvwafcl :
+    # #   slurm_id : 0
+    # #   description: "develop-ssl-diffusion-v1, FSDP"
+    # # b4vqxr2i :
+    # #   slurm_id : 0
+    # #   description: "develop-ssl-diffusion-v1, FSDP"
+    # atzlyd0w :
+    #   slurm_id : 0
+    #   description: "develop-ssl-diffusion-v1, FSDP"
+    # cw2k17sh :
+    #   slurm_id : 0
+    #   description: "forecasting_n320_obs.yml, streams_prepint, linear, with IASI channels and new AVHRR"
+    # oskdzabw :
+    #   slurm_id : 0
+    #   description: "forecasting_n320_obs.yml, streams_prepint, linear, with IASI channels and new AVHRR, 8 nodes"
+    # ltwsle8f :
+    #   slurm_id : 0
+    #   description: "forecasting_n320_obs.yml, streams_prepint, linear, with IASI channels and new AVHRR, 8 nodes, larger lr"  
+    # hq37r8b8 :
+    #   slurm_id : 0
+    #   description: "forecasting_n320_obs.yml, streams_prepint, linear, with IASI channels and new AVHRR, 8 nodes, lr=constant"
+    # trmfe6dg :
+    #   slurm_id : 0
+    #   description: "forecasting_n320_obs.yml, streams_prepint, linear, with IASI channels and new AVHRR, 8 nodes, lr=constant x 4"
+    # nxigl6wd :
+    #   slurm_id : 0
+    #   description: "forecasting_n320_obs.yml, streams_prepint, linear, with IASI channels and new AVHRR, 8 nodes, lr=constant x 4, more val samples"
+    # vi12sdqi :
+    #   slurm_id : 0
+    #   description: "smaller lr, AdamW params scaled"
+    # ys4fur29 :
+    #   slurm_id : 0
+    #   description: "even smaller lr, AdamW params scaled"
+    # genjtq6l :
+    #   slurm_id : 0
+    #   description: "larger lr, AdamW params not scaled"
+    # ymak2x2c :
+    #   slurm_id : 0
+    #   description: "even larger lr, AdamW params not scaled, more val samples"
+    # uuj3fwq3 :
+    #   slurm_id : 0
+    #   description: "medium lr, AdamW params not scaled, more val samples, lr=constant"
+    # dacn2xw5 :
+    #   slurm_id : 0
+    #   description: "medium lr, bounded AdamW params, more val samples, lr=constant"
+    # skkbxfya :
+    #   slurm_id : 0
+    #   description: "trmfe6dg contd"
+    # mwotyud5 :
+    #   slurm_id : 0
+    #   description: "skkbxfya cooldown at 175"
+    # # iy92d7me :
+    # #   slurm_id : 0
+    # #   description: "skkbxfya cooldown at 172"
+    # wr248r7y :
+    #   slurm_id : 0
+    #   description: "skkbxfya cooldown at 230, lr=constant"
+
+
+    # asp1x25q :
+    #   slurm_id : 0
+    #   description: "preops, time_window_step=1h"
+    # j75k3u38 :
+    #   slurm_id : 0
+    #   description: "preops, time_window_step=1h"
+    # mz7oyrr5 :
+    #   slurm_id : 0
+    #   description: "preops, time_window_step=6h"
+    # efzqyr4y :
+    #   slurm_id : 0
+    #   description: "j75k3u38 contd"
+    # i2w40h9t : 
+    #   slurm_id : 0
+    #   description: "j75k3u38 contd, smaller lr"
+    # skkbxfya :
+    #   slurm_id : 0
+    #   description: "trmfe6dg contd"
+    # d0wa0d50 :
+    #   slurm_id : 0
+    #   description: "from skkbxfya, fine-tuning with step=0"
+    # w1ejx92k :
+    #   slurm_id : 0
+    #   description: "from skkbxfya, fine-tuning with step=0, 64 epochs"
+    # ho69qb90 :
+    #   slurm_id : 0
+    #   description: "from skkbxfya, fine-tuning with step=0, 48 epochs"
+    # l867zxkc :
+    #   slurm_id : 0
+    #   description: "from efzqyr4y, fine-tuning with step=0, 64 epochs"
+    # # ijy8b6qr :
+    # #   slurm_id : 0
+    # #   description: "from efzqyr4y, fine-tuning with step=0, 64 epochs"
+
+    # bns3v14m :
+    #   slurm_id : 0
+    #   description: "8-step fine-tuning of u84eegh1, lr 5e-5"
+    # # gqvuahew :
+    # #   slurm_id : 0
+    # #   description: "8-step fine-tuning of u84eegh1, lr 7.5e-5"
+    # s1nq8yil :
+    #   slurm_id : 0
+    #   description: "8-step fine-tuning of skkbxfya, lr 5e-5"
+    # et5er8zi :
+    #   slurm_id : 0
+    #   description: "8-step fine-tuning of skkbxfya, lr 7.5e-5"
+
+    u84eegh1:
+      slurm_id : 0
+      description: "from efzqyr4y, 3-step forecast ft (offset 0), 32 ep, max_num_targets - parent of the 8/9-step runs"
+ 
+    # 8-step rollout fine-tuning of u84eegh1, offset 0 (matching u84eegh1), 8 epochs.
+    # Extends the lr sweep of bns3v14m (5e-5) / gqvuahew (7.5e-5), but NOTE those
+    # used offset 1 and 16 epochs, so they are not a like-for-like lr comparison.
+    # x17s8a5o :
+    #   slurm_id : 0
+    #   description: "8-step fine-tuning of u84eegh1, lr 1e-4 cosine, offset 0, 8 epochs"
+    # srl1jj3x :
+    #   slurm_id : 0
+    #   description: "8-step fine-tuning of u84eegh1, lr 2.5e-5 cosine, offset 0, 8 epochs"
+
+    # NOTE: these three are NOT one lr sweep - two separate experiments.
+    #   n1y6kc1o / datp7u95 are lessig2's runs: 9-step rollout, 16 ep, CONSTANT lr,
+    #     encoder trainable, adamw b1/b2 0.98125/0.9875 eps 2e-8. Cooldown completed
+    #     but stopped ~step 8218 with no chkpt00015; chkpt00012 missing on both.
+    #   srl1jj3x (+ x17s8a5o above) are ours: 8-step rollout, 8 ep, cosine decay,
+    #     encoder frozen, adamw b1/b2 0.9953125/0.996875 eps 1e-8. Both COMPLETED.
+    # They also report different lead counts (1-7 ours vs 1-8 theirs), so only
+    # compare per-variable MSE over matched leads. Over leads 1-7 all four sit
+    # within 1-3.5%; lr is not a meaningful lever across 2.5e-5..1e-4.
+    n1y6kc1o :
+      slurm_id : 0
+      description: "9-step ft of u84eegh1 (preops, lessig2), lr 7.5e-5 const, 16 ep, enc trainable"
+    datp7u95 :
+      slurm_id : 0
+      description: "9-step ft of u84eegh1 (preops, lessig2), lr 5e-5 const, 16 ep, enc trainable"
+    srl1jj3x :
+      slurm_id : 0
+      description: "8-step ft of u84eegh1 (preops), lr 2.5e-5 cosine, 8 ep, enc frozen - COMPLETED"
+
+    # 8-step rollout runs on streams_preprint (era5_georing_avhrr_synop_lowres_linear),
+    # offset 1. mf78r003/mf78r004 are a channel-weighted lr pair (ERA5: 2t & z x10,
+    # t x5, 10u/10v x2 - same scheme as nhv6tkln, so comparable objective; NOT
+    # comparable to unweighted runs incl. lk455g4t). Both ran out of chained parts at
+    # part4: stopped at step 7194/8192 (mini-epoch 13 of 16) having done only 26 of
+    # 1024 cooldown steps. Final val: mf78r003 3.5313e-2 (still improving),
+    # mf78r004 3.5378e-2 (best 3.5311e-2 @ep7, degrading after - overfitting).
+    # 28 Sep: mf78r004 continuation submitted (job 2103051) to finish the cooldown.
+    mf78r003 :
+      slurm_id : 0
+      description: "8-step ft of skkbxfya, streams_preprint, channel-weighted, lr 1e-5 const - INCOMPLETE 14/16 ep"
+    mf78r004 :
+      slurm_id : 0
+      description: "8-step ft of skkbxfya, streams_preprint, channel-weighted, lr 2.5e-5 const - 14/16 ep + cooldown continuation"
+    lk455g4t :
+      slurm_id : 0
+      description: "8-step ft of dy0jlrmw, streams_preprint, NO channel weighting, lr 3e-5 cosine, 4 ep - COMPLETED"
+
+    # comparison with 8-step channel weighted jepa
+    nhv6tkln :  
+      slurm_id : 0
+      description: "8-step ft of rrvj7vjv, _mnt_cw streams, channel-weighted, lr 1e-4 cosine, offset 1, 8 ep (masking mode, not jepa)"
+
+    # ---- Operational-analysis fine-tuning stage (operan IN / ERA5 OUT) ----
+    # config_u84_operan_finetune.yml, streams operan_georing_avhrr_iasi_lowres_linear.
+    # istep=0, lr_max 3e-5 cosine (warmup 64 / cooldown 128), 4 mini-epochs = 2048
+    # steps, 8 nodes, sdnbfpve freeze set, max_num_targets 108416, time_window_step 1h.
+    # num_steps inherits from the parent: 8 for tdy1mu3d, 9 for yiuu8dih/uluak445.
+    # Throughput is only ~0.024-0.027 steps/s (sdnbfpve freeze set leaves much more
+    # trainable than the parents did), so 2048 steps needs ~23h, not the ~8h estimated.
+    # 3 Oct run reached 1268 / 1262 / 1668 of 2048; tdy1mu3d + yiuu8dih also lost a
+    # part to the unretried torch.save hang (90/93 watchdog timeouts).
+    # 5 Oct: all three resumed from *_latest with --chain-jobs 3.
+    # NOTE no *.optim is written in this lineage (named_optim_state comes out empty),
+    # so every part boundary restarts the Adam moments - expect a small loss bump there.
+    tdy1mu3d :
+      slurm_id : 0
+      description: "operan ft of srl1jj3x (8-step), operan in / ERA5 out, lr 3e-5 cosine, 4 ep - IN PROGRESS"
+    yiuu8dih :
+      slurm_id : 0
+      description: "operan ft of datp7u95 (9-step, lessig2 parent), operan in / ERA5 out, lr 3e-5 cosine, 4 ep - IN PROGRESS"
+    uluak445 :
+      slurm_id : 0
+      description: "operan ft of n1y6kc1o (9-step, lessig2 parent), operan in / ERA5 out, lr 3e-5 cosine, 4 ep - IN PROGRESS"

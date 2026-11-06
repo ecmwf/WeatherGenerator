@@ -1,0 +1,58 @@
+# Eight-step rollout fine-tuning of u84eegh1 (stage 1 of 2).
+#
+# Analogue of config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml, which
+# produced nhv6tkln from rrvj7vjv. Stage 2 is the operational-analysis fine-tune
+# (config_u84_operan_finetune.yml), which inherits num_steps=8 from this run and
+# changes only the ERA5_in data source.
+#
+# Deviation from the reference config: offset stays 0 to match u84eegh1
+# (the nhv6tkln lineage was offset=1 throughout), so rollout length is the only
+# forecast variable that changes here.
+
+general:
+  # Start a new eight-step fine-tuning schedule rather than inherit completed
+  # three-step progress.
+  istep: 0
+
+# Keep the pretrained encoder and ERA5 decoding stack fixed while training the
+# forecast engine for the longer rollout objective. Note this is a DIFFERENT and
+# complementary freeze set to the operan stage, which reopens parts of the encoder.
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*|.*encoder.*"
+
+data_loading:
+  num_workers: 8
+  # Avoid DataLoader shared-memory transport during distributed validation.
+  num_workers_validation: 4
+
+# fe_impute_latent_noise_std is deliberately NOT set here: inherit u84eegh1's 1e-4.
+# The reference config sets 2e-5 and nhv6tkln as-run was 1e-5, but overriding would
+# be a second variable change on top of the rollout extension.
+
+training_config:
+  num_mini_epochs: 8
+  learning_rate_scheduling:
+    lr_max: 1e-4
+    # Pinned to nhv6tkln's resolved values. Without these the run inherits
+    # num_steps_cooldown=20000 from u84eegh1, which exceeds lr_steps (=4096) and
+    # trips the 10%/5% guard at lr_scheduler.py:55, silently rewriting the phases.
+    # 4096 - 256 - 512 = 3328 decay steps, well above the 0.2*lr_steps threshold.
+    num_steps_warmup: 256
+    num_steps_cooldown: 512
+    policy_decay: cosine
+    parallel_scaling_policy: "const"
+  optimizer:
+    grad_clip: 1.0
+    adamw :
+      # parameters are scaled by number of DDP workers
+      beta1 : 0.9953125 # 0.9875 # at B=8 beta1 =0.9
+      beta2 : 0.996875 # 0.994 # at B=8 beta1 approx 0.95
+      eps : 1e-08
+
+  # offset 0 (not the reference's 1) to match u84eegh1.
+  forecast: {time_step: 06:00:00, num_steps: 8, offset: 0, policy: fixed}
+
+train_logging:
+  # 512 steps/mini-epoch -> one mid-mini-epoch 'latest' save, 16 checkpoint writes
+  # over the run. At 8-step rollout throughput (~0.06 steps/s) that is ~71 min
+  # between saves; drop to 128 if you would rather cap worst-case lost work.
+  checkpoint: 256

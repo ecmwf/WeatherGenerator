@@ -1,0 +1,21 @@
+# Fresh forecast-only control for the wduc34ev checkpoint-transfer ablation.
+#
+# The base config supplies the exact encoder architecture used by wduc34ev, and
+# the overlay supplies the exact two-step forecast model, streams, optimizer,
+# and validation protocol used by the downstream checkpoint runs. With no
+# from_run_id, all model parameters are initialized from scratch.
+#
+# Submission:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py \
+#     --pipeline config/gjl_repro_forecast_n320_iasi_channels_scratch_pipeline.yml
+parallelize: false
+stages:
+  - name: forecast
+    stage: train
+    base_config: ./config/config_gjl6a0kb_reproduction_n320_iasi_channels.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_iasi_channels.yml
+    options:
+      - data_loading.rng_seed=1785859974
+    chain_jobs: 4
+    nodes: 2

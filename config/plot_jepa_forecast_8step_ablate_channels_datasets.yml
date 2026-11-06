@@ -1,0 +1,49 @@
+
+train:
+  
+  plot:
+
+    nhv6tkln:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 1e-5 noise"
+
+    ux8vr20d:
+      slurm_id: 0
+      description: "n320 forecasting, new iasi dataset, 8 nodes, 1e-5 noise"
+
+    # look
+    mmtjbd2z:
+      slurm_id: 0
+      description: "n320 forecasting, new iasi dataset, 8 nodes, 5e-6 noise"
+
+    deicu2cn:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 8 nodes, rm 2 geos chnls"
+
+    tapl736w:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 8 nodes, rm 2 geos chnls, repeat crrct streams"
+
+    # cxe44c76:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, correct iasi channels, 8 nodes, INCORRECT era5 (+frozen obs) only"
+
+    a5a9mw07:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 8 nodes, era5 only"
+
+    sdnbfpve:
+      slurm_id: 0
+      description: "n320 forecasting, operan input, correct iasi channels, 8 nodes, 1e-5 noise"
+
+    gzeqqa0q:
+      slurm_id: 0
+      description: "n320 forecasting, operan input, correct iasi channels, 8 nodes, 7e-6 noise"
+
+    # jtpj5shb:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, era5 only, 8 nodes"
+
+    # ps9k43kk:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, era5 only, 2 nodes"

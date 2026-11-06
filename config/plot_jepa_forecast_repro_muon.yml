@@ -122,6 +122,10 @@ train:
       slurm_id: 0
       description: "n320 forecasting, correct iasi channels"
 
+    i325yvtj:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, 2 nodes, rm 2 geos chnls"
+
     n5rtc8kk:
       slurm_id: 0
       description: "n320 forecasting, correct iasi channels, 8 nodes, no val loss"
@@ -133,6 +137,14 @@ train:
     ggru6j0j:
       slurm_id: 0
       description: "n320 forecasting, correct iasi channels, 8 nodes, more val samples, 1e-4 lr"
+
+    nlgapp37:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels, predictor noise"
+
+    t7l6h9w5:
+      slurm_id: 0
+      description: "n320 forecasting, no _10s channels in forecasting"
 
 
 

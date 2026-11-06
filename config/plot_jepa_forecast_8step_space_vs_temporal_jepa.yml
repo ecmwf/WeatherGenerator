@@ -1,0 +1,14 @@
+
+train:
+  
+  plot:
+
+    nhv6tkln:
+      slurm_id: 0
+      description: "n320 8 step forecasting, proper iasi channels, with channel weights, 1e-5 noise"
+
+    aets3ku5:
+      slurm_id: 0
+      description: "n320 8 step forecasting, space jepa, proper iasi channels, with channel weights"
+
+ 

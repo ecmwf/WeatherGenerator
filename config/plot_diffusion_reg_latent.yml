@@ -1,0 +1,43 @@
+# Latent diffusion (config_diffusion_nhv6tkln_tpc64_2.yml, frozen encoder) on the latent-regulariser arms,
+# launched 2026-10-21 from the diffusion-469b3351 worktree. Each run's loss is measured against its own
+# encoder's latents, so compare training behaviour, not encoders, from these curves.
+# Usage (loss columns are passed as "streams"):
+#   mkdir -p plots/diffusion_reg_latent
+#   uv run plot_train -fy config/plot_diffusion_reg_latent.yml -o plots/diffusion_reg_latent \
+#     -s LossLatentDiff.LossLatentDiff.mse LossLatentDiff.loss_avg.eta1e0 LossLatentDiff.loss_avg.eta4e0
+# LossLatentDiff.LossLatentDiff.mse = loss at the training noise distribution (train and val);
+# .eta1e0 / .eta4e0 = validation at fixed noise sigma 1 and 4. Passing LossLatentDiff.loss_avg instead
+# draws all three val columns in one panel (substring match).
+train:
+
+  plot:
+
+    ### forecast group: parents are the 8-step fine-tunes of the 2-step screen arms
+    lob8xd45:
+      slurm_id: 0
+      description: "ref: diffusion on nhv6tkln@8"
+
+    fjiuehtw:
+      slurm_id: 0
+      description: "A0: diffusion on l6tpst9s@8 (no regulariser, original AdamW)"
+
+    xv7e45tj:
+      slurm_id: 0
+      description: "B0: diffusion on o1nput4n@8 (kurtosis penalty 0.01)"
+
+    xe8q997k:
+      slurm_id: 0
+      description: "F0: diffusion on osu30g3y@8 (SIGReg over pairs of ranks 2e-4)"
+
+    ### JEPA group: parents are the pre-trained JEPA encoders at mini-epoch 18
+    qlzel1rn:
+      slurm_id: 0
+      description: "ref: diffusion on JEPA wduc34ev@18"
+
+    o5a6bc2o:
+      slurm_id: 0
+      description: "W1: diffusion on JEPA mab2tl2b@18 (kurtosis penalty 0.01)"
+
+    l3szizao:
+      slurm_id: 0
+      description: "W2: diffusion on JEPA gcx4vetm@18 (SIGReg over pairs of ranks 5e-5)"

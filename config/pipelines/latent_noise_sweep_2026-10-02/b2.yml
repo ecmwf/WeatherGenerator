@@ -1,0 +1,26 @@
+# Latent-noise sweep (fe_impute_latent_noise_std), launched 2026-10-02.
+#   A: redo nhv6tkln's 8-step fine-tune from rrvj7vjv with less noise, then the operan fine-tune
+#      with the same noise (compare with sdnbfpve, whose two stages both used 1e-5).
+#   B: operan fine-tune only, from nhv6tkln mini-epoch 8, with less noise (compare with
+#      sdnbfpve 1e-5 and gzeqqa0q 7e-6).
+#   C: operan fine-tune from mmtjbd2z mini-epoch 8 with a bit more noise than psqtl5ti (5e-6).
+# All operan stages use the 2026-09-16 recipe: 4 mini-epochs, command-line freeze_modules.
+# Noise values are written as 5.0e-06 (not 5e-6) so YAML parses them as floats.
+# One file per experiment: the launcher runs all stages of a pipeline file one after another,
+# so independent experiments must be launched separately to run in parallel.
+# Launch each from the WeatherGenerator root, e.g.
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/latent_noise_sweep_2026-10-02/a1.yml
+stages:
+  - name: b2operan0
+    stage: train
+    from_run_id: nhv6tkln
+    mini_epoch: 8
+    config_files:
+      - config/config_gjl_repro_forecast_n320_operan_finetune.yml
+    options:
+      - 'freeze_modules=latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\.ln.*|encoder\.q_cells.*|encoder\.q_aux.*'
+      - fe_impute_latent_noise_std=0.0
+      - training_config.num_mini_epochs=4
+    chain_jobs: 2
+    nodes: 8
+    slurm_args: ["--time=12:00:00"]

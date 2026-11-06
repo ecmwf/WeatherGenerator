@@ -1,0 +1,57 @@
+
+train:
+  
+  plot:
+
+    ### christian very long 2-step runs 
+    skkbxfya:
+      slurm_id: 0
+      description: "n320, pure forecast training, 2 step, 8 node"
+
+    grn2nsqq:
+      slurm_id: 0
+      description: "clean only forecast ablation of same config as JEPA"
+
+    rrvj7vjv:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels after JEPA"
+
+    xqu2xka7:
+      slurm_id: 0
+      description: "n320 forecasting, AdamW fix only: effective β2 0.952 → 0.99, eps 3.5e-9 → 1e-6"
+
+    b16zrmnx:
+      slurm_id: 0
+      description: "n320 forecasting, A + kurtosis penalty on the encoder output, weight 0.01 (same as kr9snxa0)"
+
+    fxedz8w0:
+      slurm_id: 0
+      description: "n320 forecasting, A + SIGReg with a queue of past steps, weight 0.02"
+
+    xsef0k15:
+      slurm_id: 0
+      description: "n320 forecasting, A + SIGReg with a queue of past steps, weight 0.002"
+
+    khygyy2i:
+      slurm_id: 0
+      description: "n320 forecasting, A + SIGReg over pairs of ranks, weight 0.002"
+
+    rs2u9v5g:
+      slurm_id: 0
+      description: "n320 forecasting, A + SIGReg over pairs of ranks, weight 0.0002"
+
+    e57ap1cl:
+      slurm_id: 0
+      description: "n320 forecasting, original AdamW (as grn2nsqq) + kurtosis penalty, weight 0.01"
+
+    tvl3rq7e:
+      slurm_id: 0
+      description: "n320 forecasting, original AdamW (as grn2nsqq) + SIGReg over pairs of ranks, weight 0.0002"
+
+    dplfxcyf:
+      slurm_id: 0
+      description: "n320 forecasting, original AdamW (as grn2nsqq) + SIGReg over pairs of ranks, weight 0.00005"
+
+    wksp72tf:
+      slurm_id: 0
+      description: "n320 forecasting, original AdamW (as grn2nsqq), no regulariser: control for B0/F0/G0 (logs latent diagnostics)"

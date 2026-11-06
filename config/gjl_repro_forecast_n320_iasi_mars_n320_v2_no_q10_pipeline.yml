@@ -1,0 +1,19 @@
+# Fresh v2 IASI temporal JEPA pretraining followed by two-step physical forecast fine-tuning.
+# q_10 is absent from the forecast ERA5 input/target schema and loss.
+#
+# Submission:
+#   uv run ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/gjl_repro_forecast_n320_iasi_mars_n320_v2_no_q10_pipeline.yml
+parallelize: false
+stages:
+  - name: pretrain
+    stage: train
+    base_config: ./config/config_gjl6a0kb_reproduction_n320_iasi_mars_n320_v2_no_q10.yml
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.pretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_iasi_mars_n320_v2_no_q10.yml
+    chain_jobs: 4
+    nodes: 2

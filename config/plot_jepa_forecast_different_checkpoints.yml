@@ -1,0 +1,110 @@
+
+train:
+  
+  plot:
+
+    perrjey5:
+      slurm_id: 0
+      description: "N320, pure forecast training"
+
+    c71eo6pu:
+      slurm_id: 0
+      description: "perrjey5, cont."
+
+
+    ### christian very long 2-step runs 
+    skkbxfya:
+      slurm_id: 0
+      description: "n320, pure forecast training, 2 step, 8 node"
+
+    rrvj7vjv:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels"
+
+    ###################
+    # earlier ablations
+    ###################
+    # i325yvtj:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, correct iasi channels, 2 nodes, rm 2 geos chnls"
+
+    # n5rtc8kk:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, correct iasi channels, 8 nodes, no val loss"
+
+    # wvg0virj:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, correct iasi channels, 8 nodes, more val samples"
+    
+    # ggru6j0j:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, correct iasi channels, 8 nodes, more val samples, 1e-4 lr"
+
+    # nlgapp37:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, correct iasi channels, predictor noise"
+
+    # t7l6h9w5:
+    #   slurm_id: 0
+    #   description: "n320 forecasting, no _10s channels in forecasting"
+
+    ### jepa checkpoint ablation
+
+    bx65p1di:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt 0"
+
+    dfwwzncs:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt 1"
+
+    r29w8cks:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt 2"
+
+    dra42uww:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt 4"
+
+    bg16u1y6:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt 8"
+
+    ttpkeb81:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt 16"
+
+    mfv0sq2b:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt 24"
+
+    zcxw6h6y:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt 42"
+
+    ye63mkc7:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, chkpt latest (43?)"
+
+    jf15g9vw:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, cont. of wbu, chkpt 60"
+
+    n168xqel:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, cont. of wbu, chkpt 84"
+    
+    grn2nsqq:
+      slurm_id: 0
+      description: "clean only forecast ablation"
+
+    y3u5xbim:
+      slurm_id: 0
+      description: "probe of usual wduc34ev jepa, 9 epochs"
+
+    s8r52uqi:
+      slurm_id: 0
+      description: "probe of multi t s8r52uqi jepa, 9 epochs"
+    anfmd47c:
+      slurm_id: 0
+      description: "probe of fast-teacher J0 xvm3a57z jepa, 9 epochs"

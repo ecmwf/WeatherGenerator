@@ -1,0 +1,49 @@
+
+train:
+  
+  plot:
+
+    grn2nsqq:
+      slurm_id: 0
+      description: "clean only forecast ablation"
+
+    # baseline 
+    rrvj7vjv:
+      slurm_id: 0
+      description: "n320 forecasting, correct iasi channels"
+
+    ###################
+    ### jepa checkpoint ablation
+
+    n168xqel:
+      slurm_id: 0
+      description: "jepa checkpoint ablation, cont. of wbu, chkpt 84, base lr"
+
+    ## LR ablation 
+
+    swimpcf8:
+      slurm_id: 0
+      description: "learning rate ablation, cont. of wbu, chkpt 84, lr max 2e-5"
+
+    paq2rn2h:
+      slurm_id: 0
+      description: "learning rate ablation, cont. of wbu, chkpt 84, lr max 4e-5"
+
+    lmygw3u4:
+      slurm_id: 0
+      description: "learning rate ablation, cont. of wbu, chkpt 84, lr max 6e-5"
+
+    p53cjlh1:
+      slurm_id: 0
+      description: "learning rate ablation, cont. of wbu, chkpt 84, lr max 8e-5"
+
+    k4t4761y:
+      slurm_id: 0
+      description: "learning rate ablation, cont. of wbu, chkpt 84, lr max 1.2e-4"
+
+    zue5otvm:
+      slurm_id: 0
+      description: "drop q_10 from training"
+
+    
+    

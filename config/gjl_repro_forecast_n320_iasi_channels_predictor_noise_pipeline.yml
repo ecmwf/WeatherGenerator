@@ -1,0 +1,24 @@
+# rrvj7vjv-style JEPA pretraining followed by physical forecast fine-tuning,
+# with predictor-input noise active during both training stages.
+#
+# Submission:
+#   uv run ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline \
+#     config/gjl_repro_forecast_n320_iasi_channels_predictor_noise_pipeline.yml
+parallelize: false
+stages:
+  - name: pretrain
+    stage: train
+    base_config: ./config/config_gjl6a0kb_reproduction_n320_iasi_channels.yml
+    options:
+      - noise_pre_predictor_std=1e-5
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.pretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_iasi_channels.yml
+    options:
+      - noise_pre_predictor_std=1e-5
+    chain_jobs: 4
+    nodes: 2
