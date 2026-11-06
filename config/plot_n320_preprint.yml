@@ -1,0 +1,62 @@
+train:
+  plot:
+    linvvcte :
+      slurm_id : 0
+      description: "fixed variables for OperAn, streams_preprint, linear"
+    p2h3q0xw :
+      slurm_id : 0
+      description: "linvvcte contd"
+    # iiflvp55:
+    #   slurm_id: 0
+    #   description: "JEPA 8 nodes"
+    # c6o1yr18:
+    #   slurm_id: 0
+    #   description: "JEPA 8 nodes (cont.)"
+    # jiedxofq:
+    #   slurm_id: 0
+    #   description: "jepa 8 nodes, noise 2e-5"
+    # dd6w20pf:
+    #   slurm_id: 0
+    #   description: "jepa 8 nodes, noise 2e-5 (cont.)"
+    # oqkez8qs:
+    #   slurm_id: 0
+    #   description: "jepa 8 nodes, noise 2e-5 (cont.)"
+    # oyhomvkd:
+    #   slurm_id: 0
+    #   description: "jepa 8 nodes, noise 2e-5 (cont.)"
+    # f59gavuk:
+    #   slurm_id: 0
+    #   description: "jepa 8 nodes, noise 2e-5 (cont.)"
+    # tkt1w06j:
+    #   slurm_id: 0
+    #   description: "JEPA (longer), 2 nodes"
+    hsq7hsb6 :
+      slurm_id : 0
+      description: "MTM, default_keep_rate: 0.8, offset=0, 12h window"
+    nzl3mplp :
+     slurm_id : 0
+     description: "p2h3q0xw  contd 128 epochs"
+    rrvj7vjv:
+      slurm_id: 0
+      description: "temporal JEPA, 2 nodes"
+    skkbxfya:
+      slurm_id: 0
+      description: "forecast 8_nodes"
+    g248a1sz:
+      slurm_id: 0
+      description: "space & time JEPA, 2 nodes"
+    f2esyc18:
+      slurm_id: 0
+      description: "space & time JEPA, 2 nodes (cont. to 24epochs)"
+    sm9udv37:
+      slurm_id: 0
+      description: "space JEPA, 2 nodes"
+    xgno7k11:
+      slurm_id: 0
+      description: "space jepa, 2 nodes"
+    onm76fjr:
+      slurm_id: 0
+      description: "space jepa, 2 nodes"
+
+
+

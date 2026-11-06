@@ -1,0 +1,22 @@
+# Fresh gjl6a0kb-style pretraining followed by physical forecast fine-tuning.
+# The first stage uses the standalone reproduction configuration. The forecast
+# stage continues the newly created stage checkpoint, never gjl6a0kb itself.
+# It uses the gjl_repro_forecast stream layout: nine forcing inputs and a
+# separate diagnostic ERA5 forecast target.
+#
+# Submission (this launcher has no non-submitting dry-run mode):
+#   uv run ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/gjl_repro_forecast_pipeline.yml
+parallelize: false
+stages:
+  - name: pretrain
+    stage: train
+    base_config: ./config/config_sjepa_repro_tjepa.yml
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.pretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_iasi_channels.yml
+    chain_jobs: 4
+    nodes: 2
