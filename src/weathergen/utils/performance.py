@@ -262,25 +262,25 @@ def nvtx_wrap(obj: object, method: str, name: str) -> None:
     Patches the instance (not its class), so only use it on objects of a run that is
     being profiled.
     """
-    original = getattr(obj, method)
+    original = getattr(obj, method)  # pylint: disable=bad-builtin
 
     @functools.wraps(original)
     def wrapped(*args, **kwargs):
         with nvtx_range(name):
             return original(*args, **kwargs)
 
-    setattr(obj, method, wrapped)
+    setattr(obj, method, wrapped)  # pylint: disable=bad-builtin
 
 
 @contextmanager
 def nvtx_patched(obj: object, method: str, name: str) -> Generator[None]:
     """Like `nvtx_wrap`, for the duration of the `with` block only (e.g. on a module)."""
-    original = getattr(obj, method)
+    original = getattr(obj, method)  # pylint: disable=bad-builtin
     nvtx_wrap(obj, method, name)
     try:
         yield
     finally:
-        setattr(obj, method, original)
+        setattr(obj, method, original)  # pylint: disable=bad-builtin
 
 
 def _nvtx_push(name: str):

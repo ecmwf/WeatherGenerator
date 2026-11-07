@@ -62,7 +62,7 @@ from weathergen.utils.train_logger import (
     prepare_losses_for_logging,
 )
 from weathergen.utils.utils import get_dtype
-from weathergen.utils.validation_io import write_output
+from weathergen.utils.validation_io import AsyncOutputWriter, stage_output, write_output
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,42 @@ def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
             t_aux.output_idxs = [t_aux.output_idxs[i // repeat] for i in range(n_pred)]
 
 
+class RolloutProgress:
+    """
+    Progress bar of one batch's rollout, over its forecast steps: from the end of the global
+    assimilation through the forecast engine to the end of writing the output.
+
+    The bar starts when the encoder's forward returns, i.e. on the first chunk of the
+    rollout; the device is synchronized there so that it starts when the assimilation has
+    run, not when it was queued.
+    """
+
+    def __init__(self, encoder: torch.nn.Module, num_steps: int, device: torch.device):
+        self.num_steps = num_steps
+        self.device = device
+        self.pbar: tqdm.tqdm | None = None
+        self._hook = encoder.register_forward_hook(self._start)
+
+    def _start(self, *_) -> None:
+        self._hook.remove()
+        torch.accelerator.synchronize(self.device)
+        self.pbar = tqdm.tqdm(total=self.num_steps, desc="rollout", unit="step", leave=True)
+
+    def update(self, num_steps: int) -> None:
+        """Count forecast steps whose output is computed (and written or submitted)."""
+        if self.pbar is not None:
+            self.pbar.update(num_steps)
+
+    def close(self, output_writer: AsyncOutputWriter | None) -> None:
+        """Close the bar once all output is written."""
+        self._hook.remove()
+        if output_writer is not None:
+            output_writer.wait()
+        if self.pbar is not None:
+            self.pbar.update(self.num_steps - self.pbar.n)
+            self.pbar.close()
+
+
 class Trainer(TrainerBase):
     def __init__(self, train_logging: Config):
         TrainerBase.__init__(self)
@@ -135,6 +171,8 @@ class Trainer(TrainerBase):
         self.model = None
         self.model_params = None
         self.optimizers: list[torch.optim.Optimizer] | None = None
+        self.optimizer_names: list[str] | None = None
+        self._muon_effective_lr_factor: float | None = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
         self.target_and_aux_calculators_val = None
@@ -147,6 +185,8 @@ class Trainer(TrainerBase):
         self.loss_spike_cfg = None
         self.loss_spike_file = None
         self.loss_spike_history = deque()
+        # writes validation output in the background while validate() runs
+        self.output_writer: AsyncOutputWriter | None = None
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -273,6 +313,27 @@ class Trainer(TrainerBase):
             for start in range(0, len(output_idxs), chunk_size)
         ]
 
+    def _rollout_progress(self, batch) -> RolloutProgress | None:
+        """Progress bar of the rollout of the batch, in inference on the root rank."""
+        if self.cf.rank > 0 or self.cf.stage != "inference":
+            return None
+        model = self.model if self.ema_model is None else self.ema_model.ema_model
+        model = getattr(model, "module", model)  # pylint: disable=bad-builtin
+        return RolloutProgress(model.encoder, len(batch.get_output_idxs()), self.device)
+
+    def _write_output(self, *args) -> None:
+        """
+        Write output with the arguments of write_output.
+
+        With an output writer, the copies to host and the zarr write run in the background,
+        overlapping with the next forecast steps.
+        """
+        if self.output_writer is None:
+            write_output(*args)
+        else:
+            staged = stage_output(*args, copy_stream=self.output_writer.copy_stream)
+            self.output_writer.submit(staged)
+
     @staticmethod
     def _keeps_full_validation_output(mode_cfg) -> bool:
         """
@@ -293,6 +354,7 @@ class Trainer(TrainerBase):
         bidx,
         targets_and_auxs,
         is_diffusion: bool = False,
+        rollout_progress: RolloutProgress | None = None,
     ) -> ModelOutput:
         """Run the rollout in chunks and assemble the predictions for the whole batch."""
         forecast_cfg = mode_cfg.get("forecast", {})
@@ -362,7 +424,7 @@ class Trainer(TrainerBase):
                     target_output = {physical_loss_names[0]: target_aux_chunk}
                 else:
                     target_output = targets_and_auxs
-                write_output(
+                self._write_output(
                     self.cf,
                     mode_cfg,
                     batch_size,
@@ -373,6 +435,8 @@ class Trainer(TrainerBase):
                     forecast_chunk,
                     target_output,
                 )
+            if rollout_progress is not None and not is_diffusion:
+                rollout_progress.update(len(chunk))
 
             if compute_full_loss:
                 physical += forecast_chunk.physical
@@ -856,6 +920,22 @@ class Trainer(TrainerBase):
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
         Perform validation / test computation as specified by mode_cfg.
+
+        With output.async_write, the output is written in the background; all of it is
+        written when validate() returns.
+        """
+        if mode_cfg.get("output", {}).get("async_write", False):
+            self.output_writer = AsyncOutputWriter(self.device)
+        try:
+            self._validate(mini_epoch, mode_cfg, batch_size)
+        finally:
+            if self.output_writer is not None:
+                output_writer, self.output_writer = self.output_writer, None
+                output_writer.close()
+
+    def _validate(self, mini_epoch, mode_cfg, batch_size):
+        """
+        Perform validation / test computation as specified by mode_cfg.
         """
 
         cf = self.cf
@@ -914,6 +994,7 @@ class Trainer(TrainerBase):
                                 self.model,
                             )
 
+                        rollout_progress = self._rollout_progress(batch)
                         preds, targets_and_auxs = self._process_validation_chunks(
                             batch,
                             mode_cfg,
@@ -922,6 +1003,7 @@ class Trainer(TrainerBase):
                             bidx,
                             targets_and_auxs,
                             is_diffusion,
+                            rollout_progress,
                         )
                         # The diffusion target_aux calculator needs a single latent target
                         # slot regardless of the number of real forecast steps; replicate it
@@ -942,7 +1024,7 @@ class Trainer(TrainerBase):
                                 if mode_cfg.get("output", {}).get("normalized_samples", False)
                                 else self.dataset_val.denormalize_target_channels
                             )
-                            write_output(
+                            self._write_output(
                                 self.cf,
                                 mode_cfg,
                                 batch_size,
@@ -968,6 +1050,8 @@ class Trainer(TrainerBase):
                                             preds,
                                             targets_and_auxs,
                                         )
+                        if rollout_progress is not None:
+                            rollout_progress.close(self.output_writer)
 
                     if with_targets:
                         _ = self.loss_calculator_val.compute_loss(
@@ -1310,8 +1394,8 @@ class Trainer(TrainerBase):
             if stream_data is None:
                 continue
 
-            source_raw = getattr(stream_data, "source_raw", [])
-            target_times_raw = getattr(stream_data, "target_times_raw", [])
+            source_raw = getattr(stream_data, "source_raw", [])  # pylint: disable=bad-builtin
+            target_times_raw = getattr(stream_data, "target_times_raw", [])  # pylint: disable=bad-builtin
             source_start_idx = int(stream_data.sample_idx) - len(source_raw) + 1
 
             streams[stream_name] = {
@@ -1321,7 +1405,7 @@ class Trainer(TrainerBase):
                 "source_step_indices": [source_start_idx + step for step in range(len(source_raw))],
                 "target_step_indices": list(range(len(target_times_raw))),
                 "source_step_datetimes": [
-                    self._serialize_datetimes(getattr(raw_data, "datetimes", None))
+                    self._serialize_datetimes(getattr(raw_data, "datetimes", None))  # pylint: disable=bad-builtin
                     for raw_data in source_raw
                 ],
                 "target_step_datetimes": [
@@ -1375,7 +1459,7 @@ class Trainer(TrainerBase):
 
     def _drop_latest_loss_record(self) -> None:
         for hist_name in ("loss_hist", "losses_unweighted_hist", "stddev_unweighted_hist"):
-            hist = getattr(self.loss_calculator, hist_name)
+            hist = getattr(self.loss_calculator, hist_name)  # pylint: disable=bad-builtin
             if hist:
                 hist.pop()
 

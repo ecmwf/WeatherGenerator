@@ -81,7 +81,7 @@ class ZarrWriteConfig:
         defaults = cls()
         return cls(
             **{
-                field.name: section.get(field.name, getattr(defaults, field.name))
+                field.name: section.get(field.name, getattr(defaults, field.name))  # pylint: disable=bad-builtin
                 for field in dataclasses.fields(cls)
             }
         )

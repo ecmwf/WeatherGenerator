@@ -78,6 +78,8 @@ class ModelOutput:
         self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
         self.batch_samples = source_samples
         self.latent_deep = None
+        # per-ODE-step decoded predictions, set when inference_logging.fe_diffusion_log_analytics
+        self.diffusion_steps_output = None
 
     def chunk_idx(self, fstep: int) -> int:
         """Index of forecast step fstep into chunk-local data, e.g. predictions."""
