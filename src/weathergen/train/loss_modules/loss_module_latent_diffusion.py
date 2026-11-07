@@ -47,7 +47,7 @@ class LossLatentDiffusion(LossModuleBase):
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [
-                getattr(loss_fns, name),
+                getattr(loss_fns, name),  # pylint: disable=bad-builtin
                 params.get("weight", 1.0),
                 name,
             ]
@@ -86,7 +86,7 @@ class LossLatentDiffusion(LossModuleBase):
         timestep_weight_config = self.cf.get("timestep_weight")
         if timestep_weight_config is None:
             return [1.0 for _ in range(forecast_steps)]
-        weights_timestep_fct = getattr(loss_fns, timestep_weight_config[0])
+        weights_timestep_fct = getattr(loss_fns, timestep_weight_config[0])  # pylint: disable=bad-builtin
         return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
 
     def _loss_per_loss_function(

@@ -171,6 +171,8 @@ class Trainer(TrainerBase):
         self.model = None
         self.model_params = None
         self.optimizers: list[torch.optim.Optimizer] | None = None
+        self.optimizer_names: list[str] | None = None
+        self._muon_effective_lr_factor: float | None = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
         self.target_and_aux_calculators_val = None
@@ -316,7 +318,7 @@ class Trainer(TrainerBase):
         if self.cf.rank > 0 or self.cf.stage != "inference":
             return None
         model = self.model if self.ema_model is None else self.ema_model.ema_model
-        model = getattr(model, "module", model)
+        model = getattr(model, "module", model)  # pylint: disable=bad-builtin
         return RolloutProgress(model.encoder, len(batch.get_output_idxs()), self.device)
 
     def _write_output(self, *args) -> None:
@@ -1392,8 +1394,8 @@ class Trainer(TrainerBase):
             if stream_data is None:
                 continue
 
-            source_raw = getattr(stream_data, "source_raw", [])
-            target_times_raw = getattr(stream_data, "target_times_raw", [])
+            source_raw = getattr(stream_data, "source_raw", [])  # pylint: disable=bad-builtin
+            target_times_raw = getattr(stream_data, "target_times_raw", [])  # pylint: disable=bad-builtin
             source_start_idx = int(stream_data.sample_idx) - len(source_raw) + 1
 
             streams[stream_name] = {
@@ -1403,7 +1405,7 @@ class Trainer(TrainerBase):
                 "source_step_indices": [source_start_idx + step for step in range(len(source_raw))],
                 "target_step_indices": list(range(len(target_times_raw))),
                 "source_step_datetimes": [
-                    self._serialize_datetimes(getattr(raw_data, "datetimes", None))
+                    self._serialize_datetimes(getattr(raw_data, "datetimes", None))  # pylint: disable=bad-builtin
                     for raw_data in source_raw
                 ],
                 "target_step_datetimes": [
@@ -1457,7 +1459,7 @@ class Trainer(TrainerBase):
 
     def _drop_latest_loss_record(self) -> None:
         for hist_name in ("loss_hist", "losses_unweighted_hist", "stddev_unweighted_hist"):
-            hist = getattr(self.loss_calculator, hist_name)
+            hist = getattr(self.loss_calculator, hist_name)  # pylint: disable=bad-builtin
             if hist:
                 hist.pop()
 
