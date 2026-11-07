@@ -214,6 +214,7 @@ def write_output(
     batch,
     model_output,
     target_aux_out,
+    store_path: "pathlib.Path | None" = None,
 ):
     """
     Interface for writing model output
@@ -228,6 +229,7 @@ def write_output(
         batch,
         model_output,
         target_aux_out,
+        store_path=store_path,
     )
     if staged is not None:
         staged.write()
@@ -244,6 +246,7 @@ def stage_output(
     model_output,
     target_aux_out,
     copy_stream: torch.cuda.Stream | None = None,
+    store_path: pathlib.Path | None = None,
 ) -> StagedOutput | None:
     """
     Collect the model output to be written and start its copy to host.
@@ -282,18 +285,6 @@ def stage_output(
     timestep_idxs = [s for s in model_output.forecast_steps if s >= chunk_forecast_offset]
 
     n_samples = len(batch.get_source_samples().get_samples())
-
-    # Diffusion inference inflates the model output's fstep dimension to one entry per
-    # ODE denoising step (the trajectory). The batch only has the original physical
-    # forecast indices, so synthesize a contiguous run of indices starting at the
-    # original first index to cover every entry in model_output / target_aux_out.
-    n_pred_steps = len(model_output.physical)
-    if (
-        cf.get("fe_diffusion_model", False)
-        and chunk_forecast_offset == 0
-        and n_pred_steps > len(timestep_idxs)
-    ):
-        timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
 
     targets_lens = []
 
@@ -466,7 +457,9 @@ def stage_output(
             forecast_offset=forecast_offset,
             forecast_steps=timestep_idxs,
         ),
-        store_path=config.get_path_results(cf, mini_epoch),
+        store_path=(
+            store_path if store_path is not None else config.get_path_results(cf, mini_epoch)
+        ),
         write_config=ZarrWriteConfig.from_config(cf),
     )
 

@@ -1,0 +1,26 @@
+# Numerics test: physical forecasting (mirrors config/config_forecasting.yml at tiny scale)
+
+ae_local_num_blocks: 0
+fe_layer_norm_after_blocks: [0]
+
+training_config:
+  training_mode: ["masking"]
+
+  losses : {
+    "physical": {
+        type: LossPhysical,
+        loss_fcts: { "mse": { }, },
+        },
+    }
+
+  model_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      },
+    }
+
+  forecast :
+      time_step: 06:00:00
+      offset: 1
+      num_steps: 2
+      policy: "fixed"
