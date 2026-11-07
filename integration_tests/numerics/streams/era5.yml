@@ -1,0 +1,38 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Small ERA5 stream for the numerics regression tests: few channels and tiny embedding
+ERA5 :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  stream_id : 0
+  source : ['t_850', 'u_850', 'v_850', 'q_850', 'z_500', '2t', 'msl']
+  target : ['t_850', 'u_850', 'v_850', 'q_850', 'z_500', '2t', 'msl']
+  loss_weight : 1.
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 8
+  tokenize_spacetime : True
+  max_num_targets: -1
+  embed :
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 32
+    num_blocks : 1
+  embed_target_coords :
+    net : linear
+    dim_embed : 32
+  target_readout :
+    num_layers : 1
+    num_heads : 2
+  pred_head :
+    ens_size : 1
+    num_layers : 1

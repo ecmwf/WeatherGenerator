@@ -68,7 +68,7 @@ class SelfAttentionBlock(nn.Module):
             self.mlp_block = AdaLayerNormLayer(dim, dim_aux, self.mlp_fn, dropout_rate)
         else:
             self.ln_mlp = nn.LayerNorm(norm_eps=kwargs["attention_kwargs"]["norm_eps"])
-            self.mlp_block = lambda x, _, **kwargs: self.mlp(self.ln_mlp(x), None, **kwargs) + x
+            self.mlp_block = lambda x, _, **kwargs: self.mlp(self.ln_mlp(x)) + x
 
         self.initialise_weights()
         if self.with_adanorm:
@@ -276,8 +276,12 @@ class OriginalPredictionBlock(nn.Module):
 
     def forward(self, latent, output, coords, latent_lens, output_lens):
         for layer in self.block:
-            if isinstance(layer, MultiCrossAttentionHeadVarlen):
-                output = layer(output, latent, output_lens, latent_lens, coords)
-            else:
-                output = layer(output, output_lens, coords)
+            output = layer(
+                output,
+                x_kv=latent,
+                x_lens=output_lens,
+                x_q_lens=output_lens,
+                x_kv_lens=latent_lens,
+                ada_ln_aux=coords,
+            )
         return output

@@ -14,7 +14,6 @@ import logging
 import time
 from collections import deque
 from collections.abc import Iterator
-from decimal import Decimal
 from math import sqrt
 
 import numpy as np
@@ -56,7 +55,12 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
+from weathergen.utils.inference_logger import EXTRA_INFERENCE_WRITERS
+from weathergen.utils.train_logger import (
+    ScalarMetricsJSONLWriter,
+    TrainLogger,
+    prepare_losses_for_logging,
+)
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
@@ -238,6 +242,12 @@ class Trainer(TrainerBase):
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
+        self.collapse_metrics_writer = ScalarMetricsJSONLWriter(
+            cf,
+            name="collapse_metrics",
+            log_fn=self.train_logger.log_metrics,
+            enabled=collapse_config.get("enabled", False),
+        )
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -846,199 +856,136 @@ class Trainer(TrainerBase):
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
         Perform validation / test computation as specified by mode_cfg.
-
-        For diffusion models, runs separate validation passes for each noise level
-        specified in ``validation_noise_levels`` (defaults to ``[0.0]``).
-        Losses are logged with a per-noise-level suffix so they can be compared.
         """
 
         cf = self.cf
         self.model.eval()
 
-        is_diffusion = cf.get("fe_diffusion_model", False)
+        is_diffusion = cf.get("diffusion", {}).get("enabled", False)
         # inference without targets: predict and write, but compute no loss
         with_targets = mode_cfg.get("with_targets", True)
         assert with_targets or not is_diffusion, (
             "with_targets: False is not supported for diffusion models, whose output writing "
             "expands the targets along the denoising trajectory."
         )
-        noise_levels = list(mode_cfg.get("validation_noise_levels", [0.0]))
-        if not is_diffusion:
-            noise_levels = [0.0]
-        else:
-            # Always include a pass without fixed noise level (random sampling)
-            noise_levels = [None] + noise_levels
 
-        # Accumulate losses across noise levels with suffixed keys so they are
-        # logged as a single "val" entry (e.g. LossLatentDiff.LossLatentDiff.mse.eta0.03)
-        all_losses: dict[str, list] = {}
-        all_stddev: dict[str, list] = {}
+        dataset_val_iter = iter(self.data_loader_validation)
 
-        for _noise_idx, noise_level in enumerate(noise_levels):
-            if is_diffusion:
-                self._set_validation_noise_level(noise_level)
+        with torch.no_grad():
+            # print progress bar but only in interactive mode, i.e. when without ddp
+            with tqdm.tqdm(
+                total=len(self.data_loader_validation) * self.cf.world_size,
+                disable=self.cf.rank > 0,
+                desc="validation samples",
+                position=0,
+            ) as pbar:
+                for bidx, batch in self.validation_batches(dataset_val_iter):
+                    compute_full_loss = self._keeps_full_validation_output(mode_cfg)
+                    if compute_full_loss or is_diffusion:
+                        batch.to_device(self.device)
+                    else:
+                        output_idxs = batch.get_output_idxs()
+                        chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
+                        chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
+                        batch.to_device_for_chunked_inference(self.device, chunks[-1])
 
-            if noise_level is None:
-                loss_suffix = ""
-                stage_suffix = ""
-            else:
-                _d = Decimal(str(noise_level)).normalize()
-                _sign, _digits, _exp = _d.as_tuple()
-                eta_str = f"{'-' if _sign else ''}{''.join(map(str, _digits))}e{_exp}"
-                loss_suffix = f".eta{eta_str}" if len(noise_levels) > 1 else ""
-                stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
+                    # evaluate model
+                    with torch.autocast(
+                        device_type=f"cuda:{cf.local_rank}",
+                        dtype=self.mixed_precision_dtype,
+                        enabled=cf.with_mixed_precision,
+                    ):
+                        targets_and_auxs = {}
+                        for (
+                            loss_name,
+                            target_aux,
+                        ) in self.target_and_aux_calculators_val.items():
+                            # without targets only the physical entry is needed, to write
+                            # the output; latent targets would cost a teacher forward pass
+                            if not with_targets and not isinstance(
+                                target_aux, PhysicalTargetAndAux
+                            ):
+                                continue
+                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
+                            targets_and_auxs[loss_name] = target_aux.compute(
+                                self.cf.general.istep,
+                                batch.get_target_samples(target_idxs),
+                                self.model_params,
+                                self.model,
+                            )
 
-            dataset_val_iter = iter(self.data_loader_validation)
+                        preds, targets_and_auxs = self._process_validation_chunks(
+                            batch,
+                            mode_cfg,
+                            batch_size,
+                            mini_epoch,
+                            bidx,
+                            targets_and_auxs,
+                            is_diffusion,
+                        )
+                        # The diffusion target_aux calculator needs a single latent target
+                        # slot regardless of the number of real forecast steps; replicate it
+                        # to keep the downstream loss calculator and validation IO aligned.
+                        if is_diffusion:
+                            _expand_targets_to_match_preds(preds, targets_and_auxs)
 
-            with torch.no_grad():
-                # print progress bar but only in interactive mode, i.e. when without ddp
-                with tqdm.tqdm(
-                    total=len(self.data_loader_validation) * self.cf.world_size,
-                    disable=self.cf.rank > 0,
-                ) as pbar:
-                    for bidx, batch in self.validation_batches(dataset_val_iter):
-                        compute_full_loss = self._keeps_full_validation_output(mode_cfg)
-                        if compute_full_loss or is_diffusion:
-                            batch.to_device(self.device)
-                        else:
-                            output_idxs = batch.get_output_idxs()
-                            chunk_size = mode_cfg.forecast.get("chunk_size", len(output_idxs))
-                            chunks = self._get_forecast_step_chunks(output_idxs, chunk_size)
-                            batch.to_device_for_chunked_inference(self.device, chunks[-1])
-
-                        # evaluate model
-                        with torch.autocast(
-                            device_type=f"cuda:{cf.local_rank}",
-                            dtype=self.mixed_precision_dtype,
-                            enabled=cf.with_mixed_precision,
-                        ):
-                            targets_and_auxs = {}
-                            for (
-                                loss_name,
-                                target_aux,
-                            ) in self.target_and_aux_calculators_val.items():
-                                # without targets only the physical entry is needed, to write
-                                # the output; latent targets would cost a teacher forward pass
-                                if not with_targets and not isinstance(
-                                    target_aux, PhysicalTargetAndAux
-                                ):
-                                    continue
-                                target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
-                                targets_and_auxs[loss_name] = target_aux.compute(
-                                    self.cf.general.istep,
-                                    batch.get_target_samples(target_idxs),
-                                    self.model_params,
-                                    self.model,
-                                )
-
-                            preds, targets_and_auxs = self._process_validation_chunks(
-                                batch,
+                        # Write output for diffusion — _process_validation_chunks
+                        # skips writing when is_diffusion=True because chunked IO
+                        # is incompatible with the ODE trajectory fstep layout.
+                        # Do it here instead, mirroring the non-diffusion path.
+                        num_samples_write = (
+                            mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+                        )
+                        if is_diffusion and bidx < num_samples_write:
+                            denormalize_data_fct = (
+                                (lambda x0, x1: x1)
+                                if mode_cfg.get("output", {}).get("normalized_samples", False)
+                                else self.dataset_val.denormalize_target_channels
+                            )
+                            write_output(
+                                self.cf,
                                 mode_cfg,
                                 batch_size,
                                 mini_epoch,
                                 bidx,
+                                denormalize_data_fct,
+                                batch,
+                                preds,
                                 targets_and_auxs,
-                                is_diffusion,
                             )
-                            # Diffusion inference inflates the model output's fstep
-                            # dimension to one entry per ODE step (the denoising
-                            # trajectory). The physical target is identical for every
-                            # such step, so replicate target/aux entries to keep the
-                            # downstream loss calculator and validation IO aligned.
-                            if is_diffusion:
-                                _expand_targets_to_match_preds(preds, targets_and_auxs)
+                            # Dedicated inference writers (see EXTRA_INFERENCE_WRITERS)
+                            if self.cf.stage == "inference":
+                                for flag, write_inference_output in EXTRA_INFERENCE_WRITERS:
+                                    if OmegaConf.select(self.cf, flag, default=False):
+                                        write_inference_output(
+                                            self.cf,
+                                            mode_cfg,
+                                            batch_size,
+                                            mini_epoch,
+                                            bidx,
+                                            denormalize_data_fct,
+                                            batch,
+                                            preds,
+                                            targets_and_auxs,
+                                        )
 
-                            # Write output for diffusion — _process_validation_chunks
-                            # skips writing when is_diffusion=True because chunked IO
-                            # is incompatible with the ODE trajectory fstep layout.
-                            # Do it here instead, mirroring the non-diffusion path.
-                            num_samples_write = (
-                                mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
-                            )
-                            if is_diffusion and _noise_idx == 0 and bidx < num_samples_write:
-                                denormalize_data_fct = (
-                                    (lambda x0, x1: x1)
-                                    if mode_cfg.get("output", {}).get("normalized_samples", False)
-                                    else self.dataset_val.denormalize_target_channels
-                                )
-                                write_output(
-                                    self.cf,
-                                    mode_cfg,
-                                    batch_size,
-                                    mini_epoch,
-                                    bidx,
-                                    denormalize_data_fct,
-                                    batch,
-                                    preds,
-                                    targets_and_auxs,
-                                )
-
-                        if with_targets:
-                            _ = self.loss_calculator_val.compute_loss(
-                                preds=preds,
-                                targets_and_aux=targets_and_auxs,
-                                metadata=extract_batch_metadata(batch),
-                            )
-                        pbar.update(batch_size * self.cf.world_size)
-
-                        if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
-                            break
-
-                    # Terminal logging per noise level for progress visibility
                     if with_targets:
-                        self._log_terminal(0, mini_epoch, VAL, stage_suffix=stage_suffix)
+                        _ = self.loss_calculator_val.compute_loss(
+                            preds=preds,
+                            targets_and_aux=targets_and_auxs,
+                            metadata=extract_batch_metadata(batch),
+                        )
+                    pbar.update(batch_size * self.cf.world_size)
 
-            # Extract losses for this noise level, suffix keys, and accumulate
-            loss_calc = self.loss_calculator_val
-            _, losses_level, stddev_level = prepare_losses_for_logging(
-                loss_calc.loss_hist,
-                loss_calc.losses_unweighted_hist,
-                loss_calc.stddev_unweighted_hist,
-            )
-            for key, value in losses_level.items():
-                all_losses[f"{key}{loss_suffix}"] = value
-            for key, value in stddev_level.items():
-                all_stddev[f"{key}{loss_suffix}"] = value
-            loss_calc.loss_hist = []
-            loss_calc.losses_unweighted_hist = []
-            loss_calc.stddev_unweighted_hist = []
+                    if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
+                        break
 
-        # Log all noise levels as a single "val" entry with suffixed loss keys
-        samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
-        if is_root() and with_targets:
-            self.train_logger.add_logs(VAL, samples, all_losses, all_stddev)
-
-        # reset fixed noise level
-        if is_diffusion:
-            self._set_validation_noise_level(None)
+                if with_targets:
+                    self._log_terminal(0, mini_epoch, VAL)
+                    self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
-
-    def _set_validation_noise_level(self, noise_level: float | None):
-        """Set fixed noise level on diffusion components for validation.
-
-        Args:
-            noise_level: The eta value (standard normal space) to fix for validation.
-                         sigma = exp(eta * p_std + p_mean). None resets to default (0.0).
-        """
-        # Unwrap DDP/FSDP to access the underlying model
-        base_model = getattr(self.model, "module", self.model)
-        # Set on the base model
-        if hasattr(base_model, "forecast_engine") and hasattr(
-            base_model.forecast_engine, "_fixed_noise_level"
-        ):
-            base_model.forecast_engine._fixed_noise_level = noise_level
-        # Also set on the EMA model (separate model copy used during validation)
-        if self.ema_model is not None:
-            ema_net = getattr(self.ema_model.ema_model, "module", self.ema_model.ema_model)
-            if hasattr(ema_net, "forecast_engine") and hasattr(
-                ema_net.forecast_engine, "_fixed_noise_level"
-            ):
-                ema_net.forecast_engine._fixed_noise_level = noise_level
-        for calc in self.target_and_aux_calculators_val.values():
-            if hasattr(calc, "_fixed_noise_level"):
-                calc._fixed_noise_level = noise_level
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
@@ -1268,15 +1215,13 @@ class Trainer(TrainerBase):
             total = sum(1 for _ in self.model.parameters())
             logger.info(f"Loaded optimizer state for {loaded}/{total} parameters.")
 
-    def _log(self, stage: Stage, stage_suffix: str = ""):
+    def _log(self, stage: Stage):
         """
         Logs training or validation metrics.
 
         Args:
             stage: Stage Is it's VAL, logs are treated as validation logs.
                         If TRAIN, logs are treated as training logs
-            stage_suffix: Optional suffix appended to the logged stage name
-                          (e.g. "_eta0.00" for per-noise-level validation).
 
         Notes:
             - This method only executes logging on the main process (rank 0).
@@ -1290,16 +1235,15 @@ class Trainer(TrainerBase):
         )
 
         samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
-        log_stage = f"{stage}{stage_suffix}" if stage_suffix else stage
 
         if is_root():
             # plain logger
             if stage == VAL:
-                self.train_logger.add_logs(log_stage, samples, losses_all, stddev_all)
+                self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.general.istep >= 0:
                 self.train_logger.add_logs(
-                    log_stage,
+                    stage,
                     samples,
                     losses_all,
                     stddev_all,
@@ -1480,7 +1424,7 @@ class Trainer(TrainerBase):
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)
 
-    def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage, stage_suffix: str = ""):
+    def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage):
         print_freq = self.train_logging.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
@@ -1494,7 +1438,7 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation{stage_suffix} ({self.cf.general.run_id}) : 
+                        f"""validation ({self.cf.general.run_id}) : 
                         {mini_epoch:03d} : {np.nanmean(avg_loss)}"""
                     )
 
@@ -1528,6 +1472,6 @@ class Trainer(TrainerBase):
         Log cached collapse monitoring metrics.
         """
         metrics = self.collapse_monitor.get_cached_metrics()
-        if metrics and is_root():
+        if metrics:
             metrics["num_samples"] = self.cf.general.istep
-            self.train_logger.log_metrics(stage, metrics)
+            self.collapse_metrics_writer.write((stage, metrics))
