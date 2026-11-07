@@ -190,8 +190,10 @@ def plot_maps_grid(
     n_cols = len(denoising_steps) + 1
     fig = plt.figure(figsize=(3.4 * n_cols, 7))
     axes = [
-        [fig.add_subplot(2, n_cols, row * n_cols + col + 1, projection=ccrs.PlateCarree())
-         for col in range(n_cols)]
+        [
+            fig.add_subplot(2, n_cols, row * n_cols + col + 1, projection=ccrs.PlateCarree())
+            for col in range(n_cols)
+        ]
         for row in range(2)
     ]
     for ax in (a for row in axes for a in row):
@@ -355,8 +357,7 @@ def main() -> None:
         type=int,
         nargs="+",
         default=None,
-        help="Which denoising steps to include in the map grid and individual maps "
-        "(default: all).",
+        help="Which denoising steps to include in the map grid and individual maps (default: all).",
     )
     parser.add_argument(
         "--plot-individual-maps",

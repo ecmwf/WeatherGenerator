@@ -61,9 +61,7 @@ EXCLUDED_STREAMS = [
     (pathlib.Path("#test.yml"), DUMMY_STREAM_CONF),
 ]
 
-DUMMY_BASE_CONF = {
-    "foo": "bar"
-}
+DUMMY_BASE_CONF = {"foo": "bar"}
 
 
 def contains_keys(super_config, sub_config):
@@ -148,18 +146,33 @@ def overwrite_file(overwrite_config):
 
 
 @pytest.fixture
-def config_fresh(private_config_file):
-    cf = config.load_merge_configs(private_config_file, None, None, None)
+def private_env(private_config_file, monkeypatch):
+    """Resolve the private config to the test's own file wherever the code looks it up
+    implicitly (e.g. get_path_model), instead of shelling out to platform-env.py."""
+    monkeypatch.setenv("WEATHERGEN_PRIVATE_CONF", str(private_config_file))
+    config._get_shared_wg_path.cache_clear()
+    yield private_config_file
+    config._get_shared_wg_path.cache_clear()
+
+
+@pytest.fixture
+def config_fresh(private_env, streams_dir):
+    cf = config.load_merge_configs(private_env, None, None, None)
     cf = config.set_run_id(cf, TEST_RUN_ID, False)
-    cf.data_loader_rng_seed = 42
+    cf.data_loading.rng_seed = 42
+    # streams are loaded after merging, as in run_train
+    write_stream_file(streams_dir / "test.yml", OmegaConf.to_yaml(DUMMY_STREAM_CONF))
+    cf.streams = config.load_streams(streams_dir)
 
     return cf
+
 
 @pytest.fixture
 def base_config():
     return OmegaConf.create(DUMMY_BASE_CONF)
 
-@pytest.fixure
+
+@pytest.fixture
 def base_file(base_config):
     with tempfile.NamedTemporaryFile("w+") as temp:
         temp.write(OmegaConf.to_yaml(base_config))
@@ -173,22 +186,23 @@ def test_contains_private(config_fresh):
     assert contains_keys(config_fresh, sanitized_private_conf)
 
 
-def test_is_paths_set(config_fresh):
-    paths = {"model_path": "foo", "run_path": "bar"}
+def test_is_paths_set(config_fresh, shared_working_dir):
+    shared_dir = pathlib.Path(shared_working_dir)
 
-    assert contains_keys(config_fresh, paths)
+    assert config.get_path_model(config_fresh) == shared_dir / "models" / TEST_RUN_ID
+    assert config.get_path_run(config_fresh) == shared_dir / "results" / TEST_RUN_ID
 
 
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_dict(overwrite_dict, private_config_file):
-    cf = config.load_merge_configs(private_config_file, None, None, None, None, overwrite_dict)
+    cf = config.load_merge_configs(private_config_file, None, None, None, overwrite_dict)
 
     assert contains(cf, overwrite_dict)
 
 
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_config(overwrite_config, private_config_file):
-    cf = config.load_merge_configs(private_config_file, None, None, None, None, overwrite_config)
+    cf = config.load_merge_configs(private_config_file, None, None, None, overwrite_config)
 
     assert contains(cf, overwrite_config)
 
@@ -196,20 +210,20 @@ def test_load_with_overwrite_config(overwrite_config, private_config_file):
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_file(private_config_file, overwrite_file):
     sub_cf = OmegaConf.load(overwrite_file)
-    cf = config.load_merge_configs(private_config_file, None, None, None, None, overwrite_file)
+    cf = config.load_merge_configs(private_config_file, None, None, None, overwrite_file)
 
     assert contains(cf, sub_cf)
 
 
 def test_load_with_base_config(private_config_file, base_config):
-    cf = config.load_merge_configs(private_config_file, None, None, None, base_config)
+    cf = config.load_merge_configs(private_config_file, None, None, base_config)
 
     assert contains(cf, base_config)
 
 
 def test_load_with_base_file(private_config_file, base_file):
     sub_cf = OmegaConf.load(base_file)
-    cf = config.load_merge_configs(private_config_file, None, None, None, None, base_file)
+    cf = config.load_merge_configs(private_config_file, None, None, base_file)
 
     assert contains(cf, sub_cf)
 
@@ -218,7 +232,7 @@ def test_load_with_stream_in_overwrite(private_config_file, streams_dir, mocker)
     overwrite = {"streams_directory": streams_dir}
     stub = mocker.patch("weathergen.common.config.load_streams", return_value=streams_dir)
 
-    config.load_merge_configs(private_config_file, None, None, None, None, overwrite)
+    config.load_merge_configs(private_config_file, None, None, None, overwrite)
 
     stub.assert_called_once_with(streams_dir)
 
@@ -227,7 +241,7 @@ def test_load_multiple_overwrites(private_config_file):
     overwrites = [{"foo": 1, "bar": 1, "baz": 1}, {"foo": 2, "bar": 2}, {"foo": 3}]
 
     expected = {"foo": 3, "bar": 2, "baz": 1}
-    cf = config.load_merge_configs(private_config_file, None, None, None, None, *overwrites)
+    cf = config.load_merge_configs(private_config_file, None, None, None, *overwrites)
 
     assert contains(cf, expected)
 
@@ -239,7 +253,9 @@ def test_load_existing_config(mini_epoch, private_config_file, config_fresh):
     config_fresh.num_mini_epochs = test_num_mini_epochs  # some specific change
     config.save(config_fresh, mini_epoch)
 
-    cf = config.load_merge_configs(private_config_file, config_fresh.run_id, None, mini_epoch)
+    cf = config.load_merge_configs(
+        private_config_file, config_fresh.general.run_id, mini_epoch, None
+    )
 
     assert cf.num_mini_epochs == test_num_mini_epochs
 
@@ -265,7 +281,7 @@ def test_set_run_id(config_fresh, run_id, reuse, expected, mocker):
 
     config_fresh = config.set_run_id(config_fresh, run_id, reuse)
 
-    assert config_fresh.run_id == expected
+    assert config_fresh.general.run_id == expected
 
 
 def test_print_cf_no_secrets(config_fresh):
@@ -276,7 +292,7 @@ def test_print_cf_no_secrets(config_fresh):
 
 @pytest.mark.parametrize("rel_path,cf", VALID_STREAMS)
 def test_load_streams(streams_dir, rel_path, cf):
-    expected = get_expected_config(*next(cf.items()))
+    expected = get_expected_config(*next(iter(cf.items())))
     write_stream_file(streams_dir / rel_path, OmegaConf.to_yaml(cf))
 
     streams = config.load_streams(streams_dir)
@@ -323,7 +339,9 @@ def test_load_multiple_streams_content(streams_dir, rel_path, cf):
 
     streams = config.load_streams(streams_dir)
 
-    assert all(is_equal(stream, expected) for stream, expected in zip(streams.values(), expected))
+    assert all(
+        is_equal(stream, exp) for stream, exp in zip(streams.values(), expected, strict=True)
+    )
 
 
 def test_load_duplicate_streams(streams_dir):
@@ -346,5 +364,6 @@ def test_load_duplicate_streams_same_file(streams_dir):
 def test_save(mini_epoch, config_fresh):
     config.save(config_fresh, mini_epoch)
 
-    cf = config.load_run_config(config_fresh.run_id, mini_epoch, config_fresh.model_path)
-    assert is_equal(cf, config_fresh)
+    cf = config.load_run_config(config_fresh.general.run_id, mini_epoch, None)
+    # time keys are saved as plain strings; load_merge_configs restores their resolvers
+    assert is_equal(config._sanitize_time_keys(cf), config_fresh)

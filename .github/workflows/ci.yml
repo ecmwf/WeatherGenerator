@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "develop"]
+    branches: [ "main", "develop", "develop-ssl-diffusion-performance" ]
   pull_request:
-    branches: [ "main", "develop"]
+    branches: [ "main", "develop", "develop-ssl-diffusion-performance" ]
     paths-ignore:
       - "CHANGELOG.md"
       - "README.md"
@@ -37,6 +37,11 @@ jobs:
         run: ./scripts/actions.sh type-check
   pr:
     name: PR checks
+    # Only for pull requests: the check needs a PR number, which pushes do not have.
+    # Not for develop-ssl-diffusion-performance, whose PRs need no linked issue.
+    if: >-
+      github.event_name == 'pull_request'
+      && github.base_ref != 'develop-ssl-diffusion-performance'
     runs-on: ubuntu-latest
 
     steps:

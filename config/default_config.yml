@@ -101,6 +101,15 @@ streams: ???
 
 # type of zarr_store
 zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
+# layout of the written zarr arrays (see weathergen.common.io.ZarrWriteConfig); for large grids
+# larger chunks write faster, e.g. N320 (542080 points): chunk_nsamples: 542080,
+# shard_nsamples: 3252480, scale_factor: 1, async_concurrency: 64
+zarr_write:
+  sharding: True
+  chunk_nsamples: 672
+  shard_nsamples: 40320
+  scale_factor: 4
+  async_concurrency: null # zarr's default
 
 general:
 
@@ -224,10 +233,18 @@ validation_config:
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
+    # copy the output to host and write it in the background, while the next forecast
+    # steps (forecast.chunk_size) run on the device
+    async_write: False,
     }
 
   # run validation before training starts (mainly for model development)
   validate_before_training: False
+
+  # load target values and compute the validation loss; False for inference without targets
+  # (e.g. in test_config): only the target points are prepared, the predictions at them are
+  # written chunk by chunk (forecast.chunk_size) and no loss is computed
+  with_targets: True
 
 
 # test config; full test config is merge of validation and test config

@@ -13,6 +13,7 @@ import json
 import logging
 import time
 from collections import deque
+from collections.abc import Iterator
 from math import sqrt
 
 import numpy as np
@@ -25,6 +26,7 @@ from torch.distributed.tensor import DTensor, distribute_tensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
+from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model import ModelOutput
@@ -36,12 +38,14 @@ from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.optimizer import build_optimizer
+from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
     VAL,
+    NoOpGradScaler,
     Stage,
     cfg_keys_to_filter,
     extract_batch_metadata,
@@ -52,14 +56,13 @@ from weathergen.train.utils import (
 )
 from weathergen.utils.distributed import is_root
 from weathergen.utils.inference_logger import EXTRA_INFERENCE_WRITERS
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import (
     ScalarMetricsJSONLWriter,
     TrainLogger,
     prepare_losses_for_logging,
 )
 from weathergen.utils.utils import get_dtype
-from weathergen.utils.validation_io import write_output
+from weathergen.utils.validation_io import AsyncOutputWriter, stage_output, write_output
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,42 @@ def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
             t_aux.output_idxs = [t_aux.output_idxs[i // repeat] for i in range(n_pred)]
 
 
+class RolloutProgress:
+    """
+    Progress bar of one batch's rollout, over its forecast steps: from the end of the global
+    assimilation through the forecast engine to the end of writing the output.
+
+    The bar starts when the encoder's forward returns, i.e. on the first chunk of the
+    rollout; the device is synchronized there so that it starts when the assimilation has
+    run, not when it was queued.
+    """
+
+    def __init__(self, encoder: torch.nn.Module, num_steps: int, device: torch.device):
+        self.num_steps = num_steps
+        self.device = device
+        self.pbar: tqdm.tqdm | None = None
+        self._hook = encoder.register_forward_hook(self._start)
+
+    def _start(self, *_) -> None:
+        self._hook.remove()
+        torch.accelerator.synchronize(self.device)
+        self.pbar = tqdm.tqdm(total=self.num_steps, desc="rollout", unit="step", leave=True)
+
+    def update(self, num_steps: int) -> None:
+        """Count forecast steps whose output is computed (and written or submitted)."""
+        if self.pbar is not None:
+            self.pbar.update(num_steps)
+
+    def close(self, output_writer: AsyncOutputWriter | None) -> None:
+        """Close the bar once all output is written."""
+        self._hook.remove()
+        if output_writer is not None:
+            output_writer.wait()
+        if self.pbar is not None:
+            self.pbar.update(self.num_steps - self.pbar.n)
+            self.pbar.close()
+
+
 class Trainer(TrainerBase):
     def __init__(self, train_logging: Config):
         TrainerBase.__init__(self)
@@ -124,7 +163,7 @@ class Trainer(TrainerBase):
         self.dataset_val: MultiStreamDataSampler | None = None
         self.device: torch.device = None
         self.ema_model = None
-        self.grad_scaler: torch.amp.GradScaler | None = None
+        self.grad_scaler: torch.amp.GradScaler | NoOpGradScaler = NoOpGradScaler()
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
@@ -132,6 +171,8 @@ class Trainer(TrainerBase):
         self.model = None
         self.model_params = None
         self.optimizers: list[torch.optim.Optimizer] | None = None
+        self.optimizer_names: list[str] | None = None
+        self._muon_effective_lr_factor: float | None = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
         self.target_and_aux_calculators_val = None
@@ -141,10 +182,11 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
-        self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
         self.loss_spike_cfg = None
         self.loss_spike_file = None
         self.loss_spike_history = deque()
+        # writes validation output in the background while validate() runs
+        self.output_writer: AsyncOutputWriter | None = None
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -247,13 +289,6 @@ class Trainer(TrainerBase):
             enabled=collapse_config.get("enabled", False),
         )
 
-        if cf.train_logging.get("track_performance_metrics"):
-            self.perf_tracker = ThroughputTracker(
-                device=torch.device(self.devices[0]),
-                warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
-                batch_size_per_gpu=self.batch_size_per_gpu,
-            )
-
     def get_target_aux_calculators(self, mode_cfg):
         """
         Get target_aux_calculators for given mode_cfg
@@ -278,6 +313,38 @@ class Trainer(TrainerBase):
             for start in range(0, len(output_idxs), chunk_size)
         ]
 
+    def _rollout_progress(self, batch) -> RolloutProgress | None:
+        """Progress bar of the rollout of the batch, in inference on the root rank."""
+        if self.cf.rank > 0 or self.cf.stage != "inference":
+            return None
+        model = self.model if self.ema_model is None else self.ema_model.ema_model
+        model = getattr(model, "module", model)  # pylint: disable=bad-builtin
+        return RolloutProgress(model.encoder, len(batch.get_output_idxs()), self.device)
+
+    def _write_output(self, *args) -> None:
+        """
+        Write output with the arguments of write_output.
+
+        With an output writer, the copies to host and the zarr write run in the background,
+        overlapping with the next forecast steps.
+        """
+        if self.output_writer is None:
+            write_output(*args)
+        else:
+            staged = stage_output(*args, copy_stream=self.output_writer.copy_stream)
+            self.output_writer.submit(staged)
+
+    @staticmethod
+    def _keeps_full_validation_output(mode_cfg) -> bool:
+        """
+        Whether validation keeps the predictions of all chunks (for the full loss).
+
+        Without targets (`with_targets: False`, inference) there is no loss, so only the
+        current chunk is kept and the data is moved to the device chunk by chunk.
+        """
+        with_targets = mode_cfg.get("with_targets", True)
+        return with_targets and mode_cfg.get("compute_full_validation_loss", True)
+
     def _process_validation_chunks(
         self,
         batch,
@@ -287,6 +354,7 @@ class Trainer(TrainerBase):
         bidx,
         targets_and_auxs,
         is_diffusion: bool = False,
+        rollout_progress: RolloutProgress | None = None,
     ) -> ModelOutput:
         """Run the rollout in chunks and assemble the predictions for the whole batch."""
         forecast_cfg = mode_cfg.get("forecast", {})
@@ -302,7 +370,7 @@ class Trainer(TrainerBase):
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
         # This assumes that you only have a physical loss, else this breaks
-        compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
+        compute_full_loss = self._keeps_full_validation_output(mode_cfg)
         should_write_output = not is_diffusion and bidx < num_samples_write
         if should_write_output:
             denormalize_data_fct = (
@@ -356,7 +424,7 @@ class Trainer(TrainerBase):
                     target_output = {physical_loss_names[0]: target_aux_chunk}
                 else:
                     target_output = targets_and_auxs
-                write_output(
+                self._write_output(
                     self.cf,
                     mode_cfg,
                     batch_size,
@@ -367,6 +435,8 @@ class Trainer(TrainerBase):
                     forecast_chunk,
                     target_output,
                 )
+            if rollout_progress is not None and not is_diffusion:
+                rollout_progress.update(len(chunk))
 
             if compute_full_loss:
                 physical += forecast_chunk.physical
@@ -424,7 +494,10 @@ class Trainer(TrainerBase):
         self.dataset_val = self.dataset
 
         # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers)
+        loader_num_workers = min(
+            self.test_cfg.samples_per_mini_epoch,
+            cf.data_loading.get("num_workers_validation", cf.data_loading.num_workers),
+        )
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
@@ -447,6 +520,7 @@ class Trainer(TrainerBase):
             cf.with_ddp,
             cf.with_fsdp,
         )
+        self.reseed_per_rank(cf)
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.test_cfg)
@@ -461,6 +535,11 @@ class Trainer(TrainerBase):
         # inference validation set
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
+
+        # Without this, NCCL's heartbeat monitor keeps polling a TCPStore whose server has
+        # already gone away, and the ranks never exit.
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
@@ -527,6 +606,9 @@ class Trainer(TrainerBase):
                 rampup_ratio=validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
+
+        # model (and EMA model) are initialized: let the ranks' RNGs diverge from here
+        self.reseed_per_rank(cf)
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
@@ -607,7 +689,7 @@ class Trainer(TrainerBase):
 
         # training loop
 
-        for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
+        for mini_epoch in self.mini_epochs(mini_epoch_base):
             if is_root():
                 logger.info(
                     f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train."
@@ -628,6 +710,20 @@ class Trainer(TrainerBase):
 
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
+
+        # Without this, NCCL's heartbeat monitor keeps polling a TCPStore whose server has
+        # already gone away, and the ranks never exit.
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
+    def mini_epochs(self, mini_epoch_base: int) -> Iterator[int]:
+        """
+        Yield the mini_epochs that run() iterates over.
+
+        Subclass seam: overriding this changes how long a run lasts without duplicating
+        run(). See weathergen.train.profiling_trainer.ProfilingTrainer.
+        """
+        yield from range(mini_epoch_base, self.training_cfg.num_mini_epochs)
 
     def validate_before_training(self):
         """
@@ -667,7 +763,7 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
-        for bidx, batch in enumerate(dataset_iter):
+        for bidx, batch in self.train_batches(dataset_iter):
             if cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
                 batch = batch.pin_memory()
@@ -778,13 +874,6 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
-            self.perf_tracker.step(
-                batch,
-                self.cf.general.istep,
-                log_fn=lambda m: self.train_logger.log_metrics(
-                    TRAIN, m, step=self.cf.general.istep
-                ),
-            )
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
                 self.collapse_monitor._compute_collapse_metrics(
@@ -810,7 +899,41 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
+    def train_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
+        """
+        Yield the (index, batch) pairs that train() steps over.
+
+        Subclass seam: overriding this bounds the loop or wraps it in a context (e.g. a
+        profiler) while the training step itself stays in train(), so there is only ever
+        one copy of it. See weathergen.train.profiling_trainer.ProfilingTrainer.
+        """
+        yield from enumerate(dataset_iter)
+
+    def validation_batches(self, dataset_iter: Iterator) -> Iterator[tuple[int, ModelBatch]]:
+        """
+        Yield the (index, batch) pairs that validate() steps over.
+
+        Subclass seam, like train_batches: the validation step itself stays in validate().
+        """
+        yield from enumerate(dataset_iter)
+
     def validate(self, mini_epoch, mode_cfg, batch_size):
+        """
+        Perform validation / test computation as specified by mode_cfg.
+
+        With output.async_write, the output is written in the background; all of it is
+        written when validate() returns.
+        """
+        if mode_cfg.get("output", {}).get("async_write", False):
+            self.output_writer = AsyncOutputWriter(self.device)
+        try:
+            self._validate(mini_epoch, mode_cfg, batch_size)
+        finally:
+            if self.output_writer is not None:
+                output_writer, self.output_writer = self.output_writer, None
+                output_writer.close()
+
+    def _validate(self, mini_epoch, mode_cfg, batch_size):
         """
         Perform validation / test computation as specified by mode_cfg.
         """
@@ -819,6 +942,12 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         is_diffusion = cf.get("diffusion", {}).get("enabled", False)
+        # inference without targets: predict and write, but compute no loss
+        with_targets = mode_cfg.get("with_targets", True)
+        assert with_targets or not is_diffusion, (
+            "with_targets: False is not supported for diffusion models, whose output writing "
+            "expands the targets along the denoising trajectory."
+        )
 
         dataset_val_iter = iter(self.data_loader_validation)
 
@@ -830,8 +959,8 @@ class Trainer(TrainerBase):
                 desc="validation samples",
                 position=0,
             ) as pbar:
-                for bidx, batch in enumerate(dataset_val_iter):
-                    compute_full_loss = mode_cfg.get("compute_full_validation_loss", True)
+                for bidx, batch in self.validation_batches(dataset_val_iter):
+                    compute_full_loss = self._keeps_full_validation_output(mode_cfg)
                     if compute_full_loss or is_diffusion:
                         batch.to_device(self.device)
                     else:
@@ -851,6 +980,12 @@ class Trainer(TrainerBase):
                             loss_name,
                             target_aux,
                         ) in self.target_and_aux_calculators_val.items():
+                            # without targets only the physical entry is needed, to write
+                            # the output; latent targets would cost a teacher forward pass
+                            if not with_targets and not isinstance(
+                                target_aux, PhysicalTargetAndAux
+                            ):
+                                continue
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
@@ -859,6 +994,7 @@ class Trainer(TrainerBase):
                                 self.model,
                             )
 
+                        rollout_progress = self._rollout_progress(batch)
                         preds, targets_and_auxs = self._process_validation_chunks(
                             batch,
                             mode_cfg,
@@ -867,6 +1003,7 @@ class Trainer(TrainerBase):
                             bidx,
                             targets_and_auxs,
                             is_diffusion,
+                            rollout_progress,
                         )
                         # The diffusion target_aux calculator needs a single latent target
                         # slot regardless of the number of real forecast steps; replicate it
@@ -887,7 +1024,7 @@ class Trainer(TrainerBase):
                                 if mode_cfg.get("output", {}).get("normalized_samples", False)
                                 else self.dataset_val.denormalize_target_channels
                             )
-                            write_output(
+                            self._write_output(
                                 self.cf,
                                 mode_cfg,
                                 batch_size,
@@ -913,19 +1050,23 @@ class Trainer(TrainerBase):
                                             preds,
                                             targets_and_auxs,
                                         )
+                        if rollout_progress is not None:
+                            rollout_progress.close(self.output_writer)
 
-                    _ = self.loss_calculator_val.compute_loss(
-                        preds=preds,
-                        targets_and_aux=targets_and_auxs,
-                        metadata=extract_batch_metadata(batch),
-                    )
+                    if with_targets:
+                        _ = self.loss_calculator_val.compute_loss(
+                            preds=preds,
+                            targets_and_aux=targets_and_auxs,
+                            metadata=extract_batch_metadata(batch),
+                        )
                     pbar.update(batch_size * self.cf.world_size)
 
                     if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                         break
 
-                self._log_terminal(0, mini_epoch, VAL)
-                self._log(VAL)
+                if with_targets:
+                    self._log_terminal(0, mini_epoch, VAL)
+                    self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
@@ -1253,8 +1394,8 @@ class Trainer(TrainerBase):
             if stream_data is None:
                 continue
 
-            source_raw = getattr(stream_data, "source_raw", [])
-            target_times_raw = getattr(stream_data, "target_times_raw", [])
+            source_raw = getattr(stream_data, "source_raw", [])  # pylint: disable=bad-builtin
+            target_times_raw = getattr(stream_data, "target_times_raw", [])  # pylint: disable=bad-builtin
             source_start_idx = int(stream_data.sample_idx) - len(source_raw) + 1
 
             streams[stream_name] = {
@@ -1264,7 +1405,7 @@ class Trainer(TrainerBase):
                 "source_step_indices": [source_start_idx + step for step in range(len(source_raw))],
                 "target_step_indices": list(range(len(target_times_raw))),
                 "source_step_datetimes": [
-                    self._serialize_datetimes(getattr(raw_data, "datetimes", None))
+                    self._serialize_datetimes(getattr(raw_data, "datetimes", None))  # pylint: disable=bad-builtin
                     for raw_data in source_raw
                 ],
                 "target_step_datetimes": [
@@ -1318,7 +1459,7 @@ class Trainer(TrainerBase):
 
     def _drop_latest_loss_record(self) -> None:
         for hist_name in ("loss_hist", "losses_unweighted_hist", "stddev_unweighted_hist"):
-            hist = getattr(self.loss_calculator, hist_name)
+            hist = getattr(self.loss_calculator, hist_name)  # pylint: disable=bad-builtin
             if hist:
                 hist.pop()
 
