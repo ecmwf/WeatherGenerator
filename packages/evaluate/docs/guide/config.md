@@ -3,48 +3,49 @@
 FInd all configuration options accepted by `uv run evaluate --config <your_config.yml>` below.
 A working template to copy and edit can be found in `config/eval_config.yml`.
 
-<pre>
-# Useful Links
+<pre style="
+    max-width:100%;
+    overflow-x:auto;
+    white-space:pre-wrap;
+    word-break:break-word;
+    background-color: #F8F8F8;
+    padding-left:10px;
+    padding-right:10px">
 
-- <a href="https://www.microsoft.com">Microsoft</a>
-- <a href="https://github.com">GitHub</a>
-- <a href="https://docs.python.org/3/">Python Documentation</a>
-</pre>
+max_workers: ...          # optional top-level cap on parallelism 
+                          <a href="./config/top-level.md">Top-Level Keys</a>
 
-```yaml
-max_workers: ...                  # optional top-level cap on parallelism
-
-global_plotting_options:          # optional - applied to all runs/streams
+global_plotting_options:  # optional - applied to all runs/streams
+                          <a href="./config/global-plotting-options.md">Global Plotting Options</a>
   ...
 
-evaluation:                       # required - scoring and summary plot settings
-  metrics: [...]
-  regions: [...]
+evaluation:               # required - scoring and summary plot settings 
+                          <a href="./config/evaluation.md">Evaluation</a>
+  metrics: [...]          <a href="./config/metrics.md">Metrics Reference</a>
+  regions: [...]          <a href="./config/regions.md">Regions Reference</a>
   ...
 
-default_streams:                  # optional - stream config used when a run_id does not
-  ERA5:                           #   specify its own streams
+default_streams:          # optional - stream config used when
+                          # run_id does not specify its own streams
+                          <a href="./config/runs-and-streams.md">default_streams, run_ids, and stream blocks</a> 
+  ERA5:                  
     channels: [...]
     evaluation: ...
     plotting: ...
   CERRA:
     ...
 
-run_ids:                          # required - one entry per run to evaluate
+run_ids:                  # required - one entry per run to evaluate
   <run_id>:
     label: "..."
     results_base_dir: "..."
     # streams: optional; if absent, default_streams is used
   ...
-```
-## 
 
-1. [Top-level keys](config/layout-and-top-level.md)
-2. [Global Plotting Options](config/global-plotting-options.md)
-3. [Evaluation](config/evaluation.md)
-4. [`default_streams`, `run_ids`, and stream blocks](config/runs-and-streams.md)
-5. [Metrics reference](config/metrics.md)
-6. [Regions reference](config/regions.md)
-7. [Score caching (JSON files)](config/score-caching.md)
-8. [CSV format for pre-computed scores](config/csv-format.md)
-9. [CLI overrides](config/cli-overrides.md)
+</pre>
+
+Further configuration options:
+
+- [Score caching (JSON files)](config/score-caching.md)
+- [CSV format for pre-computed scores](config/csv-format.md)
+- [CLI overrides](config/cli-overrides.md)
