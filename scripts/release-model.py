@@ -324,7 +324,8 @@ def main() -> None:
     }
 
     # Check against the remote tags of both repos: a tag present in either one blocks the
-    # release. Local tags are ignored, so leftovers from fork tests don't interfere.
+    # release. Version checks use only remote tags, so leftovers from fork tests don't
+    # interfere; a local tag with the exact release name is caught separately below.
     all_tags = {t for repo in repos for t in git_remote_tags(repo, remotes[repo])}
 
     # 5 – Tag must not exist + no smaller version
