@@ -234,6 +234,13 @@ def parse_args(args: list) -> argparse.Namespace:
         "streams, variable, method, date, and run ID",
     )
 
+    parser.add_argument(
+        "--results-path",
+        type=str,
+        help="Path where inference results are stored either path or folder (processes all files)",
+        default=None,
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
@@ -315,6 +322,11 @@ def export_from_args(args: list) -> None:
     # Ensure output directory exists
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure results path exists if specified
+    if args.results_path is not None:
+        results_path = Path(args.results_path)
+        assert results_path.exists(), "Results not found, check path provided"
 
     for dtype in args.type:
         _logger.info(
