@@ -15,6 +15,9 @@ test_job:
         echo "PRIVATE_REPO_BRANCH=$PRIVATE_REPO_BRANCH"
         export WEATHERGEN_PRIVATE_REPO_PATH="$PWD/WeatherGenerator-private"
         echo "WEATHERGEN_PRIVATE_REPO_PATH=$WEATHERGEN_PRIVATE_REPO_PATH"
+        # Use a fixed private config instead of inferring it from the hostname.
+        export WEATHERGEN_PRIVATE_CONF="${WEATHERGEN_PRIVATE_CONF:-$WEATHERGEN_PRIVATE_REPO_PATH/hpc/santis/config/ci_paths.yml}"
+        echo "WEATHERGEN_PRIVATE_CONF=$WEATHERGEN_PRIVATE_CONF"
 
         # Install the pinned uv instead of relying on the one shipped with the uenv.
         export UV_INSTALL_DIR="$PWD/.ci-uv"
