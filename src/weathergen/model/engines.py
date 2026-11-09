@@ -575,21 +575,48 @@ class GlobalAssimilationEngine(torch.nn.Module):
         return tokens, intermediates
 
 
-class IdentityEngine(torch.nn.Module):
+class ForecastEngineBase(torch.nn.Module):
+    """Common interface for Model.forecast_engine implementations (IdentityEngine,
+    ForecastingEngine, DiffusionForecastEngine).
+    """
+
+    def prepare_fe_input(
+        self, tokens: torch.Tensor, meta_info: dict, forecast_offset: int
+    ) -> torch.Tensor:
+        """Derive the forecast engine's initial condition from the assimilated input-step window.
+
+        tokens: (B, T, H, D), T loaded input steps, newest first (tokens[:, 0] = t). Default:
+        collapse by summation. Subclasses may instead split tokens into e.g. a conditioning
+        signal and a starting state (see DiffusionForecastEngine.prepare_fe_input).
+        """
+        return tokens.sum(axis=1)
+
+
+@dataclasses.dataclass
+class DecodeSpec:
+    """Instructions for Model._decode_step on how to decode one forecast step.
+
+    Engines may attach this to meta_info["decode_spec"] (see ForecastEngineBase) to bypass the
+    generic training_mode-gated decode in Model._decode_step; absence (None) falls back to that
+    default.
+    """
+
+    decode_latent: bool
+    merge_ensemble: bool
+
+
+class IdentityEngine(ForecastEngineBase):
     """Identity engine that passes tokens through unchanged."""
 
     def __init__(self):
         super().__init__()
         self.fe_blocks = torch.nn.ModuleList()
 
-    def collapse_input_steps(self, tokens, meta_info, forecast_offset):
-        return tokens.sum(axis=1)
-
     def forward(self, tokens, *args, **kwargs):
         return tokens
 
 
-class ForecastingEngine(torch.nn.Module):
+class ForecastingEngine(ForecastEngineBase):
     name: "ForecastingEngine"
 
     def __init__(self, cf: Config, mode_cfg, num_healpix_cells: int, dim_aux: int = None) -> None:
@@ -710,9 +737,6 @@ class ForecastingEngine(torch.nn.Module):
             torch.nn.Linear(_inner_dim, _diffusion_latent_dim, bias=False) if _concat_hd else None
         )
 
-    def collapse_input_steps(self, tokens, meta_info, forecast_offset):
-        return tokens.sum(axis=1)
-
     def forward(
         self,
         tokens: torch.Tensor,
@@ -721,6 +745,7 @@ class ForecastingEngine(torch.nn.Module):
         noise_emb: torch.Tensor = None,
         conditioning: torch.Tensor = None,
         coords: torch.Tensor = None,
+        **kwargs,
     ) -> torch.Tensor:
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
         # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")

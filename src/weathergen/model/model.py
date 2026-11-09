@@ -823,7 +823,7 @@ class Model(torch.nn.Module):
         # per-sample meta info passed to the forecast engine (stacked along the sample dim)
         fe_meta_info = source_samples.stack_sample_meta_info()
 
-        tokens = self.forecast_engine.collapse_input_steps(tokens, fe_meta_info, forecast_offset)
+        tokens = self.forecast_engine.prepare_fe_input(tokens, fe_meta_info, forecast_offset)
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
@@ -852,6 +852,10 @@ class Model(torch.nn.Module):
                 step,
                 meta_info=fe_meta_info,
                 coords=model_params.rope_coords,
+                model=self,
+                model_params=model_params,
+                batch=source_samples,
+                output=output,
             )
             output = self._decode_step(
                 tokens,
@@ -877,49 +881,44 @@ class Model(torch.nn.Module):
     ) -> ModelOutput:
         """Physical/latent decode for one forecast step.
 
-        decode_spec is only set (via meta_info) by diffusion's inference path; it bypasses the
-        generic training_mode gating below since diffusion decode decisions (which ODE state to
-        decode, whether to also predict latent, ensemble merging) don't map onto training_mode.
+        decode_spec is only set (via meta_info) by diffusion's inference path; its decode_latent/
+        merge_ensemble flags override the generic training_mode-derived ones below, since
+        diffusion decode decisions (which ODE state to decode, whether to also predict latent,
+        ensemble merging) don't map onto training_mode.
         """
         if decode_spec is None:
-            if "masking" in self.cf.training_config.training_mode:
-                # decoder predictions
-                output.add_latent_prediction(
-                    output.chunk_idx(step),
-                    "latent_state",
-                    self.tokens_to_latent_state(None, tokens),
-                )
-                output = self.predict_decoders(model_params, step, tokens, batch, output)
+            decode_physical = "masking" in self.cf.training_config.training_mode
+            decode_latent = "student_teacher" in self.cf.training_config.training_mode
+            merge_ensemble = False
+        else:
+            decode_physical = True
+            decode_latent = decode_spec.decode_latent
+            merge_ensemble = decode_spec.merge_ensemble
 
-            if "student_teacher" in self.cf.training_config.training_mode:
-                # latent predictions (raw and with SSL heads)
-                output = self.predict_latent(
-                    model_params, step, tokens, batch, output, intermediates
-                )
-            return output
-
-        if decode_spec.trajectory is not None:
-            output.diffusion_steps_output = self.forecast_engine.decode_diffusion_steps(
-                self,
-                model_params,
-                step,
-                decode_spec.trajectory,
-                batch,
-                output.forecast_offset,
-                decode_spec.cond,
-                decode_spec.predict_residual,
-            )
-
-        output = self.predict_decoders(model_params, step, tokens, batch, output)
-        if decode_spec.merge_ensemble:
+        if decode_physical:
+            output = self.predict_decoders(model_params, step, tokens, batch, output)
+        if merge_ensemble:
             # fold the per-member batch dim into a single ensemble-dim tensor for this step
             idx = output.chunk_idx(step)
             output.physical[idx] = {
                 sname: (torch.cat(list(pred), dim=0),)
                 for sname, pred in output.physical[idx].items()
             }
-        if decode_spec.decode_latent:
-            output = self.predict_latent(model_params, step, tokens, batch, output)
+        if decode_latent:
+            output = self.predict_latent(
+                model_params,
+                step,
+                tokens,
+                batch,
+                output,
+                intermediates if decode_spec is None else None,
+            )
+        # Make sure latent_state always exists in the output; it's needed further downstream
+        idx = output.chunk_idx(step)
+        if "latent_state" not in output.latent[idx]:
+            output.add_latent_prediction(
+                idx, "latent_state", self.tokens_to_latent_state(None, tokens)
+            )
         return output
 
     def _get_initial_conditions(
