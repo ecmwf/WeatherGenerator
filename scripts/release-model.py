@@ -34,8 +34,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent  # WeatherGenerator/scripts/
 WeatherGenerator_DIR = SCRIPT_DIR.parent  # WeatherGenerator/
 WeatherGeneratorPrivate_DIR = WeatherGenerator_DIR.parent / "WeatherGenerator-private"
 
-# Canonical remotes: tags are fetched from and pushed to these by default.
-# Matched against the URLs in `git remote -v`, so the local remote name does not matter.
+# Canonical remotes: tags are checked against and pushed to these by default.
+# Matched against each remote's push URL, so the local remote name does not matter.
 CANONICAL_REMOTE_URLS = {
     WeatherGenerator_DIR: "github.com/ecmwf/WeatherGenerator",
     WeatherGeneratorPrivate_DIR: "gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private",
