@@ -1,5 +1,14 @@
-"""HEALPix level-5 geometry of the latent tokens: the cell of a point, its neighbours, and where
-in the cell the point lies.
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+"""HEALPix geometry of the latent tokens: the cell of a point, its neighbours, and where in the
+cell the point lies.
 
 Token c is the cell WeatherGenerator's tokenizer calls c. The tokenizer computes HEALPix nested
 indices with phi = lon + 180 deg (datasets/tokenizer_utils.py), so token c covers the standard
@@ -15,9 +24,9 @@ import astropy_healpix as hp
 import numpy as np
 import numpy.typing as npt
 
-LEVEL = 5
-NSIDE = 2**LEVEL
-N_CELLS = 12 * NSIDE**2
+HEALPIX_LEVEL = 5
+NSIDE = 2**HEALPIX_LEVEL
+NUM_HEALPIX_CELLS = 12 * 4**HEALPIX_LEVEL
 LON_SHIFT = 180.0  # tokenizer longitude minus geographic longitude, degrees
 # cells are ~1.8 degrees across; this scales a point's offset from its cell centre to ~1
 OFFSET_SCALE = 1 / np.deg2rad(1.8)
@@ -34,19 +43,19 @@ def cell_of(lat, lon) -> npt.NDArray:
 @cache
 def cell_centres() -> tuple[npt.NDArray, npt.NDArray]:
     """Geographic (lat, lon) in degrees of each token's cell centre, lon in [-180, 180)."""
-    lon, lat = hp.healpix_to_lonlat(np.arange(N_CELLS), NSIDE, order="nested")
+    lon, lat = hp.healpix_to_lonlat(np.arange(NUM_HEALPIX_CELLS), NSIDE, order="nested")
     return lat.to_value(u.deg), (lon.to_value(u.deg) - LON_SHIFT + 180.0) % 360.0 - 180.0
 
 
 @cache
-def neighbours() -> npt.NDArray:
-    """[cell, 9]: the cell itself, then its 8 neighbours. The 24 cells that have only 7
-    neighbours repeat themselves in the missing slot."""
-    cells = np.arange(N_CELLS)
+def hp_nbours() -> npt.NDArray:
+    """[cell, 9]: the cell itself, then its 8 neighbours, as the model's own decoders use them.
+    The 24 cells that have only 7 neighbours repeat themselves in the missing slot."""
+    cells = np.arange(NUM_HEALPIX_CELLS)
     with np.errstate(invalid="ignore"):
-        nb = hp.neighbours(cells, NSIDE, order="nested").T
-    nb = np.where(nb < 0, cells[:, None], nb)
-    return np.concatenate([cells[:, None], nb], axis=1).astype(np.int64)
+        nbours = hp.neighbours(cells, NSIDE, order="nested").T
+    nbours = np.where(nbours < 0, cells[:, None], nbours)
+    return np.concatenate([cells[:, None], nbours], axis=1).astype(np.int64)
 
 
 def unit_vectors(lat, lon) -> npt.NDArray:

@@ -1,7 +1,7 @@
 # weathergen-latent-decoder
 
 Train a simple decoder on stored WeatherGenerator latent states and observations, without
-installing WeatherGenerator. Needs numpy, torch, zarr and astropy-healpix.
+installing WeatherGenerator. Needs numpy, torch, zarr, astropy-healpix and omegaconf.
 
 ```
 pip install packages/latent_decoder
@@ -10,27 +10,30 @@ pip install packages/latent_decoder
 | module | what it does |
 |---|---|
 | `latents.py` | reads the stored states; the only code that knows the storage format |
-| `obs.py` | reads WeatherGenerator observation zarr stores; replace it for other data |
+| `data_reader_obs.py` | reads a WeatherGenerator obs stream; replace it for other data |
 | `geometry.py` | HEALPix level-5 cells, neighbours and position features |
-| `head.py` | the decoder head: attention over a cell and its 8 neighbours, then an MLP |
-| `dataset.py` | pairs each state with the reports in its 6-h window |
-| `train_synop.py` | trains and tests a head on SYNOP reports |
+| `model.py` | the decoder: target coordinates attend to a cell's token and its 8 neighbours |
+| `run_train.py` | trains and validates a decoder |
+| `config/default_config.yml` | the default config |
 
 ```python
-from weathergen.latent_decoder.latents import open_latents
+from weathergen.latent_decoder.latents import LatentReader
 
-lat = open_latents("/ec/weathergen/latents/sdnbfpve-v1-raw/2023")
-s = lat.state(lat.bases[0], 1)  # tokens [12288, 2048], registers [64, 2048], window
+reader = LatentReader("/ec/weathergen/latents/sdnbfpve-v1-raw/2023")
+state = reader.get_state(reader.init_times[0], 1)  # tokens [12288, 2048], register_tokens, dtr
 ```
 
 ```
-python -m weathergen.latent_decoder.train_synop LATENTS OBS OUT \
-    --train 2023-01-01T00 2023-09-30T18 --test 2023-10-15T00 2023-12-31T18
+train_latent_decoder --config my_config.yml --options results_path=./runs/synop
 ```
 
-State k of an init with base time b covers [b + 6h·k, b + 6h·(k+1)). Step 0 is the encoded
-source window, whose observations were model inputs, so training and testing use steps 1 to 40.
-Test inits must start at least 41 steps (10 days 6 h) after the last training init.
+The config follows WeatherGenerator's: `training_config` and `validation_config` with their
+periods of init times, the obs `stream` as in `config/streams/`, and `--options key=value`
+overrides.
+
+State `fstep` of an init at time t covers [t + 6h·fstep, t + 6h·(fstep + 1)). Step 0 is the
+encoded source window, whose observations were model inputs, so training and validation use
+steps 1 to 40. Validation inits must be at least 41 steps (10 days 6 h) from every training init.
 
 Token c is the HEALPix nested cell c of WeatherGenerator's tokenizer, which uses longitude + 180°
 (see `geometry.py`). The `coords` stored by the latent writer before this was fixed are 180° off;

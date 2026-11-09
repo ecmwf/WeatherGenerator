@@ -1,0 +1,47 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Default config of train_latent_decoder. Override it with --config FILE and --options key=value.
+
+latents_path: /ec/weathergen/latents/sdnbfpve-v1-raw/2023
+results_path: ???
+
+# an obs stream as in config/streams/; target and geoinfo_channels are full column names
+stream:
+  name: SurfaceCombined
+  filenames: ['/lus/h2tcws01/project/weathergen/preprint_data_symlinks/observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr']
+  target: ['obsvalue_t2m_0', 'obsvalue_td2m_0', 'obsvalue_u10m_0', 'obsvalue_v10m_0', 'obsvalue_pmsl_0', 'obsvalue_ps_0']
+  geoinfo_channels: ['stalt', 'lsm', 'cos_sza', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+
+decoder:
+  dim_embed: 256
+  num_heads: 4
+
+data_loading:
+  num_workers: 8
+  rng_seed: 0
+
+# init times to train on, as one or more periods [start_date, end_date]; each sample is one
+# forecast step 1..40 of one init with all its reports (up to max_num_targets)
+training_config:
+  periods: [['2023-01-01T00:00', '2023-09-30T18:00']]
+  num_mini_epochs: 20
+  samples_per_mini_epoch: 1000
+  max_num_targets: 32768
+  learning_rate_scheduling:
+    # linear warm-up, then cosine decay to zero
+    lr_max: 3e-4
+    num_steps_warmup: 500
+
+# validation config; full validation config is merge of training and validation config.
+# Validation inits must be at least 41 steps (10 days 6 h) from every training init.
+validation_config:
+  periods: [['2023-10-15T00:00', '2023-12-31T18:00']]
+  init_time_stride: 4  # validate every n-th init
+  max_num_targets: 4096

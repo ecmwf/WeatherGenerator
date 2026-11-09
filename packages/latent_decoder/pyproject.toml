@@ -9,7 +9,11 @@ dependencies = [
     "torch",
     "zarr>=3.1",
     "astropy-healpix",
+    "omegaconf",
 ]
+
+[project.scripts]
+train_latent_decoder = "weathergen.latent_decoder.run_train:train"
 
 [dependency-groups]
 dev = [
