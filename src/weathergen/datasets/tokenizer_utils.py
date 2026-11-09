@@ -7,7 +7,6 @@ from torch import Tensor
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
-    locs_to_ctr_coords,
     r3tos2,
     s2tor3,
 )
@@ -448,7 +447,8 @@ def get_target_coords_local(
     a = torch.zeros(
         [
             *target_coords.shape[:-1],
-            1 + target_geoinfos.shape[1] + target_times.shape[1] + 5 * (3 * 5) + 3 * 8,
+            1 + target_geoinfos.shape[1] + target_times.shape[1] + 3,  # 5 * (3 * 5) + 3 * 8,
+            # 1 + target_geoinfos.shape[1] + target_times.shape[1] + 5 * (3 * 5) + 3 * 8,
         ]
     )
     a[..., 0] = stream_id
@@ -478,47 +478,47 @@ def get_target_coords_local(
         verts00_rots, tcs
     )
 
-    zi = 3
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
+    # zi = 3
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
 
-    zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts10_rots, tcs
-    )
+    # zi = 15
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    #     verts10_rots, tcs
+    # )
 
-    zi = 18
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
+    # zi = 18
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
 
-    zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts11_rots, tcs
-    )
+    # zi = 30
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    #     verts11_rots, tcs
+    # )
 
-    zi = 33
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
+    # zi = 33
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
 
-    zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts01_rots, tcs
-    )
+    # zi = 45
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    #     verts01_rots, tcs
+    # )
 
-    zi = 48
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
+    # zi = 48
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
 
-    zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        vertsmm_rots, tcs
-    )
+    # zi = 60
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+    #     vertsmm_rots, tcs
+    # )
 
-    zi = 63
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
+    # zi = 63
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
 
-    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
-    zi = 75
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
+    # tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
+    # zi = 75
+    # a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
 
-    # remaining geoinfos (zenith angle etc)
-    zi = 99
-    a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
+    # # remaining geoinfos (zenith angle etc)
+    # zi = 99
+    # a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
 
     return a
