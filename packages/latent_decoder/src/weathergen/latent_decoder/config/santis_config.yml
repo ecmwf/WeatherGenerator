@@ -1,0 +1,21 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# CSCS Santis paths for train_latent_decoder; everything else comes from default_config.yml.
+#   train_latent_decoder --config <this file> --options results_path=./runs/try1
+
+# sdnbfpve latents, 2023: 183 runs of 8 inits (every 6 h), copied from ECMWF
+latents_path: /capstor/store/cscs/userlab/ch17/latents/2023
+
+stream:
+  filenames: ['/capstor/store/cscs/userlab/ch17/data/observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr']
+
+data_loading:
+  # one CPU core per worker; a Santis GH200 node has 288 cores, the README's reference used 16
+  num_workers: 16

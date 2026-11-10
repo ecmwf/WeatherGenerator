@@ -103,6 +103,39 @@ the number of input features), `predictions.npz` (one row per validation report:
 `fstep`, `datetime`, `lat`, `lon`, `pred` and `obs` per channel, `channels`) and `scores.json`
 (RMSE per channel and forecast step, also printed at the end).
 
+For basic scores of `predictions.npz`:
+
+```
+python -m weathergen.latent_decoder.evaluate RESULTS_PATH --plot
+```
+
+It prints, per channel, bias, RMSE, correlation and the skill against always predicting the mean
+observation (1 - RMSE / std of the observations: 0 is no better than a constant), and RMSE per
+lead time. `--plot` writes `rmse_vs_fstep.png` and `scatter.png` (needs matplotlib).
+
+## CSCS Santis
+
+`config/santis_config.yml` sets the Santis paths of the 2023 sdnbfpve latents and the surface
+obs store. The WeatherGenerator `.venv` already has every dependency, so instead of installing
+the package, put it on the path:
+
+```
+source .venv/bin/activate
+export PYTHONPATH=$PWD/packages/latent_decoder/src
+python -m weathergen.latent_decoder.run_train \
+    --config packages/latent_decoder/src/weathergen/latent_decoder/config/santis_config.yml \
+    --options results_path=./runs/try1
+```
+
+Santis login nodes have GPUs, so a very small run works there as a test: one training and one
+validation init, e.g. `data_loading.num_workers=2`
+`"training_config.periods=[['2023-01-01T00:00','2023-01-01T00:00']]"`
+`training_config.num_mini_epochs=2 training_config.samples_per_mini_epoch=10`
+`training_config.max_num_targets=4096`
+`"validation_config.periods=[['2023-02-01T00:00','2023-02-01T00:00']]"`
+`validation_config.init_time_stride=1` takes about 2 minutes. Run anything larger on a compute
+node.
+
 ## Your own data
 
 - Another WeatherGenerator obs store: change `stream`, e.g. copy an entry from
