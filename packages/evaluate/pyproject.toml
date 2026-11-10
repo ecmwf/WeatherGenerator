@@ -36,8 +36,12 @@ dev = [
  "pyrefly==0.36.0",
 ]
 
+[project.optional-dependencies]
+mpi = ["mpi4py>=4.0"]
+
 [project.scripts]
 evaluation = "weathergen.evaluate.run_evaluation:evaluate"
+evaluate-mpi = "weathergen.evaluate.distributed.mpi:main"
 export = "weathergen.evaluate.export.export_inference:export"
 
 # The linting configuration

@@ -708,6 +708,10 @@ def init_hour_metric_region(
             else [None]
         )
 
+        _logger.info(
+            f"Creating scores-by-init-hour plots for {metric} - {region} - {stream}: "
+            f"{len(channels)} channel(s) x {len(fsteps)} forecast step(s), one figure each."
+        )
         for channel in channels:
             for fstep in fsteps:
                 # runs without this channel or step (other channels evaluated) are left out
