@@ -54,6 +54,8 @@ def write_output(
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
     targets_lens = []
+    
+    residual_state = {}
 
     # TODO Maybe stopping at forecast_steps explained #1657
     for t_idx in timestep_idxs:
@@ -96,6 +98,22 @@ def write_output(
                         target = target[idxs_inv]
                         t_coords = t_coords[idxs_inv]
                         t_times = t_times[idxs_inv]
+                    
+                    if "residual_scale" in target_data:
+                        from weathergen.train.target_and_aux_residual import residual_to_full_fields
+                        pred, target = residual_to_full_fields(
+                            target_data, i_batch, pred.to(torch.float32), target, idxs_inv,
+                            residual_state, (sname, i_batch), t_coords,
+                        )
+                    
+                    if "residual_scale" in target_data and i_batch == 0:
+                        _p, _t = pred.detach().float(), target.detach().float()
+                        _logger.info(
+                            f"{sname} t={t_idx} FULL "
+                            f"pred_mean={torch.nanmean(_p, dim=(0, 1)).cpu().numpy()} "
+                            f"target_mean={torch.nanmean(_t, dim=0).cpu().numpy()} "
+                            f"rmse={torch.sqrt(torch.nanmean((_p[0] - _t) ** 2, dim=0)).cpu().numpy()}"
+                        )
 
                     # denormalize data if requested and map to storage format
                     preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]

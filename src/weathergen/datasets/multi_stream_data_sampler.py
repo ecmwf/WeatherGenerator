@@ -112,6 +112,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
+        # residual targets: also load target values of the step before the first output step
+        # (base state x(t)); no extra output step is decoded
+        self.first_target_step = (
+            max(0, self.output_offset - 1)
+            if cf.data_loading.get("load_base_target_step", False)
+            else self.output_offset
+        )
         self.time_step = forecast_cfg["time_step"]
         self.forecast_policy = forecast_cfg["policy"]
         steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
@@ -146,10 +153,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.check_samples(self._get_fsm())
         self.streams_datasets = self._init_stream_datasets(cf)
 
-        # RNG seed setup
-        rs = cf.data_loading.rng_seed
-        nw = cf.data_loading.num_workers
-        self.data_loader_rng_seed = rs if rs > nw else rs * 97
+        # RNG seed setup, see _reset_rng()
+        self.data_loader_rng_seed = cf.data_loading.rng_seed
+        self._num_rng_resets = 0
 
         self.rng = None
 
@@ -279,6 +285,29 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return streams_datasets
 
+    def _reset_rng(self) -> np.random.Generator:
+        """
+        Create the random number generator for the current iteration (i.e. mini_epoch).
+        The generator has to be unique for DDP rank, loader worker, mini_epoch and stage.
+        All of these enter the seed as separate entropy values, so that every combination
+        yields an independent stream. The number of resets covers persistent loader workers,
+        whose mini_epoch is not advanced.
+        """
+        worker_info = torch.utils.data.get_worker_info()
+        worker_id = worker_info.id + 1 if worker_info is not None else 0
+        entropy = [
+            int(self.data_loader_rng_seed),
+            int(self.rank),
+            worker_id,
+            self.mini_epoch,
+            self._num_rng_resets,
+            ("train", "val", "test").index(self._stage),
+        ]
+        # counter _reset_rng() calls (passes over the dataset) in this process; makes the seed
+        # unique per pass for persistent loader workers, whose mini_epoch is not advanced
+        self._num_rng_resets += 1
+        return np.random.default_rng(np.random.SeedSequence(entropy))
+
     def reset(self) -> tuple[Sequence[int], Sequence[int]]:
         """
         Reset RNG, return shuffled perms adn forecast steps for this mini epoch.
@@ -288,7 +317,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         Returns: permutation index, forecast steps index
         """
-        self.rng = np.random.default_rng(self.data_loader_rng_seed)
+        self.rng = self._reset_rng()
         fsm = self._get_fsm()
         self.check_samples(fsm)
         perms = self._calc_baseperms(fsm)
@@ -456,7 +485,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         # collect for all forecast steps
         num_output_steps = self._get_output_length(num_forecast_steps)
-        for step, timestep_idx in enumerate(range(self.output_offset, num_output_steps)):
+        for step, timestep_idx in enumerate(range(self.first_target_step, num_output_steps)):
             step_forecast_dt = idx + (self.time_step * timestep_idx) // self.step_timedelta
             time_win_target = self.time_window_handler.window(step_forecast_dt)
 
@@ -467,7 +496,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             if token_data[0] is None and token_data[1] is None:
                 continue
 
-            if "target_coords" in mode:
+            if "target_coords" in mode and timestep_idx >= self.output_offset:
                 (tc, tc_l) = self.tokenizer.get_target_coords(
                     stream_info,
                     rdata,
@@ -589,7 +618,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # target data: collect for all forecast steps
         output_data = []
         num_output_steps = self._get_output_length(num_forecast_steps)
-        for timestep_idx in range(self.output_offset, num_output_steps):
+        for timestep_idx in range(self.first_target_step, num_output_steps):
             step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
@@ -816,19 +845,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             iter_end = len(self)
 
         else:
-            # ensure the rng seed is fully unique across workers and mini_epochs
-            # the worker processes are generated as bit-wise copy of the "template" (the actual
-            # instance of the present class that is created) whenever __iter__ is started. This
-            # happens for each mini_epoch, for train and validation, and independently for each DDP
-            # worker. After the bit-wise copy, the rng seed needs to be made unique for
-            # DDP workers, loader process, mini_epoch.
-            dist = torch.distributed
-            self.data_loader_rng_seed *= (
-                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
-                * ((worker_info.id + 1) * 37)
-                * (self.mini_epoch + 13)
-                * 7
-            )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers
             iter_start = local_start + worker_info.id * per_worker

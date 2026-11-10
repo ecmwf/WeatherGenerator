@@ -76,6 +76,16 @@ def get_target_aux_calculator(
 
     elif target_and_aux_calc == "FrozenTeacher":
         target_aux = FrozenTeacher.from_pretrained(cf, dataset, device, target_and_aux_calc_params)
+    
+    elif target_and_aux_calc == "Residual":
+        from weathergen.train.target_and_aux_residual import ResidualTargetAndAux
+
+        params = (
+            omegaconf.OmegaConf.to_container(target_and_aux_calc_params, resolve=True)
+            if isinstance(target_and_aux_calc_params, omegaconf.DictConfig)
+            else dict(target_and_aux_calc_params)
+        )
+        target_aux = ResidualTargetAndAux(loss_cfg, model, **params)
 
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
