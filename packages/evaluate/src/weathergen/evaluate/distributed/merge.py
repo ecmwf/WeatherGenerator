@@ -61,7 +61,7 @@ def merge_results(
     for chunk, window in zip(chunks, fsteps or [None] * len(chunks), strict=True):
         for region, by_metric in chunk.items():
             for metric, r in by_metric.items():
-                parts.setdefault(region, {}).setdefault(metric, []).append(_in_window(r, window))
+                parts.setdefault(region, {}).setdefault(metric, []).append(in_window(r, window))
     return {
         region: {metric: _merge_metric(rs) for metric, rs in by_metric.items()}
         for region, by_metric in parts.items()
@@ -84,7 +84,7 @@ def merge_bounds(chunks: list[dict[str, dict]]) -> dict[str, dict]:
     return merged
 
 
-def _in_window(r: MetricResult, window: list[int] | None) -> MetricResult:
+def in_window(r: MetricResult, window: list[int] | None) -> MetricResult:
     """*r* restricted to the forecast steps of *window* (arrays and per-step attrs)."""
     if window is None:
         return r

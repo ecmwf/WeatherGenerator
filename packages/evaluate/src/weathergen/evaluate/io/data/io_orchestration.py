@@ -522,22 +522,21 @@ def _store_substep(
     da_tar: xr.DataArray,
     da_pred: xr.DataArray,
     n_sub: int,
-    fs: int,
-    fstep_counter: int,
+    label: int,
     da_tars_dict: dict,
     da_preds_dict: dict,
-) -> int:
-    """Store one sub-step into the output dicts; return the next fstep_counter."""
+) -> None:
+    """Store one sub-step into the output dicts under its forecast-step *label*.
+
+    Sub-step ``i`` of forecast step ``fs`` is labelled ``(fs - 1) * n_sub + i + 1``: the
+    same label whichever forecast steps are loaded with it, so the chunks of a chunked
+    evaluation merge (``build_scoring_chunk_tasks``).  Without sub-steps the label is ``fs``.
+    """
     if n_sub > 1:
-        da_tar = da_tar.assign_coords(forecast_step=fstep_counter)
-        da_pred = da_pred.assign_coords(forecast_step=fstep_counter)
-        da_tars_dict[fstep_counter] = da_tar
-        da_preds_dict[fstep_counter] = da_pred
-        return fstep_counter + 1
-    else:
-        da_tars_dict[int(fs)] = da_tar
-        da_preds_dict[int(fs)] = da_pred
-        return fstep_counter
+        da_tar = da_tar.assign_coords(forecast_step=label)
+        da_pred = da_pred.assign_coords(forecast_step=label)
+    da_tars_dict[label] = da_tar
+    da_preds_dict[label] = da_pred
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +559,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
 
     da_tars_dict: dict = {}
     da_preds_dict: dict = {}
-    fstep_counter = 1
+    n_sub_stream: int | None = None
     init_times: NDArray | None = None
     n_workers = state.n_workers
 
@@ -594,13 +593,21 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             init_times = _extract_init_times(results, state.samples, state.offset)
 
         n_sub = results[0][3]["n_substeps"][0]
+        n_sub_stream = n_sub_stream or n_sub
+        # the sub-step labels (_store_substep) hold only with as many sub-steps everywhere
+        if any(r[3]["n_substeps"][0] != n_sub_stream for r in results):
+            raise ValueError(
+                f"RUN {state.run_id} - {state.stream}: forecast step {fs} does not have "
+                f"{n_sub_stream} sub-steps in every sample; sub-steps must be the same in "
+                "all forecast steps and samples."
+            )
 
         for sub_idx in range(n_sub):
             tars_list = [results[i][1][sub_idx] for i in range(len(state.samples))]
             preds_list = [results[i][0][sub_idx] for i in range(len(state.samples))]
             per_sample_valid_times = _collect_substep_valid_times(results, n_sub, sub_idx, 0)
 
-            fs_val = fs if n_sub == 1 else fstep_counter
+            label = (int(fs) - 1) * n_sub + sub_idx + 1
             da_tar, da_pred = _assemble_substep(
                 state,
                 results,
@@ -608,13 +615,11 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
                 preds_list,
                 per_sample_valid_times,
                 init_times,
-                fs_val,
+                label,
                 0,
             )
             del tars_list, preds_list
-            fstep_counter = _store_substep(
-                da_tar, da_pred, n_sub, fs, fstep_counter, da_tars_dict, da_preds_dict
-            )
+            _store_substep(da_tar, da_pred, n_sub, label, da_tars_dict, da_preds_dict)
 
         del results
 
@@ -686,11 +691,22 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
 
     da_tars_dict: dict = {}
     da_preds_dict: dict = {}
-    fstep_counter = 1
+    n_sub_stream: int | None = None
 
     for fi, fs in enumerate(state.fsteps):
         # Each (sample, fstep) result has n_substeps for that single fstep
         n_sub = flat_results[fi][3]["n_substeps"][0]  # from first sample
+        n_sub_stream = n_sub_stream or n_sub
+        # the sub-step labels (_store_substep) hold only with as many sub-steps everywhere
+        if any(
+            flat_results[si * n_fsteps + fi][3]["n_substeps"][0] != n_sub_stream
+            for si in range(len(state.samples))
+        ):
+            raise ValueError(
+                f"RUN {state.run_id} - {state.stream}: forecast step {fs} does not have "
+                f"{n_sub_stream} sub-steps in every sample; sub-steps must be the same in "
+                "all forecast steps and samples."
+            )
 
         for sub_idx in range(n_sub):
             tars_list = [
@@ -710,7 +726,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
                 else:
                     per_sample_valid_times.append(np.datetime64("NaT", "ns"))
 
-            fs_val = fs if n_sub == 1 else fstep_counter
+            label = (int(fs) - 1) * n_sub + sub_idx + 1
             # Build a per-sample results list compatible with _assemble_substep
             per_sample_results = [
                 flat_results[si * n_fsteps + fi] for si in range(len(state.samples))
@@ -722,13 +738,11 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
                 preds_list,
                 per_sample_valid_times,
                 init_times,
-                fs_val,
+                label,
                 0,  # fstep_idx is always 0 since each result has a single fstep
             )
             del tars_list, preds_list
-            fstep_counter = _store_substep(
-                da_tar, da_pred, n_sub, fs, fstep_counter, da_tars_dict, da_preds_dict
-            )
+            _store_substep(da_tar, da_pred, n_sub, label, da_tars_dict, da_preds_dict)
 
     del flat_results
 

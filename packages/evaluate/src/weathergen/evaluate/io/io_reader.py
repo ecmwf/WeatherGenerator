@@ -180,6 +180,14 @@ class Reader(ABC):
         """
         return True
 
+    def get_forecast_substep_valid_times(self, stream: str) -> set[str]:
+        """The valid times of one forecast step of a gridded stream: one per sub-step.
+
+        Sub-step i of forecast step fs is labelled ``(fs - 1) * n_sub + i + 1`` in the data
+        (``io_orchestration._store_substep``).  Empty when the stream has no sub-steps.
+        """
+        return set()
+
     @abstractmethod
     def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
         """Placeholder to load pre-computed scores for a given run, stream, metric"""

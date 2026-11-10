@@ -747,7 +747,8 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         with self._open_any_rank_for_metadata() as zio:
             dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
-            unique_lead = np.unique(dummy.valid_time.data)
+            # the same split as io_workers._read_sample: one sub-step per unique time
+            unique_lead = np.unique(np.asarray(dummy.prediction.times))
         return set(str(lt) for lt in unique_lead)
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:

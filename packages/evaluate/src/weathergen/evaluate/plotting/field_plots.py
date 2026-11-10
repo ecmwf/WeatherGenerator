@@ -359,17 +359,12 @@ def plot_data(
     plot_channel_set = set(available_data.channels) if available_data.channels is not None else None
 
     output_dir = str(reader.runplot_dir)
-    output_fstep_keys = set(da_tars.keys())
 
-    if plot_fstep_set is not None and output_fstep_keys - plot_fstep_set:
-        zarr_fsteps = set(int(f) for f in reader.get_forecast_steps())
-        if plot_fstep_set == zarr_fsteps:
-            _logger.debug(
-                f"Sub-step expansion detected: output has {len(output_fstep_keys)} "
-                f"entries vs {len(zarr_fsteps)} zarr fsteps. "
-                f"Expanding plotting filter to all output fsteps."
-            )
-            plot_fstep_set = output_fstep_keys
+    if plot_fstep_set is not None and reader.is_gridded_data(stream):
+        # The data is keyed by sub-step: the reader labels sub-step i of step fs as
+        # (fs - 1) * n_sub + i + 1 (_store_substep); the requested steps are zarr steps.
+        n_sub = max(1, len(reader.get_forecast_substep_valid_times(stream)))
+        plot_fstep_set = {(f - 1) * n_sub + i + 1 for f in plot_fstep_set for i in range(n_sub)}
 
     if plot_fstep_set is not None:
         da_tars = {fs: da for fs, da in da_tars.items() if fs in plot_fstep_set}

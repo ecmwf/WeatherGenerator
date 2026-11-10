@@ -121,41 +121,57 @@ def master(cfg: dict, mlflow_client: MlflowClient | None, comm) -> None:
         advance(i, None)
 
     idle: list[int] = []
-    active = comm.size - 1
-    while active > 0:
-        msg, source, tag = comm.recv()
-        if tag == Tag.READY:
-            _logger.info(f"Worker rank {source} ready on {msg}.")
-        elif tag == Tag.RESULT:
-            i, j, output, error = msg
-            if i in failed:
-                pass  # a task of a stream that already failed elsewhere
-            elif error is not None:
-                failed[i] = error
-                pending.pop(i, None)
-                missing.pop(i, None)
-                stages[i].close()
-                _logger.error(f"{names[i]}: task {j + 1} failed on rank {source}:\n{error}")
-            else:
-                pending[i][j] = output  # may be None: finish_stream returns nothing
-                missing[i] -= 1
-                if missing[i] == 0:
-                    outputs = pending.pop(i)
-                    del missing[i]
-                    advance(i, outputs)
-        idle.append(source)
-        while idle and queue:
-            i, j, fn, kwargs, description = queue.pop(0)
-            if i in failed:
-                continue
-            rank = idle.pop(0)
-            _logger.info(f"{description} -> rank {rank}")
-            comm.send((i, j, fn, kwargs, description), rank, Tag.TASK)
-        if not queue and not pending:
-            for rank in idle:
-                comm.send(None, rank, Tag.STOP)
-                active -= 1
-            idle.clear()
+    busy: set[int] = set()  # the ranks that hold a task
+    running = set(range(1, comm.size))  # the ranks not told to stop yet
+    try:
+        while running:
+            msg, source, tag = comm.recv()
+            busy.discard(source)
+            if tag == Tag.READY:
+                _logger.info(f"Worker rank {source} ready on {msg}.")
+            elif tag == Tag.RESULT:
+                i, j, output, error = msg
+                if i in failed:
+                    pass  # a task of a stream that already failed elsewhere
+                elif error is not None:
+                    failed[i] = error
+                    pending.pop(i, None)
+                    missing.pop(i, None)
+                    stages[i].close()
+                    _logger.error(f"{names[i]}: task {j + 1} failed on rank {source}:\n{error}")
+                else:
+                    pending[i][j] = output  # may be None: finish_stream returns nothing
+                    missing[i] -= 1
+                    if missing[i] == 0:
+                        outputs = pending.pop(i)
+                        del missing[i]
+                        advance(i, outputs)
+            idle.append(source)
+            while idle and queue:
+                i, j, fn, kwargs, description = queue.pop(0)
+                if i in failed:
+                    continue
+                rank = idle.pop(0)
+                _logger.info(f"{description} -> rank {rank}")
+                comm.send((i, j, fn, kwargs, description), rank, Tag.TASK)
+                busy.add(rank)
+            if not queue and not pending:
+                for rank in idle:
+                    comm.send(None, rank, Tag.STOP)
+                    running.discard(rank)
+                idle.clear()
+    except Exception:
+        # Stop the workers before leaving: left waiting for a task, they would keep the job
+        # alive until its time limit.  The busy ones are stopped once their result is in,
+        # which their send waits for.
+        _logger.exception("The master failed; stopping the workers.")
+        for rank in running - busy:
+            comm.send(None, rank, Tag.STOP)
+        while busy:
+            _, source, _ = comm.recv()
+            busy.discard(source)
+            comm.send(None, source, Tag.STOP)
+        raise
 
     _logger.info(
         "All chunk tasks done, workers stopped; finalising on the master: MLflow upload "
