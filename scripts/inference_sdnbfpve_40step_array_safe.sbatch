@@ -5,9 +5,13 @@
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 
 # One independent 40-step inference sample per array task, from model sdnbfpve.
-# Task i writes run sdniiiii for source window
+# Task i writes run <prefix>000ii (e.g. abc00000 ... abc00015) for source window
 # 2023-06-01T12:00 + i * 12 hours. Each task uses a local test date range that
 # contains exactly that one valid input window.
+#
+# Set up for the Zurich hackathon (account wghack-course2026-cscs, results in the
+# course shared_work directory, as in WeatherGenerator-private's Santis paths.yml).
+# <prefix> is a unique 3-character prefix (lowercase letters/digits) per participant.
 #
 # sdnbfpve only has a "latest" checkpoint (no numbered mini-epochs), so
 # --mini-epoch is omitted and the CLI default (-1 = latest) is used.
@@ -15,14 +19,14 @@
 # aifs-od-an-oper-0001-mars-n320-2016-2025-6h-v1-for-single-v2.zarr.
 #
 # Submit from the WeatherGenerator root with:
-#   sbatch scripts/inference_sdnbfpve_40step_array_safe.sbatch
+#   sbatch scripts/inference_sdnbfpve_40step_array_safe.sbatch <prefix>
 # To test a single task first:
-#   sbatch --array=0 scripts/inference_sdnbfpve_40step_array_safe.sbatch
+#   sbatch --array=0 scripts/inference_sdnbfpve_40step_array_safe.sbatch <prefix>
 #
 # Santis normal is node-exclusive: every one-GPU array task reserves one full
 # four-GPU GH200 node. The shared partition can avoid this, but is limited to 1h.
 
-#SBATCH -A ch17
+#SBATCH -A wghack-course2026-cscs
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -37,10 +41,15 @@
 set -euo pipefail
 
 FROM_RUN_ID=sdnbfpve
-RUN_PREFIX=sdn
+RUN_PREFIX=${1:-}
+if [[ ! "$RUN_PREFIX" =~ ^[a-z][a-z0-9]{2}$ ]]; then
+    echo "Usage: sbatch scripts/inference_sdnbfpve_40step_array_safe.sbatch <prefix>" >&2
+    echo "<prefix>: your unique 3 characters, lowercase letters/digits, starting with a letter." >&2
+    exit 2
+fi
 FORECAST_STEPS=40
 FORECAST_CHUNK_SIZE=4
-RESULTS_ROOT=/iopsstor/scratch/cscs/thunter/shared_work/results
+RESULTS_ROOT=/iopsstor/scratch/cscs/course_29fe58c1/shared_work/results
 FIRST_SOURCE_START=2023-06-01T12:00
 SOURCE_CADENCE_HOURS=12
 INPUT_STEP_HOURS=6

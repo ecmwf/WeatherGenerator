@@ -1,15 +1,15 @@
 # Evaluation of the sdnbfpve 40-step inference array
-# (scripts/inference_sdnbfpve_40step_array_safe.sbatch -> runs sdn00000 ... sdn00015).
+# (scripts/inference_sdnbfpve_40step_array_safe.sbatch <prefix> -> runs <prefix>00000 ... <prefix>00015).
 #
 # Targets are read from the anemoi dataset (type: anemoi-target), not from the
 # inference output. For the ERA5 stream (sdnbfpve's diagnostic output) that is
 # aifs-ea-an-oper-0001-mars-n320-1979-2024-1h-v2-with-era51.zarr (ERA5 reanalysis).
 #
-# Before running, merge the 16 one-sample runs into "sdnmerge":
-#   1. in scripts/aggregate_inference_zarr.py set RUN_PREFIX = "sdn"
-#   2. python scripts/aggregate_inference_zarr.py sdnmerge
-# The merge also writes models/sdnmerge/model_sdnmerge_chkpt00000.json, which the
-# anemoi-target reader needs to find the target dataset.
+# Before running:
+#   1. merge the one-sample runs into <prefix>merge:
+#        uv run python scripts/aggregate_inference_zarr.py <prefix>
+#   2. below, replace <prefix> in "<prefix>merge:" with your prefix.
+# Results and run configs are found through the private config (shared_work of the course).
 #
 # Run (CPU only, from the WeatherGenerator root):
 #   uv run evaluate --config config/evaluate/eval_sdnbfpve_40step.yml
@@ -45,25 +45,19 @@ default_streams:
       plot_animations: false
 
 run_ids:
-  sdnmerge:
+  <prefix>merge:
     label: "sdnbfpve, 40 steps (16 init times, 2023-06-01T12 to 2023-06-09T00)"
     type: anemoi-target
     mini_epoch: 0
-    results_base_dir: "/iopsstor/scratch/cscs/thunter/shared_work/results/sdnmerge/"
-    model_base_dir: "/iopsstor/scratch/cscs/thunter/shared_work/models/"
 
   # Alternative without merging: score each one-sample run separately
-  # (one curve per init time instead of one averaged curve). Uncomment and
-  # remove sdnmerge above; repeat for sdn00002 ... sdn00015.
-  # sdn00000:
+  # (one curve per init time instead of one averaged curve). Uncomment, replace
+  # <prefix>, and remove <prefix>merge above; repeat for <prefix>00002 ... <prefix>00015.
+  # <prefix>00000:
   #   label: "sdnbfpve init 2023-06-01T12"
   #   type: anemoi-target
   #   mini_epoch: 0
-  #   results_base_dir: "/iopsstor/scratch/cscs/thunter/shared_work/results/sdn00000/"
-  #   model_base_dir: "/iopsstor/scratch/cscs/thunter/shared_work/models/"
-  # sdn00001:
+  # <prefix>00001:
   #   label: "sdnbfpve init 2023-06-02T00"
   #   type: anemoi-target
   #   mini_epoch: 0
-  #   results_base_dir: "/iopsstor/scratch/cscs/thunter/shared_work/results/sdn00001/"
-  #   model_base_dir: "/iopsstor/scratch/cscs/thunter/shared_work/models/"

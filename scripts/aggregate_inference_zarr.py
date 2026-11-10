@@ -4,14 +4,15 @@
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 
-"""Merge the NUM_SHARDS one-sample outputs of an inference array into one run.
+"""Merge the one-sample outputs of an inference array into one run.
 
-Set RUN_PREFIX to the array's run-id prefix (e.g. "cw6" for cw600000..cw600015,
-"sdn" for sdn00000..sdn00015) before running.
+Merges runs <prefix>00000 ... <prefix>000NN (NN = num_shards - 1) of
+scripts/inference_sdnbfpve_40step_array_safe.sbatch into the run <prefix>merge.
+Paths are those of the Zurich hackathon (course shared_work directory).
 
 Usage:
-    python scripts/aggregate_inference_zarr.py cw6merge
-    python scripts/aggregate_inference_zarr.py sdnmerge   # with RUN_PREFIX = "sdn"
+    uv run python scripts/aggregate_inference_zarr.py <prefix>
+    uv run python scripts/aggregate_inference_zarr.py <prefix> --num-shards 4
 """
 
 from __future__ import annotations
@@ -25,17 +26,23 @@ import numpy as np
 import zarr
 from zarr.storage import ZipStore
 
-RESULTS_ROOT = Path("/iopsstor/scratch/cscs/thunter/shared_work/results")
-MODELS_ROOT = Path("/iopsstor/scratch/cscs/thunter/shared_work/models")
-RUN_PREFIX = "cw6"
-NUM_SHARDS = 16
+RESULTS_ROOT = Path("/iopsstor/scratch/cscs/course_29fe58c1/shared_work/results")
+MODELS_ROOT = Path("/iopsstor/scratch/cscs/course_29fe58c1/shared_work/models")
 MINI_EPOCH = 0
 logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("output_run_id", help="Eight-character run ID for the merged output.")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("prefix", help="3-character run-id prefix used for the inference array.")
+    parser.add_argument(
+        "--num-shards",
+        type=int,
+        default=16,
+        help="number of array tasks to merge, <prefix>00000 onwards (default 16)",
+    )
     return parser.parse_args()
 
 
@@ -87,17 +94,17 @@ def copy_sample(source: zarr.Group, destination: zarr.Group, sample_index: int) 
             copy_group(source_fstep, destination_fstep)
 
 
-def write_config(output_run_id: str) -> None:
+def write_config(output_run_id: str, prefix: str, num_shards: int) -> None:
     """Copy the first shard's saved inference config for use by evaluation."""
-    first_run_id = f"{RUN_PREFIX}00000"
+    first_run_id = f"{prefix}00000"
     source = MODELS_ROOT / first_run_id / f"model_{first_run_id}_chkpt{MINI_EPOCH:05d}.json"
     if not source.is_file():
         raise FileNotFoundError(f"Missing inference config: {source}")
 
     config = json.loads(source.read_text(encoding="utf-8"))
     config["general"]["run_id"] = output_run_id
-    config["test_config"]["samples_per_mini_epoch"] = NUM_SHARDS
-    config["test_config"]["output"]["num_samples"] = NUM_SHARDS
+    config["test_config"]["samples_per_mini_epoch"] = num_shards
+    config["test_config"]["output"]["num_samples"] = num_shards
 
     destination_dir = MODELS_ROOT / output_run_id
     destination_dir.mkdir()
@@ -106,13 +113,13 @@ def write_config(output_run_id: str) -> None:
 
 
 def main() -> None:
-    output_run_id = parse_args().output_run_id
-    if len(output_run_id) != 8 or not output_run_id[0].isalpha() or not output_run_id.isalnum():
-        raise ValueError(
-            "output_run_id must be eight alphanumeric characters starting with a letter."
-        )
+    args = parse_args()
+    prefix, num_shards = args.prefix, args.num_shards
+    if len(prefix) != 3 or not prefix[0].isalpha() or not prefix.isalnum():
+        raise ValueError("prefix must be three alphanumeric characters starting with a letter.")
+    output_run_id = f"{prefix}merge"
 
-    shard_ids = [f"{RUN_PREFIX}{index:05d}" for index in range(NUM_SHARDS)]
+    shard_ids = [f"{prefix}{index:05d}" for index in range(num_shards)]
     archives = [archive_path(run_id) for run_id in shard_ids]
     missing = [path for path in archives if not path.is_file()]
     if missing:
@@ -135,12 +142,12 @@ def main() -> None:
                     copy_sample(source_root, destination_root, sample_index)
 
         partial_output.replace(output)
-        write_config(output_run_id)
+        write_config(output_run_id, prefix, num_shards)
     except Exception:
         logger.error(f"Aggregation failed. Inspect or remove {output_dir} before retrying.")
         raise
 
-    logger.info(f"Merged {NUM_SHARDS} samples into {output}")
+    logger.info(f"Merged {num_shards} samples into {output}")
 
 
 if __name__ == "__main__":
