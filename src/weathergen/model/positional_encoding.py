@@ -135,7 +135,7 @@ def rotary_embedding_2d(coords, dim, base=10000.0):
     """Create 2D RoPE embeddings from latitude/longitude coordinates.
 
     Args:
-        coords: Tensor of shape (..., 2) with coordinates in radians (lat, lon).
+        coords: Tensor of shape (..., 2) with (lat, lon) in radians times rope_2D_coord_scale.
         dim: Head dimension to encode; must be divisible by 4.
         base: RoPE base frequency.
 
