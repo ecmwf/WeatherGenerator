@@ -1,0 +1,55 @@
+# Overlay config: train a NEW decoder for NOAA GHCNh station observations on top of
+# the frozen sdnbfpve encoder + forecast engine. Everything not set here
+# (architecture, other streams, forecast MSE loss over 8 x 6h steps, dates) is
+# inherited from sdnbfpve.
+#
+# Launch (from the WeatherGenerator root; --stage train + --from-run-id = train_continue):
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --stage train \
+#       --from-run-id sdnbfpve --config config/config_finetune_decoder_sdnbfpve_ghcnh.yml
+#
+# GHCNH is a diagnostic (target-only) stream: it is never fed to the encoder
+# (Identity embedder, no new encoder weights). Its decoder (embed_target_coords /
+# target_token_engines / pred_heads for GHCNH) does not exist in the sdnbfpve
+# checkpoint, so it starts from random init (logged as "Missing keys" on load).
+# The existing ERA5 decoder is frozen too, so ONLY the GHCNH decoder trains.
+
+freeze_modules: "encoder|forecast_engine|embed_target_coords_ERA5|TargetPredictionEngine_ERA5|EnsPredictionHead_ERA5"
+
+# sdnbfpve stopped at istep=1168. Restart the step counter so the LR schedule
+# and mini-epoch count start from zero for this stage.
+general:
+  istep: 0
+
+training_config:
+  num_mini_epochs: 4
+  learning_rate_scheduling:
+    lr_max: 1.0e-4
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
+
+streams:
+  GHCNH:
+    name: GHCNH  # normally set by load_streams; required when a stream is defined inline
+    type: obs
+    stream_id: 40  # unused by sdnbfpve (0, 1, 10-14, 21, 22, 30 are taken)
+    filenames: ["observations-noaa-ghcnh-1979-2025-qc-v2.zarr"]
+    diagnostic: true  # target only, not model input
+    coords_channels: ["latitude", "longitude"]  # this zarr uses latitude/longitude, not lat/lon
+    source: &ghcnh_channels
+      - obsvalue_temperature
+      - obsvalue_dew_point_temperature
+      - obsvalue_station_level_pressure
+      - obsvalue_u
+      - obsvalue_v
+    target: *ghcnh_channels
+    # "elevation" is left out: it contains -999.9 / 9999 sentinel values in this zarr.
+    geoinfo_channels: ["cos_sza", "cos_local_time", "sin_local_time", "cos_julian_day", "sin_julian_day"]
+    loss_weight: 1.0
+    token_size: 256
+    tokenize_spacetime: false
+    max_num_targets: -1
+    # decoder sized like sdnbfpve's SurfaceCombined stream (also surface station obs)
+    embed: {net: transformer, num_tokens: 1, num_heads: 2, dim_embed: 512, num_blocks: 2}  # unused (diagnostic)
+    embed_target_coords: {net: linear, dim_embed: 512}
+    target_readout: {num_layers: 1, num_heads: 4, self_attention: false, mlp_hidden_factor: 1}
+    pred_head: {ens_size: 1, num_layers: 1}

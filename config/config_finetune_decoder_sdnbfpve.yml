@@ -1,0 +1,29 @@
+# Overlay config: fine-tune (or retrain) the ERA5 decoder of sdnbfpve with the
+# encoder and forecast engine frozen. Everything not set here (architecture,
+# streams, forecast loss, 8-step forecast, data) is inherited from sdnbfpve.
+#
+# Launch (from the WeatherGenerator root; --stage train + --from-run-id = train_continue):
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --stage train \
+#       --from-run-id sdnbfpve --config config/config_finetune_decoder_sdnbfpve.yml
+#
+# Decoder = target_token_engines + embed_target_coords + pred_heads (ERA5 stream only;
+# ERA5_in is forcing and has no decoder). With the freeze below, ~25.4M params are
+# trainable and ~1153M are frozen.
+
+freeze_modules: "encoder|forecast_engine"
+
+# Uncomment to train a NEW decoder from random init instead of fine-tuning the
+# existing one. (Applied only when starting a new run from sdnbfpve.)
+# reset_modules: "target_token_engines|embed_target_coords|pred_heads"
+
+# sdnbfpve stopped at istep=1168. Restart the step counter so the LR schedule
+# (warmup/decay/cooldown) and mini-epoch count start from zero for this stage.
+general:
+  istep: 0
+
+training_config:
+  num_mini_epochs: 4
+  learning_rate_scheduling:
+    lr_max: 1.0e-4
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
