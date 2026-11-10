@@ -68,22 +68,6 @@ def merge_results(
     }
 
 
-def merge_bounds(chunks: list[dict[str, dict]]) -> dict[str, dict]:
-    """The ``colour_bounds`` of the union of the chunks: min of the minima, max of the maxima.
-
-    Exact, since every bound is a min or a max over samples and points.  Channels and keys
-    missing from some chunks are taken from the ones that have them.
-    """
-    merged: dict[str, dict] = {}
-    for bounds in chunks:
-        for channel, by_key in bounds.items():
-            into = merged.setdefault(channel, {})
-            for key, value in by_key.items():
-                reduce = min if key.endswith("vmin") else max
-                into[key] = value if key not in into else reduce(into[key], value)
-    return merged
-
-
 def _in_window(r: MetricResult, window: list[int] | None) -> MetricResult:
     """*r* restricted to the forecast steps of *window* (arrays and per-step attrs)."""
     if window is None:

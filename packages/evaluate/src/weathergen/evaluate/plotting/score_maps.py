@@ -26,7 +26,7 @@ from weathergen.evaluate.io.io_reader import Reader
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.scores.score_orchestration import MetricResult
-from weathergen.evaluate.utils.array_utils import colour_bounds, common_ranges
+from weathergen.evaluate.utils.array_utils import common_ranges, data_colour_ranges
 
 _logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ def plot_score_maps(
         for metric, da in by_metric.items():
             channels = [str(c) for c in da.channel.values]
             ranges = common_ranges(
-                colour_bounds({0: da}, {0: da}, channels), channels, oc.DictConfig({})
+                data_colour_ranges({0: da}, {0: da}, channels), channels, oc.DictConfig({})
             )
             score_ranges_dict.setdefault(metric, {})[region] = oc.OmegaConf.to_container(ranges)
 

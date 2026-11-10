@@ -25,7 +25,7 @@ import logging
 
 import omegaconf as oc
 
-from weathergen.evaluate.utils.array_utils import configured_bound
+from weathergen.evaluate.utils.array_utils import configured_colour_range
 from weathergen.evaluate.utils.config_compat import _split_entry, parse_data_plots
 
 _logger = logging.getLogger(__name__)
@@ -168,7 +168,7 @@ def build_plotting_chunk_tasks(
     channels: list[str],
     sample_size: int | None,
     fstep_size: int | None,
-    bounds: dict[str, dict] | None = None,
+    colour_ranges: dict[str, dict] | None = None,
 ) -> list[dict]:
     """The ``_process_stream`` chunk tasks that draw the field plots of one (run, stream).
 
@@ -180,10 +180,10 @@ def build_plotting_chunk_tasks(
         The stream's plotting samples, forecast steps and channels (``check_availability``).
     sample_size, fstep_size:
         The chunk windows (``parse_distributed_config``).
-    bounds:
-        ``colour_bounds`` of the whole (run, stream), per channel.  They go into the tasks'
-        plotting options for the stream, where the config has not fixed a bound, so every
-        chunk draws with the same colour ranges.
+    colour_ranges:
+        ``data_colour_ranges`` of the whole (run, stream), per channel.  They go into the
+        tasks' plotting options for the stream, where the config has not fixed a range, so
+        every chunk draws with the same colour ranges.
 
     Notes
     -----
@@ -210,19 +210,19 @@ def build_plotting_chunk_tasks(
             f"RUN {run_id} - {stream}: across-samples histograms are not drawn when the "
             "samples are chunked."
         )
-    # the bounds of the whole (run, stream), under the config's own entries
+    # the colour ranges of the whole (run, stream), under the config's own entries
     global_plotting_opts = oc.OmegaConf.create(
         oc.OmegaConf.to_container(task["global_plotting_opts"], resolve=True)
         if isinstance(task["global_plotting_opts"], oc.DictConfig)
         else task["global_plotting_opts"]
     )
-    if bounds:
+    if colour_ranges:
         if stream not in global_plotting_opts:
             global_plotting_opts[stream] = {}
         stream_opts = global_plotting_opts[stream]
-        for channel, by_key in bounds.items():
+        for channel, by_key in colour_ranges.items():
             for key, value in by_key.items():
-                if configured_bound(stream_opts, channel, key) is None:
+                if configured_colour_range(stream_opts, channel, key) is None:
                     if channel not in stream_opts:
                         stream_opts[channel] = {}
                     stream_opts[channel][key] = value
