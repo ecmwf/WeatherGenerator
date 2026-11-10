@@ -615,6 +615,10 @@ class ForecastingEngine(torch.nn.Module):
         )
         _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
         _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
+        # fe_rope_2D sets 2D rope for forecast engine only.
+        # None, null in config, uses rope_2D like the encoder
+        fe_rope = self.cf.get("fe_rope_2D", None)
+        with_2d_rope = self.cf.get("rope_2D", False) if fe_rope is None else fe_rope
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
@@ -634,7 +638,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_2d_rope=self.cf.get("rope_2D", False),
+                            with_2d_rope=with_2d_rope,
                             is_dit=self.cf.get("fe_diffusion_model", False),
                             dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
                             == "ada_ln",
@@ -656,7 +660,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_2d_rope=self.cf.get("rope_2D", False),
+                            with_2d_rope=with_2d_rope,
                             is_dit=self.cf.get("fe_diffusion_model", False),
                             dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
                             == "ada_ln",
