@@ -6,38 +6,56 @@ dewpoint, 10 m wind, pressure) from the latent tokens around each station.
 
 ## Install
 
-If you already have a WeatherGenerator environment (the repository's `.venv`), you can use it:
-it has every dependency of this package. Instead of installing, put the package on the path and
-run it as a module, from the root of the repository:
+The package does not depend on WeatherGenerator and is not part of its uv workspace: it installs
+in its own environment, or runs from source in an existing WeatherGenerator environment.
+
+### Standalone
+
+With Python 3.12, from the root of the WeatherGenerator repository:
+
+```
+uv venv --python 3.12 .venv-ld
+source .venv-ld/bin/activate
+uv pip install --torch-backend cu126 packages/latent_decoder
+```
+
+or, without uv:
+
+```
+python3.12 -m venv .venv-ld
+source .venv-ld/bin/activate
+pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cu126
+pip install packages/latent_decoder
+```
+
+This installs numpy, torch, zarr, astropy-healpix and omegaconf, and the commands
+`train_latent_decoder` and `evaluate_latent_decoder`. Check the GPU with
+`python -c "import torch; print(torch.cuda.is_available())"` on a GPU node.
+
+- torch is pinned to 2.9.1, as in WeatherGenerator. Take it from PyTorch's CUDA 12.6 index, as
+  above: on aarch64 (GH200) the torch wheel on PyPI is CPU-only, and on x86 it is built for
+  CUDA 12.8. If your machine needs another torch, change the pin in `pyproject.toml` and the
+  index before installing.
+- The environment is about 5 GB, mostly torch. On a parallel filesystem the install can take
+  10 to 15 minutes, nearly all of it copying files.
+- An older uv prints a warning that it cannot parse `[tool.uv.extra-build-dependencies]` in the
+  repository's `pyproject.toml`. It does not affect this package.
+
+### In an existing WeatherGenerator environment
+
+The repository's `.venv` (synced with `--extra gpu`) already has every dependency. Without
+installing anything into it, put the package on the path and run it as a module, from the root
+of the repository:
 
 ```
 source .venv/bin/activate
 export PYTHONPATH=$PWD/packages/latent_decoder/src
 python -m weathergen.latent_decoder.run_train --config my_config.yml --options results_path=./runs/try1
+python -m weathergen.latent_decoder.evaluate ./runs/try1 --plot
 ```
 
-`python -m weathergen.latent_decoder.run_train` stands in for `train_latent_decoder` below.
-
-Otherwise, a separate environment needs Python 3.12. From the root of the WeatherGenerator
-repository:
-
-```
-uv venv --python 3.12 .venv-ld
-source .venv-ld/bin/activate
-uv pip install packages/latent_decoder
-```
-
-or, without uv, `python3.12 -m venv .venv-ld` and `pip install packages/latent_decoder`. This
-installs numpy, torch, zarr, astropy-healpix and omegaconf, and the command
-`train_latent_decoder`. On Linux the torch wheel from PyPI includes CUDA, on x86 and on GH200
-(aarch64). Check with `python -c "import torch; print(torch.cuda.is_available())"` on a GPU node.
-
-- torch is pinned to 2.9.1, as in WeatherGenerator; its PyPI wheels are built for CUDA 12. If
-  your machine needs another torch, change the pin in `pyproject.toml` before installing.
-- The environment is about 5 GB, mostly torch. On a parallel filesystem the install can take
-  10 to 15 minutes, nearly all of it copying files.
-- An older uv prints a warning that it cannot parse `[tool.uv.extra-build-dependencies]` in the
-  repository's `pyproject.toml`. It does not affect this package.
+`python -m weathergen.latent_decoder.run_train` and `python -m weathergen.latent_decoder.evaluate`
+stand in for `train_latent_decoder` and `evaluate_latent_decoder` below.
 
 ## Data
 
@@ -119,7 +137,7 @@ the number of input features), `predictions.npz` (one row per validation report:
 For basic scores of `predictions.npz`:
 
 ```
-python -m weathergen.latent_decoder.evaluate RESULTS_PATH --plot
+evaluate_latent_decoder RESULTS_PATH --plot
 ```
 
 It prints, per channel, bias, RMSE, correlation and the skill against always predicting the mean
@@ -129,8 +147,8 @@ lead time. `--plot` writes `rmse_vs_fstep.png` and `scatter.png` (needs matplotl
 ## CSCS Santis
 
 `config/santis_config.yml` sets the Santis paths of the 2023 sdnbfpve latents and the surface
-obs store. The WeatherGenerator `.venv` already has every dependency, so instead of installing
-the package, put it on the path:
+obs store. With the WeatherGenerator `.venv` (see "In an existing WeatherGenerator environment"
+above), from the root of the repository:
 
 ```
 source .venv/bin/activate
@@ -138,7 +156,10 @@ export PYTHONPATH=$PWD/packages/latent_decoder/src
 python -m weathergen.latent_decoder.run_train \
     --config packages/latent_decoder/src/weathergen/latent_decoder/config/santis_config.yml \
     --options results_path=./runs/try1
+python -m weathergen.latent_decoder.evaluate ./runs/try1 --plot
 ```
+
+In a standalone environment, use `train_latent_decoder` and `evaluate_latent_decoder` instead.
 
 Santis login nodes have GPUs, so a very small run works there as a test: one training and one
 validation init, e.g. `data_loading.num_workers=2`
