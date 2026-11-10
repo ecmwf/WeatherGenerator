@@ -23,10 +23,10 @@ from joblib import delayed
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader
+from weathergen.evaluate.plotting.colour_ranges import common_ranges, data_colour_ranges
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.scores.score_orchestration import MetricResult
-from weathergen.evaluate.utils.array_utils import common_ranges, data_colour_ranges
 
 _logger = logging.getLogger(__name__)
 

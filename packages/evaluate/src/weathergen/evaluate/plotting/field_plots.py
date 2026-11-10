@@ -26,10 +26,10 @@ from joblib import delayed
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
+from weathergen.evaluate.plotting.colour_ranges import plot_colour_ranges
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.timeseries import Timeseries
-from weathergen.evaluate.utils.array_utils import plot_colour_ranges
 from weathergen.evaluate.utils.config_compat import parse_data_plots
 
 _logger = logging.getLogger(__name__)

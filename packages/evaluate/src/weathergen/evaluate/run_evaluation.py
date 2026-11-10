@@ -39,6 +39,11 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenZarrReader,
 )
 from weathergen.evaluate.plotting.animations import build_animations
+from weathergen.evaluate.plotting.colour_ranges import (
+    colour_ranges_configured,
+    data_colour_ranges,
+    merge_colour_ranges,
+)
 from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.plotting.score_maps import plot_score_maps
@@ -48,11 +53,6 @@ from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
     metric_list_to_json,
     results_to_dict,
-)
-from weathergen.evaluate.utils.array_utils import (
-    colour_ranges_configured,
-    data_colour_ranges,
-    merge_colour_ranges,
 )
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.config_compat import get_plot_score_options, parse_plot_config

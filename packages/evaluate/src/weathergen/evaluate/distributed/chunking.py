@@ -25,7 +25,7 @@ import logging
 
 import omegaconf as oc
 
-from weathergen.evaluate.utils.array_utils import configured_colour_range
+from weathergen.evaluate.plotting.colour_ranges import configured_colour_range
 from weathergen.evaluate.utils.config_compat import _split_entry, parse_data_plots
 
 _logger = logging.getLogger(__name__)
