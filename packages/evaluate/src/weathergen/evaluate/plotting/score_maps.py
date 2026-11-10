@@ -31,11 +31,31 @@ from weathergen.evaluate.scores.score_orchestration import MetricResult
 _logger = logging.getLogger(__name__)
 
 
+def score_map_ranges(spatial: dict[str, dict[str, xr.DataArray]]) -> dict:
+    """Colour range of each (metric, region, channel) over all the forecast steps.
+
+    ``spatial[region][metric]`` are the ``MetricResult.spatial`` arrays; the ranges are
+    ``{metric: {region: {channel: ...}}}`` as ``common_ranges`` gives them.  Computed from
+    the whole (run, stream) so that the maps of all its forecast steps share one scale.
+    """
+    # the scores are passed as both inputs of common_ranges, which takes targets and predictions
+    score_ranges_dict: dict = {}
+    for region, by_metric in spatial.items():
+        for metric, da in by_metric.items():
+            channels = [str(c) for c in da.channel.values]
+            ranges = common_ranges(
+                data_colour_ranges({0: da}, {0: da}, channels), channels, oc.DictConfig({})
+            )
+            score_ranges_dict.setdefault(metric, {})[region] = oc.OmegaConf.to_container(ranges)
+    return score_ranges_dict
+
+
 def plot_score_maps(
     reader: Reader,
     stream: str,
     results: dict[str, dict[str, MetricResult]],
     global_plotting_options: dict | None = None,
+    score_ranges: dict | None = None,
 ) -> None:
     """Plot spatial score maps for all regions and forecast steps.
 
@@ -52,6 +72,9 @@ def plot_score_maps(
         (``calc_scores_per_stream(..., compute_spatial=True)``).
     global_plotting_options : dict | None
         Global plotting options. These can be passed to the plotter and can be used to set options.
+    score_ranges : dict | None
+        ``score_map_ranges`` of the whole (run, stream), when *results* holds only part of its
+        forecast steps (a chunk); computed from *results* otherwise.
     """
 
     if not reader.is_gridded_data(stream):
@@ -91,16 +114,7 @@ def plot_score_maps(
     apply_font_settings(plotter_cfg)
     run_id = reader.run_id
 
-    # Colour range of each (metric, region, channel) over all forecast steps; the scores
-    # are passed as both inputs of common_ranges, which takes targets and predictions.
-    score_ranges_dict: dict = {}
-    for region, by_metric in spatial.items():
-        for metric, da in by_metric.items():
-            channels = [str(c) for c in da.channel.values]
-            ranges = common_ranges(
-                data_colour_ranges({0: da}, {0: da}, channels), channels, oc.DictConfig({})
-            )
-            score_ranges_dict.setdefault(metric, {})[region] = oc.OmegaConf.to_container(ranges)
+    score_ranges_dict = score_ranges if score_ranges is not None else score_map_ranges(spatial)
 
     regions = list(spatial)
     fsteps = sorted(
