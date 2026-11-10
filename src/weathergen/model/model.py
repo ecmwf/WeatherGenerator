@@ -823,7 +823,9 @@ class Model(torch.nn.Module):
         # per-sample meta info passed to the forecast engine (stacked along the sample dim)
         fe_meta_info = source_samples.stack_sample_meta_info()
 
-        tokens = self.forecast_engine.prepare_fe_input(tokens, fe_meta_info, forecast_offset)
+        tokens, fe_meta_info = self.forecast_engine.prepare_fe_input(
+            tokens, fe_meta_info, forecast_offset
+        )
 
         output = ModelOutput(forecast_steps, forecast_offset, source_samples)
         # posteriors come from encoding the source window, so they exist only on the first chunk
@@ -859,7 +861,6 @@ class Model(torch.nn.Module):
             )
             output = self._decode_step(
                 tokens,
-                fe_meta_info.pop("decode_spec", None),
                 model_params,
                 step,
                 source_samples,
@@ -872,7 +873,6 @@ class Model(torch.nn.Module):
     def _decode_step(
         self,
         tokens: torch.Tensor,
-        decode_spec,
         model_params: ModelParams,
         step: int,
         batch: BatchSamples,
@@ -881,11 +881,12 @@ class Model(torch.nn.Module):
     ) -> ModelOutput:
         """Physical/latent decode for one forecast step.
 
-        decode_spec is only set (via meta_info) by diffusion's inference path; its decode_latent/
-        merge_ensemble flags override the generic training_mode-derived ones below, since
-        diffusion decode decisions (which ODE state to decode, whether to also predict latent,
-        ensemble merging) don't map onto training_mode.
+        decode_spec (see ForecastEngineBase.decode_spec) is a pure function of the forecast
+        engine's static config; its decode_latent/merge_ensemble flags override the generic
+        training_mode-derived ones below, since diffusion decode decisions (which ODE state to
+        decode, whether to also predict latent, ensemble merging) don't map onto training_mode.
         """
+        decode_spec = self.forecast_engine.decode_spec(self.training)
         if decode_spec is None:
             decode_physical = "masking" in self.cf.training_config.training_mode
             decode_latent = "student_teacher" in self.cf.training_config.training_mode

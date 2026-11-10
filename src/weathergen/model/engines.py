@@ -582,14 +582,23 @@ class ForecastEngineBase(torch.nn.Module):
 
     def prepare_fe_input(
         self, tokens: torch.Tensor, meta_info: dict, forecast_offset: int
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, dict]:
         """Derive the forecast engine's initial condition from the assimilated input-step window.
 
         tokens: (B, T, H, D), T loaded input steps, newest first (tokens[:, 0] = t). Default:
         collapse by summation. Subclasses may instead split tokens into e.g. a conditioning
-        signal and a starting state (see DiffusionForecastEngine.prepare_fe_input).
+        signal and a starting state (see DiffusionForecastEngine.prepare_fe_input). Returns the
+        initial condition and meta_info, updated if the subclass needs to pass extra state along.
         """
-        return tokens.sum(axis=1)
+        return tokens.sum(axis=1), meta_info
+
+    def decode_spec(self, training: bool) -> "DecodeSpec | None":
+        """Instructions for Model._decode_step on how to decode a forecast step (see DecodeSpec),
+        derived purely from this engine's static config (not sample/runtime data). Default: None,
+        i.e. defer to the generic training_mode-gated decode. Subclasses may override (see
+        DiffusionForecastEngine.decode_spec).
+        """
+        return None
 
 
 @dataclasses.dataclass
