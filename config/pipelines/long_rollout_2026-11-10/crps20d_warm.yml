@@ -10,7 +10,7 @@
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-11-10/crps20d_warm.yml
 parallelize: true
 stages:
-  - name: crps20d_warm
+  - name: crps20dwarm
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
