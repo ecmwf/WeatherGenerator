@@ -10,7 +10,7 @@ on:
       - "README.md"
 
 env:
-  UV_VERSION: "0.13.5"
+  UV_VERSION: "0.13.7"
 
 jobs:
   linting:
