@@ -26,10 +26,10 @@ from joblib import delayed
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
+from weathergen.evaluate.plotting.colour_ranges import plot_colour_ranges
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.timeseries import Timeseries
-from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.config_compat import parse_data_plots
 
 _logger = logging.getLogger(__name__)
@@ -215,32 +215,6 @@ def _plot_histograms_across_samples(
     plotter.clean_data_selection()
 
 
-def _colour_ranges(
-    da_tars: dict, da_preds: dict, channels: list[str], stream_opts: oc.DictConfig
-) -> tuple[dict, dict, dict]:
-    """Colour ranges of the maps, the bias maps and the ensemble-std maps, per channel.
-
-    Computed over all forecast steps of the data given, unless *stream_opts* (the stream's
-    entry of the global plotting options) fixes them.
-    """
-    range_args = (da_tars, da_preds, channels, stream_opts)
-    maps_config_dict = oc.OmegaConf.to_container(common_ranges(*range_args), resolve=True)
-    bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*range_args), resolve=True)
-
-    has_ens = any("ens" in da.dims for da in da_preds.values())
-    if not has_ens:
-        return maps_config_dict, bias_config_dict, maps_config_dict
-
-    std_preds = {fs: da.std(dim="ens") for fs, da in da_preds.items()}
-    std_config_dict = oc.OmegaConf.to_container(
-        common_ranges(std_preds, std_preds, channels, stream_opts), resolve=True
-    )
-    for cfg in std_config_dict.values():
-        if isinstance(cfg, dict):
-            cfg["colormap"] = "YlOrRd"
-    return maps_config_dict, bias_config_dict, std_config_dict
-
-
 def plot_data(
     reader: Reader,
     stream: str,
@@ -370,7 +344,7 @@ def plot_data(
 
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
-    maps_config_dict, bias_config_dict, std_config_dict = _colour_ranges(
+    maps_config_dict, bias_config_dict, std_config_dict = plot_colour_ranges(
         da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
     )
 

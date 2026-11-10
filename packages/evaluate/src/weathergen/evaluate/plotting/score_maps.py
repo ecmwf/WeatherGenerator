@@ -23,10 +23,10 @@ from joblib import delayed
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader
+from weathergen.evaluate.plotting.colour_ranges import common_ranges, data_colour_ranges
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.scores.score_orchestration import MetricResult
-from weathergen.evaluate.utils.array_utils import common_ranges
 
 _logger = logging.getLogger(__name__)
 
@@ -96,8 +96,9 @@ def plot_score_maps(
     score_ranges_dict: dict = {}
     for region, by_metric in spatial.items():
         for metric, da in by_metric.items():
+            channels = [str(c) for c in da.channel.values]
             ranges = common_ranges(
-                {0: da}, {0: da}, [str(c) for c in da.channel.values], oc.DictConfig({})
+                data_colour_ranges({0: da}, {0: da}, channels), channels, oc.DictConfig({})
             )
             score_ranges_dict.setdefault(metric, {})[region] = oc.OmegaConf.to_container(ranges)
 

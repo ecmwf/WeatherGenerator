@@ -9,10 +9,6 @@
 
 """Array / DataArray utility functions: range computation, coordinate helpers."""
 
-import fnmatch
-
-import numpy as np
-import omegaconf as oc
 import xarray as xr
 
 
@@ -62,93 +58,6 @@ def calc_bounds(data_tars, data_preds, var, bound):
             )
         )
     return list_bound
-
-
-def common_ranges(
-    data_tars: dict,
-    data_preds: dict,
-    plot_chs: list[str],
-    global_plotting_opts_stream: oc.DictConfig,
-) -> oc.DictConfig:
-    """Calculate common colour ranges per variable across all fsteps.
-
-    Parameters
-    ----------
-    data_tars : dict
-        Forecast step → target DataArray.
-    data_preds : dict
-        Forecast step → prediction DataArray.
-    plot_chs : list[str]
-        Variables to include.
-    global_plotting_opts_stream : oc.DictConfig
-        Existing per-stream plotting config (used as base; may already contain ranges).
-
-    Returns
-    -------
-    oc.DictConfig
-        Updated config with ``vmin`` / ``vmax`` for every variable in *plot_chs*.
-    """
-    maps_config = global_plotting_opts_stream.copy()
-    for var in plot_chs:
-        if var not in maps_config:
-            maps_config[var] = {}
-        # override empty bounds with matching glob bounds from config
-        for key, value in maps_config.items():
-            if not isinstance(value, oc.DictConfig | dict):
-                continue
-            k = str(key)
-            if any(c in k for c in "*?[]") and fnmatch.fnmatch(var, k):
-                for bound in ("vmin", "vmax"):
-                    if isinstance(value.get(bound), int | float):
-                        maps_config[var].setdefault(bound, value[bound])
-        # if vmax still missing, compute bound from data
-        if not isinstance(maps_config[var].get("vmax"), (int | float)):
-            list_max = calc_bounds(data_tars, data_preds, var, "max")
-            list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-            maps_config[var].update({"vmax": float(np.nanmax(list_max))})
-        # if vmin still missing, compute bound from data
-        if not isinstance(maps_config[var].get("vmin"), (int | float)):
-            list_min = calc_bounds(data_tars, data_preds, var, "min")
-            list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
-            maps_config[var].update({"vmin": float(np.nanmin(list_min))})
-    return maps_config
-
-
-def bias_ranges(
-    data_tars: dict,
-    data_preds: dict,
-    plot_chs: list[str],
-    global_plotting_opts_stream: oc.DictConfig,
-) -> oc.DictConfig:
-    """Calculate symmetric bias colour ranges (preds − tars) per variable.
-
-    Parameters
-    ----------
-    data_tars : dict
-        Forecast step → target DataArray.
-    data_preds : dict
-        Forecast step → prediction DataArray.
-    plot_chs : list[str]
-        Variables to include.
-    global_plotting_opts_stream : oc.DictConfig
-        Existing per-stream plotting config used as base.
-
-    Returns
-    -------
-    oc.DictConfig
-        Per-variable symmetric ranges (``vmin = -abs_max``, ``vmax = abs_max``).
-    """
-    bias_config = global_plotting_opts_stream.copy()
-    for var in plot_chs:
-        bias_vals = [
-            (p - t).sel(channel=var).values
-            for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
-        ]
-        abs_max = float(
-            max(abs(np.concatenate(bias_vals).max()), abs(np.concatenate(bias_vals).min()))
-        )
-        bias_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
-    return bias_config
 
 
 def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataArray:
