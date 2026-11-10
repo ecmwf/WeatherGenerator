@@ -747,8 +747,24 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         with self._open_any_rank_for_metadata() as zio:
             dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
-            unique_lead = np.unique(dummy.valid_time.data)
+            # the same split as io_workers._read_sample: one sub-step per unique time
+            unique_lead = np.unique(np.asarray(dummy.prediction.times))
         return set(str(lt) for lt in unique_lead)
+
+    def substep_labels(self, stream: str, fsteps: list[int]) -> list[int]:
+        """The forecast-step labels of the data of the zarr forecast steps *fsteps*.
+
+        ``get_data`` splits a step of a gridded stream into its sub-steps (one per valid
+        time) and labels sub-step ``i`` of step ``fs`` as ``(fs - 1) * n_sub + i + 1``
+        (``io_orchestration._store_substep``); a stream without sub-steps keeps its steps.
+        """
+        n_sub = (
+            len(self.get_forecast_substep_valid_times(stream))
+            if self.is_gridded_data(stream)
+            else 1
+        )
+        n_sub = max(1, n_sub)
+        return [(f - 1) * n_sub + i + 1 for f in fsteps for i in range(n_sub)]
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Get the list of ensemble member names for a given stream.

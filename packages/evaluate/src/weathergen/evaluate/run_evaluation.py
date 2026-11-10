@@ -30,7 +30,7 @@ from weathergen.evaluate.distributed.chunking import (
     parse_distributed_config,
     windows,
 )
-from weathergen.evaluate.distributed.merge import merge_results
+from weathergen.evaluate.distributed.merge import in_window, merge_results
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
@@ -46,7 +46,7 @@ from weathergen.evaluate.plotting.colour_ranges import (
 )
 from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
 from weathergen.evaluate.plotting.plot_utils import collect_channels
-from weathergen.evaluate.plotting.score_maps import plot_score_maps
+from weathergen.evaluate.plotting.score_maps import plot_score_maps, score_map_ranges
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
     MetricResult,
@@ -468,9 +468,10 @@ def _run_stream_in_chunks(
     workers of an MPI run (``distributed.runner``).
 
     Scoring chunk tasks first (their results merged, the missing scores written), then the
-    plotting chunk tasks with the colour ranges of the whole (run, stream), then the score
-    maps and videos (``finish_stream``).  A run whose reader does not load data has nothing
-    to chunk and goes through ``_process_stream`` as it is.
+    plotting chunk tasks with the colour ranges of the whole (run, stream), then
+    ``finish_stream``: the score maps, one scoring window at a time with the colour ranges
+    of the whole stream, and last the videos.  A run whose reader does not load data has
+    nothing to chunk and goes through ``_process_stream`` as it is.
 
     The colour ranges are those a serial run uses: the ranges of the evaluation samples
     over the plotting forecast steps when the stream was scored here (returned by the
@@ -490,6 +491,7 @@ def _run_stream_in_chunks(
 
     results: dict[str, dict[str, MetricResult]] = {}
     computed: dict[str, dict[str, MetricResult]] = {}
+    score_windows: list[list[int]] = []  # the forecast steps (sub-steps) of each scoring chunk
     chunk_ranges: list[dict[int, dict]] = []  # colour ranges per scoring chunk, per step
     if stream_cfg.get("evaluation"):
         available = reader.check_availability(stream, mode="evaluation")
@@ -523,7 +525,9 @@ def _run_stream_in_chunks(
                     for i, t in enumerate(tasks)
                 ]
             )
-            computed = merge_results([o[2] for o in outputs], fsteps=responsible)
+            # the chunks are cut in zarr steps; their scores come back labelled by sub-step
+            score_windows = [reader.substep_labels(stream, window) for window in responsible]
+            computed = merge_results([o[2] for o in outputs], fsteps=score_windows)
             chunk_ranges = [o[3] for o in outputs]
             write_missing_scores(reader, stream, computed, recomputable_metrics)
             for region, by_metric in computed.items():
@@ -531,8 +535,9 @@ def _run_stream_in_chunks(
 
     if stream_cfg.get("plotting"):
         available = reader.check_availability(stream, mode="plotting")
+        plot_steps = reader.substep_labels(stream, available.fsteps)
         colour_ranges = merge_colour_ranges(
-            [by_fstep[f] for by_fstep in chunk_ranges for f in available.fsteps if f in by_fstep]
+            [by_fstep[f] for by_fstep in chunk_ranges for f in plot_steps if f in by_fstep]
         )
         # the ens dimension is dropped on loading only for an ensemble reduced to [mean] / [std]
         has_ens = list(available.ensemble) not in (["mean"], ["std"])
@@ -571,8 +576,35 @@ def _run_stream_in_chunks(
             ]
         )
 
-    finish = f"RUN {run_id} - {stream}: score maps and videos of the whole stream"
-    run_tasks([(finish_stream, task | {"computed": computed}, finish)])
+    # The spatial scores of a whole stream are too big for one task (GBs: an MPI message
+    # must stay under 2 GiB): the maps are drawn one scoring window at a time, with the
+    # colour ranges of the whole stream; the videos are then built from the frames on disk.
+    spatial = {
+        region: {m: r.spatial for m, r in by_metric.items() if r.spatial is not None}
+        for region, by_metric in computed.items()
+    }
+    if plot_score_options.get("plot_score_maps", False) and any(spatial.values()):
+        ranges = score_map_ranges({r: m for r, m in spatial.items() if m})
+        run_tasks(
+            [
+                (
+                    finish_stream,
+                    task
+                    | {
+                        "computed": {
+                            region: {m: in_window(r, window) for m, r in by_metric.items()}
+                            for region, by_metric in computed.items()
+                        },
+                        "score_ranges": ranges,
+                        "animations": False,
+                    },
+                    f"RUN {run_id} - {stream}: score maps {i + 1}/{len(score_windows)}: "
+                    f"forecast steps {window}",
+                )
+                for i, window in enumerate(score_windows)
+            ]
+        )
+    run_tasks([(finish_stream, task, f"RUN {run_id} - {stream}: videos of the whole stream")])
     return run_id, stream, results, {}
 
 
@@ -607,19 +639,30 @@ def finish_stream(
     private_paths: dict[str, str],
     regions: list[str],
     metrics: dict[str, object],
-    computed: dict[str, dict[str, MetricResult]],
     global_plotting_opts: dict[str, object],
     plot_score_options: dict[str, object],
+    computed: dict[str, dict[str, MetricResult]] | None = None,
+    score_ranges: dict | None = None,
+    animations: bool = True,
 ) -> None:
-    """Score maps and videos of one (run, stream), once all its chunks are done.
+    """Score maps of *computed* (a window of the stream's forecast steps, drawn with the
+    colour ranges *score_ranges* of the whole stream) and / or the videos of one (run,
+    stream), once all its frames are on disk.
 
     What a serial ``_process_stream`` call does at its end; here with a reader of its own,
     so that it can run wherever the chunk tasks ran.
     """
     reader = get_reader(run.get("type", "zarr"), run, run_id, private_paths, regions, metrics)
     if plot_score_options.get("plot_score_maps", False) and computed:
-        plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
-    build_animations(reader, stream, global_plotting_opts, plot_score_options)
+        plot_score_maps(
+            reader,
+            stream,
+            computed,
+            global_plotting_options=global_plotting_opts,
+            score_ranges=score_ranges,
+        )
+    if animations:
+        build_animations(reader, stream, global_plotting_opts, plot_score_options)
 
 
 def _chunk_description(
