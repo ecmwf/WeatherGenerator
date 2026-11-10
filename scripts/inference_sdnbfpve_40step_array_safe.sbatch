@@ -23,8 +23,10 @@
 # To test a single task first:
 #   sbatch --array=0 scripts/inference_sdnbfpve_40step_array_safe.sbatch <prefix>
 #
-# Santis normal is node-exclusive: every one-GPU array task reserves one full
-# four-GPU GH200 node. The shared partition can avoid this, but is limited to 1h.
+# Santis nodes (4 GH200 GPUs, 870 GB RAM) are shared between jobs, and a one-GPU
+# job only gets DefMemPerGPU=115 GB of host memory by default. Building one
+# 40-step N320 sample needs more than that (the data loader is OOM-killed at
+# ~106 GB), so request host memory explicitly with --mem.
 
 #SBATCH -A wghack-course2026-cscs
 #SBATCH --partition=normal
@@ -32,6 +34,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
 #SBATCH --gres=gpu:1
+#SBATCH --mem=300G
 #SBATCH --time=01:30:00
 #SBATCH --array=0-3
 #SBATCH --job-name=wg-sdn-f40
