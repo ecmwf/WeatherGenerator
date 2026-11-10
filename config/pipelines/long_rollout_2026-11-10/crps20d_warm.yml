@@ -1,0 +1,40 @@
+# Warm start of the 20-day pushforward recipe: crps20d (long_rollout_2026-10-26/crps20d.yml) started from
+# crps8long's true final checkpoint (axhby5w8 mini-epoch 9; its chkpt 10 was re-saved from _latest by a
+# redundant chain part) instead of crps8's klbklwf7 chkpt 12, for 5 mini-epochs instead of 10. Everything
+# else is crps20d's: K in [8, 12, ..., 80] (random_choice), anchor 4 + final 4 with gradient, 2 members,
+# fair (kernel) CRPS, lead balance power 0.5 (80-step table), FE dropout 0.1, latent noise 1e-5, lr_max 5e-5.
+# Question: is crps20d's ~1% cost at days 3-12 vs crps8long a training-budget effect (crps20d's final
+# windows land at days <= 10 in 9 of 19 batches only)? The medium range starts already learned here.
+# chain_jobs 2: crps20d did ~3.5 mini-epochs per 12 h part, so 2 parts cover 5 without a redundant part.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-11-10/crps20d_warm.yml
+parallelize: true
+stages:
+  - name: crps20d_warm
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_c8lx80.yml
+    options:
+      - load_chkpt.run_id=axhby5w8
+      - load_chkpt.mini_epoch=9
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.lead_balance.power=0.5
+      # 4 + 4 scored steps with gradient (8 + 8 do not fit with 2 members: OOM at 90 GiB in the
+      # smoke test ioq8yjj6), so the memory is that of crps8 and C
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=4
+      - training_config.forecast.rollout_loss_steps=4
+      # K in steps of 4, so that the final windows of 4 steps tile 6h - 20 days (K = 8 is crps8's objective)
+      - training_config.forecast.num_steps=[8,12,16,20,24,28,32,36,40,44,48,52,56,60,64,68,72,76,80]
+      - training_config.num_mini_epochs=5
+      - training_config.learning_rate_scheduling.lr_max=5.0e-05
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 2
+    nodes: 8
