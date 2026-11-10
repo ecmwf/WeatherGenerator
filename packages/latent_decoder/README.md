@@ -6,7 +6,20 @@ dewpoint, 10 m wind, pressure) from the latent tokens around each station.
 
 ## Install
 
-Python 3.12. From the root of the WeatherGenerator repository:
+If you already have a WeatherGenerator environment (the repository's `.venv`), you can use it:
+it has every dependency of this package. Instead of installing, put the package on the path and
+run it as a module, from the root of the repository:
+
+```
+source .venv/bin/activate
+export PYTHONPATH=$PWD/packages/latent_decoder/src
+python -m weathergen.latent_decoder.run_train --config my_config.yml --options results_path=./runs/try1
+```
+
+`python -m weathergen.latent_decoder.run_train` stands in for `train_latent_decoder` below.
+
+Otherwise, a separate environment needs Python 3.12. From the root of the WeatherGenerator
+repository:
 
 ```
 uv venv --python 3.12 .venv-ld
