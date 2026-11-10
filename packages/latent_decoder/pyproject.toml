@@ -1,0 +1,29 @@
+[project]
+name = "weathergen-latent-decoder"
+version = "0.1.0"
+description = "Train simple decoders on stored WeatherGenerator latent states"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy",
+    # as in WeatherGenerator; newer PyPI wheels are built for CUDA 13 and need a newer driver
+    "torch==2.9.1",
+    "zarr>=3.1",
+    "astropy-healpix",
+    "omegaconf",
+]
+
+[project.scripts]
+train_latent_decoder = "weathergen.latent_decoder.run_train:train"
+
+[dependency-groups]
+dev = [
+ "pytest>=8.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/weathergen"]
