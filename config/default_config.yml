@@ -76,6 +76,11 @@ healpix_level: 5
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
 rope_2D: False
+# 2D RoPE in forecast engine only (e.g. encoder trained without RoPE). If null, rope_2D is used
+fe_rope_2D: null
+# Scale of the lat/lon in radians given to 2D RoPE, about 30 makes neighbouring cells differ by 1.
+# Coords are rebuilt at start and not in checkpoints, thus a run must use the scale it was trained with
+rope_2D_coord_scale: 1.0
 
 with_mixed_precision: True
 with_flash_attention: True
