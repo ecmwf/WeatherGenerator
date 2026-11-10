@@ -46,7 +46,7 @@ default_streams:
 
 run_ids:
   <prefix>merge:
-    label: "sdnbfpve, 40 steps (16 init times, 2023-06-01T12 to 2023-06-09T00)"
+    label: "sdnbfpve, 40 steps (4 init times, 2023-06-03T12 to 2023-06-05T00)"
     type: anemoi-target
     mini_epoch: 0
 
@@ -54,10 +54,10 @@ run_ids:
   # (one curve per init time instead of one averaged curve). Uncomment, replace
   # <prefix>, and remove <prefix>merge above; repeat for <prefix>00002 ... <prefix>00015.
   # <prefix>00000:
-  #   label: "sdnbfpve init 2023-06-01T12"
+  #   label: "sdnbfpve init 2023-06-03T12"
   #   type: anemoi-target
   #   mini_epoch: 0
   # <prefix>00001:
-  #   label: "sdnbfpve init 2023-06-02T00"
+  #   label: "sdnbfpve init 2023-06-04T00"
   #   type: anemoi-target
   #   mini_epoch: 0

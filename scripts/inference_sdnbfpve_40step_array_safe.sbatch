@@ -5,8 +5,8 @@
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 
 # One independent 40-step inference sample per array task, from model sdnbfpve.
-# Task i writes run <prefix>000ii (e.g. abc00000 ... abc00015) for source window
-# 2023-06-01T12:00 + i * 12 hours. Each task uses a local test date range that
+# Task i writes run <prefix>000ii (e.g. abc00000 ... abc00003 with the default --array=0-3) for source window
+# 2023-06-03T12:00 + i * 12 hours. Each task uses a local test date range that
 # contains exactly that one valid input window.
 #
 # Set up for the Zurich hackathon (account wghack-course2026-cscs, results in the
@@ -33,7 +33,7 @@
 #SBATCH --cpus-per-task=18
 #SBATCH --gres=gpu:1
 #SBATCH --time=01:30:00
-#SBATCH --array=0-15%16
+#SBATCH --array=0-3
 #SBATCH --job-name=wg-sdn-f40
 #SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --error=logs/%x-%A_%a.err
@@ -50,7 +50,7 @@ fi
 FORECAST_STEPS=40
 FORECAST_CHUNK_SIZE=4
 RESULTS_ROOT=/iopsstor/scratch/cscs/course_29fe58c1/shared_work/results
-FIRST_SOURCE_START=2023-06-01T12:00
+FIRST_SOURCE_START=2023-06-03T12:00
 SOURCE_CADENCE_HOURS=12
 INPUT_STEP_HOURS=6
 # 1 input step + 1 selected window + (40 forecast steps + offset 1) * 6 h.

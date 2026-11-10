@@ -40,8 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--num-shards",
         type=int,
-        default=16,
-        help="number of array tasks to merge, <prefix>00000 onwards (default 16)",
+        default=4,
+        help="number of array tasks to merge, <prefix>00000 onwards (default 4)",
     )
     return parser.parse_args()
 
