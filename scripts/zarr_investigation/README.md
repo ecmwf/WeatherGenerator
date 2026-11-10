@@ -52,6 +52,6 @@ and appends `a`, `b`, ...
 | ID | Dataset | Outcome | Record |
 | --- | --- | --- | --- |
 | ZRB-E001 | N320 v2, sharded, March 2022 | Blocked: store's time metadata covers 1979–2024, data only March 2022; fix ready, needs the store owner | [`experiments/ZRB-E001-n320-sharded-month3-2022.md`](experiments/ZRB-E001-n320-sharded-month3-2022.md) |
-| ZRB-E001a | same, store not fixed | Planned: training range given in the store's wrong dates (January 1979) | [`experiments/ZRB-E001a-workaround-1979-range.md`](experiments/ZRB-E001a-workaround-1979-range.md) |
+| ZRB-E001a | same, store not fixed | Done (job 2683819, 1 task, under nsys): ~3.0 s per 6-step window (~470 MiB/s decoded), training range given in the store's wrong dates (January 1979) | [`experiments/ZRB-E001a-workaround-1979-range.md`](experiments/ZRB-E001a-workaround-1979-range.md) |
 | ZRB-E002 | N320 March 2022: Zarr 2 vs Zarr 3 sharded | Zarr 3 with 24-step shards ~1.2× slower per window than Zarr 2 (login and compute, 1 and 4 tasks, cold and warm), 1/3 the inodes. Squashfs variant dropped (1.4–3× slower than Zarr 2): [`experiments/ZRB-E002-squashfs-dropped.md`](experiments/ZRB-E002-squashfs-dropped.md) | [`experiments/ZRB-E002-n320-v2-v3-march-2022.md`](experiments/ZRB-E002-n320-v2-v3-march-2022.md) |
 | ZRB-E003 | N320 2022 (March read): Zarr 3 shards of 6, 24, 96, 216 steps vs Zarr 2 | Planned | [`experiments/ZRB-E003-n320-2022-shard-sizes.md`](experiments/ZRB-E003-n320-2022-shard-sizes.md) |

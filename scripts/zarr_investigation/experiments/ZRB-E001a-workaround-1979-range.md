@@ -1,7 +1,7 @@
 # ZRB-E001a — N320 v2, sharded, March 2022: run before the store fix
 
 - Date: 2026-10-30
-- Status: planned
+- Status: done 2026-11-04 (Slurm run under nsys; an unprofiled repeat is optional)
 - Question: same as [ZRB-E001](ZRB-E001-n320-sharded-month3-2022.md), run on the store as it
   is, without its prerequisite (the time-metadata fix).
 - Code: WeatherGenerator [`acfe78b6`](https://github.com/florianscheidl/WeatherGenerator/commit/acfe78b60d662449acd3f6e9f16b7d07ed1c8139)
@@ -92,8 +92,48 @@ training_config.end_date=1979-01-31T18:00 \
 
 Check that the summary line reports `num_empty: 0`.
 
-- Job ID(s) / output name(s): —
+- Job ID(s) / output name(s): login-node check run (2b, see Result):
+  `aifs-ea-an-oper-0001-mars-n320-1979-2024-1h-v2-with-era51_sharded_month3_2022_shards24_20261104T134936.jsonl`;
+  Slurm run (2a): job 2683819,
+  `aifs-ea-an-oper-0001-mars-n320-1979-2024-1h-v2-with-era51_sharded_month3_2022_shards24_20261104T140224_2683819.jsonl`
+  and the matching `.nsys-rep` in `profiling/zarr_experiment_results/profiler_traces/`
 
 ## Result
 
-—
+**Slurm run** (2a, job 2683819, `jpbo-030-44`, 1 task, 72 CPUs, under nsys). Both runs read
+the same 100 windows (seed 0) and their checksums agree on all 100.
+
+| Run | Node | Median ms | p90 ms | p99 ms | Max ms | Decoded MiB/s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Slurm, under nsys | `jpbo-030-44` | 3021 | 3167 | 3538 | 3669 | 466.5 |
+| Login node (below) | `jpbl-s01-01` | 3110 | 3476 | 8032 | 13765 | 426.5 |
+
+- One reader takes about 3.0 s per 6-step window (about 1.4 GiB decoded), i.e. roughly
+  470 MiB/s, with a tight distribution: the slowest window is 1.2× the median.
+- No warmup effect (warmup windows 2981 and 3025 ms) and no drift (median of the first and
+  second half 3001 and 3033 ms).
+- Windows that cross a 24-step shard boundary are not slower: median 2855 ms (24 windows)
+  against 3044 ms within one shard.
+- Caveats: the run is under nsys (overhead not measured);
+  it started about 4 minutes after the login-node run had read the same data, so a
+  storage-side cache can't be ruled out, and these need not be cold-read times.
+  `zarr_threading_max_workers` is unset (zarr default), `zarr_async_concurrency` 10.
+
+**Login-node check run** (2026-11-04, `jpbl-s01-01`). Step 2b run on a login node, not a
+compute node, and without `--nsys` (the pasted command ended at the line before it). It
+checks correctness; its timings are not results.
+
+- `num_empty: 0` over all 100 windows: the 1979 workaround range reads the March 2022 data.
+- Per-window `--checksum` hashes are recorded. They do not depend on the node, so they are a
+  reference for the Slurm run and for a later run on the fixed store (ZRB-E001).
+- Timings, 98 timed windows: median 3110 ms, p90 3476 ms, p99 8032 ms, max 13765 ms;
+  426.5 MiB/s decoded (about 1.4 GiB per window). Not comparable to a `booster` node: other
+  users' processes compete for the CPU (chunk decompression runs on it) and memory
+  bandwidth; the login node's cores, per-user limits and filesystem client may differ from
+  a compute node's; and its page cache may hold parts of the store from earlier reads.
+- The long tail is contention, not data: it comes from two windows close together in time
+  (positions 79 and 81, idx 5 at 13765 ms and idx 515 at 7855 ms), and the same windows are
+  not among the slowest in the Slurm run (max 3669 ms). Outside them the login node was
+  only a little slower (median +3 %, p90 +10 %).
+- Wall time 505 s against 322 s timed: the rest is reader init, the 2 warmup windows and the
+  checksum (about 1.5 GiB hashed per window), all outside the timed `_get`.
