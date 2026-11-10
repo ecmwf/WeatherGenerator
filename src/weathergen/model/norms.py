@@ -35,7 +35,8 @@ class RMSNorm(torch.nn.Module):
 
     def reset_parameters(self):
         """Re-initialize the learnable scale to ones (matches ``__init__``)."""
-        torch.nn.init.ones_(self.weight)
+        if self.weight is not None:
+            torch.nn.init.ones_(self.weight)
 
     def _norm(self, x):
         """
@@ -62,7 +63,48 @@ class RMSNorm(torch.nn.Module):
 
         """
         output = self._norm(x.float()).type_as(x)
-        return output * self.weight
+        return output if self.weight is None else output * self.weight
+
+
+class FixedScaleNorm(torch.nn.Module):
+    """Wraps an affine-free norm and multiplies its output by a fixed (non-learnable) scale."""
+
+    def __init__(self, norm: torch.nn.Module, scale: float):
+        super().__init__()
+        self.norm = norm
+        self.scale = scale
+
+    def forward(self, x):
+        return self.norm(x) * self.scale
+
+
+def _drop_affine(module: torch.nn.Module) -> None:
+    if isinstance(module, torch.nn.LayerNorm):
+        module.elementwise_affine = False
+        module.register_parameter("bias", None)
+    module.register_parameter("weight", None)
+
+
+def strip_norm_affine(model: torch.nn.Module, norm_affine: bool, qk_norm_scale: float | None):
+    """Remove learnable norm parameters after the model is built.
+
+    norm_affine=False drops weight and bias of every LayerNorm and RMSNorm. qk_norm_scale drops the
+    affine of the query/key norms (lnorm_q, lnorm_k) and multiplies their output by that fixed scale
+    instead, which bounds every attention logit by qk_norm_scale**2 * sqrt(dim_head).
+    """
+    is_norm = (torch.nn.LayerNorm, RMSNorm)
+    qk_names = ("lnorm_q", "lnorm_k")
+    for parent in list(model.modules()):
+        for name, child in list(parent.named_children()):
+            if not isinstance(child, is_norm):
+                continue
+            if qk_norm_scale is not None and name in qk_names:
+                _drop_affine(child)
+                setattr(parent, name, FixedScaleNorm(child, qk_norm_scale))
+            elif not norm_affine and (
+                child.weight is not None or getattr(child, "bias", None) is not None
+            ):
+                _drop_affine(child)
 
 
 class AdaLNZero(torch.nn.Module):

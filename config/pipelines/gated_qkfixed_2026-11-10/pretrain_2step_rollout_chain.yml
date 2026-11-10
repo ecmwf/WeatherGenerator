@@ -1,0 +1,111 @@
+# Gated attention + affine-free norms + fixed QK-norm scale on the optimizer-fix chain.
+#   norm_affine=False: no weight/bias in any LayerNorm or RMSNorm.
+#   qk_norm_scale=1.3: q and k are RMS-normalised without affine and multiplied by 1.3, so every
+#   attention logit is bounded by 1.3**2 * sqrt(d_head) = 13.5 (d_head 64) / 19.1 (d_head 128).
+#   1.3**2 = 1.69 matches the median learned mean(g_q * g_k) of gatpt001 (1.2-3.0 per block).
+# Otherwise identical to gated_attention_2026-11-04/pretrain_2step_rollout_chain.yml (gatpt001 chain).
+# Launch from the WeatherGenerator root of this branch and keep the checkout until all stages have started:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --no-register --pipeline config/pipelines/gated_qkfixed_2026-11-10/pretrain_2step_rollout_chain.yml
+parallelize: false
+stages:
+  - name: pretrain
+    stage: train
+    run_id: gqkpt001
+    base_config: ./config/config_gjl6a0kb_reproduction_n320_iasi_channels.yml
+    options:
+      - use_gated_attention=True
+      - norm_affine=False
+      - qk_norm_scale=1.3
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+      - train_logging.loss_spike_detection.enabled=False
+      - train_logging.loss_spike_detection.skip_batch=False
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+    chain_jobs: 4
+    nodes: 2
+  - name: forecastft
+    stage: train
+    run_id: gqkft001
+    from_run_id: STAGE.pretrain
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_iasi_channels_monitoring_optimfix_gated_qkfixed.yml
+    chain_jobs: 4
+    nodes: 2
+  - name: rollout8
+    stage: train
+    run_id: gqkro801
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    options:
+      - use_gated_attention=True
+      - norm_affine=False
+      - qk_norm_scale=1.3
+      # the base config stores nhv6tkln's final step (2048): start a new schedule, as nhv6tkln did
+      - general.istep=0
+      - load_chkpt.run_id=gqkft001
+      - load_chkpt.mini_epoch=-1
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8
+  - name: pfanchndlb
+    stage: train
+    run_id: gqkpf001
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - use_gated_attention=True
+      - norm_affine=False
+      - qk_norm_scale=1.3
+      - load_chkpt.run_id=gqkro801
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=5
+      - train_logging.checkpoint=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8
+  - name: combodet
+    stage: train
+    run_id: gqkcd001
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - use_gated_attention=True
+      - norm_affine=False
+      - qk_norm_scale=1.3
+      - load_chkpt.run_id=gqkpf001
+      - load_chkpt.mini_epoch=5
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.0
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      - train_logging.checkpoint=128
+      - training_config.optimizer.adamw.eps=1e-10
+      - training_config.optimizer.no_weight_decay=[norms,biases]
+      - train_logging.monitoring.enabled=True
+      - train_logging.monitoring.monitors.adam_state.enabled=True
+    chain_jobs: 2
+    nodes: 8

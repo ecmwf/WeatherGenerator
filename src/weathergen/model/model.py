@@ -40,6 +40,7 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.norms import strip_norm_affine
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.rollout import RolloutPlan, autocast_cache_disabled, get_rollout_plan
@@ -672,6 +673,8 @@ class Model(torch.nn.Module):
                 self.deep_ssl_level_projections[head_name] = nn.ModuleList(
                     [nn.Linear(out_dim, out_dim, bias=False) for _ in range(num_levels)]
                 )
+
+        strip_norm_affine(self, cf.get("norm_affine", True), cf.get("qk_norm_scale", None))
 
         return self
 
