@@ -99,6 +99,9 @@ class TokenizerMasking(Tokenizer):
         if num_tokens == 0:
             return (mask_tokens, mask_channels)
 
+        if mask is None:
+            mask = [True] * len(idxs_cells_lens)
+
         # TODO, TODO, TODO: use np.repeat
         # https://stackoverflow.com/questions/26038778/repeat-each-values-of-an-array-different-times
         # build token level mask: for each cell replicate the keep flag across its tokens

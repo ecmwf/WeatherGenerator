@@ -1,0 +1,49 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Example field conditioning stream: SST forcing for the atmosphere.
+# The conditioning encoder reads SST data at each forecast step and encodes it
+# into a latent representation that is injected into the ForecastingEngine.
+ERA5_SST:
+  type: anemoi
+  conditioning: True
+  filenames: ['ERA5-1deg-6h-mean-forcing-1978-2024.zarr']
+  timestep_conditioning: field
+  stream_id: 99
+  source: ['sea_surface_temperature']
+  token_size: 8
+  tokenize_spacetime: False
+  geoinfo_channels: []
+
+  # Conditioning encoder configuration.
+  # Option A — load a pre-trained encoder from a model checkpoint:
+  #   encoder:
+  #     model_id: XXX
+  #     model_epoch: XXX
+  #
+  # Option B — define an inline encoder (same parameters as the main encoder):
+  encoder:
+    ae_local_dim_embed: 512
+    ae_local_num_blocks: 2
+    ae_local_num_heads: 8
+    ae_local_num_queries: 1
+    ae_global_dim_embed: 512
+    ae_global_num_blocks: 2
+    ae_global_num_heads: 8
+
+  embed:
+    net: transformer
+    num_tokens: 1
+    num_heads: 8
+    dim_embed: 512
+    num_blocks: 2
+
+  conditioning_FE:
+    type: cross_attention
+    dim_embed: 256
