@@ -50,6 +50,10 @@ class WeatherGenReader(Reader):
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
         self.rank = eval_cfg.get("rank", "all")
 
+        # Set by WeatherGenJsonReader._compute_common_coords() to tell load_single_score()
+        # to skip the eval_settings check while common coords are being established.
+        self.computing_common_coords = False
+
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
 
@@ -278,16 +282,18 @@ class WeatherGenReader(Reader):
             if "scores" not in data_dict:
                 data_dict = {"scores": [data_dict]}
 
-            # Check eval_settings match current config
-            stored_settings = data_dict.get("eval_settings", {})
-            current_settings = self.get_eval_settings(stream)
-            if stored_settings != current_settings:
-                _logger.info(
-                    f"Eval settings changed for {score_path.name}: "
-                    f"stored={stored_settings}, current={current_settings}. "
-                    f"Forcing recomputation."
-                )
-                return None
+            # Check eval_settings match current config. Skipped while computing
+            # common_coords, since computing eval_settings itself needs common_coords.
+            if not self.computing_common_coords:
+                stored_settings = data_dict.get("eval_settings", {})
+                current_settings = self.get_eval_settings(stream)
+                if stored_settings != current_settings:
+                    _logger.info(
+                        f"Eval settings changed for {score_path.name}: "
+                        f"stored={stored_settings}, current={current_settings}. "
+                        f"Forcing recomputation."
+                    )
+                    return None
 
             for score_version in data_dict["scores"]:
                 if score_version["attrs"] == parameters:
@@ -350,7 +356,8 @@ class WeatherGenJsonReader(WeatherGenReader):
         metrics: dict[str, object] | None = None,
     ):
         super().__init__(eval_cfg, run_id, private_paths)
-        self.common_coords: dict = self._compute_common_coords(regions, metrics)
+        self.common_coords: dict = {}
+        self.common_coords = self._compute_common_coords(regions, metrics)
 
     def _compute_common_coords(self, regions: list[str], metrics: list[str]) -> dict:
         # Find common coordinates across streams, regions, metrics.
@@ -359,6 +366,10 @@ class WeatherGenJsonReader(WeatherGenReader):
         all_coords = {name: [] for name in coord_names}
         provenance = {name: defaultdict(list) for name in coord_names}
 
+        # load_single_score() -> get_eval_settings() -> get_forecast_steps() needs
+        # common_coords, which is what we're computing here. So computing_common_coords
+        # tells load_single_score() to skip here when it is already beeing computed.
+        self.computing_common_coords = True
         for stream in streams:
             for region in regions:
                 for metric, parameters in metrics.items():
@@ -369,6 +380,7 @@ class WeatherGenJsonReader(WeatherGenReader):
                             all_coords[name].append(vals)
                             for val in vals:
                                 provenance[name][val].append((stream, region, metric))
+        self.computing_common_coords = False
 
         common_coords = {name: set.intersection(*all_coords[name]) for name in coord_names}
 
@@ -739,6 +751,22 @@ class WeatherGenZarrReader(WeatherGenReader):
         """Get the set of forecast steps (validated across all ranks at init)."""
         return self._validated_metadata["forecast_steps"]
 
+    def get_effective_forecast_steps(self, stream: str) -> set[int]:
+        """Forecast steps as they appear in saved score files.
+
+        For gridded streams with multiple valid_times per raw fstep (e.g.
+        4x6h models), each sub-step is assigned its own sequential forecast_step
+        label (1..N) when scores are built, rather than the raw rollout step
+        indices returned by ``get_forecast_steps()``. Reconstruct that expanded
+        range here so eval_settings match what's actually stored in score files.
+        """
+        if not self.is_gridded_data(stream):
+            return self.get_forecast_steps()
+        n_sub = len(self.get_forecast_substep_valid_times(stream))
+        if n_sub <= 1:
+            return self.get_forecast_steps()
+        return set(range(1, len(self.get_forecast_steps()) * n_sub + 1))
+
     def get_forecast_substep_valid_times(self, stream: str) -> set[str]:
         """Get the set of forecast times from a rank file."""
         if not self.is_gridded_data(stream):
@@ -747,7 +775,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         with self._open_any_rank_for_metadata() as zio:
             dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
-            unique_lead = np.unique(dummy.valid_time.data)
+            unique_lead = np.unique(np.asarray(dummy.prediction.times))
         return set(str(lt) for lt in unique_lead)
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:
