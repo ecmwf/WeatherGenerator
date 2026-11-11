@@ -10,6 +10,7 @@
 embed_orientation: "channels"
 embed_unembed_mode: "full"
 embed_dropout_rate: 0.1
+embed_final_dropout_rate: 0.0  # was hard-coded 0.1 in StreamEmbedTransformer
 
 ae_local_dim_embed: 2048
 ae_local_num_blocks: 0
@@ -47,6 +48,7 @@ ae_aggregation_mlp_hidden_factor: 2
 ae_local_max_tokens_per_cell: 256
 
 decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
+pred_dropout_rate: 0.0  # target readout (decoder) dropout, was hard-coded 0.1
 pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
