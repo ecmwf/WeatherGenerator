@@ -1,10 +1,15 @@
+import logging
 from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 import xarray as xr
 
 from weathergen.evaluate.utils.regions import RegionBoundingBox
+
+_logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
 
 
 class Timeseries:
@@ -77,14 +82,25 @@ class Timeseries:
         has_ens = ens is not None and "ens" in da_preds_ts.dims and ens != "mean"
         if has_ens:
             da_preds_ts = da_preds_ts.sel(ens=ens)
-        valid_times = da_tars_ts.valid_time.values
+        # With a single forecast step, xr.concat leaves valid_time as a scalar: make it 1-D.
+        valid_times = np.atleast_1d(da_tars_ts.valid_time.values)
+
+        # A single point cannot form a line, so warn and draw it with a marker.
+        single_step = len(valid_times) == 1
+        if single_step:
+            _logger.warning(
+                f"Timeseries:: Only one forecast step available for {stream}, channel {channel}, "
+                f"sample {sample}. Plotting a single point; use at least two forecast steps "
+                "to see a timeseries."
+            )
+        marker = "o" if single_step else None
 
         pred_label = "Prediction" if not has_ens else f"Prediction (ens {ens})"
 
         matplotlib.use("Agg")
         fig, ax = plt.subplots(figsize=(15, 7))
-        ax.plot(valid_times, da_preds_ts.values, label=pred_label)
-        ax.plot(valid_times, da_tars_ts.values, label=stream, linestyle="--")
+        ax.plot(valid_times, da_preds_ts.values, label=pred_label, marker=marker)
+        ax.plot(valid_times, da_tars_ts.values, label=stream, linestyle="--", marker=marker)
         fig.suptitle(
             f"Timeseries Average - {region.capitalize()}",
             fontsize="x-large",
