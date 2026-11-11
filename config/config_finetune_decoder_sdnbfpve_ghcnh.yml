@@ -26,6 +26,8 @@ training_config:
     lr_max: 1.0e-4
     num_steps_warmup: 64
     num_steps_cooldown: 128
+    # sdnbfpve was trained with the old spelling "const", which the scheduler no longer accepts
+    parallel_scaling_policy: "constant"
 
 streams:
   GHCNH:

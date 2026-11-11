@@ -10,6 +10,13 @@ Merges runs <prefix>00000 ... <prefix>000NN (NN = num_shards - 1) of
 scripts/inference_sdnbfpve_40step_array_safe.sbatch into the run <prefix>merge.
 Paths are those of the Zurich hackathon (course shared_work directory).
 
+Nothing is copied: the evaluation reader supports several rank files per run
+(validation_chkpt00000_rank0000.zip, rank0001.zip, ...), each holding local sample 0,
+and assigns them consecutive global sample indices. So shard i becomes a relative
+symlink rank000i.zip -> ../<prefix>0000i/validation_chkpt00000_rank0000.zip. This
+takes seconds and no disk space, and is fine on a login node. Do not delete the
+<prefix>0000i runs afterwards, since the merged run points at them.
+
 Usage:
     uv run python scripts/aggregate_inference_zarr.py <prefix>
     uv run python scripts/aggregate_inference_zarr.py <prefix> --num-shards 4
@@ -21,10 +28,6 @@ import argparse
 import json
 import logging
 from pathlib import Path
-
-import numpy as np
-import zarr
-from zarr.storage import ZipStore
 
 RESULTS_ROOT = Path("/iopsstor/scratch/cscs/course_29fe58c1/shared_work/results")
 MODELS_ROOT = Path("/iopsstor/scratch/cscs/course_29fe58c1/shared_work/models")
@@ -43,55 +46,15 @@ def parse_args() -> argparse.Namespace:
         default=4,
         help="number of array tasks to merge, <prefix>00000 onwards (default 4)",
     )
+    parser.add_argument(
+        "--output-run-id",
+        help="run id of the merged run (default: <prefix>merge)",
+    )
     return parser.parse_args()
 
 
 def archive_path(run_id: str) -> Path:
     return RESULTS_ROOT / run_id / f"validation_chkpt{MINI_EPOCH:05d}_rank0000.zip"
-
-
-def copy_group(source: zarr.Group, destination: zarr.Group) -> None:
-    """Recursively copy Zarr arrays, groups, and attributes."""
-    for name, array in source.arrays():
-        values = np.asarray(array)
-        destination.create_array(
-            name,
-            data=values,
-            chunks="auto" if values.size == 0 else array.chunks,
-            attributes=dict(array.attrs),
-        )
-
-    for name, group in source.groups():
-        child = destination.create_group(name, attributes=dict(group.attrs))
-        copy_group(group, child)
-
-
-def copy_sample(source: zarr.Group, destination: zarr.Group, sample_index: int) -> None:
-    """Copy source sample 0 to its contiguous sample index in the merged archive."""
-    if list(source.group_keys()) != ["0"]:
-        raise ValueError(
-            f"Expected one source sample named '0', found {list(source.group_keys())}."
-        )
-
-    source_sample = source["0"]
-    destination_sample = destination.create_group(
-        str(sample_index), attributes=dict(source_sample.attrs)
-    )
-    for stream_name, source_stream in source_sample.groups():
-        destination_stream = destination_sample.create_group(
-            stream_name, attributes=dict(source_stream.attrs)
-        )
-
-        # Chunked offset-one output contains forecast groups 1..40. ZarrIO looks
-        # at fstep 0 to identify offset-one output, so retain an empty fstep 0.
-        if "0" not in source_stream:
-            destination_stream.create_group("0")
-
-        for fstep, source_fstep in source_stream.groups():
-            destination_fstep = destination_stream.create_group(
-                fstep, attributes=dict(source_fstep.attrs)
-            )
-            copy_group(source_fstep, destination_fstep)
 
 
 def write_config(output_run_id: str, prefix: str, num_shards: int) -> None:
@@ -117,7 +80,7 @@ def main() -> None:
     prefix, num_shards = args.prefix, args.num_shards
     if len(prefix) != 3 or not prefix[0].isalpha() or not prefix.isalnum():
         raise ValueError("prefix must be three alphanumeric characters starting with a letter.")
-    output_run_id = f"{prefix}merge"
+    output_run_id = args.output_run_id or f"{prefix}merge"
 
     shard_ids = [f"{prefix}{index:05d}" for index in range(num_shards)]
     archives = [archive_path(run_id) for run_id in shard_ids]
@@ -126,28 +89,21 @@ def main() -> None:
         raise FileNotFoundError("Missing shard output(s):\n" + "\n".join(map(str, missing)))
 
     output_dir = RESULTS_ROOT / output_run_id
-    output = output_dir / f"validation_chkpt{MINI_EPOCH:05d}_rank0000.zip"
-    partial_output = output.with_suffix(".partial.zip")
-    if output_dir.exists() or (MODELS_ROOT / output_run_id).exists() or partial_output.exists():
+    if output_dir.exists() or (MODELS_ROOT / output_run_id).exists():
         raise FileExistsError(f"Output run ID is already in use: {output_run_id}")
 
     output_dir.mkdir()
     try:
-        with ZipStore(partial_output, mode="w") as destination_store:
-            destination_root = zarr.group(store=destination_store)
-            for sample_index, (run_id, archive) in enumerate(zip(shard_ids, archives, strict=True)):
-                logger.info(f"Copying {run_id} -> sample {sample_index}")
-                with ZipStore(archive, mode="r") as source_store:
-                    source_root = zarr.open_group(store=source_store, mode="r")
-                    copy_sample(source_root, destination_root, sample_index)
-
-        partial_output.replace(output)
+        for rank, (run_id, archive) in enumerate(zip(shard_ids, archives, strict=True)):
+            link = output_dir / f"validation_chkpt{MINI_EPOCH:05d}_rank{rank:04d}.zip"
+            link.symlink_to(Path("..") / run_id / archive.name)
+            logger.info(f"{link.name} -> {run_id} (sample {rank})")
         write_config(output_run_id, prefix, num_shards)
     except Exception:
         logger.error(f"Aggregation failed. Inspect or remove {output_dir} before retrying.")
         raise
 
-    logger.info(f"Merged {num_shards} samples into {output}")
+    logger.info(f"Merged {num_shards} runs into {output_dir}")
 
 
 if __name__ == "__main__":
