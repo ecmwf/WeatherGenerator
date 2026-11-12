@@ -119,12 +119,11 @@ def init_model_and_shard(
                     if isinstance(module, modules_to_shard):
                         fully_shard(module, mp_policy=encoder_policy)
 
-        for module in model.forecast_engine.fe_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                # reshard_after_forward=False keeps FE parameters unsharded
-                # during the multi-step rollout loop.
-                # Needed for pushforward trick.
-                fully_shard(module, reshard_after_forward=False, **fsdp_kwargs)
+        for engine in model.forecast_engines.values():
+            for module in engine.fe_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    # Keep FE parameters unsharded through the rollout/pushforward loop.
+                    fully_shard(module, reshard_after_forward=False, **fsdp_kwargs)
 
         for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):
@@ -204,6 +203,11 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     params = torch.load(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
+    if any(name.startswith(("forecast_engine.", "module.forecast_engine.")) for name in params):
+        raise ValueError(
+            "Checkpoint uses a single forecast_engine; load encoder-only weights or use a "
+            "checkpoint with forecast_engines."
+        )
 
     is_model_sharded = cf.with_ddp and cf.with_fsdp
     if is_model_sharded:

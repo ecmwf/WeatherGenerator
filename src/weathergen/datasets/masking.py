@@ -113,9 +113,8 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, stage: Stage, healpix_level: int, streams=None, mode_cfg=None):
+    def __init__(self, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
-        self.healpix_level = healpix_level
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -316,13 +315,13 @@ class Masker:
         self,
         training_mode: str,
         stream_info: dict,
+        healpix_level: int,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
         SampleMetaData is currently just a dict with the masking params used.
         """
 
-        healpix_level = self.healpix_level
         num_cells = hp_level_to_num_cells(healpix_level)
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
