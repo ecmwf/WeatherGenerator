@@ -16,7 +16,9 @@ import numpy as np
 import zarr
 
 from weathergen.datasets.data_reader_base import (
+    NPDT64,
     DataReaderBase,
+    DTRange,
     ReaderData,
     TimeWindowHandler,
     check_reader_data,
@@ -47,7 +49,9 @@ class DataReaderObs(DataReaderBase):
 
         # To read idx convert to a string, format e.g.: 197001010000
         base_date_str = dt_obj.strftime("%Y%m%d%H%M")
-        self.hrly_index = self.z[f"idx_{base_date_str}_1"]
+        # Hourly index: hrly_index[h] is the number of rows with date <= base_datetime + h hours.
+        # Loaded into memory (8 bytes per hour) since _get looks it up for every window.
+        self.hrly_index = self.z[f"idx_{base_date_str}_1"][:]
         self.colnames = list(self.data.attrs["colnames"])
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
@@ -172,9 +176,9 @@ class DataReaderObs(DataReaderBase):
         end_range_1 = min(diff_in_hours_end, self.hrly_index.shape[0] - 1)
         self.indices_start = self.hrly_index[diff_in_hours_start:end_range_1:step_hrs]
 
-        end_range_2 = min(
-            diff_in_hours_end + len_hrs, self.hrly_index.shape[0] - 1
-        )  # handle beyond end of data range safely
+        # The slice stop is exclusive, so clamp to shape[0] (not shape[0] - 1): otherwise the
+        # last window's end is cut off when the hourly index ends exactly at t_end.
+        end_range_2 = min(diff_in_hours_end + len_hrs, self.hrly_index.shape[0])
         self.indices_end = (
             self.hrly_index[diff_in_hours_start + len_hrs : end_range_2 : step_hrs] - 1
         )
@@ -245,8 +249,12 @@ class DataReaderObs(DataReaderBase):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        start_row = self.indices_start[idx]
-        end_row = self.indices_end[idx]
+        t_win = self.time_window_handler.window(idx)
+        start_row, end_row = self._row_range(t_win)
+        if start_row >= end_row:
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
 
         coords = self.data.oindex[start_row:end_row, self.coords_idx]
         geoinfos = (
@@ -258,20 +266,42 @@ class DataReaderObs(DataReaderBase):
         data = self.data.oindex[start_row:end_row, channels_idx]
         datetimes = self.dt[start_row:end_row][:, 0]
 
-        # indices_start, indices_end above work with [t_start, t_end] and violate
-        # our convention [t_start, t_end) where endpoint is excluded
-        # compute mask to enforce it
-        t_win = self.time_window_handler.window(idx)
-        t_mask = np.logical_and(datetimes >= t_win.start, datetimes < t_win.end)
-
-        rdata = ReaderData(
-            coords=coords[t_mask],
-            geoinfos=geoinfos[t_mask],
-            data=data[t_mask],
-            datetimes=datetimes[t_mask],
-        )
-
-        dtr = self.time_window_handler.window(idx)
-        check_reader_data(rdata, dtr)
+        # The row range is exactly [t_start, t_end), so nothing needs masking;
+        # check_reader_data fails if dates are not sorted and rows fall outside the window.
+        rdata = ReaderData(coords=coords, geoinfos=geoinfos, data=data, datetimes=datetimes)
+        check_reader_data(rdata, t_win)
 
         return rdata
+
+    def _row_range(self, t_win: DTRange) -> tuple[int, int]:
+        """
+        Rows [start_row, end_row) holding exactly the data with t_win.start <= date < t_win.end.
+
+        For back-to-back windows, end_row of one window is start_row of the next, so every
+        row belongs to exactly one window.
+        """
+        return self._first_row_at_or_after(t_win.start), self._first_row_at_or_after(t_win.end)
+
+    def _first_row_at_or_after(self, t: NPDT64) -> int:
+        """
+        Index of the first row with date >= t, i.e. the number of rows with date < t.
+        """
+        lo, hi = self._bracket(t)
+        return lo + int(np.searchsorted(self.dt[lo:hi, 0], t, side="left"))
+
+    def _bracket(self, t: NPDT64) -> tuple[int, int]:
+        """
+        Rows [lo, hi) that contain the position of the first row with date >= t.
+
+        hrly_index[h] is the number of rows with date <= base_datetime + h hours, so with
+        h = ceil(hours from base_datetime to t), every row before lo has date <= h - 1 hours < t
+        and every row from hi on has date > h hours >= t. Only the dates of the hour bin
+        (h - 1, h] are left to search.
+        """
+        n_hours = self.hrly_index.shape[0]
+        h = int(np.ceil((t - self.base_datetime) / np.timedelta64(1, "h")))
+        lo = 0 if h <= 0 else int(self.hrly_index[min(h - 1, n_hours - 1)])
+        # rows after the last indexed hour exist, so search to the end of the data;
+        # clamp h at 0 so t before base_datetime does not wrap to the end of the index
+        hi = self.data.shape[0] if h >= n_hours else int(self.hrly_index[max(h, 0)])
+        return lo, hi
