@@ -276,6 +276,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 if ds.target_channel_weights is not None
                 else [1.0 for _ in ds.target_channels]
             )
+            if (n := getattr(ds, "n_latitudes", None)) is not None:
+                stream_info["n_latitudes"] = n
 
         return streams_datasets
 
