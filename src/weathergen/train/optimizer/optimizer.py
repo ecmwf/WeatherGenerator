@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import re
 
 import numpy as np
 import torch
@@ -26,6 +27,16 @@ _NORM_MODULES = (
     RMSNorm,
 )
 _NO_WEIGHT_DECAY_KINDS = ("norms", "biases")
+
+# with optimizer.muon.hidden_only, parameters whose name matches one of these go to adamw even if
+# 2D: input/output embeddings and coordinate/aux embeddings, prediction heads, learned queries
+_MUON_NON_HIDDEN_PATTERNS = (
+    r"(^|\.)embed_target_coords\.",  # target coordinate embedding
+    r"(^|\.)embeds\.[^.]+\.(embed|unembed|layer)\.",  # stream input embed / unembed
+    r"(^|\.)embed_aux\.",  # coordinate conditioning in target token engines
+    r"(^|\.)(pred_heads|latent_heads)\.",
+    r"(^|\.)q_(cells|aux)$",
+)
 
 
 def _adamw_betas_eps(optimizer_cfg, kappa: float) -> dict:
@@ -136,18 +147,31 @@ class AdamW:
         self.muon_effective_lr_factor: float | None = None
 
 
+def _is_muon_param(name: str, param: torch.Tensor, hidden_only: bool) -> bool:
+    """
+    Muon takes 2D parameters; with hidden_only, only the transformer hidden matrices, i.e. not
+    those matching _MUON_NON_HIDDEN_PATTERNS (embeddings, heads, learned queries).
+    """
+    if param.ndim != 2:
+        return False
+    return not (hidden_only and any(re.search(pat, name) for pat in _MUON_NON_HIDDEN_PATTERNS))
+
+
 class Muon:
     """
     Muon optimizer for the model's 2D weight matrices (hidden layers), paired with a separate
     AdamW optimizer for all other (non-2D) parameters -- biases, norms, ... -- as recommended by
     https://kellerjordan.github.io/posts/muon/ (torch.optim.Muon also hard-requires exactly 2D
     tensors and raises ValueError otherwise, e.g. for a [1, 1, 2048] param).
+    With optimizer.muon.hidden_only, 2D embeddings and heads go to AdamW as well.
     """
 
     def __init__(self, model: torch.nn.Module, optimizer_cfg, shared_lr_cfg, kappa: float):
         muon_cfg = optimizer_cfg.muon
-        muon_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
-        adamw_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
+        hidden_only = bool(muon_cfg.get("hidden_only", False))
+        named = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+        muon_params = [p for n, p in named if _is_muon_param(n, p, hidden_only)]
+        adamw_params = [p for n, p in named if not _is_muon_param(n, p, hidden_only)]
 
         muon_lr_cfg = _scale_lr_cfg(shared_lr_cfg, muon_cfg.get("lr_max", None))
         adjust_lr_fn = muon_cfg.get("adjust_lr_fn", None) or "original"
@@ -157,8 +181,10 @@ class Muon:
 
         if is_root():
             logger.info(
-                f"Using muon optimizer: {len(muon_params)} params (ndim == 2) via muon, "
-                f"{len(adamw_params)} params (ndim != 2) via adamw, "
+                f"Using muon optimizer (hidden_only={hidden_only}): "
+                f"{len(muon_params)} params ({sum(p.numel() for p in muon_params)} elements) "
+                f"via muon, {len(adamw_params)} params "
+                f"({sum(p.numel() for p in adamw_params)} elements) via adamw, "
                 f"muon lr_max={muon_lr_cfg.lr_max:.3g} "
                 f"(adamw lr_max={shared_lr_cfg.lr_max:.3g}), "
                 f"median {adjust_lr_fn} factor={self.muon_effective_lr_factor:.3g}"
