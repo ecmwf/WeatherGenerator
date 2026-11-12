@@ -1,8 +1,18 @@
-"""Native ICON GRIB2 export of physical (already denormalized) COSMO output.
+"""Native ICON GRIB2 export of physical (already denormalized) ICON output.
 
 The reference Zarr supplies coordinates and interval metadata only, never predictions
 or normalization statistics. Local products may have unknown ecCodes short names;
 the raw parameter, table and fixed-surface keys define their identity.
+
+Output follows evalml's ``grib_forecaster`` layout, one file per initialisation and
+lead time (whole hours) holding all surface and pressure-level messages::
+
+    {output_dir}/{YYYYMMDDHHMM}/grib/{YYYYMMDDHHMM}_{step:03d}.grib
+
+Ranks (and streams) are exported by separate parser instances in the same process.
+They share a registry of written messages, so a later instance appends to files an
+earlier one created and skips messages (channel, member) that are already present,
+e.g. samples duplicated across ranks.
 """
 
 import logging
@@ -117,7 +127,7 @@ def _field_spec(name, metadata):
     match = re.fullmatch(r"(z|q|t|u|v|w)_(\d+)", name)
     if match and int(match[2]) in LEVELS:
         return FieldSpec(PRESSURE_PARAMETERS[match[1]], (100, -2, int(match[2])), level_type="pl")
-    raise ValueError(f"Unmapped COSMO physical channel: {name}")
+    raise ValueError(f"Unmapped ICON physical channel: {name}")
 
 
 def _identity(spec):
@@ -150,40 +160,43 @@ def _coordinates(lat, lon):
         or lon.shape != lat.shape
         or not np.isfinite(lat).all()
         or not np.isfinite(lon).all()
+        or (np.abs(lat) > 90).any()
     ):
-        raise ValueError("COSMO coordinates must be finite latitude/longitude point arrays")
-    return np.column_stack(
-        (
-            (2 * np.clip(lat, -90, 90) - lat).astype(np.float32),
-            ((lon + 180) % 360 - 180).astype(np.float32),
-        )
-    )
+        raise ValueError("ICON coordinates must be finite geographic latitude/longitude arrays")
+    # Only harmonise the longitude convention (0..360 vs -180..180) with the reference.
+    return np.column_stack((lat.astype(np.float32), ((lon + 180) % 360 - 180).astype(np.float32)))
 
 
-class CosmoParser(CfParser):
+class IconParser(CfParser):
+    # Output path -> {(channel, member)} written by any instance in this process.
+    _written: dict[Path, set[tuple[str, int]]] = {}
+
     def __init__(self, config, **kwargs):
         try:
             import eccodes
         except ImportError as exc:
             raise ImportError(
-                "ecCodes is required only for COSMO export. Install conda-forge "
+                "ecCodes is required only for ICON export. Install conda-forge "
                 "python-eccodes/eccodes in a separate Pixi environment."
             ) from exc
         self.ec = eccodes
         kwargs.setdefault("fstep_hours", 1)
         super().__init__(config, **kwargs)
         self.templates = {}
-        self.files = {}
+        self.files = {}  # handles open for the sample being processed
         self.created_paths = []
+        self.appended_sizes = {}  # pre-existing path -> size before this instance wrote
+        self.claimed = []  # (path, key) registered by this instance
         self.message_count = 0
+        self.skipped_count = 0
         self.failed = False
         self._closed = False
         if kwargs.get("regrid_degree") is not None or kwargs.get("regrid_type") is not None:
-            raise ValueError("COSMO export requires the native grid")
-        for key in ("cosmo_dataset", "cosmo_surface_template", "cosmo_pressure_template"):
+            raise ValueError("ICON export requires the native grid")
+        for key in ("icon_dataset", "icon_surface_template", "icon_pressure_template"):
             if not kwargs.get(key):
-                raise ValueError(f"{key} is required for COSMO export")
-        dataset = zarr.open_group(str(self.cosmo_dataset), mode="r")
+                raise ValueError(f"{key} is required for ICON export")
+        dataset = zarr.open_group(str(self.icon_dataset), mode="r")
         metadata = dataset.attrs.get("variables_metadata", {})
         self.native = _coordinates(dataset["latitudes"][:], dataset["longitudes"][:])
         order = np.lexsort((self.native[:, 1], self.native[:, 0]))
@@ -195,7 +208,7 @@ class CosmoParser(CfParser):
             raise ValueError("Reference grid contains duplicate coordinates or is empty")
         requested = list(self.channels)
         if len(set(requested)) != len(requested):
-            raise ValueError("COSMO channel selection contains duplicates")
+            raise ValueError("ICON channel selection contains duplicates")
         excluded = [
             name
             for name in requested
@@ -206,23 +219,9 @@ class CosmoParser(CfParser):
             _logger.info("Excluded computed_forcing channels: %s", ", ".join(excluded))
         self.specs = {name: _field_spec(name, metadata) for name in self.channels}
         if not self.specs:
-            raise ValueError("COSMO selection contains no physical channels")
+            raise ValueError("ICON selection contains no physical channels")
         try:
             self._load_templates()
-            paths = {
-                level: Path(self.output_dir)
-                / (
-                    f"{self.data_type}_{self.stream}_{level}_{self.run_id}_rank{self.rank_label}.grib"
-                )
-                for level in sorted({spec.level_type for spec in self.specs.values()})
-            }
-            for path in paths.values():
-                if path.exists() or path.is_symlink():
-                    raise FileExistsError(f"Refusing to overwrite COSMO output: {path}")
-            Path(self.output_dir).mkdir(parents=True, exist_ok=True)
-            for level, path in paths.items():
-                self.files[level] = path.open("xb")
-                self.created_paths.append(path)
         except BaseException:
             self.close()
             raise
@@ -250,7 +249,7 @@ class CosmoParser(CfParser):
     def _grid_identity(self, handle):
         e = self.ec
         if e.codes_get_long(handle, "gridDefinitionTemplateNumber") != 101:
-            raise ValueError("COSMO templates require grid template 3.101 (unstructured_grid)")
+            raise ValueError("ICON templates require grid template 3.101 (unstructured_grid)")
         if e.codes_get_long(handle, "numberOfDataPoints") != len(self.native):
             raise ValueError("Template grid point count differs from reference coordinates")
         return tuple(
@@ -275,8 +274,8 @@ class CosmoParser(CfParser):
         grid = None
         try:
             for level_type, path in (
-                ("sfc", self.cosmo_surface_template),
-                ("pl", self.cosmo_pressure_template),
+                ("sfc", self.icon_surface_template),
+                ("pl", self.icon_pressure_template),
             ):
                 count = 0
                 with open(path, "rb") as source:
@@ -286,21 +285,21 @@ class CosmoParser(CfParser):
                             identity = self._grid_identity(handle)
                             if grid is not None and identity != grid:
                                 raise ValueError(
-                                    "COSMO template grid/centre/table identities do not match"
+                                    "ICON template grid/centre/table identities do not match"
                                 )
                             grid = identity
                             key = (level_type, self._message_identity(handle))
                             if key in needed:
                                 if key in retained:
-                                    raise ValueError(f"Ambiguous COSMO prototype: {key}")
+                                    raise ValueError(f"Ambiguous ICON prototype: {key}")
                                 retained[key] = e.codes_clone(handle)
                         finally:
                             e.codes_release(handle)
                 if not count:
-                    raise ValueError(f"Empty COSMO template file: {path}")
+                    raise ValueError(f"Empty ICON template file: {path}")
             missing = needed - retained.keys()
             if missing:
-                raise ValueError(f"Missing complete COSMO prototypes: {sorted(missing, key=str)}")
+                raise ValueError(f"Missing complete ICON prototypes: {sorted(missing, key=str)}")
             for name, spec in self.specs.items():
                 handle = e.codes_clone(retained[prototypes[name]])
                 self.templates[name] = handle
@@ -346,8 +345,43 @@ class CosmoParser(CfParser):
     def _minute_time(value):
         value = np.datetime64(value, "ns")
         if np.isnat(value) or value != value.astype("datetime64[m]"):
-            raise ValueError("COSMO timestamps must be valid and minute-aligned")
+            raise ValueError("ICON timestamps must be valid and minute-aligned")
         return value
+
+    def _output_path(self, ref_time, valid_time):
+        ref_time, valid_time = self._minute_time(ref_time), self._minute_time(valid_time)
+        lead = (valid_time - ref_time) / np.timedelta64(1, "h")
+        if lead < 0 or lead != int(lead):
+            raise ValueError(f"ICON lead time must be a non-negative whole hour, got {lead}h")
+        init = ref_time.astype("datetime64[m]").astype(object).strftime("%Y%m%d%H%M")
+        return Path(self.output_dir) / init / "grib" / f"{init}_{int(lead):03d}.grib"
+
+    def _open(self, path):
+        if path in self.files:
+            return self.files[path]
+        if path in self._written and path.exists():
+            # Created by an earlier instance (another rank/stream) of this export.
+            self.appended_sizes.setdefault(path, path.stat().st_size)
+            handle = path.open("ab")
+        else:
+            if path.exists() or path.is_symlink():
+                raise FileExistsError(f"Refusing to overwrite ICON output: {path}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = path.open("xb")
+            self.created_paths.append(path)
+            self._written[path] = set()
+        self.files[path] = handle
+        return handle
+
+    def _close_files(self):
+        errors = []
+        for stream in self.files.values():
+            try:
+                stream.close()
+            except OSError as exc:
+                errors.append(exc)
+        self.files.clear()
+        return errors
 
     def _encode(self, name, values, ref_time, valid_time, member, members):
         e = self.ec
@@ -355,12 +389,12 @@ class CosmoParser(CfParser):
         ref_time, valid_time = self._minute_time(ref_time), self._minute_time(valid_time)
         end = int((valid_time - ref_time) / np.timedelta64(1, "m"))
         if end < 0:
-            raise ValueError("COSMO valid time precedes forecast reference time")
+            raise ValueError("ICON valid time precedes forecast reference time")
         values = np.asarray(values, dtype=np.float64)
         if values.shape != (len(self.native),):
             raise ValueError("Field values must have exactly the native point count")
         if np.isinf(values).any():
-            raise ValueError(f"Infinite values in COSMO channel {name}")
+            raise ValueError(f"Infinite values in ICON channel {name}")
         if spec.factor != 1:
             values = values * spec.factor
         missing = np.isnan(values)
@@ -422,7 +456,7 @@ class CosmoParser(CfParser):
                 e.codes_get_long(handle, "validityDate") != int(stamp.strftime("%Y%m%d"))
                 or e.codes_get_long(handle, "validityTime") != stamp.hour * 100 + stamp.minute
             ):
-                raise ValueError("Encoded COSMO validity differs from the intended timestamp")
+                raise ValueError("Encoded ICON validity differs from the intended timestamp")
             return e.codes_get_message(handle)
         finally:
             e.codes_release(handle)
@@ -436,7 +470,7 @@ class CosmoParser(CfParser):
         **kwargs,
     ):
         if self._closed:
-            raise ValueError("COSMO parser is closed")
+            raise ValueError("ICON parser is closed")
         try:
             for result in fstep_iterator_results:
                 if not hasattr(result, "dims"):
@@ -444,7 +478,7 @@ class CosmoParser(CfParser):
                 for dim in ("sample", "stream", "forecast_step"):
                     if dim in result.dims:
                         if result.sizes[dim] != 1:
-                            raise ValueError(f"COSMO expects a singleton {dim} axis")
+                            raise ValueError(f"ICON expects a singleton {dim} axis")
                         result = result.isel({dim: 0}, drop=True)
                 if "ens" in result.dims:
                     if "mem" in result.dims:
@@ -456,38 +490,51 @@ class CosmoParser(CfParser):
                     "mem",
                 }:
                     raise ValueError(
-                        "COSMO fields require ipoint/channel and optional mem dimensions"
+                        "ICON fields require ipoint/channel and optional mem dimensions"
                     )
                 channels = list(result.channel.values)
                 if len(set(channels)) != len(channels) or set(self.channels) - set(channels):
                     raise ValueError("Missing or duplicate prediction channels")
                 for key in ("valid_time", "lat", "lon"):
                     if result[key].dims != ("ipoint",):
-                        raise ValueError(f"COSMO {key} must be indexed by ipoint")
+                        raise ValueError(f"ICON {key} must be indexed by ipoint")
                 times = np.asarray(result.valid_time.values, dtype="datetime64[ns]")
                 if not len(times) or np.isnat(times).any():
-                    raise ValueError("COSMO valid times must be nonempty and non-NaT")
+                    raise ValueError("ICON valid times must be nonempty and non-NaT")
                 members = result.sizes.get("mem", 1)
                 if not 1 <= members <= 255:
-                    raise ValueError("COSMO requires 1–255 members")
+                    raise ValueError("ICON requires 1–255 members")
                 for valid_time in np.unique(times):
+                    path = self._output_path(ref_time, valid_time)
+                    written = self._written.get(path, set())
+                    pending = [
+                        (name, member)
+                        for name in self.channels
+                        for member in range(members)
+                        if (name, member) not in written
+                    ]
+                    self.skipped_count += len(self.channels) * members - len(pending)
+                    if not pending:
+                        continue
                     sub = result.isel(ipoint=times == valid_time)
                     permutation = self._native_permutation(sub.lat.values, sub.lon.values)
-                    for name in self.channels:
+                    stream = self._open(path)
+                    for name, member in pending:
                         field = sub.sel(channel=name)
-                        for member in range(members):
-                            values = (
-                                field.isel(mem=member).values
-                                if "mem" in field.dims
-                                else field.values
-                            )
-                            if permutation is not None:
-                                values = values[permutation]
-                            message = self._encode(
-                                name, values, ref_time, valid_time, member, members
-                            )
-                            self.files[self.specs[name].level_type].write(message)
-                            self.message_count += 1
+                        values = (
+                            field.isel(mem=member).values if "mem" in field.dims else field.values
+                        )
+                        if permutation is not None:
+                            values = values[permutation]
+                        message = self._encode(name, values, ref_time, valid_time, member, members)
+                        stream.write(message)
+                        self._written[path].add((name, member))
+                        self.claimed.append((path, (name, member)))
+                        self.message_count += 1
+            # A sample covers one init, so its files are complete: free the handles.
+            errors = self._close_files()
+            if errors:
+                raise errors[0]
         except BaseException:
             self.failed = True
             self.close()
@@ -499,14 +546,8 @@ class CosmoParser(CfParser):
             return
         self._closed = True
         self.failed |= sys.exc_info()[0] is not None
-        errors = []
-        for stream in self.files.values():
-            try:
-                stream.close()
-            except OSError as exc:
-                errors.append(exc)
-                self.failed = True
-        self.files.clear()
+        errors = self._close_files()
+        self.failed |= bool(errors)
         for handle in self.templates.values():
             try:
                 self.ec.codes_release(handle)
@@ -515,12 +556,29 @@ class CosmoParser(CfParser):
                 self.failed = True
         self.templates.clear()
         if self.failed:
+            for path, key in self.claimed:
+                self._written.get(path, set()).discard(key)
             for path in self.created_paths:
+                self._written.pop(path, None)
                 try:
                     path.unlink()
                 except OSError as exc:
                     errors.append(exc)
+            for path, size in self.appended_sizes.items():
+                try:
+                    with path.open("r+b") as stream:
+                        stream.truncate(size)
+                except OSError as exc:
+                    errors.append(exc)
         else:
-            _logger.info("Exported %d COSMO messages to %s", self.message_count, self.created_paths)
+            _logger.info(
+                "Exported %d ICON messages (%d duplicates skipped) under %s "
+                "(%d new files, %d appended)",
+                self.message_count,
+                self.skipped_count,
+                self.output_dir,
+                len(self.created_paths),
+                len(self.appended_sizes),
+            )
         if errors:
             raise errors[0]
