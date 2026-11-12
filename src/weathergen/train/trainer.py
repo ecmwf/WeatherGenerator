@@ -51,6 +51,7 @@ from weathergen.train.utils import (
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
 )
+from weathergen.train.wd_scheduler import WeightDecayScheduler
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
@@ -125,6 +126,7 @@ class Trainer(TrainerBase):
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
         self.lr_schedulers: list[LearningRateScheduler] | None = None
+        self.wd_scheduler: WeightDecayScheduler | None = None
         self.model = None
         self.model_params = None
         self.optimizers: list[torch.optim.Optimizer] | None = None
@@ -563,6 +565,16 @@ class Trainer(TrainerBase):
             for optimizer, lr_cfg in zip(self.optimizers, lr_cfgs, strict=True)
         ]
 
+        wd_schedule_cfg = self.training_cfg.optimizer.get("weight_decay_schedule", None)
+        if wd_schedule_cfg is not None:
+            self.wd_scheduler = WeightDecayScheduler(
+                self.optimizers,
+                self.training_cfg.optimizer.weight_decay,
+                wd_schedule_cfg,
+                lr_steps,
+                cf.general.istep,
+            )
+
         self.monitor = build_monitor_manager(
             cf.train_logging.get("monitoring", {}),
             self.model,
@@ -771,6 +783,8 @@ class Trainer(TrainerBase):
             # update learning rate
             for lr_scheduler in self.lr_schedulers:
                 lr_scheduler.step()
+            if self.wd_scheduler is not None:
+                self.wd_scheduler.step(self.cf.general.istep + 1)
 
             batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
             step = batch_size_total * self.cf.general.istep
