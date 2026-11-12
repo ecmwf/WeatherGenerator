@@ -23,17 +23,17 @@ from pathlib import Path
 import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf
+
 from weathergen.common.platform_env import get_platform_env
+from weathergen.evaluate.io.wegen_reader import WeatherGenReader
+from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.utils.dict_utils import triple_nested_dict
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
     get_or_create_mlflow_parent_run,
     log_scores,
     setup_mlflow,
 )
-
-from weathergen.evaluate.io.wegen_reader import WeatherGenReader
-from weathergen.evaluate.plotting.plot_utils import collect_channels
-from weathergen.evaluate.utils.dict_utils import triple_nested_dict
 
 _logger = logging.getLogger(__name__)
 
