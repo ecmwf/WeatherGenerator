@@ -51,7 +51,7 @@ from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
-from weathergen.utils.validation_io import write_output
+from weathergen.utils.validation_io import compute_time_means, write_output
 
 logger = logging.getLogger(__name__)
 
@@ -661,6 +661,10 @@ class Trainer(TrainerBase):
 
                 self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)
+
+        # optionally add temporally averaged (binned mean) output (issue #2836)
+        if num_samples_write > 0:
+            compute_time_means(cf, mode_cfg, mini_epoch)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
