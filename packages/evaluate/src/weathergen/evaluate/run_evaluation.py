@@ -16,7 +16,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
@@ -28,16 +27,10 @@ from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJsonReader,
-    WeatherGenReader,
     WeatherGenZarrReader,
 )
-from weathergen.evaluate.plotting.plot_orchestration import (
-    plot_data,
-    plot_init_hour_summary,
-    plot_summary,
-    run_score_map_pipeline,
-)
-from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
+from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
@@ -46,12 +39,10 @@ from weathergen.evaluate.scores.score_orchestration import (
 )
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.config_compat import get_plot_score_options, parse_plot_config
-from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
-from weathergen.metrics.mlflow_utils import (
-    MlFlowUpload,
-    get_or_create_mlflow_parent_run,
-    log_scores,
-    setup_mlflow,
+from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params
+from weathergen.evaluate.utils.mlflow_utils import (
+    setup_mlflow_client,
+    upload_scores_to_mlflow,
 )
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
@@ -120,15 +111,6 @@ def evaluate_from_args(argl: list[str]) -> None:
             "No config file provided, using the default template config (please edit accordingly)"
         )
         config = Path(_REPO_ROOT / "config" / "evaluate" / "eval_config.yml")
-    mlflow_client: MlflowClient | None = None
-    if args.push_metrics:
-        hpc_conf = _platform_env.get_hpc_config()
-        assert hpc_conf is not None
-        private_home = Path(hpc_conf)
-        private_cf = OmegaConf.load(private_home)
-        assert isinstance(private_cf, DictConfig)
-        mlflow_client = setup_mlflow(private_cf)
-        _logger.info(f"MLFlow client set up: {mlflow_client}")
 
     cf = OmegaConf.load(config)
     assert isinstance(cf, DictConfig)
@@ -153,6 +135,10 @@ def evaluate_from_args(argl: list[str]) -> None:
         existing = cf.get("run_ids", {})
         cf.run_ids = {k: existing.get(k, {}) for k in args.run_ids}
         _logger.info(f"Overwritten run_ids to: {args.run_ids}")
+
+    mlflow_client: MlflowClient | None = None
+    if args.push_metrics:
+        mlflow_client = setup_mlflow_client()
 
     evaluate_from_config(cf, mlflow_client)
 
@@ -232,7 +218,7 @@ def _process_stream(
     for option, name in (("plot_score_maps", "score_map"), ("plot_score_init_hour", "init_hour")):
         if plot_score_options.get(option, False) and not reads_data:
             _logger.warning(f"RUN {run_id} - {stream}: '{name}' not supported for type '{type_}'.")
-    plot_score_maps = plot_score_options.get("plot_score_maps", False) and reads_data
+    do_score_maps = plot_score_options.get("plot_score_maps", False) and reads_data
     plot_score_init_hour = plot_score_options.get("plot_score_init_hour", False) and reads_data
 
     recomputable_metrics = {}
@@ -242,7 +228,7 @@ def _process_stream(
     if needs_scoring:
         stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
         needs_score_recomputation = (
-            plot_score_maps or plot_score_init_hour or bool(recomputable_metrics)
+            do_score_maps or plot_score_init_hour or bool(recomputable_metrics)
         ) and reads_data
 
     # --- Load data only when necessary ---
@@ -259,9 +245,9 @@ def _process_stream(
             )
             _logger.info(f"RUN {run_id} - {stream}: Data loaded successfully.")
 
-    # Plotting: pass pre-loaded data if available, otherwise plot_data loads its own subset
+    # Field plots: pass pre-loaded data if available, otherwise plot_data loads its own subset
     if needs_plotting:
-        plot_data(reader, stream, global_plotting_opts, output_data=output_data)
+        plot_stream_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
     if not needs_scoring:
@@ -271,7 +257,7 @@ def _process_stream(
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif plot_score_maps or plot_score_init_hour:
+    elif do_score_maps or plot_score_init_hour:
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
@@ -291,7 +277,7 @@ def _process_stream(
         metrics_to_compute,
         output_data=output_data,
         climatology=climatology,
-        compute_spatial=plot_score_maps,
+        compute_spatial=do_score_maps,
     )
     if plot_score_init_hour and output_data is not None:
         compute_scores_by_init_hour(
@@ -300,8 +286,10 @@ def _process_stream(
     metric_list_to_json(reader, stream, results, regions_to_compute)
     scores_dict = merge(stream_loaded_scores, results_to_dict(results, "score"))
 
-    if plot_score_maps:
-        run_score_map_pipeline(
+    # Drawn here, where the spatial scores of this (run, stream) are, until _process_stream
+    # returns the MetricResults and plot_evaluation can draw them from the merged results.
+    if do_score_maps:
+        plot_score_maps(
             reader,
             stream,
             results,
@@ -388,40 +376,11 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
 
     # MLFlow logging
     if mlflow_client:
-        reordered_dict = defaultdict(triple_nested_dict)
-        for metric, regions_dict in scores_dict.items():
-            for region, streams_dict in regions_dict.items():
-                for stream, runs_dict in streams_dict.items():
-                    for run_id, data in runs_dict.items():
-                        reordered_dict[run_id][metric][region][stream] = data
+        upload_scores_to_mlflow(mlflow_client, runs, scores_dict, private_paths)
 
-        channels_set = collect_channels(scores_dict, metric, region, runs)
-
-        for run_id, run in runs.items():
-            reader = WeatherGenReader(run, run_id, private_paths)
-            from_run_id = reader.inference_cfg["from_run_id"]
-            parent_run = get_or_create_mlflow_parent_run(mlflow_client, from_run_id)
-            _logger.info(f"MLFlow parent run: {parent_run}")
-            phase = "eval"
-            with mlflow.start_run(run_id=parent_run.info.run_id):
-                with mlflow.start_run(
-                    run_name=f"{phase}_{from_run_id}_{run_id}",
-                    parent_run_id=parent_run.info.run_id,
-                    nested=True,
-                ) as mlflow_run:
-                    mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase, from_run_id))
-                    log_scores(
-                        reordered_dict[run_id],
-                        mlflow_client,
-                        mlflow_run.info.run_id,
-                        channels_set,
-                    )
-
-    # summary plots
+    # verification plots across runs
     if scores_dict:
-        plot_summary(cfg, scores_dict, summary_dir)
-    if init_hour_scores:
-        plot_init_hour_summary(cfg, init_hour_scores, summary_dir)
+        plot_evaluation(cfg, scores_dict, init_hour_scores, summary_dir)
 
 
 if __name__ == "__main__":
