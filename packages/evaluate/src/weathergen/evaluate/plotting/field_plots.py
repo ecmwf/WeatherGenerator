@@ -26,10 +26,18 @@ from joblib import delayed
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.animations import _dispatch_field_animations
-from weathergen.evaluate.plotting.plot_utils import apply_font_settings
+from weathergen.evaluate.plotting.plot_utils import (
+    apply_font_settings,
+    build_plotter_cfg,
+    filter_set,
+)
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.timeseries import Timeseries
-from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
+from weathergen.evaluate.utils.array_utils import (
+    bias_ranges,
+    common_ranges,
+    select_ensemble_data,
+)
 from weathergen.evaluate.utils.config_compat import MAP_KINDS, parse_data_plots
 
 _logger = logging.getLogger(__name__)
@@ -82,18 +90,6 @@ def _dispatch_timeseries_plots(
 # ---------------------------------------------------------------------------
 # Per-sample map / histogram plots
 # ---------------------------------------------------------------------------
-def _select_ensemble_data(da: xr.DataArray, ens):
-    """Return ensemble member, mean or std view of a DataArray."""
-    if "ens" not in da.dims:
-        return da
-
-    if ens == "mean":
-        return da.mean(dim="ens")
-
-    if ens == "std":
-        return da.std(dim="ens")
-
-    return da.sel(ens=ens)
 
 
 def _plot_single_sample(
@@ -136,7 +132,7 @@ def _plot_single_sample(
         plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
     for ens in ensemble:
-        preds_ens = _select_ensemble_data(preds, ens)
+        preds_ens = select_ensemble_data(preds, ens)
         if ens in ("mean", "std"):
             preds_tag = f"ens_{ens}"
         else:
@@ -150,7 +146,7 @@ def _plot_single_sample(
             )
 
         if plot_bias and bias_has_ens:
-            bias_ens = _select_ensemble_data(bias_data, ens)
+            bias_ens = select_ensemble_data(bias_data, ens)
             bias_tag = "_".join(filter(None, ["bias", preds_tag]))
             plotter.create_maps_per_sample(bias_ens, plot_chs, data_selection, bias_tag, bias_cfg)
 
@@ -195,7 +191,7 @@ def _plot_histograms_across_samples(
     data_selection = {"sample": "all_samples", "stream": stream, "forecast_step": fstep}
 
     for ens in ensemble:
-        preds_ens = _select_ensemble_data(preds, ens)
+        preds_ens = select_ensemble_data(preds, ens)
 
         if ens in ("mean", "std"):
             preds_tag = f"ens_{ens}"
@@ -241,21 +237,11 @@ def plot_data(
     if not spec:
         return
 
-    plotter_cfg = {
-        "image_format": global_plotting_opts.get("image_format", "png"),
-        "animation_format": global_plotting_opts.get("animation_format", "mp4"),
-        "dpi_val": global_plotting_opts.get("dpi_val", 300),
-        "fig_size": global_plotting_opts.get("fig_size"),
-        "fps": global_plotting_opts.get("fps", 2),
-        "regions": global_plotting_opts.get("regions", stream_cfg.get("regions", ["global"])),
-        "log_x": global_plotting_opts.get("log_x", False),
-        "log_y": global_plotting_opts.get("log_y", False),
-        "n_bins": global_plotting_opts.get("n_bins", 50),
-        "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
-        | plot_settings.get("plot_subtimesteps", False),
-        "font_size": global_plotting_opts.get("font_size"),
-        "font_type": global_plotting_opts.get("font_type"),
-    }
+    plotter_cfg = build_plotter_cfg(
+        global_plotting_opts,
+        stream_cfg,
+        tokenize_spacetime=reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
+    )
 
     apply_font_settings(plotter_cfg)
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
@@ -376,20 +362,12 @@ def plot_data(
     all_samples_tasks: list[dict] = []
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         all_chs = list(np.atleast_1d(tars.channel.values))
-        plot_chs = (
-            [ch for ch in all_chs if ch in plot_channel_set]
-            if plot_channel_set is not None
-            else all_chs
-        )
+        plot_chs = filter_set(all_chs, plot_channel_set)
         if not plot_chs:
             continue
 
         all_samples = list(np.unique(tars.sample.values))
-        plot_samples = (
-            [s for s in all_samples if s in plot_sample_set]
-            if plot_sample_set is not None
-            else all_samples
-        )
+        plot_samples = filter_set(all_samples, plot_sample_set)
         if not plot_samples:
             continue
 
@@ -479,10 +457,11 @@ def plot_data(
         last_tars = da_tars[last_fstep]
         has_ens = "ens" in last_preds.dims
 
-        _sel = lambda items, allowed: [x for x in items if x in allowed] if allowed else items
-        plot_chs = _sel(list(np.atleast_1d(last_tars.channel.values)), plot_channel_set)
-        plot_samples = _sel(list(np.unique(last_tars.sample.values)), plot_sample_set)
-
+        plot_chs = filter_set(list(np.atleast_1d(last_tars.channel.values)), plot_channel_set)
+        plot_samples = filter_set(list(np.unique(last_tars.sample.values)), plot_sample_set)
+        if not plot_chs or not plot_samples:
+            _logger.info(f"RUN {run_id} - {stream}: no matching channels/samples for animations.")
+            return
         anim_kw = dict(
             plotter=plotter,
             fsteps=da_tars.keys(),
