@@ -10,15 +10,15 @@
 import dataclasses
 import logging
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common.config import Config, get_healpix_level
+from weathergen.common.config import Config, get_encoder_configs, get_healpix_level
 from weathergen.common.io import IOReaderData
-from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.batch import ModelBatch, MultiBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
@@ -103,8 +103,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # Batch assembly still requires a common HEALPix level.
-        get_healpix_level(cf)
-        self.masker = Masker(stage, cf.streams, self.mode_cfg)
+        self.healpix_level = get_healpix_level(cf)
+        self.encoder_streams = {
+            name: list(encoder_cf.streams) for name, encoder_cf in get_encoder_configs(cf).items()
+        }
+        self.masker = Masker(stage, self.healpix_level, cf.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
@@ -525,7 +528,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         num_output_steps = self._get_output_length(num_forecast_steps)
-        num_cells = hp_level_to_num_cells(stream_info["tokenizer"]["healpix_level"])
+        num_cells = hp_level_to_num_cells(self.healpix_level)
         stream_data = StreamData(
             base_idx,
             num_steps_input,
@@ -562,7 +565,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
 
-        Empty windows use the first reader's stream HEALPix level for spoofed data.
+        Empty windows use the shared encoder HEALPix level for spoofed data.
         """
 
         # source data: iterate overall input steps
@@ -571,13 +574,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
-            stream_info = stream_ds[0].stream_info
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
-                    stream_info["tokenizer"]["healpix_level"],
+                    self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
@@ -599,7 +601,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
-                    stream_info["tokenizer"]["healpix_level"],
+                    self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),
@@ -648,7 +650,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return batch
 
-    def _get_batch(self, idx: int, num_forecast_steps: int):
+    def _get_batch(self, idx: int, num_forecast_steps: int) -> MultiBatch:
         """
         Assemble a batch using the sample corresponding to idx
         """
@@ -755,9 +757,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
-        return batch
+        return MultiBatch(batch, self.encoder_streams)
 
-    def __iter__(self) -> ModelBatch:
+    def __iter__(self) -> Iterator[MultiBatch]:
         """
         Return one batch of data
 
@@ -790,8 +792,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # ensure the batch is valid, i.e. not completely empty and no NaN values
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
-                not_valid = batch.sources_empty() or batch.is_nan()
-                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
+                not_valid = (
+                    all(view.sources_empty() for view in batch.batches.values())
+                    or all(view.sources_nan() for view in batch.batches.values())
+                    or batch.batch.targets_nan()
+                )
+                not_valid = not_valid or (
+                    batch.batch.targets_empty() if "masking" in mode else False
+                )
 
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not_valid:

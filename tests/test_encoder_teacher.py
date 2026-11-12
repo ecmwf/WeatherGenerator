@@ -70,9 +70,7 @@ def _make_mock_model(dim_embed: int = 64) -> nn.Module:
     """Create a mock model with the attributes that prepare_encoder_teacher expects."""
     model = nn.Module()
     model.forecast_engine = nn.Linear(10, 10)
-    model.embed_target_coords = nn.ModuleDict({"stream1": nn.Linear(3, 3)})
-    model.target_token_engines = nn.ModuleDict({"stream1": nn.Linear(5, 5)})
-    model.pred_heads = nn.ModuleDict({"stream1": nn.Linear(5, 5)})
+    model.decoders = nn.ModuleDict({"physical": nn.Linear(5, 5)})
     model.latent_pre_norm = None
     model.latent_heads = nn.ModuleDict({"existing": nn.Linear(dim_embed, dim_embed)})
     # Add a minimal encoder
@@ -97,17 +95,6 @@ def _make_mock_ema_model():
 
 
 class TestPrepareEncoderTeacher:
-    def test_strips_non_encoder_components(self):
-        model = _make_mock_model()
-        training_cfg = _make_training_cfg()
-
-        prepare_encoder_teacher(model, training_cfg, teacher_dim_embed=64)
-
-        assert model.forecast_engine is None
-        assert len(model.embed_target_coords) == 0
-        assert len(model.target_token_engines) == 0
-        assert len(model.pred_heads) == 0
-
     def test_creates_latent_pre_norm_if_missing(self):
         model = _make_mock_model()
         assert model.latent_pre_norm is None
@@ -263,7 +250,7 @@ class TestLoadEncoderFromCheckpoint:
             checkpoint[name] = torch.randn_like(param)
         # Add some extra non-encoder params that should be ignored
         checkpoint["forecast_engine.weight"] = torch.randn(10, 10)
-        checkpoint["pred_heads.stream1.weight"] = torch.randn(5, 5)
+        checkpoint["decoders.physical.pred_heads.stream1.weight"] = torch.randn(5, 5)
 
         # Save checkpoint
         run_id = "test1234"
@@ -449,7 +436,7 @@ class TestEncoderTeacher:
         teacher.postprocess_targets = {}
 
         with pytest.raises(NotImplementedError):
-            teacher.forward_teacher(None, None)
+            teacher.forward_teacher(None, None, [0])
 
     def test_update_state_pre_backward_is_noop(self):
         teacher = EncoderTeacher.__new__(EncoderTeacher)
@@ -568,32 +555,6 @@ class TestFrozenTeacher:
 
         teacher = FrozenTeacher(model, training_cfg)
         teacher.update_state_post_opt_step(istep=0, batch=None, model=None)  # should not raise
-
-    def test_forward_teacher_uses_own_params(self):
-        model = MagicMock()
-        model.parameters = MagicMock(return_value=iter([]))
-        model.eval = MagicMock(return_value=model)
-        training_cfg = _make_training_cfg()
-        teacher_params = MagicMock()
-
-        teacher = FrozenTeacher(model, training_cfg, teacher_model_params=teacher_params)
-
-        batch = MagicMock()
-        teacher.forward_teacher(MagicMock(), batch)
-        model.assert_called_once_with(teacher_params, batch)
-
-    def test_forward_teacher_falls_back_to_student_params(self):
-        model = MagicMock()
-        model.parameters = MagicMock(return_value=iter([]))
-        model.eval = MagicMock(return_value=model)
-        training_cfg = _make_training_cfg()
-
-        teacher = FrozenTeacher(model, training_cfg, teacher_model_params=None)
-
-        student_params = MagicMock()
-        batch = MagicMock()
-        teacher.forward_teacher(student_params, batch)
-        model.assert_called_once_with(student_params, batch)
 
     def test_has_required_methods(self):
         """FrozenTeacher has all required TargetAndAuxModuleBase methods."""

@@ -75,7 +75,7 @@ class TargetAndAuxModuleBase:
     def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
         pass
 
-    def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
+    def compute(self, istep, multi_batch, model_params, model, target_idxs) -> TargetAuxOutput:
         pass
 
     def to_device(self, device) -> TargetAndAuxModuleBase:
@@ -95,7 +95,8 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
+    def compute(self, bidx, multi_batch, model_params, model, target_idxs) -> TargetAuxOutput:
+        batch = multi_batch.batch.get_target_samples(target_idxs)
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
         output_idxs = batch.get_output_idxs()

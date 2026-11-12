@@ -17,6 +17,7 @@ import torch.nn as nn
 
 from weathergen.common.config import get_path_model
 from weathergen.model.engines import (
+    IdentityEngine,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
@@ -61,13 +62,13 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
     """Strip a model to encoder-only and create fresh SSL latent heads.
 
     Modifies model in-place:
-    1. Removes forecast_engine, decoders, pred_heads, embed_target_coords
+    1. Disables forecasting and removes physical prediction modules
     2. Ensures latent_pre_norm exists
     3. Creates fresh latent_heads based on the student's SSL loss config
     """
     # Strip non-encoder components
     teacher_dim_embed = override_cfg.ae_global_dim_embed
-    model.forecast_engine = None
+    model.forecast_engine = IdentityEngine()
     model.embed_target_coords = nn.ModuleDict()
     model.target_token_engines = nn.ModuleDict()
     model.pred_heads = nn.ModuleDict()

@@ -457,13 +457,14 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
-        for bidx, batch in enumerate(dataset_iter):
+        for bidx, multi_batch in enumerate(dataset_iter):
             with self.training_loop_annotation_context(f"batch_{bidx}"):
                 if cf.data_loading.get("memory_pinning", False):
                     # pin memory for faster CPU-GPU transfer
-                    batch = batch.pin_memory()
+                    multi_batch = multi_batch.pin_memory()
 
-                batch.to_device(self.device)
+                multi_batch.to_device(self.device)
+                batch = multi_batch.batch
 
                 with torch.autocast(
                     device_type=f"cuda:{cf.local_rank}",
@@ -472,7 +473,7 @@ class Trainer(TrainerBase):
                 ):
                     preds = self.model(
                         model_params=self.model_params,
-                        batch=batch.get_source_samples(),
+                        batch=multi_batch,
                     )
 
                     targets_and_auxs = {}
@@ -482,9 +483,10 @@ class Trainer(TrainerBase):
                         # apply target-aux calculator
                         targets_and_auxs[loss_name] = target_aux.compute(
                             self.cf.general.istep,
-                            batch.get_target_samples(target_idxs),
+                            multi_batch,
                             self.model_params,
                             self.model,
+                            target_idxs,
                         )
 
                 loss = self.loss_calculator.compute_loss(
@@ -597,8 +599,11 @@ class Trainer(TrainerBase):
             with tqdm.tqdm(
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
-                for bidx, batch in enumerate(dataset_val_iter):
-                    batch.to_device(self.device)
+                for bidx, multi_batch in enumerate(dataset_val_iter):
+                    if cf.data_loading.get("memory_pinning", False):
+                        multi_batch = multi_batch.pin_memory()
+                    multi_batch.to_device(self.device)
+                    batch = multi_batch.batch
 
                     # evaluate model
                     with torch.autocast(
@@ -609,12 +614,12 @@ class Trainer(TrainerBase):
                         if self.ema_model is None:
                             preds = self.model(
                                 self.model_params,
-                                batch.get_source_samples(),
+                                multi_batch,
                             )
                         else:
                             preds = self.ema_model.forward_eval(
                                 self.model_params,
-                                batch.get_source_samples(),
+                                multi_batch,
                             )
 
                         targets_and_auxs = {}
@@ -622,9 +627,10 @@ class Trainer(TrainerBase):
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
-                                batch.get_target_samples(target_idxs),
+                                multi_batch,
                                 self.model_params,
                                 self.model,
+                                target_idxs,
                             )
 
                     _ = self.loss_calculator_val.compute_loss(
