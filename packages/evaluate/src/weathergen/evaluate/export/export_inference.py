@@ -95,9 +95,10 @@ def parse_args(args: list) -> argparse.Namespace:
         "--format",
         dest="output_format",
         type=str,
-        choices=["netcdf", "verif", "quaver"],
+        choices=["netcdf", "verif", "quaver", "icon"],
         help="Output file format; netcdf (CF-compliant netcdfs), \
-        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool)",
+        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool), \
+        icon (native ICON GRIB2 in evalml's per-init layout)",
         required=True,
     )
 
@@ -191,6 +192,31 @@ def parse_args(args: list) -> argparse.Namespace:
         required=False,
         default="O96",
         dest="quaver_template_grid_type",
+    )
+
+    parser.add_argument(
+        "--icon-dataset",
+        type=str,
+        required=False,
+        dest="icon_dataset",
+        help="Reference ICON Zarr dataset supplying native grid coordinates and "
+        "variable metadata (required for --format icon)",
+    )
+
+    parser.add_argument(
+        "--icon-surface-template",
+        type=str,
+        required=False,
+        dest="icon_surface_template",
+        help="ICON GRIB2 file with surface-level template messages (required for --format icon)",
+    )
+
+    parser.add_argument(
+        "--icon-pressure-template",
+        type=str,
+        required=False,
+        dest="icon_pressure_template",
+        help="ICON GRIB2 file with pressure-level template messages (required for --format icon)",
     )
 
     parser.add_argument(
