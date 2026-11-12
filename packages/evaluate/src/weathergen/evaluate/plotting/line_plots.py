@@ -64,14 +64,21 @@ class LinePlots:
         self._base_dir_lines = Path(output_basedir) / "line_plots"
         self._base_dir_ratio = Path(output_basedir) / "ratio_plots"
         self._base_dir_psd = Path(output_basedir) / "psd_plots"
+        self._base_dir_rank_hist = Path(output_basedir) / "rank_histogram_plots"
 
         self.out_plot_dir_lines = self._base_dir_lines
         self.out_plot_dir_ratio = self._base_dir_ratio
         self.out_plot_dir_psd = self._base_dir_psd
+        self.out_plot_dir_rank_hist = self._base_dir_rank_hist
         # heat_map uses self.out_plot_dir (alias for line_plots dir)
         self.out_plot_dir = self._base_dir_lines
 
-        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
+        for d in (
+            self.out_plot_dir_lines,
+            self.out_plot_dir_ratio,
+            self.out_plot_dir_psd,
+            self.out_plot_dir_rank_hist,
+        ):
             os.makedirs(d, exist_ok=True)
 
     def set_subdir(self, metric: str, region: str) -> None:
@@ -91,9 +98,15 @@ class LinePlots:
         self.out_plot_dir_lines = self._base_dir_lines / subdir
         self.out_plot_dir_ratio = self._base_dir_ratio / subdir
         self.out_plot_dir_psd = self._base_dir_psd / subdir
+        self.out_plot_dir_rank_hist = self._base_dir_rank_hist / subdir
         self.out_plot_dir = self.out_plot_dir_lines
 
-        for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
+        for d in (
+            self.out_plot_dir_lines,
+            self.out_plot_dir_ratio,
+            self.out_plot_dir_psd,
+            self.out_plot_dir_rank_hist,
+        ):
             os.makedirs(d, exist_ok=True)
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
@@ -810,5 +823,64 @@ class LinePlots:
         name = tag or "psd"
         fname = out_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving PSD summary plot to {fname}")
+        fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
+        plt.close(fig)
+
+    # ------------------------------------------------------------------
+    # Rank histogram (Talagrand diagram) bar chart
+    # ------------------------------------------------------------------
+
+    def rank_histogram_plot(
+        self,
+        rank_hist_datasets: list[dict],
+        labels: list[str],
+        tag: str = "",
+        title: str | None = None,
+    ) -> None:
+        """Create a rank histogram (Talagrand diagram) bar chart overlaying multiple runs.
+
+        Each entry in *rank_hist_datasets* is a dict with keys ``rank_counts`` (normalized
+        or raw per-bin counts) and ``n_bins``, as stored in ``.attrs`` by
+        ``Scores.calc_rank_histogram``.
+
+        Parameters
+        ----------
+        rank_hist_datasets : list[dict]
+            One dict per run.
+        labels : list[str]
+            Human-readable label for each run.
+        tag : str
+            Filename tag.
+        title : str | None
+            Plot title.
+        """
+        out_dir = Path(self.out_plot_dir_rank_hist)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        fig, ax = plt.subplots(figsize=self.fig_size or (8, 6), dpi=self.dpi_val)
+
+        n_runs = len(rank_hist_datasets)
+        n_bins = rank_hist_datasets[0]["n_bins"]
+        bar_width = 0.8 / n_runs
+        ranks = np.arange(n_bins)
+
+        for i, (ds, label) in enumerate(zip(rank_hist_datasets, labels, strict=False)):
+            counts = np.asarray(ds["rank_counts"])
+            offset = (i - (n_runs - 1) / 2.0) * bar_width
+            ax.bar(ranks + offset, counts, width=bar_width, label=label)
+
+        ax.axhline(1.0 / n_bins, ls="--", color="gray", lw=1.0, label="uniform")
+        ax.set_xlabel("Rank")
+        ax.set_ylabel("Normalized frequency")
+        ax.set_xticks(ranks)
+        if title:
+            ax.set_title(title)
+        ax.legend(frameon=False, fontsize=8)
+        if self.add_grid:
+            ax.grid(True, axis="y", ls="--", alpha=0.4)
+
+        name = tag or "rank_histogram"
+        fname = out_dir / f"{name}.{self.image_format}"
+        _logger.debug(f"Saving rank histogram plot to {fname}")
         fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
         plt.close(fig)
