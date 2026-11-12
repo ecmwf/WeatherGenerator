@@ -577,7 +577,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
 
 class ForecastEngineBase(torch.nn.Module):
     """Common interface for Model.forecast_engine implementations (IdentityEngine,
-    ForecastingEngine, DiffusionForecastEngine).
+    ForecastingEngine, DiffusionForecastEngineBase).
     """
 
     def prepare_fe_input(
@@ -587,7 +587,7 @@ class ForecastEngineBase(torch.nn.Module):
 
         tokens: (B, T, H, D), T loaded input steps, newest first (tokens[:, 0] = t). Default:
         collapse by summation. Subclasses may instead split tokens into e.g. a conditioning
-        signal and a starting state (see DiffusionForecastEngine.prepare_fe_input). Returns the
+        signal and a starting state (see DiffusionForecastEngineBase.prepare_fe_input). Returns the
         initial condition and meta_info, updated if the subclass needs to pass extra state along.
         """
         return tokens.sum(axis=1), meta_info
@@ -596,7 +596,7 @@ class ForecastEngineBase(torch.nn.Module):
         """Instructions for Model._decode_step on how to decode a forecast step (see DecodeSpec),
         derived purely from this engine's static config (not sample/runtime data). Default: None,
         i.e. defer to the generic training_mode-gated decode. Subclasses may override (see
-        DiffusionForecastEngine.decode_spec).
+        DiffusionForecastEngineBase.decode_spec).
         """
         return None
 

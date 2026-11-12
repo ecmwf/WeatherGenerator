@@ -25,8 +25,8 @@ from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.diffusion import (
-    DiffusionForecastEngine,
     DiffusionRegisters,
+    build_diffusion_forecast_engine,
 )
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
@@ -433,7 +433,7 @@ class Model(torch.nn.Module):
             else:
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
             if cf.get("diffusion", {}).get("enabled", False):
-                self.forecast_engine = DiffusionForecastEngine(
+                self.forecast_engine = build_diffusion_forecast_engine(
                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
                 )
         else:

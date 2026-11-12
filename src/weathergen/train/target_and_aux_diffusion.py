@@ -12,6 +12,9 @@ from weathergen.train.target_and_aux_module_base import (
 
 
 class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
+    """Clean latent target z (frozen encoder applied to the target sample) and the per-sample
+    noise level, for both LossLatentDiffusion and LossFlowMatching."""
+
     def __init__(self, cf, encoder, is_model_sharded=True):
         # Todo: make sure this is a frozen clone or forward without gradients in compute()
         self.cf = cf
