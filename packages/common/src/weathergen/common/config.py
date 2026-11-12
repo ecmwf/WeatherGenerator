@@ -43,7 +43,7 @@ Config = DictConfig
 def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
     """
     Parse a value into a numpy timedelta64[ms].
-    Integers and floats are interpreted as hours.
+    Integers and floats are interpreted as seconds.
     Strings are parsed using pandas.to_timedelta.
     """
     if isinstance(val, int | float | np.number):
