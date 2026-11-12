@@ -16,7 +16,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
@@ -28,12 +27,10 @@ from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJsonReader,
-    WeatherGenReader,
     WeatherGenZarrReader,
 )
 from weathergen.evaluate.plotting.animations import build_animations
 from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
-from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.plotting.score_maps import plot_score_maps
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
@@ -44,12 +41,10 @@ from weathergen.evaluate.scores.score_orchestration import (
 )
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.config_compat import get_plot_score_options, parse_plot_config
-from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
-from weathergen.metrics.mlflow_utils import (
-    MlFlowUpload,
-    get_or_create_mlflow_parent_run,
-    log_scores,
-    setup_mlflow,
+from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params
+from weathergen.evaluate.utils.mlflow_utils import (
+    setup_mlflow_client,
+    upload_scores_to_mlflow,
 )
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
@@ -118,15 +113,6 @@ def evaluate_from_args(argl: list[str]) -> None:
             "No config file provided, using the default template config (please edit accordingly)"
         )
         config = Path(_REPO_ROOT / "config" / "evaluate" / "eval_config.yml")
-    mlflow_client: MlflowClient | None = None
-    if args.push_metrics:
-        hpc_conf = _platform_env.get_hpc_config()
-        assert hpc_conf is not None
-        private_home = Path(hpc_conf)
-        private_cf = OmegaConf.load(private_home)
-        assert isinstance(private_cf, DictConfig)
-        mlflow_client = setup_mlflow(private_cf)
-        _logger.info(f"MLFlow client set up: {mlflow_client}")
 
     cf = OmegaConf.load(config)
     assert isinstance(cf, DictConfig)
@@ -151,6 +137,10 @@ def evaluate_from_args(argl: list[str]) -> None:
         existing = cf.get("run_ids", {})
         cf.run_ids = {k: existing.get(k, {}) for k in args.run_ids}
         _logger.info(f"Overwritten run_ids to: {args.run_ids}")
+
+    mlflow_client: MlflowClient | None = None
+    if args.push_metrics:
+        mlflow_client = setup_mlflow_client()
 
     evaluate_from_config(cf, mlflow_client)
 
@@ -463,34 +453,7 @@ def finalise(
 
     # MLFlow logging
     if mlflow_client:
-        reordered_dict = defaultdict(triple_nested_dict)
-        for metric, regions_dict in scores_dict.items():
-            for region, streams_dict in regions_dict.items():
-                for stream, runs_dict in streams_dict.items():
-                    for run_id, data in runs_dict.items():
-                        reordered_dict[run_id][metric][region][stream] = data
-
-        channels_set = collect_channels(scores_dict, metric, region, runs)
-
-        for run_id, run in runs.items():
-            reader = WeatherGenReader(run, run_id, private_paths)
-            from_run_id = reader.inference_cfg["from_run_id"]
-            parent_run = get_or_create_mlflow_parent_run(mlflow_client, from_run_id)
-            _logger.info(f"MLFlow parent run: {parent_run}")
-            phase = "eval"
-            with mlflow.start_run(run_id=parent_run.info.run_id):
-                with mlflow.start_run(
-                    run_name=f"{phase}_{from_run_id}_{run_id}",
-                    parent_run_id=parent_run.info.run_id,
-                    nested=True,
-                ) as mlflow_run:
-                    mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase, from_run_id))
-                    log_scores(
-                        reordered_dict[run_id],
-                        mlflow_client,
-                        mlflow_run.info.run_id,
-                        channels_set,
-                    )
+        upload_scores_to_mlflow(mlflow_client, runs, scores_dict, private_paths)
 
     # verification plots across runs
     if scores_dict:

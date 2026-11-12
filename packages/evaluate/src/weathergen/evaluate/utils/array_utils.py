@@ -177,3 +177,17 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
         da = da.drop_vars(name)
         da = da.expand_dims({name: [val]}, axis=axis)
     return da
+
+
+def select_ensemble_data(da: xr.DataArray, ens):
+    """Return ensemble member, mean or std view of a DataArray."""
+    if "ens" not in da.dims:
+        return da
+
+    if ens == "mean":
+        return da.mean(dim="ens")
+
+    if ens == "std":
+        return da.std(dim="ens")
+
+    return da.sel(ens=ens)

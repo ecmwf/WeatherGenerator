@@ -23,7 +23,7 @@ from joblib import delayed
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader
-from weathergen.evaluate.plotting.plot_utils import apply_font_settings
+from weathergen.evaluate.plotting.plot_utils import apply_font_settings, build_plotter_cfg
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.scores.score_orchestration import MetricResult
 from weathergen.evaluate.utils.array_utils import common_ranges
@@ -77,16 +77,8 @@ def plot_score_maps(
         max_workers=reader.eval_cfg.get("max_workers", None),
     )
 
-    cfg = global_plotting_options
-    plotter_cfg = {
-        "image_format": cfg.get("image_format", "png"),
-        "dpi_val": cfg.get("dpi_val", 300),
-        "fig_size": cfg.get("fig_size", None),
-        "animation_format": cfg.get("animation_format", "mp4"),
-        "fps": cfg.get("fps", 2),
-        "font_size": cfg.get("font_size"),
-        "font_type": cfg.get("font_type"),
-    }
+    plotter_cfg = build_plotter_cfg(global_plotting_options)
+
     output_basedir = str(reader.runplot_dir)
     apply_font_settings(plotter_cfg)
     run_id = reader.run_id
