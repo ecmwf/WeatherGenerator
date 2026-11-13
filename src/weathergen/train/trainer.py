@@ -318,6 +318,11 @@ class Trainer(TrainerBase):
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
+        
+        if cf.get("estimate_residual_stats", 0) > 0:
+            from weathergen.train.target_and_aux_residual import run_stats_estimation
+            run_stats_estimation(self, cf.estimate_residual_stats)
+            return
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
