@@ -36,10 +36,11 @@ from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.masking import get_noise_level_cfg
 from weathergen.model.engines import DecodeSpec, ForecastEngineBase, ForecastingEngine
+from weathergen.model.model_output import ModelOutput
 from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
 
 if TYPE_CHECKING:
-    from weathergen.model.model import Model, ModelOutput, ModelParams
+    from weathergen.model.model import Model, ModelParams
 
 
 logger = logging.getLogger(__name__)
@@ -261,6 +262,13 @@ class DiffusionForecastEngine(ForecastEngineBase):
         self.num_inference_steps = sampler_cf.get("num_steps", None)
         self.num_ensemble_members = sampler_cf.get("num_ensemble_members", 1)
         self.rollout = self.diff_cf.get("rollout", False)
+        # Trajectory mode: a single ODE path returning every intermediate denoising state (vs.
+        # ensemble mode, which draws num_ensemble_members independent members in one batched
+        # pass, see inference_forward). decode_trajectory additionally excludes rollout: it's the
+        # specific case where only the final ODE state is a real forecast-step prediction and all
+        # intermediate states are only used for optional analytics (see _run_inference_step).
+        self.trajectory_mode = self.num_ensemble_members <= 1
+        self.decode_trajectory = self.trajectory_mode and not self.rollout
         # s_churn == 0 (the default) keeps the deterministic Heun sampler.
         self.s_churn = float(sampler_cf.get("s_churn", 0.0))
         self.s_min = float(sampler_cf.get("s_min", 0.0))
@@ -432,33 +440,25 @@ class DiffusionForecastEngine(ForecastEngineBase):
         output: "ModelOutput | None" = None,
     ) -> torch.Tensor:
         """Run one diffusion inference step and resolve it to the plain tensor Model.forward
-        expects, attaching a DecodeSpec to meta_info when this step needs diffusion-specific
-        decoding (bypassing the generic training_mode-gated decode in Model._decode_step).
-        Trajectory-mode analytics (only when inference_logging.fe_diffusion_log_analytics is
-        enabled) are decoded and stashed into output.diffusion_steps_output directly here,
-        rather than deferred to model.py.
+        expects.
         """
         raw = self.inference_forward(
             fstep=fstep, num_steps=num_steps, meta_info=meta_info, coords=coords
         )
-        is_trajectory = self.num_ensemble_members <= 1
 
-        if not is_trajectory and not self.rollout:
-            # Ensemble without rollout: no diffusion-specific decode handling defined for this
-            # combination; falls through to the generic training_mode-gated decode like any
-            # other engine (conditioning_tokens is intentionally left untouched, matching prior
-            # behaviour).
+        if not (self.decode_trajectory or self.rollout):
+            # Ensemble without rollout: default behaviour that does not require any
+            # diffusion-specific output restructuring and decode handling.
             return raw
 
         cond = meta_info.get("conditioning_tokens")
         predict_residual = self.diff_cf.get("predict_residual", False)
-        final = raw[-1] if is_trajectory else raw
+        final = raw[-1] if self.trajectory_mode else raw
         result = cond + final if predict_residual else final
         meta_info["conditioning_tokens"] = result
 
-        # Trajectory mode: by default only the final ODE state is a real forecast-step
-        # prediction, decoded once (like any other step) by Model._decode_step.
-        if is_trajectory and not self.rollout and self.log_analytics:
+        if self.decode_trajectory and self.log_analytics:
+            # Log the diffusion step outputs for analytics if desired
             output.diffusion_steps_output = self.decode_diffusion_steps(
                 model,
                 model_params,
@@ -472,25 +472,27 @@ class DiffusionForecastEngine(ForecastEngineBase):
 
         return result
 
-    def decode_spec(self, training: bool) -> DecodeSpec | None:
-        """Static decode instructions for a forecast step (see ForecastEngineBase.decode_spec).
-
-        A pure function of this engine's config (num_ensemble_members, diffusion.rollout) — not
-        of any sample/runtime data — even though it varies by trajectory/rollout/ensemble mode.
-        None during training, and for ensembling without rollout (both fall back to the generic
-        training_mode-gated decode, matching _run_inference_step's handling of that case).
-        """
-        if training or self.cf.stage != "inference":
-            return None
-        is_trajectory = self.num_ensemble_members <= 1
-        if is_trajectory and not self.rollout:
-            return DecodeSpec(decode_latent=True, merge_ensemble=False)
-        if not is_trajectory and not self.rollout:
-            return None
-        # Unified rollout/ensemble path — handles both:
-        # - rollout (diffusion.rollout=True): raw is a list; take the final ODE state
-        # - ensemble (N > 1): raw is already a (N, healpix_cells, embed_dim) tensor
-        return DecodeSpec(decode_latent=False, merge_ensemble=True)
+    def decode_spec(self, training: bool, training_mode: list[str]) -> DecodeSpec:
+        """Static decode instructions for a forecast step."""
+        decode_physical = "masking" in training_mode
+        decode_latent = "student_teacher" in training_mode
+        merge_ensemble = False
+        use_intermediates = True
+        if self.cf.stage == "inference":
+            if self.decode_trajectory:
+                decode_physical, decode_latent, use_intermediates = True, True, False
+            elif self.rollout:
+                # Unified rollout/ensemble path — handles both:
+                # - rollout (diffusion.rollout=True): raw is a list; take the final ODE state
+                # - ensemble (N > 1): raw is already a (N, healpix_cells, embed_dim) tensor
+                decode_physical, decode_latent, merge_ensemble = True, False, True
+                use_intermediates = False
+        return DecodeSpec(
+            decode_physical=decode_physical,
+            decode_latent=decode_latent,
+            merge_ensemble=merge_ensemble,
+            use_intermediates=use_intermediates,
+        )
 
     def decode_diffusion_steps(
         self,
@@ -513,9 +515,6 @@ class DiffusionForecastEngine(ForecastEngineBase):
         ``OutputBatchData`` and not readable by the ``evaluate`` package. It is never merged
         into the real output returned by ``Model.forward``.
         """
-        # local import: avoids a model<->diffusion module-level import cycle
-        from weathergen.model.model import ModelOutput
-
         analytics_output = ModelOutput(
             list(range(forecast_offset, forecast_offset + len(trajectory))),
             forecast_offset,

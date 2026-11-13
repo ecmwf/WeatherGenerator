@@ -43,77 +43,12 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.model_output import ModelOutput
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_reconstructed
 
 logger = logging.getLogger(__name__)
-
-type StreamName = str
-
-
-class ModelOutput:
-    """
-    Representation of model output
-    """
-
-    physical: list[dict[StreamName, torch.Tensor]]
-    latent: list[dict[str, torch.Tensor | LatentState]]
-    latent_deep: list[dict[str, list[torch.Tensor]]] | None
-
-    def __init__(
-        self,
-        forecast_steps: list[int],
-        forecast_offset: int,
-        source_samples: BatchSamples,
-    ) -> None:
-        self.forecast_offset = forecast_offset
-        # the first chunk keeps its leading forecast_offset steps as empty slots, so that
-        # concatenating the chunks of a rollout stays indexed by global forecast step
-        base = 0 if forecast_steps[0] == forecast_offset else forecast_steps[0]
-        self.forecast_steps = list(range(base, forecast_steps[-1] + 1))
-
-        self.physical: list[dict[StreamName, torch.Tensor]] = [{} for _ in self.forecast_steps]
-        self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in self.forecast_steps]
-        self.batch_samples = source_samples
-        self.latent_deep = None
-
-    def chunk_idx(self, fstep: int) -> int:
-        """Index of forecast step fstep into chunk-local data, e.g. predictions."""
-        return fstep - self.forecast_steps[0]
-
-    def fstep_idx(self, fstep: int) -> int:
-        """Index of forecast step fstep into batch-global data, e.g. target coordinates."""
-        return fstep
-
-    def add_physical_prediction(
-        self, fstep: int, stream_name: StreamName, pred: torch.Tensor
-    ) -> None:
-        self.physical[fstep][stream_name] = pred
-
-    def add_latent_prediction(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
-        self.latent[fstep][latent_name] = pred
-
-    def add_deep_latent_prediction(
-        self, fstep: int, name: str, level_preds: list[torch.Tensor]
-    ) -> None:
-        if self.latent_deep is None:
-            self.latent_deep = [{} for _ in range(len(self.physical))]
-        self.latent_deep[fstep][name] = level_preds
-
-    def get_physical_prediction(
-        self, fstep: int, stream_name: StreamName | None = None, sample_idx: int | None = None
-    ):
-        pred = self.physical[fstep]
-        if stream_name is not None:
-            pred = pred.get(stream_name, None)
-            if sample_idx is not None:
-                assert sample_idx < len(pred), "Invalid sample index."
-                pred = pred[sample_idx]
-        return pred
-
-    def get_latent_prediction(self, fstep: int):
-        return self.latent[fstep]
 
 
 class ModelParams(torch.nn.Module):
@@ -848,7 +783,7 @@ class Model(torch.nn.Module):
                         coords=model_params.rope_coords,
                     )
                 continue
-
+            # Predict tokens for the next time step with the forecast engine
             tokens = self.forecast_engine(
                 tokens,
                 step,
@@ -859,67 +794,14 @@ class Model(torch.nn.Module):
                 batch=source_samples,
                 output=output,
             )
-            output = self._decode_step(
-                tokens,
-                model_params,
-                step,
-                source_samples,
-                output,
-                intermediates,
+            # Instantiate decode specifications then decode the tokens
+            decode_spec = self.forecast_engine.decode_spec(
+                self.training, self.cf.training_config.training_mode
+            )
+            output = decode_spec.decode(
+                self, model_params, step, tokens, source_samples, output, intermediates
             )
 
-        return output
-
-    def _decode_step(
-        self,
-        tokens: torch.Tensor,
-        model_params: ModelParams,
-        step: int,
-        batch: BatchSamples,
-        output: ModelOutput,
-        intermediates: list[torch.Tensor] | None,
-    ) -> ModelOutput:
-        """Physical/latent decode for one forecast step.
-
-        decode_spec (see ForecastEngineBase.decode_spec) is a pure function of the forecast
-        engine's static config; its decode_latent/merge_ensemble flags override the generic
-        training_mode-derived ones below, since diffusion decode decisions (which ODE state to
-        decode, whether to also predict latent, ensemble merging) don't map onto training_mode.
-        """
-        decode_spec = self.forecast_engine.decode_spec(self.training)
-        if decode_spec is None:
-            decode_physical = "masking" in self.cf.training_config.training_mode
-            decode_latent = "student_teacher" in self.cf.training_config.training_mode
-            merge_ensemble = False
-        else:
-            decode_physical = True
-            decode_latent = decode_spec.decode_latent
-            merge_ensemble = decode_spec.merge_ensemble
-
-        if decode_physical:
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
-        if merge_ensemble:
-            # fold the per-member batch dim into a single ensemble-dim tensor for this step
-            idx = output.chunk_idx(step)
-            output.physical[idx] = {
-                sname: (torch.cat(list(pred), dim=0),)
-                for sname, pred in output.physical[idx].items()
-            }
-        if decode_latent:
-            output = self.predict_latent(
-                model_params,
-                step,
-                tokens,
-                batch,
-                output,
-                intermediates if decode_spec is None else None,
-            )
-        # Make sure latent_state always exists in the output; it's needed further downstream
-        idx = output.chunk_idx(step)
-        if "latent_state" not in output.latent[idx]:
-            output.add_latent_prediction(
-                idx, "latent_state", self.tokens_to_latent_state(None, tokens)
-            )
         return output
 
     def _get_initial_conditions(

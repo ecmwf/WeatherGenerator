@@ -592,26 +592,62 @@ class ForecastEngineBase(torch.nn.Module):
         """
         return tokens.sum(axis=1), meta_info
 
-    def decode_spec(self, training: bool) -> "DecodeSpec | None":
-        """Instructions for Model._decode_step on how to decode a forecast step (see DecodeSpec),
-        derived purely from this engine's static config (not sample/runtime data). Default: None,
-        i.e. defer to the generic training_mode-gated decode. Subclasses may override (see
-        DiffusionForecastEngine.decode_spec).
+    def decode_spec(self, training: bool, training_mode: list[str]) -> "DecodeSpec":
+        """Instructions for Model.forward on how to decode a forecast step.
         """
-        return None
+        return DecodeSpec(
+            decode_physical="masking" in training_mode,
+            decode_latent="student_teacher" in training_mode,
+            use_intermediates=True,
+        )
 
 
 @dataclasses.dataclass
 class DecodeSpec:
-    """Instructions for Model._decode_step on how to decode one forecast step.
+    """Instructions for Model.forward on how to decode one forecast step."""
 
-    Engines may attach this to meta_info["decode_spec"] (see ForecastEngineBase) to bypass the
-    generic training_mode-gated decode in Model._decode_step; absence (None) falls back to that
-    default.
-    """
+    decode_physical: bool = False
+    decode_latent: bool = False
+    merge_ensemble: bool = False
+    # deep-SSL per-level predictions
+    use_intermediates: bool = False
 
-    decode_latent: bool
-    merge_ensemble: bool
+    def decode(
+        self,
+        model: torch.nn.Module,
+        model_params,
+        step: int,
+        tokens: torch.Tensor,
+        batch,
+        output,
+        intermediates: list[torch.Tensor] | None,
+    ):
+        """Run the decoders this spec calls for to keep the branching out of model.py."""
+        if self.decode_physical:
+            output = model.predict_decoders(model_params, step, tokens, batch, output)
+        if self.merge_ensemble:
+            # fold the per-member batch dim into a single ensemble-dim tensor for this step
+            idx = output.chunk_idx(step)
+            output.physical[idx] = {
+                sname: (torch.cat(list(pred), dim=0),)
+                for sname, pred in output.physical[idx].items()
+            }
+        if self.decode_latent:
+            output = model.predict_latent(
+                model_params,
+                step,
+                tokens,
+                batch,
+                output,
+                intermediates if self.use_intermediates else None,
+            )
+        # Make sure latent_state always exists in the output; it's needed further downstream
+        idx = output.chunk_idx(step)
+        if "latent_state" not in output.latent[idx]:
+            output.add_latent_prediction(
+                idx, "latent_state", model.tokens_to_latent_state(None, tokens)
+            )
+        return output
 
 
 class IdentityEngine(ForecastEngineBase):
