@@ -18,7 +18,7 @@ import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules as LossModules
-from weathergen.model.model import ModelOutput
+from weathergen.model.model_output import ModelOutput
 from weathergen.train.target_and_aux_module_base import TargetAuxOutput
 from weathergen.utils.train_logger import Stage
 

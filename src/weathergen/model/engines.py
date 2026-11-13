@@ -576,7 +576,82 @@ class GlobalAssimilationEngine(torch.nn.Module):
         return tokens, intermediates
 
 
-class IdentityEngine(torch.nn.Module):
+class ForecastEngineBase(torch.nn.Module):
+    """Common interface for Model.forecast_engine implementations (IdentityEngine,
+    ForecastingEngine, DiffusionForecastEngine).
+    """
+
+    def prepare_fe_input(
+        self, tokens: torch.Tensor, meta_info: dict, forecast_offset: int
+    ) -> tuple[torch.Tensor, dict]:
+        """Derive the forecast engine's initial condition from the assimilated input-step window.
+
+        tokens: (B, T, H, D), T loaded input steps, newest first (tokens[:, 0] = t). Default:
+        collapse by summation. Subclasses may instead split tokens into e.g. a conditioning
+        signal and a starting state (see DiffusionForecastEngine.prepare_fe_input). Returns the
+        initial condition and meta_info, updated if the subclass needs to pass extra state along.
+        """
+        return tokens.sum(axis=1), meta_info
+
+    def decode_spec(self, training: bool, training_mode: list[str]) -> "DecodeSpec":
+        """Instructions for Model.forward on how to decode a forecast step.
+        """
+        return DecodeSpec(
+            decode_physical="masking" in training_mode,
+            decode_latent="student_teacher" in training_mode,
+            use_intermediates=True,
+        )
+
+
+@dataclasses.dataclass
+class DecodeSpec:
+    """Instructions for Model.forward on how to decode one forecast step."""
+
+    decode_physical: bool = False
+    decode_latent: bool = False
+    merge_ensemble: bool = False
+    # deep-SSL per-level predictions
+    use_intermediates: bool = False
+
+    def decode(
+        self,
+        model: torch.nn.Module,
+        model_params,
+        step: int,
+        tokens: torch.Tensor,
+        batch,
+        output,
+        intermediates: list[torch.Tensor] | None,
+    ):
+        """Run the decoders this spec calls for to keep the branching out of model.py."""
+        if self.decode_physical:
+            output = model.predict_decoders(model_params, step, tokens, batch, output)
+        if self.merge_ensemble:
+            # fold the per-member batch dim into a single ensemble-dim tensor for this step
+            idx = output.chunk_idx(step)
+            output.physical[idx] = {
+                sname: (torch.cat(list(pred), dim=0),)
+                for sname, pred in output.physical[idx].items()
+            }
+        if self.decode_latent:
+            output = model.predict_latent(
+                model_params,
+                step,
+                tokens,
+                batch,
+                output,
+                intermediates if self.use_intermediates else None,
+            )
+        # Make sure latent_state always exists in the output; it's needed further downstream
+        idx = output.chunk_idx(step)
+        if "latent_state" not in output.latent[idx]:
+            output.add_latent_prediction(
+                idx, "latent_state", model.tokens_to_latent_state(None, tokens)
+            )
+        return output
+
+
+class IdentityEngine(ForecastEngineBase):
     """Identity engine that passes tokens through unchanged."""
 
     def __init__(self):
@@ -587,7 +662,7 @@ class IdentityEngine(torch.nn.Module):
         return tokens
 
 
-class ForecastingEngine(torch.nn.Module):
+class ForecastingEngine(ForecastEngineBase):
     name: "ForecastingEngine"
 
     def __init__(self, cf: Config, mode_cfg, num_healpix_cells: int, dim_aux: int = None) -> None:
@@ -716,6 +791,7 @@ class ForecastingEngine(torch.nn.Module):
         noise_emb: torch.Tensor = None,
         conditioning: torch.Tensor = None,
         coords: torch.Tensor = None,
+        **kwargs,
     ) -> torch.Tensor:
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
         # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
