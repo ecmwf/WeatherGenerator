@@ -487,12 +487,19 @@ def load_merge_configs(
 
 def _load_streams_in_config(config: Config) -> Config:
     """If the config contains a streams_directory, loads the streams and returns the config with
-    the streams set."""
+    the streams set. Any `streams.*` entries already present in `config` (e.g. from CLI dotlist
+    overrides passed alongside `streams_directory` in the same `--options`) take precedence over
+    the freshly loaded ones, instead of being silently discarded."""
     streams_directory = config.get("streams_directory", None)
     config = config.copy()
     if streams_directory is not None:
         streams_directory = Path(streams_directory)
-        config.streams = load_streams(streams_directory)
+        loaded_streams = load_streams(streams_directory)
+        existing_streams = config.get("streams", None)
+        if existing_streams:
+            config.streams = OmegaConf.merge(loaded_streams, existing_streams)
+        else:
+            config.streams = loaded_streams
     return config
 
 
