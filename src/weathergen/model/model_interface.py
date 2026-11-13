@@ -21,11 +21,9 @@ from torch.distributed.tensor import distribute_tensor
 
 from weathergen.common.config import Config, get_path_model, merge_configs
 from weathergen.model.attention import (
-    MultiCrossAttentionHeadVarlen,
+    Attention,
     MultiCrossAttentionHeadVarlenSlicedQ,
-    MultiSelfAttentionHead,
     MultiSelfAttentionHeadLocal,
-    MultiSelfAttentionHeadVarlen,
 )
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
@@ -91,11 +89,9 @@ def init_model_and_shard(
         }
         modules_to_shard = (
             MLP,
+            Attention,
             MultiSelfAttentionHeadLocal,
-            MultiSelfAttentionHead,
-            MultiCrossAttentionHeadVarlen,
             MultiCrossAttentionHeadVarlenSlicedQ,
-            MultiSelfAttentionHeadVarlen,
         )
 
         for module in model.encoder.ae_local_engine.ae_local_blocks.modules():

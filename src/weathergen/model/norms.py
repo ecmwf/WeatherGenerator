@@ -151,7 +151,6 @@ class AdaLayerNormLayer(torch.nn.Module):
         shift, scale, gate = self.adaLN_modulation(c)[torch.repeat_interleave(x_lens) - 1].chunk(
             3, dim=1
         )
-        kwargs["x_lens"] = x_lens
         return (
             gate
             * self.layer(
