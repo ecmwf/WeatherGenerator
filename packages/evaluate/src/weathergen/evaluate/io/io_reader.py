@@ -181,8 +181,15 @@ class Reader(ABC):
         return True
 
     @abstractmethod
-    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray:
-        """Placeholder to load pre-computed scores for a given run, stream, metric"""
+    def load_scores(
+        self, stream: str, regions: list[str], metrics: dict[str, object]
+    ) -> tuple[dict, dict | None]:
+        """Load the pre-computed scores of this run for one stream.
+
+        Returns ``({region: {metric: score}}, missing)``, where ``missing`` maps a region
+        to the metrics (and their parameters) that must be recomputed, or is ``None``
+        when the reader cannot recompute anything.
+        """
         pass
 
     def check_availability(

@@ -263,13 +263,11 @@ def _process_stream(
 
     # cached scores as MetricResults; the ones computed below override them
     results: dict[str, dict[str, MetricResult]] = {}
-    for metric, by_region in stream_loaded_scores.items():
-        for region, by_stream in by_region.items():
-            for stream_key, by_run in by_stream.items():
-                for run_key, score in by_run.items():
-                    results.setdefault(region, {})[metric] = MetricResult(
-                        metric, region, stream_key, run_key, score
-                    )
+    for region, by_metric in stream_loaded_scores.items():
+        for metric, score in by_metric.items():
+            results.setdefault(region, {})[metric] = MetricResult(
+                metric, region, stream, reader.run_id, score
+            )
 
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
