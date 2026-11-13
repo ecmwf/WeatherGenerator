@@ -210,7 +210,7 @@ class WeatherGenReader(Reader):
         Returns
         -------
         tuple[dict, dict]
-            - local_scores: dictionary of available scores.
+            - local_scores: ``{region: {metric: score}}`` of the available scores.
             - recomputable_missing_metrics: dictionary of regions and metrics
               that must be recomputed (empty for JSON reader).
         """
@@ -230,9 +230,7 @@ class WeatherGenReader(Reader):
                             channel=available_data.channels,
                             forecast_step=available_data.fsteps,
                         )
-                        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
-                            stream, {}
-                        )[self.run_id] = score
+                        local_scores.setdefault(region, {})[metric] = score
                     else:
                         # JSON exists but doesn't cover the requested data — recompute.
                         missing_metrics.setdefault(region, {}).update({metric: parameters})

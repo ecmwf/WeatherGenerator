@@ -77,8 +77,8 @@ def results_to_dict(results: dict[str, dict[str, MetricResult]], field: str = "s
     """``d[metric][region][stream][run_id] -> MetricResult.<field>`` (``None`` fields skipped).
 
     With ``field="score"`` this is the nested shape ``plot_scores``, ``collect_channels``
-    and the MLflow upload consume, and that the readers' ``load_scores`` returns for
-    cached scores; with ``field="by_init_hour"`` it is what ``init_hour_metric_region`` reads.
+    and the MLflow upload consume; with ``field="by_init_hour"`` it is what
+    ``init_hour_metric_region`` reads.
     """
     d: dict = {}
     for region, by_metric in results.items():

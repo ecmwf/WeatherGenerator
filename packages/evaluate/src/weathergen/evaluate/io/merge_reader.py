@@ -188,25 +188,24 @@ class WeatherGenMergeReader(Reader):
         return da_ens
 
     def load_scores(
-        self, stream: str, regions: list[str], metrics: list[str]
-    ) -> xr.DataArray | None:
+        self, stream: str, regions: list[str], metrics: dict[str, object]
+    ) -> tuple[dict, dict]:
         """
-        Load the pre-computed scores for a given run, stream and metric and epoch.
+        Load the pre-computed scores of the merged runs for a given stream.
 
         Parameters
         ----------
-        reader :
-            Reader object containing all info for a specific run_id
         stream :
             Stream name.
         regions :
             Region names.
         metrics :
-            Metric names.
+            Metric names and their parameters.
         Returns
         -------
-        xr.DataArray
-            The metric DataArray.
+        local_scores:
+            ``{region: {metric: score}}``, each score concatenated over the merged runs
+            along ``ens``.
         missing_metrics:
             dictionary of missing regions and metrics that need to be recomputed.
         """
@@ -334,33 +333,29 @@ class WeatherGenMergeReader(Reader):
         return all(reader.is_gridded_data(stream) for reader in self.readers)
 
     def _load_scores_json(self, stream, regions, metrics):
-        "Concatenate the scores of all JSON readers"
+        "Concatenate the scores of all JSON readers along ``ens``"
 
         local_scores = {}
         missing_metrics = {}
 
-        # deep merge dicts
+        per_reader = []
         for reader in self.readers:
             scores, missing = reader.load_scores(stream, regions, metrics)
-            merge(local_scores, scores)
+            per_reader.append(scores)
             merge(missing_metrics, missing)
 
-        # merge runs into one with all scores concatenated
-        for metric in local_scores.keys():
-            for region in local_scores[metric].keys():
-                for stream in local_scores[metric][region].keys():
-                    assert len(local_scores[metric][region][stream].keys()) == len(self.run_ids), (
-                        f"Not all run ids are distinct or have the requested precomputed "
-                        f"scores for metric: {metric}, region: {region}, stream: {stream}"
-                    )
-
-                    scores = (
-                        local_scores[metric][region][stream].pop(run_id) for run_id in self.run_ids
-                    )
-
-                    local_scores[metric][region][stream].setdefault(
-                        self.run_id,
-                        xr.concat(scores, dim="ens").assign_coords(ens=range(len(self.readers))),
-                    )
+        # a (region, metric) is cached for the merged run only if every run has it
+        for region in regions:
+            for metric in metrics:
+                scores = [s[region][metric] for s in per_reader if metric in s.get(region, {})]
+                if not scores:
+                    continue
+                assert len(scores) == len(self.readers), (
+                    f"Not all run ids have the requested precomputed "
+                    f"scores for metric: {metric}, region: {region}, stream: {stream}"
+                )
+                local_scores.setdefault(region, {})[metric] = xr.concat(
+                    scores, dim="ens"
+                ).assign_coords(ens=range(len(self.readers)))
 
         return local_scores, missing_metrics
