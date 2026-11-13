@@ -148,7 +148,7 @@ def evaluate_from_args(argl: list[str]) -> None:
             _logger.info(f"Applied --options overwrites: {cli_items}")
 
     if args.run_ids:
-        existing = cf.get("run_ids", {})
+        existing = cf.get("run_ids", {}) or {}
         cf.run_ids = {k: existing.get(k, {}) for k in args.run_ids}
         _logger.info(f"Overwritten run_ids to: {args.run_ids}")
 
