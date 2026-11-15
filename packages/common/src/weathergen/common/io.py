@@ -427,7 +427,13 @@ class ZarrIO:
     def _get_group(self, item: ItemKey, create: bool) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
-            assert self.data_root.get(item.path) is None, "Group already exists, stop overwriting"
+            if self.data_root.get(item.path) is not None:
+                msg = (
+                    f"Output item '{item.path}' already exists in the zarr store at "
+                    f"{self._store_path}. Output items are never overwritten; "
+                    "use a new run id or a different output location."
+                )
+                raise ValueError(msg)
             group = self.data_root.create_group(item.path)
         else:
             try:
