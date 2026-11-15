@@ -56,8 +56,10 @@ case "$FROM_RUN_ID" in
     spqvzngg) MINI_EPOCH=${MINI_EPOCH:-9} ;;
     # base model nhv6tkln (deterministic with ENS=1, e.g. to make maps; its scored runs are nhv600NN)
     nhv6tkln) MINI_EPOCH=${MINI_EPOCH:-8} ;;
+    # crps20d_warm (crps20d recipe from crps8long's final checkpoint, 5 mini-epochs): final chkpt 5
+    qiuftfm4) MINI_EPOCH=${MINI_EPOCH:-5} ;;
     *)
-        echo "FROM_RUN_ID must be zmmj3eby, okfe03ir, cbqstu8f, klbklwf7, axhby5w8, q4gwmov3, nyscsarv, ci7g92ye, ps71a3lb, rs5zhuu1, spqvzngg or nhv6tkln; got '$FROM_RUN_ID'." >&2
+        echo "FROM_RUN_ID must be zmmj3eby, okfe03ir, cbqstu8f, klbklwf7, axhby5w8, q4gwmov3, nyscsarv, ci7g92ye, ps71a3lb, rs5zhuu1, spqvzngg, nhv6tkln or qiuftfm4; got '$FROM_RUN_ID'." >&2
         exit 2
         ;;
 esac
