@@ -11,6 +11,7 @@
 
 import logging
 import math
+import os
 import typing
 import warnings
 
@@ -898,7 +899,8 @@ class Model(torch.nn.Module):
         # ensembles in validation / inference: keep the stochasticity of the forecast engine
         # (dropout, latent noise) as in training (MC dropout)
         fe_train_modes = None
-        if ensemble_size > 1 and not self.training:
+        # (also for a single member per process, WG_MC_MEMBER)
+        if (ensemble_size > 1 or os.environ.get("WG_MC_MEMBER")) and not self.training:
             fe_train_modes = {m: m.training for m in self.forecast_engine.modules()}
             self.forecast_engine.train()
 

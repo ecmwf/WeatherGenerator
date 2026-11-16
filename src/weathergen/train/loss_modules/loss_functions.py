@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+import os
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -95,7 +97,11 @@ def kernel_crps(
     """
 
     ens_size = preds.shape[0]
-    assert ens_size > 1, "Ensemble size has to be greater than 1 for kernel CRPS."
+    # one MC-dropout member per process (WG_MC_MEMBER, inference): the CRPS reduces to the MAE
+    if ens_size == 1 and os.environ.get("WG_MC_MEMBER"):
+        fair = False
+    else:
+        assert ens_size > 1, "Ensemble size has to be greater than 1 for kernel CRPS."
     assert len(preds.shape) == 3, "if data has batch dimension, remove unsqueeze() below"
 
     # replace NaN by 0

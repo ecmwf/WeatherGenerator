@@ -19,6 +19,8 @@ import time
 import traceback
 from pathlib import Path
 
+import torch
+
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
@@ -97,6 +99,9 @@ def run_inference(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
     cf.data_loading.rng_seed = 42
+    # one MC-dropout ensemble member per process: WG_MC_MEMBER seeds the dropout masks
+    if os.environ.get("WG_MC_MEMBER"):
+        torch.manual_seed(1000 + int(os.environ["WG_MC_MEMBER"]))
     cf.stage = args.stage
 
     devices = Trainer.init_torch()
