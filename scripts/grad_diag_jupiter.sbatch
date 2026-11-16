@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Per-lead-window gradient diagnostics (scripts/grad_diag.py): one independent process per GPU (WORLD_SIZE=1),
 # each on its own training dates; no weight updates. Submit from the WeatherGenerator root, e.g. a smoke test:
-#   sbatch --ntasks=1 --time=00:40:00 --export=ALL,BASHRCSOURCED=Y,OUT_DIR=...,NUM_SAMPLES=1,WINDOWS=anchor,8,80 \
+#   sbatch --ntasks=1 --time=00:40:00 --export=ALL,BASHRCSOURCED=Y,OUT_DIR=...,NUM_SAMPLES=1,WINDOWS=anchor:8:80 \
 #       scripts/grad_diag_jupiter.sbatch
 # and the full run with --ntasks=4 (default) and NUM_SAMPLES=16. Optional: LOAD_RUN_ID, LOAD_MINI_EPOCH.
 
@@ -26,7 +26,9 @@ ml Python/3.12.3
 
 OUT_DIR=${OUT_DIR:?Set OUT_DIR}
 NUM_SAMPLES=${NUM_SAMPLES:?Set NUM_SAMPLES (per process)}
-WINDOWS=${WINDOWS:-anchor,8,12,16,20,28,40,60,80}
+# windows separated by ":" in --export (sbatch splits --export on commas), e.g. WINDOWS=anchor:8:80
+WINDOWS=${WINDOWS:-anchor:8:12:16:20:28:40:60:80}
+WINDOWS=${WINDOWS//:/,}
 LOAD_RUN_ID=${LOAD_RUN_ID:-axhby5w8}
 LOAD_MINI_EPOCH=${LOAD_MINI_EPOCH:-9}
 

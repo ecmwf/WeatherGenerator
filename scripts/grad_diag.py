@@ -82,12 +82,16 @@ class GradDiagTrainer(Trainer):
             batch.to_device(self.device)
             steps = list(batch.get_output_idxs())
             assert len(steps) == 80, f"expected 80 output steps, got {len(steps)}"
-            assert getattr(batch, "ensemble_size", 1) == 2, getattr(batch, "ensemble_size", None)
+            # the model reads the rollout plan and ensemble size from the batch's source samples (set_rollout)
+            ens = batch.get_source_samples().ensemble_size
+            assert ens == 2, f"expected 2 training members, got {ens}"
             for w, win in enumerate(a.windows):
                 loss_steps = steps[:4] if win == "anchor" else steps[int(win) - 4 : int(win)]
-                batch.rollout_plan = RolloutPlan(
-                    no_grad_steps=frozenset(steps) - frozenset(loss_steps), loss_steps=frozenset(loss_steps)
+                batch.set_rollout(
+                    RolloutPlan(no_grad_steps=frozenset(steps) - frozenset(loss_steps), loss_steps=frozenset(loss_steps)),
+                    ens,
                 )
+                assert batch.get_source_samples().rollout_plan.loss_steps == frozenset(loss_steps)
                 for n, p in params:
                     p.grad = None
                 with torch.autocast(device_type=f"cuda:{cf.local_rank}", dtype=self.mixed_precision_dtype,
@@ -147,9 +151,12 @@ def main():
         "training_config.forecast.rollout_anchor_steps=4",
         "training_config.forecast.rollout_grad_steps=4",
         "training_config.forecast.rollout_loss_steps=4",
-        # every batch carries targets for 80 steps; the window's rollout plan selects the scored steps
+        # every batch carries targets for all 80 steps (the sampler loads targets only for the steps its own plan
+        # scores, so its pushforward is off); each window's rollout plan (set_rollout) then applies the pushforward
+        # structure of training: gradient and loss only on the window's steps. Lead balancing does not depend on it.
         "training_config.forecast.policy=fixed",
         "training_config.forecast.num_steps=80",
+        "training_config.forecast.pushforward=false",
         "with_ddp=false",
         "with_fsdp=false",
         "data_loading.num_workers=4",
