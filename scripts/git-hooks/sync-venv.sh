@@ -1,7 +1,6 @@
 #!/bin/bash
 # Re-syncs the venv after git pull (post-merge, post-rewrite) or a branch
-# switch (post-checkout) when dependency files (uv.lock, pyproject.toml,
-# .python-version) changed, so that `uv run` never
+# switch (post-checkout) when dependency files changed, so that `uv run` never
 # syncs by itself with pyproject.toml's link mode instead of the HPC's.
 # Installed by `scripts/actions.sh sync` on HPCs that set uv_link_mode in their
 # config (JUPITER); called from small stubs in .git/hooks with the hook name
@@ -26,8 +25,8 @@ top=$(git rev-parse --show-toplevel) || exit 0
 cd "$top" || exit 0
 [[ -d .venv ]] || exit 0
 git rev-parse -q --verify "$old" > /dev/null || exit 0
-if git diff --quiet "$old" HEAD -- uv.lock pyproject.toml \
-  'packages/*/pyproject.toml' .python-version; then
+if git diff --quiet "$old" HEAD -- pyproject.toml 'packages/*/pyproject.toml' \
+  .python-version; then
   exit 0
 fi
 
