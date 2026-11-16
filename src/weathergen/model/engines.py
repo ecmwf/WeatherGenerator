@@ -626,12 +626,7 @@ class DecodeSpec:
         if self.decode_physical:
             output = model.predict_decoders(model_params, step, tokens, batch, output)
         if self.merge_ensemble:
-            # fold the per-member batch dim into a single ensemble-dim tensor for this step
-            idx = output.chunk_idx(step)
-            output.physical[idx] = {
-                sname: (torch.cat(list(pred), dim=0),)
-                for sname, pred in output.physical[idx].items()
-            }
+            merge_ensemble_physical(output, step)
         if self.decode_latent:
             output = model.predict_latent(
                 model_params,
@@ -650,8 +645,22 @@ class DecodeSpec:
         return output
 
 
+def merge_ensemble_physical(output, step: int) -> None:
+    """Fold per-member physical predictions into one explicit (N, ...) tensor, in place.
+
+    predict_decoders stores one prediction per ensemble member as a tuple (ensemble membership
+    encoded only by tuple position); this concatenates them into a single tensor so N becomes a
+    real leading dimension, distinguishing it from a batch of unrelated samples.
+    """
+    idx = output.chunk_idx(step)
+    output.physical[idx] = {
+        sname: (torch.cat(list(pred), dim=0),) for sname, pred in output.physical[idx].items()
+    }
+
+
 class IdentityEngine(ForecastEngineBase):
     """Identity engine that passes tokens through unchanged."""
+
 
     def __init__(self):
         super().__init__()

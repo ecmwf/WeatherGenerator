@@ -35,7 +35,12 @@ import tqdm
 from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples
 from weathergen.datasets.masking import get_noise_level_cfg
-from weathergen.model.engines import DecodeSpec, ForecastEngineBase, ForecastingEngine
+from weathergen.model.engines import (
+    DecodeSpec,
+    ForecastEngineBase,
+    ForecastingEngine,
+    merge_ensemble_physical,
+)
 from weathergen.model.model_output import ModelOutput
 from weathergen.utils.inference_logger import ScalarSeriesJSONLWriter
 
@@ -222,11 +227,7 @@ class DiffusionForecastEngine(ForecastEngineBase):
         if self.conditioning and (self.conditioning in ["date_time", "date", "time"]):
             self.datetime_embedder = DateTimeEncoder(self.conditioning)
 
-        # Optional MLP projections for an expanded diffusion latent space:
-        # projects encoder tokens (ae_global_dim_embed -> diffusion.latent_dim) before denoising
-        # and back (diffusion.latent_dim -> ae_global_dim_embed) after. The conditioning tokens
-        # get their own up-projection so the denoiser can tell them apart from the noisy tokens.
-        # When diffusion.latent_dim == ae_global_dim_embed (default), these are None (no-op).
+        # Optional MLP up- and down-projections for an expanded diffusion latent space
         _enc_dim = self.cf.ae_global_dim_embed
         _lat_dim = self.diff_cf.get("latent_dim") or _enc_dim
         if _lat_dim != _enc_dim:
@@ -239,7 +240,6 @@ class DiffusionForecastEngine(ForecastEngineBase):
             self.latent_proj_down = None
 
         # Spatial AdaLN: per-cell modulation using the conditioning token at each HEALPix cell.
-        # Only instantiated for the 'spatial_ada_ln' conditioning type.
         if self.conditioning_type == "spatial_ada_ln":
             self.spatial_ada_ln = SpatialAdaLN(dim=_lat_dim, norm_eps=self.cf.get("norm_eps", 1e-4))
         else:
@@ -262,13 +262,9 @@ class DiffusionForecastEngine(ForecastEngineBase):
         self.num_inference_steps = sampler_cf.get("num_steps", None)
         self.num_ensemble_members = sampler_cf.get("num_ensemble_members", 1)
         self.rollout = self.diff_cf.get("rollout", False)
-        # Trajectory mode: a single ODE path returning every intermediate denoising state (vs.
-        # ensemble mode, which draws num_ensemble_members independent members in one batched
-        # pass, see inference_forward). decode_trajectory additionally excludes rollout: it's the
-        # specific case where only the final ODE state is a real forecast-step prediction and all
-        # intermediate states are only used for optional analytics (see _run_inference_step).
-        self.trajectory_mode = self.num_ensemble_members <= 1
-        self.decode_trajectory = self.trajectory_mode and not self.rollout
+        # Decode every ODE denoising step as its own forecast-shaped analytics output instead of
+        # only the final denoised state.
+        self.decode_diffusion_steps = sampler_cf.get("decode_diffusion_steps", False)
         # s_churn == 0 (the default) keeps the deterministic Heun sampler.
         self.s_churn = float(sampler_cf.get("s_churn", 0.0))
         self.s_min = float(sampler_cf.get("s_min", 0.0))
@@ -442,28 +438,28 @@ class DiffusionForecastEngine(ForecastEngineBase):
         """Run one diffusion inference step and resolve it to the plain tensor Model.forward
         expects.
         """
-        raw = self.inference_forward(
+        inference_output = self.inference_forward(
             fstep=fstep, num_steps=num_steps, meta_info=meta_info, coords=coords
         )
 
-        if not (self.decode_trajectory or self.rollout):
-            # Ensemble without rollout: default behaviour that does not require any
-            # diffusion-specific output restructuring and decode handling.
-            return raw
+        if not (self.decode_diffusion_steps or self.rollout):
+            # default behaviour that does not require any diffusion-specific output
+            # restructuring and decode handling.
+            return inference_output
 
         cond = meta_info.get("conditioning_tokens")
         predict_residual = self.diff_cf.get("predict_residual", False)
-        final = raw[-1] if self.trajectory_mode else raw
-        result = cond + final if predict_residual else final
+        final_ode_step = inference_output[-1] if self.decode_diffusion_steps else inference_output
+        result = cond + final_ode_step if predict_residual else final_ode_step
         meta_info["conditioning_tokens"] = result
 
-        if self.decode_trajectory and self.log_analytics:
+        if self.decode_diffusion_steps and self.log_analytics:
             # Log the diffusion step outputs for analytics if desired
-            output.diffusion_steps_output = self.decode_diffusion_steps(
+            output.diffusion_steps_output = self._decode_diffusion_steps_analytics(
                 model,
                 model_params,
                 fstep,
-                raw,
+                inference_output,
                 batch,
                 output.forecast_offset,
                 cond,
@@ -479,13 +475,12 @@ class DiffusionForecastEngine(ForecastEngineBase):
         merge_ensemble = False
         use_intermediates = True
         if self.cf.stage == "inference":
-            if self.decode_trajectory:
+            merge_ensemble = self.num_ensemble_members > 1
+            if self.decode_diffusion_steps:
                 decode_physical, decode_latent, use_intermediates = True, True, False
             elif self.rollout:
                 # Unified rollout/ensemble path — handles both:
-                # - rollout (diffusion.rollout=True): raw is a list; take the final ODE state
-                # - ensemble (N > 1): raw is already a (N, healpix_cells, embed_dim) tensor
-                decode_physical, decode_latent, merge_ensemble = True, False, True
+                decode_physical, decode_latent = True, False
                 use_intermediates = False
         return DecodeSpec(
             decode_physical=decode_physical,
@@ -494,7 +489,7 @@ class DiffusionForecastEngine(ForecastEngineBase):
             use_intermediates=use_intermediates,
         )
 
-    def decode_diffusion_steps(
+    def _decode_diffusion_steps_analytics(
         self,
         model: "Model",
         model_params: "ModelParams",
@@ -522,14 +517,12 @@ class DiffusionForecastEngine(ForecastEngineBase):
         )
         for i, toks in enumerate(trajectory):
             toks_abs = cond + toks if predict_residual else toks
-            # out_step indexes analytics_output.physical/.latent directly (global forecast step,
-            # not chunk-local), so it must start at forecast_offset like the rest of the list,
-            # else the leading empty padding slot stays at the wrong end and write_output (which
-            # only reads steps >= forecast_offset) never sees the first ODE step.
             out_step = forecast_offset + i
             analytics_output = model.predict_decoders(
                 model_params, step, toks_abs, source_samples, analytics_output, out_step=out_step
             )
+            if self.num_ensemble_members > 1:
+                merge_ensemble_physical(analytics_output, out_step)
             analytics_output = model.predict_latent(
                 model_params, step, toks_abs, source_samples, analytics_output, out_step=out_step
             )
@@ -813,10 +806,9 @@ class DiffusionForecastEngine(ForecastEngineBase):
         https://github.com/NVlabs/edm/blob/main/generate.py
 
         When ``diffusion.sampler.num_ensemble_members > 1`` in the config all N members
-        are denoised in a single batched ODE pass and the final tensor of shape
-        ``(N, num_healpix_cells, embed_dim)`` is returned directly.  The model
-        forward pass in ``model.py`` detects ensemble mode by checking
-        ``tokens.shape[0] > 1`` and routes to the ensemble decoding branch.
+        are denoised in a single batched ODE pass. The model forward pass in ``model.py``
+        detects ensemble mode by checking ``tokens.shape[0] > 1`` and routes to the ensemble
+        decoding branch.
 
         Args:
             fstep: Forecast step index for the network
@@ -825,10 +817,10 @@ class DiffusionForecastEngine(ForecastEngineBase):
                 (date/time conditioning) or conditioning_tokens (forecast conditioning)
             coords: Optional coordinate tensor for spatial conditioning
         Returns:
-            list[Tensor]: ODE trajectory (one tensor per denoising step) when
-                ``diffusion.sampler.num_ensemble_members == 1`` (default / trajectory mode).
-            Tensor: shape ``(N, num_healpix_cells, embed_dim)`` when
-                ``diffusion.sampler.num_ensemble_members > 1`` (ensemble mode).
+            list[Tensor]: ODE trajectory (one tensor per denoising step), each of shape
+                ``(N, num_healpix_cells, embed_dim)``, when ``decode_diffusion_steps`` is set.
+            Tensor: shape ``(N, num_healpix_cells, embed_dim)`` otherwise, where N is
+                ``diffusion.sampler.num_ensemble_members`` (default 1).
         """
 
         # Extract conditioning (mirrors training_forward).
@@ -838,35 +830,23 @@ class DiffusionForecastEngine(ForecastEngineBase):
         elif self.conditioning == "forecast":
             c = meta_info["conditioning_tokens"]
 
-        num_ensemble_members: int = self.num_ensemble_members
-
-        # Ensemble mode: draw N independent samples in one batched ODE pass.
+        num_ensemble_members = self.num_ensemble_members
         if num_ensemble_members > 1:
             logger.info(f"Diffusion ensemble mode: generating {num_ensemble_members} members.")
-            # Build batched conditioning of shape (N, healpix_cells, embed_dim).
-            # conditioning_tokens is (1, H, D) on the first rollout step (encoder output) and
-            # (N, H, D) on subsequent steps (stored by model.py after the previous ensemble step).
-            # expand() is a no-op when the leading dim already matches N, so this handles both.
-            c_batched = c.expand(num_ensemble_members, *c.shape[1:]) if c is not None else None
-            final_x, _ = self._run_ode(
-                c=c_batched,
-                fstep=fstep,
-                num_steps=num_steps,
-                coords=coords,
-                batch_size=num_ensemble_members,
-                return_diffusion_steps=False,
-            )
-            return final_x
-
-        # Default trajectory mode: return all intermediate ODE states (existing behaviour).
-        _, intermediate_x = self._run_ode(
-            c=c,
+        # Build batched conditioning of shape (N, healpix_cells, embed_dim).
+        # conditioning_tokens is (1, H, D) on the first rollout step (encoder output) and
+        # (N, H, D) on subsequent steps (stored by model.py after the previous ensemble step).
+        # expand() is a no-op when the leading dim already matches N (e.g. N == 1).
+        c_batched = c.expand(num_ensemble_members, *c.shape[1:]) if c is not None else None
+        final_x, intermediate_x = self._run_ode(
+            c=c_batched,
             fstep=fstep,
             num_steps=num_steps,
             coords=coords,
-            return_diffusion_steps=True,
+            batch_size=num_ensemble_members,
+            return_diffusion_steps=self.decode_diffusion_steps,
         )
-        return intermediate_x
+        return intermediate_x if self.decode_diffusion_steps else final_x
 
     def _stochastic_churn(
         self, x_cur: torch.Tensor, t_cur: torch.Tensor, num_steps: int, sigma_max_eff: float
@@ -920,7 +900,7 @@ class DiffusionForecastEngine(ForecastEngineBase):
             num_steps: Number of ODE integration steps.
             coords: Optional spatial coordinates for :meth:`denoise`.
             batch_size: Number of independent noise realisations to denoise in
-                parallel.  Defaults to 1 (trajectory / single-sample mode).
+                parallel.  Defaults to 1.
             return_diffusion_steps: When ``True``, also return the list of intermediate
                 states (one per ODE step).  Set to ``False`` in ensemble mode to
                 avoid storing the full trajectory N times.
@@ -982,9 +962,7 @@ class DiffusionForecastEngine(ForecastEngineBase):
         # Per-step intermediate denoised states (one per ODE step).
         intermediate_x: list[torch.Tensor] = [] if return_diffusion_steps else None
 
-        # Main sampling loop. position=1 nests this bar below the per-sample/batch bar
-        # (position=0) in trainer.py's validation loop, so progress is visible at both
-        # levels during inference.
+        # Main sampling loop
         x_next = x * t_steps[0]
         step_pairs = list(zip(t_steps[:-1], t_steps[1:], strict=False))
         for i, (t_cur, t_next) in enumerate(
