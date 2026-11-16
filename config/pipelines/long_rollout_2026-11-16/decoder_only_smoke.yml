@@ -11,7 +11,7 @@
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-11-16/decoder_only_smoke.yml
 parallelize: true
 stages:
-  - name: smokedecoderonly
+  - name: smokedeconly
     stage: train
     base_config: ./config/config_nhv6tkln_chkpt8_base.yml
     config_files:
