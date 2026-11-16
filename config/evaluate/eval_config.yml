@@ -48,6 +48,16 @@
 
 # max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
 
+# ── Chunked evaluation ──
+# Every (run, stream) is cut into chunks of samples × forecast steps, each scored and plotted
+# on its own and merged back (scores exact; score maps, init-hour scores and across-sample
+# histograms are skipped when the samples are chunked; data timeseries whenever chunked).
+# distributed:
+#   enabled: false          # auto | true | false  (true: the chunks run one after the other here)
+#   chunks:
+#     forecast_step: 10     # window size, or "all"
+#     sample: all
+
 evaluation:
   metrics  : 
   - rmse
