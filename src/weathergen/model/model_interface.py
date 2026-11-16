@@ -136,6 +136,13 @@ def init_model_and_shard(
 
     # freeze request model part
     apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
+    # opt-in: freeze weights WITHOUT eval mode (freeze_modules also sets eval mode in every mini-epoch), e.g.
+    # freeze_weights_only: "forecast_engine" trains only the decoder while the forecast engine's dropout, the
+    # MC-dropout ensemble mechanism, stays active
+    if cf.get("freeze_weights_only", None):
+        apply_fct_to_blocks(model, cf.freeze_weights_only, freeze_weights)
+        n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        logger.info(f"freeze_weights_only={cf.freeze_weights_only}: {n_train / 1e6:.2f} M trainable parameters left")
 
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
