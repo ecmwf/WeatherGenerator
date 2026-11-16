@@ -438,33 +438,32 @@ class DiffusionForecastEngine(ForecastEngineBase):
         """Run one diffusion inference step and resolve it to the plain tensor Model.forward
         expects.
         """
-        inference_output = self.inference_forward(
+        inference_result = self.inference_forward(
             fstep=fstep, num_steps=num_steps, meta_info=meta_info, coords=coords
         )
 
-        if not (self.decode_diffusion_steps or self.rollout):
-            # default behaviour that does not require any diffusion-specific output
-            # restructuring and decode handling.
-            return inference_output
-
-        cond = meta_info.get("conditioning_tokens")
-        predict_residual = self.diff_cf.get("predict_residual", False)
-        final_ode_step = inference_output[-1] if self.decode_diffusion_steps else inference_output
-        result = cond + final_ode_step if predict_residual else final_ode_step
-        meta_info["conditioning_tokens"] = result
-
-        if self.decode_diffusion_steps and self.log_analytics:
-            # Log the diffusion step outputs for analytics if desired
-            output.diffusion_steps_output = self._decode_diffusion_steps_analytics(
-                model,
-                model_params,
-                fstep,
-                inference_output,
-                batch,
-                output.forecast_offset,
-                cond,
-                predict_residual,
+        result = inference_result
+        if self.decode_diffusion_steps or self.rollout:
+            cond = meta_info.get("conditioning_tokens")
+            predict_residual = self.diff_cf.get("predict_residual", False)
+            final_ode_step = (
+                inference_result[-1] if self.decode_diffusion_steps else inference_result
             )
+            result = cond + final_ode_step if predict_residual else final_ode_step
+            meta_info["conditioning_tokens"] = result  # Update conditioning for next iter
+
+            if self.decode_diffusion_steps and self.log_analytics:
+                # Log the diffusion step outputs for analytics if desired
+                output.diffusion_steps_output = self._decode_diffusion_steps_analytics(
+                    model,
+                    model_params,
+                    fstep,
+                    inference_result,
+                    batch,
+                    output.forecast_offset,
+                    cond,
+                    predict_residual,
+                )
 
         return result
 
@@ -501,8 +500,7 @@ class DiffusionForecastEngine(ForecastEngineBase):
         predict_residual: bool,
     ) -> "ModelOutput":
         """
-        Decode every ODE denoising step into its own forecast-shaped ``ModelOutput`` (only if
-        ``inference_logging.fe_diffusion_log_analytics``).
+        Decode every ODE denoising step to physical space represented by ModelOutput.
 
         The result is shaped like a forecast rollout of ``len(trajectory)`` pseudo-steps, matching
         the indexing ``predict_decoders``/``predict_latent`` expect, but it is written via the
@@ -851,35 +849,22 @@ class DiffusionForecastEngine(ForecastEngineBase):
     def _stochastic_churn(
         self, x_cur: torch.Tensor, t_cur: torch.Tensor, num_steps: int, sigma_max_eff: float
     ) -> "tuple[torch.Tensor, torch.Tensor]":
-        """EDM Algorithm 2 churn step: temporarily raise the noise level from ``t_cur`` to
+        """EDM Algorithm 2 churn step: temporarily raises the noise level from ``t_cur`` to
         ``t_post`` by injecting fresh Gaussian noise, so the subsequent denoise+Heun step acts
-        as a Langevin corrector. Returns ``(x_post, t_post)``.
-
-        ``diffusion.sampler.s_max`` is capped at ``sigma_max_eff`` (the top of the training-aligned
-        inference schedule) so churn can neither operate at nor raise the noise level into the
-        untrained high-sigma tail.
-
-        No-op — returns ``(x_cur, t_cur)`` with the global RNG stream untouched — when
-        ``s_churn <= 0`` (the default), ``t_cur`` is outside ``[s_min, s_max]``, ``gamma``
-        rounds to 0, or the ``s_max`` cap leaves nothing to add.
-
-        Works for both trajectory mode (``x_cur`` is ``(1, H, D)``) and ensemble mode
-        (``x_cur`` is ``(N, H, D)`` — each member gets independent churn noise).
+        as a Langevin corrector.
         """
-        if self.s_churn <= 0.0:
-            return x_cur, t_cur
-        s_max = min(self.s_max, sigma_max_eff)
-        sigma = t_cur.item()
-        if not (self.s_min <= sigma <= s_max):
-            return x_cur, t_cur
-        gamma = min(self.s_churn / num_steps, math.sqrt(2.0) - 1.0)
-        sigma_post = min((1.0 + gamma) * sigma, s_max)
-        if sigma_post <= sigma:
-            return x_cur, t_cur
-        t_post = torch.full_like(t_cur, sigma_post)
-        x_post = x_cur + math.sqrt(sigma_post**2 - sigma**2) * self.s_noise * torch.randn_like(
-            x_cur
-        )
+        x_post, t_post = x_cur, t_cur
+        if self.s_churn > 0.0:
+            s_max = min(self.s_max, sigma_max_eff)
+            sigma = t_cur.item()
+            if self.s_min <= sigma <= s_max:
+                gamma = min(self.s_churn / num_steps, math.sqrt(2.0) - 1.0)
+                sigma_post = min((1.0 + gamma) * sigma, s_max)
+                if sigma_post > sigma:
+                    t_post = torch.full_like(t_cur, sigma_post)
+                    x_post = x_cur + math.sqrt(
+                        sigma_post**2 - sigma**2
+                    ) * self.s_noise * torch.randn_like(x_cur)
         return x_post, t_post
 
     def _run_ode(
