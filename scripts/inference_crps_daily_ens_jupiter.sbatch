@@ -3,10 +3,12 @@
 # AIFS-ENS). Each array task runs 4 independent single-GPU processes (WORLD_SIZE=1), one init each, bound to the
 # GPU's own Grace NUMA node. Day index d = 4*(task-1) + local rank, init = FIRST_DAY + d days at 00 UTC.
 #
-# Init convention: the model was trained on 6-hourly input windows starting at 00/06/12/18 UTC, so a "00 UTC"
-# forecast uses the input window 18:00-23:00 UTC of the previous day (last input 23 UTC). Each 6-h output step
-# holds hourly fields; step k covers init + 6(k-1) .. init + 6k - 1 h, so fields valid at 00/06/12/18 UTC are the
-# first hourly field of steps 1, 2, 3, ... (lead 0 h, 6 h, 12 h, ...). Run ids: RUN_PREFIX + 4-digit day number.
+# Init convention (as in training): a "00 UTC" forecast uses the input window [00:00, 06:00): the 00 UTC analysis
+# (ERA5_in nominal_time_mapping treats it as available at 05 UTC, the latest analysis before the window ends) and
+# the observations in [00:00, 06:00). Each 6-h output step holds hourly fields; step k covers init + 6k ..
+# init + 6k + 5 h (step 1 = 06:00-11:00), so fields valid at 06/12/18/00 UTC are the first hourly field of steps
+# 1, 2, 3, 4, ... Note for comparisons: the forecast has seen observations up to 06 UTC.
+# Run ids: RUN_PREFIX + 4-digit day number.
 #
 # Submit from the WeatherGenerator root, e.g. 1 Jun - 31 Aug 2023 (92 days = 23 tasks), crps8long, 8 members:
 #   sbatch --array=1-23 --export=ALL,BASHRCSOURCED=Y,RUN_PREFIX=cq23,FIRST_DAY=2023-06-01,NDAYS=92 \
@@ -66,7 +68,7 @@ srun --ntasks=4 --cpus-per-task="$SLURM_CPUS_PER_TASK" bash -c '
     if (( d >= NDAYS )); then echo "local rank $i: day $d beyond NDAYS, nothing to do"; exit 0; fi
     run_id=$(printf "%s%04d" "$RUN_PREFIX" $((d + 1)))
     init=$(date -u --date="$FIRST_DAY UTC + $d days" "+%Y-%m-%dT%H:%M")
-    source_start=$(date -u --date="$init UTC - 6 hours" "+%Y-%m-%dT%H:%M")
+    source_start=$init
     test_start=$(date -u --date="$source_start UTC - 6 hours" "+%Y-%m-%dT%H:%M")
     test_end=$(date -u --date="$test_start UTC + $(( FORECAST_STEPS * 6 + 18 + 6 )) hours" "+%Y-%m-%dT%H:%M")
     if [[ -e /e/scratch/weatherai/shared_work/results/$run_id/validation_chkpt00000_rank0000.zip ]]; then
