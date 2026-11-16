@@ -148,7 +148,10 @@ def main():
         "with_fsdp=false",
         "data_loading.num_workers=4",
     ]
-    cf = config.load_merge_configs(a.private_config, None, None, BASE, *CONFIGS, config.from_cli_arglist(options))
+    # Path objects, as the training CLI passes them (weathergen/utils/cli.py: type=Path)
+    cf = config.load_merge_configs(
+        Path(a.private_config), None, None, Path(BASE), *[Path(c) for c in CONFIGS], config.from_cli_arglist(options)
+    )
     cf = config.set_run_id(cf, f"gdg{a.proc:01d}{a.load_run_id[:4]}", False)
     cf.data_loading.rng_seed = 20261116 + 1000 * a.proc  # distinct, reproducible training dates per process
     cf.stage = "train"
