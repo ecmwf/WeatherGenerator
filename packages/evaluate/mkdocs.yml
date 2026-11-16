@@ -1,6 +1,7 @@
 site_name: WeatherGenerator-FastEvaluation
 site_url: https://wgen-fasteval.readthedocs.io/
 repo_url: https://github.com/ecmwf/WeatherGenerator/tree/develop/packages/evaluate
+edit_uri: ./docs/
 site_author: WeatherGenerator contributors
 copyright: "2025 - 2026, WeatherGenerator contributors"
 
@@ -25,5 +26,18 @@ extra_css:
 
 nav:
   - "Introduction": 'index.md'
-  - "Configuration Reference": 'guide/config.md'
+  - "Configuration Reference":
+      - "Overview": 'guide/config.md'
+      - "Top-Level": 'guide/config/top-level.md'
+      - "Global Plotting Options": 'guide/config/global-plotting-options.md'
+      - "Evaluation": 'guide/config/evaluation.md'
+      - "Runs and Streams": 'guide/config/runs-and-streams.md'
+      - "Metrics": 'guide/config/metrics.md'
+      - "Regions": 'guide/config/regions.md'
+      - "Score Caching": 'guide/config/score-caching.md'
+      - "CSV Format": 'guide/config/csv-format.md'
+      - "CLI Overrides": 'guide/config/cli-overrides.md'
+  - "Exporting Outputs": 
+      - "Overview": 'guide/export.md'
+      - "Quaver": 'guide/export/quaver.md'
   - "Examples": 'examples/index.md'
