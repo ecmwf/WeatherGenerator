@@ -12,7 +12,9 @@
 The counterpart of ``score_orchestration``.  Field plots (``field_plots``) are drawn from
 the loaded data of one (run, stream), and so can be drawn per chunk of samples and forecast
 steps; verification plots (``verification_plots``) are drawn from the scores of all runs,
-once they are complete.
+once they are complete.  In between, once all the chunks of a (run, stream) are done, come
+its score maps (``score_maps``) and its videos (``animations``), called by name from the
+run loop.
 """
 
 from pathlib import Path
@@ -28,7 +30,7 @@ def plot_stream_data(
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
 ) -> None:
-    """Field plots of one (run, stream): maps, histograms, timeseries and their videos.
+    """Field plots of one (run, stream): maps, histograms and timeseries.
 
     Parameters
     ----------
