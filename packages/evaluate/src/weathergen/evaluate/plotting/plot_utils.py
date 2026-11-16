@@ -41,6 +41,38 @@ def apply_font_settings(cfg: dict) -> None:
         mpl.rcParams["font.family"] = font_type
 
 
+def build_plotter_cfg(
+    global_plotting_opts, stream_cfg=None, *, tokenize_spacetime: bool = False
+) -> dict:
+    """Assemble the dict consumed by ``Plotter``/``LinePlots``.
+
+    Always returns the stream-independent keys; the stream-dependent ones are
+    added only when *stream_cfg* is given. ``fps``/``image_format``/
+    ``animation_format`` are always present because
+    ``_dispatch_score_map_animations`` indexes them directly.
+    """
+    cfg = {
+        "image_format": global_plotting_opts.get("image_format", "png"),
+        "animation_format": global_plotting_opts.get("animation_format", "mp4"),
+        "dpi_val": global_plotting_opts.get("dpi_val", 300),
+        "fig_size": global_plotting_opts.get("fig_size"),
+        "fps": global_plotting_opts.get("fps", 2),
+        "font_size": global_plotting_opts.get("font_size"),
+        "font_type": global_plotting_opts.get("font_type"),
+    }
+    if stream_cfg is None:
+        return cfg
+    plot_settings = stream_cfg.get("plotting", {})
+    cfg |= {
+        "regions": global_plotting_opts.get("regions", stream_cfg.get("regions", ["global"])),
+        "log_x": global_plotting_opts.get("log_x", False),
+        "log_y": global_plotting_opts.get("log_y", False),
+        "n_bins": global_plotting_opts.get("n_bins", 50),
+        "plot_subtimesteps": tokenize_spacetime | plot_settings.get("plot_subtimesteps", False),
+    }
+    return cfg
+
+
 class PlotSubdir(str, Enum):
     """Known plot subdirectory names produced by the plotting pipeline.
 
