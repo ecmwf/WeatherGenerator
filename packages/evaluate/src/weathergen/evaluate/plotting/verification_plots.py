@@ -699,23 +699,29 @@ def init_hour_metric_region(
         if not run_dict:
             continue
 
-        # Determine fsteps and channels from first run
-        first_run_scores = next(iter(run_dict.values()))
-        fsteps = sorted(int(f) for f in first_run_scores.forecast_step.values)
-        sample_score = first_run_scores.isel(forecast_step=0)
+        # forecast steps and channels of all runs (runs may have evaluated different ones)
+        fsteps = sorted({int(f) for s in run_dict.values() for f in s.forecast_step.values})
+        has_channel = all("channel" in s.dims for s in run_dict.values())
         channels = (
-            list(sample_score.coords["channel"].values)
-            if "channel" in sample_score.dims
+            sorted({str(c) for s in run_dict.values() for c in s.channel.values})
+            if has_channel
             else [None]
         )
 
         for channel in channels:
             for fstep in fsteps:
+                # runs without this channel or step (other channels evaluated) are left out
+                plotted = {
+                    run_id: fstep_scores
+                    for run_id, fstep_scores in run_dict.items()
+                    if fstep in fstep_scores.forecast_step.values
+                    and (channel is None or channel in fstep_scores.channel.values)
+                }
+                if not plotted:
+                    continue
                 plt.figure(figsize=(10, 6), dpi=dpi_val)
 
-                for run_id, fstep_scores in run_dict.items():
-                    if fstep not in fstep_scores.forecast_step.values:
-                        continue
+                for run_id, fstep_scores in plotted.items():
                     score = fstep_scores.sel(forecast_step=fstep)
                     score_vals = score.sel(channel=channel) if channel is not None else score
                     hours = score_vals.coords["init_hour"].values
