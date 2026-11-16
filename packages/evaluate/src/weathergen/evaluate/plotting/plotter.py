@@ -666,6 +666,10 @@ class Plotter:
                 - extra (dict) – leftover kwargs for ``ax.scatter``
         """
         kw = map_kwargs.copy() if map_kwargs is not None else {}
+        # range keys of the other map kinds (array_utils.bias_ranges / common_ranges "std_"):
+        # already resolved into vmin / vmax for this map, not matplotlib keywords
+        for key in ("bias_vmax", "std_vmin", "std_vmax"):
+            kw.pop(key, None)
 
         parsed = {
             "marker_size_base": kw.pop(

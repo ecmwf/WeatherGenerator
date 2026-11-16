@@ -10,8 +10,8 @@
 """Merging the results of the chunks of one (run, stream) into the results of the whole.
 
 A chunk is one ``_process_stream`` call on a window of samples × forecast steps; its results
-are ``results[region][metric] -> MetricResult`` like those of a whole run.  Merging is pure
-array work on them, no config and no MPI.
+are ``results[region][metric] -> MetricResult`` like those of a whole run, plus the colour
+bounds of its data.  Merging is pure array work on them, no config and no MPI.
 """
 
 import logging

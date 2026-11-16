@@ -22,9 +22,12 @@
 #    add_healpix_grid: false
 #    healpix_nside: 4
 #    # alpha: 0.5
-#    2t: 
-#      vmin: 250
+#    2t:                  # colour ranges per channel (or per glob pattern, e.g. "tp_*");
+#      vmin: 250          # what is not given is taken from the data
 #      vmax: 300
+#      # bias_vmax: 5     # bias maps: symmetric around 0
+#      # std_vmin: 0      # ensemble-std maps
+#      # std_vmax: 2
 #    10u:
 #      vmin: -40
 #      vmax: 40
