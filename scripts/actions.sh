@@ -150,13 +150,16 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       # This script creates symbolic links to the shared working directories.
-      # 1. Get the path of the private config of the cluster
+      # 1. Get the path of the private config: WEATHERGEN_PRIVATE_CONF if set
+      #    (e.g. in CI), otherwise inferred from the hostname by platform-env.py
       # 2. Read the yaml and extract the path of the shared conf
       # This uses the yq command. It is a python package so uvx (bundled with uv) will donwload and create the right venv
       # The 'yq' command is used in a separate virtual environment, because the cache
       # around that tool can get corrupted.
       # See https://github.com/ecmwf/WeatherGenerator/issues/2298
-      export working_dir=$(cat "$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config)" |
+      private_conf="${WEATHERGEN_PRIVATE_CONF:-$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config)}"
+      echo "Private config: $private_conf"
+      export working_dir=$(cat "$private_conf" |
         UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV=""  uvx yq .path_shared_working_dir)
       # Remove quotes
       export working_dir=$(echo "$working_dir" | sed 's/[\"\x27]//g')

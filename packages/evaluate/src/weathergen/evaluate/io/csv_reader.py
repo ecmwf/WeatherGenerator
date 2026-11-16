@@ -212,7 +212,8 @@ class CsvReader(Reader):
         Returns
         -------
         scores: tuple[dict,None]
-            Dictionary of local scores keyed by metric/region/stream/run_id.
+            ``{region: {metric: score}}`` of the local scores, and ``None``: a CSV
+            reader cannot recompute anything.
         """
         available_data = self.check_availability(stream, mode="evaluation")
         channels = available_data.channels
@@ -222,7 +223,6 @@ class CsvReader(Reader):
         local_scores = {}
 
         for metric in metrics:
-            local_scores[metric] = {}
             for region in regions:
                 data = self.get_values(
                     region=region, metric=metric, forecast_steps=fsteps, channels=channels
@@ -244,9 +244,7 @@ class CsvReader(Reader):
                         },
                     )
 
-                local_scores[metric].setdefault(region, {})[stream] = {
-                    self.run_id: data,
-                }
+                local_scores.setdefault(region, {})[metric] = data
         return local_scores, None
 
 
