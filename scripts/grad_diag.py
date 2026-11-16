@@ -34,6 +34,7 @@ import torch
 
 from weathergen.common import config
 from weathergen.common.logger import init_loggers
+from weathergen.model.model import Model
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.trainer import Trainer
 from weathergen.train.utils import extract_batch_metadata, get_target_idxs_from_cfg
@@ -47,6 +48,11 @@ CONFIGS = [
     "./config/config_long_rollout_crps.yml",
     "./config/config_lead_balance_c8lx80.yml",
 ]
+
+
+# Trainer.run prints parameter counts only without DDP (never the case in training); Model.print_num_parameters
+# fails there ("if self.encoder.q_aux:" on a multi-element tensor). This script logs its own trainable count.
+Model.print_num_parameters = lambda self: None
 
 
 class GradDiagTrainer(Trainer):
