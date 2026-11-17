@@ -85,6 +85,20 @@ SCORE_MAP_CMAP = mpl.colors.LinearSegmentedColormap.from_list(
 )
 
 
+def histogram_bins(
+    xlim: tuple | None, n_bins: int, values: np.typing.NDArray | None = None
+) -> np.typing.NDArray:
+    """The bin edges of a histogram: *xlim* (``vmin``, ``vmax``), a missing limit taken from
+    *values*, with a 5% margin on each side so tails are clearly visible."""
+    xmin, xmax = xlim if xlim else (None, None)
+    if xmin is None:
+        xmin = float(np.nanmin(values))
+    if xmax is None:
+        xmax = float(np.nanmax(values))
+    margin = (xmax - xmin) * 0.05
+    return np.linspace(xmin - margin, xmax + margin, n_bins + 1)
+
+
 @dataclass
 class DistStats:
     """Summary statistics for a 1-D distribution."""
@@ -108,6 +122,25 @@ class DistStats:
             median=float(np.median(v)),
             std=float(np.std(v)),
             skewness=float(skew(v, nan_policy="omit")),
+        )
+
+    @classmethod
+    def from_moments(
+        cls, count: int, vmin: float, vmax: float, s1: float, s2: float, s3: float, median: float
+    ) -> "DistStats":
+        """From the count, min, max and the sums of the values, squares and cubes (exact,
+        mergeable over chunks of samples); *median* is read off the merged histogram."""
+        mean = s1 / count
+        var = max(s2 / count - mean**2, 0.0)
+        m3 = s3 / count - 3 * mean * s2 / count + 2 * mean**3
+        return cls(
+            count=int(count),
+            min=float(vmin),
+            max=float(vmax),
+            mean=float(mean),
+            median=float(median),
+            std=float(np.sqrt(var)),
+            skewness=float(m3 / var**1.5) if var > 0 else float("nan"),
         )
 
     def summary(self, label: str) -> str:
@@ -380,25 +413,64 @@ class Plotter:
         tar_vals = np.asarray(target_data).ravel()
         prd_vals = np.asarray(pred_data).ravel()
 
-        # Get common bin edges — use fixed xlim range if provided for consistency
-        xmin, xmax = xlim if xlim else (None, None)
-        # Fall back to data-derived bounds if either limit is missing
-        if xmin is None or xmax is None:
-            vals = np.concatenate([tar_vals, prd_vals])
-            if xmin is None:
-                xmin = float(np.nanmin(vals))
-            if xmax is None:
-                xmax = float(np.nanmax(vals))
-        # Add 5% margin on each side so tails are clearly visible
-        margin = (xmax - xmin) * 0.05
-        xmin -= margin
-        xmax += margin
-        bins = np.linspace(xmin, xmax, self.n_bins + 1)
-
-        # Compute histograms
+        bins = self.histogram_bins(xlim, np.concatenate([tar_vals, prd_vals]))
         target_counts, _ = np.histogram(tar_vals, bins=bins)
         pred_counts, _ = np.histogram(prd_vals, bins=bins)
+
+        # For "all_samples" (across-samples) histograms, omit the valid_time from the name
+        if str(self.sample) == "all_samples":
+            valid_time = None
+        else:
+            valid_time = (
+                target_data["valid_time"][0]
+                .values.astype("datetime64[m]")
+                .astype(datetime.datetime)
+                .strftime("%Y-%m-%dT%H%M")
+            )
+        return self.draw_histogram(
+            bins,
+            target_counts,
+            pred_counts,
+            DistStats.from_array(tar_vals),
+            DistStats.from_array(prd_vals),
+            wd(tar_vals, prd_vals),
+            hist_output_dir,
+            varname,
+            tag=tag,
+            region=region,
+            valid_time=valid_time,
+        )
+
+    def histogram_bins(
+        self, xlim: tuple | None, values: np.typing.NDArray | None = None
+    ) -> np.typing.NDArray:
+        """``histogram_bins`` with this plotter's ``n_bins``."""
+        return histogram_bins(xlim, self.n_bins, values)
+
+    def draw_histogram(
+        self,
+        bins: np.typing.NDArray,
+        target_counts: np.typing.NDArray,
+        pred_counts: np.typing.NDArray,
+        t_s: DistStats,
+        p_s: DistStats,
+        w_dist: float,
+        hist_output_dir: Path,
+        varname: str,
+        tag: str = "",
+        region: str = "",
+        valid_time: str | None = None,
+    ) -> str:
+        """Draw and save a histogram figure from its counts: the curves, the ratio and the
+        statistics panel.  ``plot_histogram`` computes the counts from the data; the
+        across-samples histograms of a chunked run come from counts summed over samples.
+
+        Returns
+        -------
+            Name of the saved plot file.
+        """
         bin_centers = (bins[:-1] + bins[1:]) / 2
+        xmin, xmax = bins[0], bins[-1]
 
         color_tar = "black"
         color_pred = "#00897B"  # teal / green-blue
@@ -440,12 +512,6 @@ class Plotter:
             ax_ratio.set_xscale("log")
         ax_ratio.set_xlim(xmin, xmax)
 
-        t_s = DistStats.from_array(tar_vals)
-        p_s = DistStats.from_array(prd_vals)
-
-        # Wasserstein distance
-        w_dist = wd(tar_vals, prd_vals)
-
         stat_text = (
             f"Wasserstein distance: {w_dist:.4g}\n{t_s.summary('Target:')}\n{p_s.summary('Pred:')}"
         )
@@ -461,19 +527,6 @@ class Plotter:
             transform=ax_text.transAxes,
             bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
         )
-
-        # For "all_samples" (across-samples) histograms, omit the valid_time from the name
-        is_global = str(self.sample) == "all_samples"
-
-        if is_global:
-            valid_time = None
-        else:
-            valid_time = (
-                target_data["valid_time"][0]
-                .values.astype("datetime64[m]")
-                .astype(datetime.datetime)
-                .strftime("%Y-%m-%dT%H%M")
-            )
 
         parts = [
             "histogram",
@@ -895,7 +948,7 @@ class Plotter:
             Colour normalisation instance.
         cmap : matplotlib.colors.Colormap
             Colourmap for the scatter points.
-        marker_size : float or np.ndarray
+        marker_size : float or np.typing.NDArray
             Marker size(s) in matplotlib scatter units (pt²).
         marker : str
             Marker style (e.g. ``'o'``, ``'s'``).

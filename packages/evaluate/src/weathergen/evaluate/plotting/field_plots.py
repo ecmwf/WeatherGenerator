@@ -25,6 +25,7 @@ import numpy as np
 import omegaconf as oc
 import xarray as xr
 from joblib import delayed
+from scipy.stats import wasserstein_distance as wd
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
@@ -34,10 +35,11 @@ from weathergen.evaluate.plotting.plot_utils import (
     build_plotter_cfg,
     filter_set,
 )
-from weathergen.evaluate.plotting.plotter import Plotter
+from weathergen.evaluate.plotting.plotter import DistStats, Plotter, histogram_bins
 from weathergen.evaluate.plotting.timeseries import Timeseries, plot_single_timeseries
 from weathergen.evaluate.utils.array_utils import select_ensemble_data
 from weathergen.evaluate.utils.config_compat import parse_data_plots
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
 
@@ -118,52 +120,170 @@ def _plot_single_sample(
     plotter.clean_data_selection()
 
 
-def _plot_histograms_across_samples(
-    plotter_cfg: dict,
-    output_basedir: str,
-    tars: xr.DataArray,
-    preds: xr.DataArray,
-    bias_data: xr.DataArray | None,
-    fstep: int | str,
-    stream: str,
-    plot_chs: list[str],
+def histogram_statistics(
+    da_tars: dict,
+    da_preds: dict,
+    samples: list,
+    channels: list[str],
+    regions: list[str],
     ensemble: list,
-    plot_histograms: bool | str,
-    maps_config: dict,
-    bias_config: dict,
-) -> None:
-    """Plot histograms across all samples for a single fstep.
+    ranges: dict,
+    n_bins: int,
+) -> xr.Dataset:
+    """The across-samples histograms as per-sample counts: the ``histogram`` data statistic.
 
-    Unlike per-sample histograms, these aggregate all samples together.
-    The output filename uses 'global' instead of a sample id and omits the timestep.
+    Per (sample, forecast step, channel, region) the counts of the target and, per ensemble
+    tag (a member, the mean or the std, as ``select_ensemble_data`` names them in the file
+    names), of the prediction on the channel's bins (``Plotter.histogram_bins`` of the
+    channel's ``vmin`` / ``vmax`` in *ranges*: the same edges in every chunk), with the
+    count, min, max and sums of the values, squares and cubes for the statistics panel.
+    Summed over the samples, these draw the across-samples histogram of the whole stream
+    (``plot_histograms_across_samples``), chunked or not.
     """
-    if not (plot_histograms is True or plot_histograms == "across-samples"):
-        return
+    bins = {}
+    for channel in channels:
+        var_range = ranges.get(channel, {})
+        values = np.concatenate(
+            [np.asarray(da.sel(channel=channel)).ravel() for da in da_tars.values()]
+            + [np.asarray(da.sel(channel=channel)).ravel() for da in da_preds.values()]
+        )
+        bins[channel] = histogram_bins(
+            (var_range.get("vmin"), var_range.get("vmax")), n_bins, values
+        )
+    first = next(iter(da_preds.values()))
+    tags = []
+    for ens in ensemble:
+        if ens in ("mean", "std"):
+            tags.append(f"preds_ens_{ens}")
+        else:
+            tags.append("preds" if "ens" not in first.dims else f"preds_ens_{ens}")
+    fsteps = list(da_tars)
+    stats = ["count", "min", "max", "sum", "sum2", "sum3"]
+    shape = (len(samples), len(fsteps), len(channels), len(regions))
+    target_counts = np.zeros(shape + (n_bins,))
+    target_moments = np.zeros(shape + (len(stats),))
+    pred_counts = np.zeros(shape + (len(tags), n_bins))
+    pred_moments = np.zeros(shape + (len(tags), len(stats)))
+    for f, fstep in enumerate(fsteps):
+        for r, region in enumerate(regions):
+            bbox = None if region == "global" else RegionBoundingBox.from_region_name(region)
+            tars = da_tars[fstep] if bbox is None else bbox.apply_mask(da_tars[fstep])
+            preds = da_preds[fstep] if bbox is None else bbox.apply_mask(da_preds[fstep])
+            for c, channel in enumerate(channels):
+                for i, sample in enumerate(samples):
+                    v = np.asarray(tars.sel(channel=channel, sample=sample)).ravel()
+                    v = v[~np.isnan(v)]
+                    target_counts[i, f, c, r] = np.histogram(v, bins=bins[channel])[0]
+                    target_moments[i, f, c, r] = _moments(v)
+                for t, ens in enumerate(ensemble):
+                    preds_ens = select_ensemble_data(preds, ens)
+                    for i, sample in enumerate(samples):
+                        v = np.asarray(preds_ens.sel(channel=channel, sample=sample)).ravel()
+                        v = v[~np.isnan(v)]
+                        pred_counts[i, f, c, r, t] = np.histogram(v, bins=bins[channel])[0]
+                        pred_moments[i, f, c, r, t] = _moments(v)
+    dims = ("sample", "forecast_step", "channel", "region")
+    return xr.Dataset(
+        {
+            "target_counts": (dims + ("bin",), target_counts),
+            "target_moments": (dims + ("stat",), target_moments),
+            "prediction_counts": (dims + ("tag", "bin"), pred_counts),
+            "prediction_moments": (dims + ("tag", "stat"), pred_moments),
+        },
+        coords={
+            "sample": list(samples),
+            "forecast_step": fsteps,
+            "channel": list(channels),
+            "region": list(regions),
+            "tag": tags,
+            "bin": np.arange(n_bins),
+            "stat": stats,
+            "edges": (("channel", "edge"), np.stack([bins[c] for c in channels])),
+        },
+    )
 
+
+def _moments(v: np.typing.NDArray) -> list[float]:
+    """count, min, max and the sums of the values, squares and cubes of *v*."""
+    if v.size == 0:
+        return [0.0, np.nan, np.nan, 0.0, 0.0, 0.0]
+    return [v.size, v.min(), v.max(), v.sum(), (v**2).sum(), (v**3).sum()]
+
+
+def plot_histograms_across_samples(
+    plotter_cfg: dict, output_basedir: str | Path, stream: str, histogram: xr.Dataset
+) -> None:
+    """The across-samples histograms of one (run, stream) from the ``histogram`` statistic
+    (``histogram_statistics``), merged over the chunks: one figure per (forecast step,
+    channel, region, ensemble tag), the counts and the statistics summed over the samples.
+    The median and the Wasserstein distance are read off the binned counts."""
     matplotlib.use("Agg")
     plotter = Plotter(plotter_cfg, Path(output_basedir))
-
-    data_selection = {"sample": "all_samples", "stream": stream, "forecast_step": fstep}
-
-    for ens in ensemble:
-        preds_ens = select_ensemble_data(preds, ens)
-
-        if ens in ("mean", "std"):
-            preds_tag = f"ens_{ens}"
-        else:
-            preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
-        preds_name = "_".join(filter(None, ["preds", preds_tag]))
-
-        plotter.create_histograms(
-            tars,
-            preds_ens,
-            plot_chs,
-            data_selection,
-            preds_name,
-            ranges=maps_config,
+    for fstep in histogram.forecast_step.values:
+        plotter.update_data_selection(
+            {"sample": "all_samples", "stream": stream, "forecast_step": int(fstep)}
         )
-
+        hist_output_dir = plotter.get_hist_output_dir()
+        hist_output_dir.mkdir(parents=True, exist_ok=True)
+        at_step = histogram.sel(forecast_step=fstep).sum("sample", keep_attrs=True)
+        extrema = histogram.sel(forecast_step=fstep)
+        for region in histogram.region.values:
+            for channel in histogram.channel.values:
+                bins = histogram.edges.sel(channel=channel).values
+                centers = (bins[:-1] + bins[1:]) / 2
+                target = at_step.sel(region=region, channel=channel)
+                t_counts = target.target_counts.values
+                t_s = _stats_of(
+                    target.target_moments,
+                    extrema.sel(region=region, channel=channel).target_moments,
+                    centers,
+                    t_counts,
+                )
+                for tag in histogram.tag.values:
+                    pred = target.sel(tag=tag)
+                    p_counts = pred.prediction_counts.values
+                    p_s = _stats_of(
+                        pred.prediction_moments,
+                        extrema.sel(region=region, channel=channel, tag=tag).prediction_moments,
+                        centers,
+                        p_counts,
+                    )
+                    w_dist = wd(centers, centers, u_weights=t_counts, v_weights=p_counts)
+                    plotter.draw_histogram(
+                        bins,
+                        t_counts,
+                        p_counts,
+                        t_s,
+                        p_s,
+                        w_dist,
+                        hist_output_dir,
+                        str(channel),
+                        tag=str(tag),
+                        region=str(region),
+                    )
     plotter.clean_data_selection()
+
+
+def _stats_of(
+    summed, per_sample, centers: np.typing.NDArray, counts: np.typing.NDArray
+) -> DistStats:
+    """``DistStats`` of the samples together: the sums from *summed* (``stat`` dim), the min
+    and max over the samples from *per_sample*, the median from the *counts* on *centers*."""
+    cumulative = np.cumsum(counts)
+    median = (
+        float(centers[np.searchsorted(cumulative, cumulative[-1] / 2)])
+        if cumulative[-1]
+        else np.nan
+    )
+    return DistStats.from_moments(
+        float(summed.sel(stat="count")),
+        float(per_sample.sel(stat="min").min()),
+        float(per_sample.sel(stat="max").max()),
+        float(summed.sel(stat="sum")),
+        float(summed.sel(stat="sum2")),
+        float(summed.sel(stat="sum3")),
+        median,
+    )
 
 
 def plot_data(
@@ -292,7 +412,6 @@ def plot_data(
     )
 
     tasks: list[dict] = []
-    all_samples_tasks: list[dict] = []
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         all_chs = list(np.atleast_1d(tars.channel.values))
         plot_chs = filter_set(all_chs, plot_channel_set)
@@ -305,23 +424,6 @@ def plot_data(
             continue
 
         bias_data = (preds - tars) if plot_bias else None
-
-        all_samples_tasks.append(
-            {
-                "plotter_cfg": plotter_cfg,
-                "output_basedir": output_dir,
-                "tars": tars,
-                "preds": preds,
-                "bias_data": bias_data,
-                "fstep": fstep,
-                "stream": stream,
-                "plot_chs": plot_chs,
-                "ensemble": list(available_data.ensemble),
-                "plot_histograms": plot_histograms,
-                "maps_config": maps_config_dict,
-                "bias_config": bias_config_dict,
-            }
-        )
 
         for sample in plot_samples:
             tasks.append(
@@ -355,24 +457,24 @@ def plot_data(
         calls, n_workers=num_plot_workers, backend="loky", desc=f"Plotting {run_id} - {stream}"
     )
 
-    if all_samples_tasks:
-        _logger.info(
-            f"Parallel plotting: dispatching {len(all_samples_tasks)} across-samples "
-            f"tasks using up to {num_plot_workers} loky workers."
-        )
-        as_calls = [delayed(_plot_histograms_across_samples)(**t) for t in all_samples_tasks]
-        dispatch_parallel(
-            as_calls,
-            n_workers=num_plot_workers,
-            backend="loky",
-            desc=f"Across-samples plots {run_id} - {stream}",
-        )
-
+    # the plots across samples: per-sample statistics of the plotting samples, drawn once
+    # all the samples are there (plot_stream_statistics / plot_evaluation)
     statistics = {}
+    first = next(iter(da_tars.values()))
+    samples = filter_set(list(np.unique(first.sample.values)), plot_sample_set)
+    channels = filter_set(list(np.atleast_1d(first.channel.values)), plot_channel_set)
+    if "across_samples" in spec.histograms:
+        statistics["histogram"] = histogram_statistics(
+            da_tars,
+            da_preds,
+            samples,
+            channels,
+            plotter_cfg["regions"],
+            list(available_data.ensemble),
+            maps_config_dict,
+            plotter_cfg.get("n_bins", 50),
+        )
     if plot_timeseries:
-        first = next(iter(da_tars.values()))
-        samples = filter_set(list(np.unique(first.sample.values)), plot_sample_set)
-        channels = filter_set(list(np.atleast_1d(first.channel.values)), plot_channel_set)
         statistics["timeseries"] = Timeseries(
             {fs: da.sel(sample=samples) for fs, da in da_preds.items()},
             {fs: da.sel(sample=samples) for fs, da in da_tars.items()},

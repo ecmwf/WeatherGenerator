@@ -139,7 +139,7 @@ ERA5:
 | `maps` | map kind -> formats (`predictions`, `target`, `bias`) | 2D scatter maps. |
 | `histograms` | formats (default `[image]`) | Target vs prediction histograms. |
 | `histograms_per_sample` | formats (default `[image]`) | One histogram per sample. |
-| `histograms_across_samples` | formats (default `[image]`) | One histogram across samples. |
+| `histograms_across_samples` | formats (default `[image]`) | One histogram across samples. Drawn by a chunked run too, from per-sample counts summed over the chunks. |
 | `timeseries` | - | Timeseries of the prediction and the target averaged over each region, one figure per initialisation time of the `sample` subset with every run of the config on it, written under `summary_dir/<run_ids>/timeseries/`. Drawn by a chunked run too. |
 
 ### Regridding

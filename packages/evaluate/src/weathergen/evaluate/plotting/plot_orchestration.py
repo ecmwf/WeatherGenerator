@@ -22,7 +22,12 @@ from pathlib import Path
 import xarray as xr
 
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
-from weathergen.evaluate.plotting.field_plots import plot_data, plot_timeseries
+from weathergen.evaluate.plotting.field_plots import (
+    plot_data,
+    plot_histograms_across_samples,
+    plot_timeseries,
+)
+from weathergen.evaluate.plotting.plot_utils import apply_font_settings, build_plotter_cfg
 from weathergen.evaluate.plotting.verification_plots import plot_scores
 
 
@@ -50,6 +55,40 @@ def plot_stream_data(
     return plot_data(reader, stream, global_plotting_opts, output_data=output_data)
 
 
+def plot_stream_statistics(
+    reader: Reader, stream: str, global_plotting_opts: dict, statistics: dict
+) -> None:
+    """The plots across samples of one (run, stream) that are per run, from its data
+    statistics once all its samples are there (``merge_statistics`` in a chunked run):
+    ``histogram`` draws the across-samples histograms under the run's plot directory, before
+    the videos are built from the frames.  The statistics that compare runs (``timeseries``)
+    are drawn by ``plot_evaluation``.
+
+    Parameters
+    ----------
+    reader : Reader
+        Reader object containing all info about the run.
+    stream : str
+        Stream name.
+    global_plotting_opts : dict
+        Global plotting options (applies to all run_ids).
+    statistics : dict
+        ``{name: Dataset}`` of the (run, stream), as ``plot_data`` returns them.
+    """
+    if "histogram" in statistics:
+        plotter_cfg = build_plotter_cfg(
+            global_plotting_opts,
+            reader.get_stream(stream),
+            tokenize_spacetime=reader.get_inference_stream_attr(
+                stream, "tokenize_spacetime", False
+            ),
+        )
+        apply_font_settings(plotter_cfg)
+        plot_histograms_across_samples(
+            plotter_cfg, reader.runplot_dir, stream, statistics["histogram"]
+        )
+
+
 def plot_evaluation(
     cfg: dict, scores_dict: dict, init_hour_scores: dict, statistics: dict, summary_dir: Path
 ) -> None:
@@ -68,7 +107,8 @@ def plot_evaluation(
     statistics : dict
         ``statistics[name][stream][run_id] -> Dataset``, the data statistics of the runs
         (``plot_data``) as ``accumulate_stream_results`` nests them: ``timeseries`` are the
-        region means, drawn one figure per initialisation time with every run on it.
+        region means, drawn one figure per initialisation time with every run on it.  The
+        per-run ones (``histogram``) were drawn by ``plot_stream_statistics``.
     summary_dir : Path
         Directory to write plots to.
     """

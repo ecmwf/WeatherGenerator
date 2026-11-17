@@ -26,7 +26,6 @@ import logging
 import omegaconf as oc
 
 from weathergen.evaluate.plotting.colour_ranges import configured_colour_range
-from weathergen.evaluate.utils.config_compat import _split_entry, parse_data_plots
 
 _logger = logging.getLogger(__name__)
 
@@ -73,36 +72,19 @@ def chunked_run_config(
     mode: str,
     samples: list[int],
     fsteps: list[int],
-    drop_data_plots: frozenset[str] = frozenset(),
 ) -> oc.DictConfig:
     """A copy of the run config in which *stream* covers one chunk, for one *mode*.
 
     The stream's *mode* block (``evaluation`` or ``plotting``) gets ``sample`` /
     ``forecast_step`` set to the chunk's lists and the other block is removed, so a
-    ``_process_stream`` call on the copy scores, or plots, exactly this chunk.  For
-    ``plotting``, the ``data_plots`` named in *drop_data_plots* (``"across_samples"``) are
-    removed.  *run* is not modified.
+    ``_process_stream`` call on the copy scores, or plots, exactly this chunk.  *run* is
+    not modified.
     """
     cfg = oc.OmegaConf.create(oc.OmegaConf.to_container(run, resolve=True))
     stream_cfg = cfg.streams[stream]
     stream_cfg.pop("plotting" if mode == "evaluation" else "evaluation", None)
     stream_cfg[mode]["sample"] = list(samples)
     stream_cfg[mode]["forecast_step"] = list(fsteps)
-    if drop_data_plots and stream_cfg[mode].get("data_plots"):
-        kept = []
-        for entry in stream_cfg[mode]["data_plots"]:
-            name, options = _split_entry(entry)
-            if "across_samples" in drop_data_plots:
-                if name == "histograms_across_samples":
-                    continue
-                if name == "histograms":  # keep its per-sample half
-                    entry = (
-                        "histograms_per_sample"
-                        if options is None
-                        else {"histograms_per_sample": options}
-                    )
-            kept.append(entry)
-        stream_cfg[mode]["data_plots"] = kept
     return cfg
 
 
@@ -185,22 +167,13 @@ def build_plotting_chunk_tasks(
 
     Notes
     -----
-    The across-samples histograms cannot be drawn by a chunk of samples and are left out of
-    the chunk configs, with a warning, when the samples are chunked.  The timeseries are
-    computed per chunk (the region means of its window) and merged by the chunked run.
+    The plots across samples (the across-samples histograms, the timeseries) are computed
+    per chunk as per-sample statistics of its window and merged by the chunked run, so a
+    chunk's ``data_plots`` are the stream's.
     """
-    run_id, stream = task["run_id"], task["stream"]
+    stream = task["stream"]
     sample_windows = windows(samples, sample_size)
     fstep_windows = windows(fsteps, fstep_size)
-
-    spec = parse_data_plots(task["run"].streams[stream].get("plotting"))
-    drop = set()
-    if len(sample_windows) > 1 and "across_samples" in spec.histograms:
-        drop.add("across_samples")
-        _logger.warning(
-            f"RUN {run_id} - {stream}: across-samples histograms are not drawn when the "
-            "samples are chunked."
-        )
     # the colour ranges of the whole (run, stream), under the config's own entries
     global_plotting_opts = oc.OmegaConf.create(
         oc.OmegaConf.to_container(task["global_plotting_opts"], resolve=True)
@@ -221,9 +194,7 @@ def build_plotting_chunk_tasks(
     return [
         task
         | {
-            "run": chunked_run_config(
-                task["run"], stream, "plotting", sample_window, fstep_window, frozenset(drop)
-            ),
+            "run": chunked_run_config(task["run"], stream, "plotting", sample_window, fstep_window),
             "global_plotting_opts": global_plotting_opts,
             "chunk": True,
         }
