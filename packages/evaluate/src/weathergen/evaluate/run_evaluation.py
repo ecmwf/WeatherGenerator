@@ -43,11 +43,7 @@ from weathergen.evaluate.plotting.colour_ranges import (
     data_colour_ranges,
     merge_colour_ranges,
 )
-from weathergen.evaluate.plotting.plot_orchestration import (
-    plot_evaluation,
-    plot_stream_data,
-    plot_stream_statistics,
-)
+from weathergen.evaluate.plotting.plot_orchestration import plot_evaluation, plot_stream_data
 from weathergen.evaluate.plotting.score_maps import plot_score_maps, score_map_ranges
 from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
@@ -210,9 +206,9 @@ def _process_stream(
     overridden by the ones computed here, empty when the stream is not scored; for a chunk
     that loaded data, the ``data_colour_ranges`` of that data per forecast step (empty
     otherwise), from which the chunked run sets the colour ranges of the whole (run,
-    stream); and the data statistics of the plots across samples, ``{name: Dataset}`` of
-    per-sample quantities of the plotting samples (``plot_data``), empty when none is
-    requested.
+    stream); and the plots across samples as ``{name: Dataset}`` of per-sample quantities of
+    the plotting samples (``plot_data``: ``region_means``, ``histogram_counts``), empty when
+    none is requested.
     Parameters
     ----------
 
@@ -325,7 +321,6 @@ def _process_stream(
         if do_score_maps and computed:
             plot_score_maps(reader, stream, computed, global_plotting_options=global_plotting_opts)
         if reads_data:
-            plot_stream_statistics(reader, stream, global_plotting_opts, statistics)
             build_animations(reader, stream, global_plotting_opts, plot_score_options)
 
     for region, by_metric in computed.items():
@@ -605,15 +600,7 @@ def _run_stream_in_chunks(
                 for i, window in enumerate(score_windows)
             ]
         )
-    run_tasks(
-        [
-            (
-                finish_stream,
-                task | {"statistics": statistics},
-                f"RUN {run_id} - {stream}: plots across samples and videos of the whole stream",
-            )
-        ]
-    )
+    run_tasks([(finish_stream, task, f"RUN {run_id} - {stream}: videos of the whole stream")])
     return run_id, stream, results, {}, statistics
 
 
@@ -653,12 +640,10 @@ def finish_stream(
     computed: dict[str, dict[str, MetricResult]] | None = None,
     score_ranges: dict | None = None,
     animations: bool = True,
-    statistics: dict | None = None,
 ) -> None:
     """Score maps of *computed* (a window of the stream's forecast steps, drawn with the
-    colour ranges *score_ranges* of the whole stream) and / or, once all the chunks are
-    done, the per-run plots across samples from the merged *statistics* and the videos of
-    one (run, stream) from the frames on disk.
+    colour ranges *score_ranges* of the whole stream) and / or the videos of one (run,
+    stream), once all its frames are on disk.
 
     What a serial ``_process_stream`` call does at its end; here with a reader of its own,
     so that it can run wherever the chunk tasks ran.
@@ -673,7 +658,6 @@ def finish_stream(
             score_ranges=score_ranges,
         )
     if animations:
-        plot_stream_statistics(reader, stream, global_plotting_opts, statistics or {})
         build_animations(reader, stream, global_plotting_opts, plot_score_options)
 
 

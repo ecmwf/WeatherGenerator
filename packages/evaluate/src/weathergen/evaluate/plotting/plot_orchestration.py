@@ -22,12 +22,9 @@ from pathlib import Path
 import xarray as xr
 
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
-from weathergen.evaluate.plotting.field_plots import (
-    plot_data,
-    plot_histograms_across_samples,
-    plot_timeseries,
-)
-from weathergen.evaluate.plotting.plot_utils import apply_font_settings, build_plotter_cfg
+from weathergen.evaluate.plotting.field_plots import plot_data
+from weathergen.evaluate.plotting.histograms import plot_histograms_across_samples
+from weathergen.evaluate.plotting.timeseries import plot_timeseries
 from weathergen.evaluate.plotting.verification_plots import plot_scores
 
 
@@ -37,9 +34,9 @@ def plot_stream_data(
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
 ) -> dict[str, xr.Dataset]:
-    """Field plots of one (run, stream): the maps and histograms are drawn; the plots
-    across samples are returned as data statistics, ``{name: Dataset}`` of per-sample
-    quantities (``plot_data``), drawn by ``plot_evaluation`` once all runs are done.
+    """Field plots of one (run, stream): the maps and per-sample histograms are drawn; the
+    plots across samples are returned as ``{name: Dataset}`` of per-sample quantities
+    (``plot_data``), drawn by ``plot_evaluation`` once all runs are done.
 
     Parameters
     ----------
@@ -53,40 +50,6 @@ def plot_stream_data(
         Pre-loaded data; when provided ``reader.get_data()`` is skipped.
     """
     return plot_data(reader, stream, global_plotting_opts, output_data=output_data)
-
-
-def plot_stream_statistics(
-    reader: Reader, stream: str, global_plotting_opts: dict, statistics: dict
-) -> None:
-    """The plots across samples of one (run, stream) that are per run, from its data
-    statistics once all its samples are there (``merge_statistics`` in a chunked run):
-    ``histogram`` draws the across-samples histograms under the run's plot directory, before
-    the videos are built from the frames.  The statistics that compare runs (``timeseries``)
-    are drawn by ``plot_evaluation``.
-
-    Parameters
-    ----------
-    reader : Reader
-        Reader object containing all info about the run.
-    stream : str
-        Stream name.
-    global_plotting_opts : dict
-        Global plotting options (applies to all run_ids).
-    statistics : dict
-        ``{name: Dataset}`` of the (run, stream), as ``plot_data`` returns them.
-    """
-    if "histogram" in statistics:
-        plotter_cfg = build_plotter_cfg(
-            global_plotting_opts,
-            reader.get_stream(stream),
-            tokenize_spacetime=reader.get_inference_stream_attr(
-                stream, "tokenize_spacetime", False
-            ),
-        )
-        apply_font_settings(plotter_cfg)
-        plot_histograms_across_samples(
-            plotter_cfg, reader.runplot_dir, stream, statistics["histogram"]
-        )
 
 
 def plot_evaluation(
@@ -105,14 +68,16 @@ def plot_evaluation(
         Same nesting with the ``MetricResult.by_init_hour`` arrays; empty unless
         ``init_hour`` is requested.
     statistics : dict
-        ``statistics[name][stream][run_id] -> Dataset``, the data statistics of the runs
-        (``plot_data``) as ``accumulate_stream_results`` nests them: ``timeseries`` are the
-        region means, drawn one figure per initialisation time with every run on it.  The
-        per-run ones (``histogram``) were drawn by ``plot_stream_statistics``.
+        ``statistics[name][stream][run_id] -> Dataset``, the per-sample quantities of the
+        plots across samples (``plot_data``) as ``accumulate_stream_results`` nests them:
+        ``region_means`` for the timeseries, ``histogram_counts`` for the across-samples
+        histograms.
     summary_dir : Path
         Directory to write plots to.
     """
     if scores_dict:
         plot_scores(cfg, scores_dict, init_hour_scores, summary_dir)
-    if "timeseries" in statistics:
-        plot_timeseries(cfg, statistics["timeseries"], summary_dir)
+    if "region_means" in statistics:
+        plot_timeseries(cfg, statistics["region_means"], summary_dir)
+    if "histogram_counts" in statistics:
+        plot_histograms_across_samples(cfg, statistics["histogram_counts"], summary_dir)
