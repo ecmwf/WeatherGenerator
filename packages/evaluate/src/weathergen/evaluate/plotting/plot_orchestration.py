@@ -27,11 +27,6 @@ from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.bar_plots import BarPlots
 from weathergen.evaluate.plotting.line_plots import LinePlots
 from weathergen.evaluate.plotting.pdf_merge import merge_pdf_subdirectories
-from weathergen.evaluate.plotting.plot_orchestration_utils import (
-    _compute_ranges,
-    _compute_scores,
-    group_by_init_hour,
-)
 from weathergen.evaluate.plotting.plot_utils import (
     PlotSubdir,
     apply_font_settings,
@@ -47,188 +42,11 @@ from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
 from weathergen.evaluate.plotting.timeseries import Timeseries
-from weathergen.evaluate.scores.score import VerifiedData, get_score
+from weathergen.evaluate.scores.score_orchestration import MetricResult
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
-from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.config_compat import MAP_KINDS, parse_data_plots
-from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# timeseries
-# ---------------------------------------------------------------------------
-def run_score_timeseries_pipeline(
-    reader: Reader,
-    stream: str,
-    regions: list[str],
-    metrics_dict: dict,
-    output_data: "ReaderOutput | None" = None,
-    global_plotting_options: dict | None = None,
-) -> dict[str, dict[str, dict[int, xr.DataArray]]]:
-    """Plot timeseries of score values across forecast steps for all regions.
-
-    Parameters
-    ----------
-    reader : Reader
-        Reader object containing all info about a particular run.
-    stream : str
-        Stream name to plot score timeseries for.
-    regions : list[str]
-        List of regions to plot.
-    metrics_dict : dict
-        Dictionary mapping region names to metric dicts.
-    output_data : ReaderOutput | None
-        Pre-loaded data; when provided ``reader.get_data()`` is skipped.
-    global_plotting_options : dict | None
-        Global plotting options. These can be passed to the plotter and can be used to set options.
-
-    Returns
-    -------
-    dict[str, dict[str, dict[int, xr.DataArray]]]
-        Nested dict: ``scores_by_hour[metric][region][fstep] = xr.DataArray`` with
-        dims ``(source_end_hour, channel)``.  Returns empty dict on failure.
-    """
-
-    available_data = reader.check_availability(stream, mode="evaluation")
-    if not available_data.score_availability:
-        _logger.warning(f"RUN {reader.run_id} - {stream}: No data available for score timeseries.")
-        return {}
-
-    da_tars = output_data.target
-    da_preds = output_data.prediction
-    if not da_tars:
-        return {}
-
-    # Group samples by hour of day of source_interval_end
-    hour_to_samples = group_by_init_hour(output_data)
-    if not hour_to_samples:
-        _logger.warning(f"RUN {reader.run_id} - {stream}: Could not group by init hour. Skipping.")
-        return {}
-
-    unique_hours = sorted(hour_to_samples.keys())
-    fsteps = sorted(da_preds.keys())
-
-    n_workers = get_num_workers(
-        check_process_headroom=True,
-        max_workers=reader.eval_cfg.get("max_workers", None),
-    )
-
-    needs_clim = needs_climatology(metrics_dict)
-    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
-
-    # --- Parallel score computation across (region, fstep) pairs ---
-    score_tasks: list[dict] = []
-    for fstep in fsteps:
-        preds_fs = da_preds[fstep]
-        tars_fs = da_tars[fstep]
-
-        # Assign source_end_hour coordinate from the grouping
-        hour_values = np.full(len(preds_fs.sample), -1, dtype=int)
-        sample_vals = preds_fs.sample.values
-        for hour, sample_indices in hour_to_samples.items():
-            mask = np.isin(sample_vals, sample_indices)
-            hour_values[mask] = hour
-
-        source_end_hour = xr.DataArray(
-            hour_values, dims=("sample",), coords={"sample": sample_vals}
-        )
-        preds_with_hour = preds_fs.assign_coords(source_end_hour=source_end_hour)
-        tars_with_hour = tars_fs.assign_coords(source_end_hour=source_end_hour)
-        # get_score groups every DataArray argument, so the climatology is grouped too.
-        clim_with_hour = (
-            aligned_clim_data[fstep].assign_coords(source_end_hour=source_end_hour)
-            if aligned_clim_data
-            else None
-        )
-
-        for region in regions:
-            # PSD is a spatial metric incompatible with sample+ipoint aggregation
-            region_metrics = dict(metrics_dict.get(region))
-            region_metrics.pop("psd", None)
-            if not region_metrics:
-                continue
-
-            metric_names = list(region_metrics.keys())
-            metric_params = list(region_metrics.values())
-            # Masked here: the worker only labels its results with `region`.
-            bbox = RegionBoundingBox.from_region_name(region)
-            preds_r = bbox.apply_mask(preds_with_hour)
-            tars_r = bbox.apply_mask(tars_with_hour)
-            if preds_r.sizes.get("ipoint") == 0:
-                continue
-            score_tasks.append(
-                dict(
-                    fstep=fstep,
-                    region=region,
-                    metric_names=metric_names,
-                    metric_params=metric_params,
-                    preds_with_hour=preds_r,
-                    tars_with_hour=tars_r,
-                    clim_with_hour=(
-                        bbox.apply_mask(clim_with_hour) if clim_with_hour is not None else None
-                    ),
-                    unique_hours=unique_hours,
-                )
-            )
-
-    _logger.info(
-        f"RUN {reader.run_id} - {stream}: Computing score timeseries for "
-        f"{len(score_tasks)} (region, fstep) tasks with up to {n_workers} worker(s)."
-    )
-
-    calls = [delayed(_compute_timeseries_scores_for_fstep)(**t) for t in score_tasks]
-    raw_results = dispatch_parallel(
-        calls, n_workers=n_workers, backend="loky", desc=f"Score timeseries {stream}"
-    )
-
-    # Accumulate results into scores_by_hour[metric][region][fstep]
-    scores_by_hour: dict[str, dict[str, dict[int, xr.DataArray]]] = {}
-    for fstep, region, metric_scores in raw_results:
-        for metric_name, score in metric_scores.items():
-            scores_by_hour.setdefault(metric_name, {}).setdefault(region, {})[fstep] = score
-
-    _logger.info(
-        f"RUN {reader.run_id} - {stream}: Score timeseries computed for "
-        f"{len(fsteps)} fsteps × {len(unique_hours)} init hours."
-    )
-
-    return scores_by_hour
-
-
-def _compute_timeseries_scores_for_fstep(
-    fstep: int,
-    region: str,
-    metric_names: list[str],
-    metric_params: list,
-    preds_with_hour: xr.DataArray,
-    tars_with_hour: xr.DataArray,
-    clim_with_hour: xr.DataArray | None,
-    unique_hours: list[int],
-) -> tuple[int, str, dict[str, xr.DataArray]]:
-    """Compute grouped scores for one (region, fstep) pair (parallelisable worker).
-
-    Returns ``(fstep, region, {metric_name: score_da})``.
-    """
-    group_by_coord = "source_end_hour" if len(unique_hours) > 1 else None
-    agg_dims = ["sample", "ipoint"]
-
-    metric_scores: dict[str, xr.DataArray] = {}
-    for metric_name, parameters in zip(metric_names, metric_params, strict=False):
-        score = get_score(
-            VerifiedData(preds_with_hour, tars_with_hour, None, None, clim_with_hour),
-            metric_name,
-            agg_dims=agg_dims,
-            group_by_coord=group_by_coord,
-            compute=True,
-            parameters=parameters,
-        )
-        if group_by_coord is None:
-            score = score.expand_dims({"source_end_hour": [int(unique_hours[0])]})
-        metric_scores[metric_name] = score
-
-    return fstep, region, metric_scores
 
 
 # ---------------------------------------------------------------------------
@@ -239,9 +57,7 @@ def _compute_timeseries_scores_for_fstep(
 def run_score_map_pipeline(
     reader: Reader,
     stream: str,
-    regions: list[str],
-    metrics_dict: dict,
-    output_data: "ReaderOutput | None" = None,
+    results: dict[str, dict[str, MetricResult]],
     global_plotting_options: dict | None = None,
     plot_score_options: dict | None = None,
 ) -> None:
@@ -253,12 +69,9 @@ def run_score_map_pipeline(
         Reader object containing all info about a particular run.
     stream : str
         Stream name to plot score maps for.
-    regions : list[str]
-        List of regions to plot.
-    metrics_dict : dict
-        Dictionary mapping region names to metric dicts.
-    output_data : ReaderOutput | None
-        Pre-loaded data; when provided ``reader.get_data()`` is skipped.
+    results : dict[str, dict[str, MetricResult]]
+        ``results[region][metric] -> MetricResult`` with the ``spatial`` field filled
+        (``calc_scores_per_stream(..., compute_spatial=True)``).
     global_plotting_options : dict | None
         Global plotting options. These can be passed to the plotter and can be used to set options.
     plot_score_options : dict | None
@@ -269,31 +82,23 @@ def run_score_map_pipeline(
         _logger.debug(f"RUN {reader.run_id} - {stream}: Skipping score maps (non-gridded data).")
         return
 
+    # {region: {metric: spatial DataArray(ipoint, forecast_step, channel[, ens])}}
+    spatial = {
+        region: {m: r.spatial for m, r in by_metric.items() if r.spatial is not None}
+        for region, by_metric in results.items()
+    }
+    spatial = {region: by_metric for region, by_metric in spatial.items() if by_metric}
+    if not spatial:
+        _logger.warning(f"RUN {reader.run_id} - {stream}: No spatial scores. Skipping score maps.")
+        return
+
     map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
     map_dir.mkdir(parents=True, exist_ok=True)
     _logger.info(f"RUN {reader.run_id} - {stream}: Saving score maps to {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
-    if not available_data.score_availability:
-        _logger.warning(
-            f"RUN {reader.run_id} - {stream}: No evaluation config. Skipping score maps."
-        )
-        return
-    fsteps = available_data.fsteps
-    samples = available_data.samples
     channels = available_data.channels
     ensemble = available_data.ensemble
-
-    if output_data is None:
-        output_data = reader.get_data(
-            stream, fsteps=fsteps, samples=samples, channels=channels, ensemble=ensemble
-        )
-
-    da_preds = output_data.prediction
-    da_tars = output_data.target
-    fsteps = sorted(da_preds.keys())
-    needs_clim = needs_climatology(metrics_dict)
-    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
     n_plot_workers = get_num_workers(
         check_process_headroom=True,
@@ -314,20 +119,27 @@ def run_score_map_pipeline(
     apply_font_settings(plotter_cfg)
     run_id = reader.run_id
 
-    _computed, raw_results = _compute_scores(
-        regions,
-        metrics_dict,
-        fsteps,
-        da_preds,
-        da_tars,
-        aligned_clim_data,
-        n_workers=n_plot_workers,
+    # Colour range of each (metric, region, channel) over all forecast steps; the scores
+    # are passed as both inputs of common_ranges, which takes targets and predictions.
+    score_ranges_dict: dict = {}
+    for region, by_metric in spatial.items():
+        for metric, da in by_metric.items():
+            ranges = common_ranges(
+                {0: da}, {0: da}, [str(c) for c in da.channel.values], oc.DictConfig({})
+            )
+            score_ranges_dict.setdefault(metric, {})[region] = oc.OmegaConf.to_container(ranges)
+
+    regions = list(spatial)
+    fsteps = sorted(
+        {
+            int(f)
+            for by_metric in spatial.values()
+            for da in by_metric.values()
+            for f in da.forecast_step.values
+        }
     )
-
-    score_ranges_dict = _compute_ranges(raw_results)
-
     fstep_tasks: list[dict] = []
-    for region in regions:
+    for region, by_metric in spatial.items():
         for fstep in fsteps:
             fstep_tasks.append(
                 {
@@ -337,7 +149,11 @@ def run_score_map_pipeline(
                     "map_dir": str(map_dir),
                     "stream": stream,
                     "region": region,
-                    "computed": _computed[(region, fstep)],
+                    "spatial_scores": {
+                        m: da.sel(forecast_step=fstep, drop=True)
+                        for m, da in by_metric.items()
+                        if fstep in da.forecast_step.values
+                    },
                     "fstep": fstep,
                     "run_id": run_id,
                 }
@@ -359,7 +175,7 @@ def run_score_map_pipeline(
             plotter_cfg=plotter_cfg,
             run_id=run_id,
             stream=stream,
-            metrics=list(dict.fromkeys(m for metrics in metrics_dict.values() for m in metrics)),
+            metrics=list(dict.fromkeys(m for by_metric in spatial.values() for m in by_metric)),
             regions=regions,
             variables=channels,
             ens_values=list(ensemble) if ensemble else [None],
@@ -375,17 +191,18 @@ def _plot_score_maps_per_stream(
     map_dir: str,
     stream: str,
     region: str,
-    computed: tuple[list, xr.DataArray, list[str]],
+    spatial_scores: dict[str, xr.DataArray],
     fstep: int,
     run_id: str = "",
 ) -> None:
-    """Plot 2D score maps for all metrics/channels for one (region, fstep)."""
+    """Plot 2D score maps for all metrics/channels for one (region, fstep).
 
-    score_results, preds, metric_names = computed
+    ``spatial_scores[metric]`` are ``DataArray(ipoint, channel[, ens])`` with ``lat``/``lon``
+    coordinates on ``ipoint``.
+    """
+
     valid = [
-        (metric, result)
-        for metric, result in zip(metric_names, score_results, strict=False)
-        if result is not None and "ipoint" in result.dims
+        (metric, result) for metric, result in spatial_scores.items() if "ipoint" in result.dims
     ]
     if not valid:
         return
@@ -398,14 +215,7 @@ def _plot_score_maps_per_stream(
         coords="minimal",
         combine_attrs="drop_conflicts",
     )
-    plot_metrics = plot_metrics.assign_coords(
-        lat=preds.lat.reset_coords(drop=True),
-        lon=preds.lon.reset_coords(drop=True),
-        metric=[metric for metric, _ in valid],
-    ).compute()
-
-    if "ens" in plot_metrics.dims:
-        plot_metrics = plot_metrics.assign_coords(ens=preds.ens.values)
+    plot_metrics = plot_metrics.assign_coords(metric=[metric for metric, _ in valid]).compute()
 
     all_ens = plot_metrics.coords["ens"].values if "ens" in plot_metrics.dims else [None]
 
@@ -496,10 +306,9 @@ def _build_single_animation(
 
         {prefix}_{run_id}_{tag}_{sample}_{valid_time}_{stream}_{region}_{var}_{fstep:03d}
 
-    When ``score_animation=True`` filenames are constructed deterministically because
-    the fstep is embedded in the tag (``score_maps_{metric}_fstep_{N}``) rather
-    than being a zero-padded suffix.  Pass ``tag="score_maps_{metric}"`` and
-    ``sample`` as the ensemble value (or ``None`` for no ensemble).
+    Score-map frames follow the same pattern without the sample and valid time
+    (``map_{run_id}_score_maps[_ens_{ens}]_{metric}_{stream}_{region}_{var}_{fstep:03d}``):
+    pass ``tag="score_maps[_ens_{ens}]_{metric}"`` and ``sample=None``.
 
     Returns the list of source frame paths assembled into the animation, or an
     empty list when no (or fewer than two for score maps) frames were found.
@@ -676,7 +485,6 @@ def _dispatch_score_map_animations(
             image_format=plotter_cfg["image_format"],
             animation_format=plotter_cfg["animation_format"],
             duration_ms=duration_ms,
-            score_animation=True,
         )
         for metric in metrics
         for region in regions
@@ -1188,24 +996,24 @@ def plot_data(
 # ---------------------------------------------------------------------------
 
 
-def plot_timeseries_summary(
+def plot_init_hour_summary(
     cfg: dict,
-    timeseries_scores: dict,
+    init_hour_scores: dict,
     summary_dir: Path,
 ) -> None:
-    """Plot timeseries summary comparing multiple run_ids on the same figure.
+    """Plot scores by initialisation hour, comparing multiple run_ids on the same figure.
 
     Parameters
     ----------
     cfg : dict
         Configuration dictionary (used for runs, labels, colors, plotting options).
-    timeseries_scores : dict
-        Nested dict: ``timeseries_scores[metric][region][stream][run_id][fstep] = xr.DataArray``
-        where each DataArray has dims ``(source_end_hour,)`` or ``(source_end_hour, channel)``.
+    init_hour_scores : dict
+        Nested dict: ``init_hour_scores[metric][region][stream][run_id] = xr.DataArray``
+        with dims ``(init_hour, forecast_step[, channel])`` (``MetricResult.by_init_hour``).
     summary_dir : Path
         Directory to write summary plots to.
     """
-    if not timeseries_scores:
+    if not init_hour_scores:
         return
 
     runs = cfg.run_ids
@@ -1213,10 +1021,10 @@ def plot_timeseries_summary(
     image_format = plt_opt.get("image_format", "png")
     dpi_val = plt_opt.get("dpi_val", 150)
 
-    ts_dir = summary_dir / "score_init_time_series"
+    ts_dir = summary_dir / "_".join(runs) / "score_by_init_hour"
     ts_dir.mkdir(parents=True, exist_ok=True)
 
-    for metric_name, region_dict in timeseries_scores.items():
+    for metric_name, region_dict in init_hour_scores.items():
         for region, stream_dict in region_dict.items():
             for stream, run_dict in stream_dict.items():
                 if not run_dict:
@@ -1224,8 +1032,8 @@ def plot_timeseries_summary(
 
                 # Determine fsteps and channels from first run
                 first_run_scores = next(iter(run_dict.values()))
-                fsteps = sorted(first_run_scores.keys())
-                sample_score = first_run_scores[fsteps[0]]
+                fsteps = sorted(int(f) for f in first_run_scores.forecast_step.values)
+                sample_score = first_run_scores.isel(forecast_step=0)
                 channels = (
                     list(sample_score.coords["channel"].values)
                     if "channel" in sample_score.dims
@@ -1237,13 +1045,13 @@ def plot_timeseries_summary(
                         plt.figure(figsize=(10, 6), dpi=dpi_val)
 
                         for run_id, fstep_scores in run_dict.items():
-                            if fstep not in fstep_scores:
+                            if fstep not in fstep_scores.forecast_step.values:
                                 continue
-                            score = fstep_scores[fstep]
+                            score = fstep_scores.sel(forecast_step=fstep)
                             score_vals = (
                                 score.sel(channel=channel) if channel is not None else score
                             )
-                            hours = score_vals.coords["source_end_hour"].values
+                            hours = score_vals.coords["init_hour"].values
                             values = score_vals.values.flatten()
                             run_label = runs[run_id].get("label", run_id)
                             label = f"{run_label} ({run_id})"
@@ -1259,11 +1067,11 @@ def plot_timeseries_summary(
 
                         ch_label = channel if channel is not None else "all"
                         title = (
-                            f"{metric_name.upper()} vs source end hour | "
+                            f"{metric_name.upper()} vs initialisation hour | "
                             f"{ch_label} | fstep {fstep} | {region} | {stream}"
                         )
                         plt.title(title)
-                        plt.xlabel("Source window end hour [UTC]")
+                        plt.xlabel("Initialisation hour [UTC]")
                         plt.ylabel(metric_name.upper())
                         if hours is not None and len(hours) > 0:
                             plt.xlim(min(hours) - 0.5, max(hours) + 0.5)
@@ -1276,12 +1084,12 @@ def plot_timeseries_summary(
                         plot_path = (
                             ts_dir / f"{metric_name}_{ch_label}_{region}_{stream}"
                             f"_{run_ids_str}"
-                            f"_fstep_{fstep}_by_source_end_hour.{image_format}"
+                            f"_fstep_{fstep}_by_init_hour.{image_format}"
                         )
                         plt.savefig(plot_path, bbox_inches="tight")
                         plt.close()
 
-    _logger.info(f"Timeseries summary plots saved to {ts_dir}.")
+    _logger.info(f"Scores by initialisation hour plots saved to {ts_dir}.")
 
 
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
