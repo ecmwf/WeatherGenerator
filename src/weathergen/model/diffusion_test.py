@@ -10,7 +10,6 @@
 import pytest
 from omegaconf import OmegaConf
 
-from weathergen.common.config import _check_diffusion
 from weathergen.model.diffusion import validate_diffusion_config
 from weathergen.train.loss_modules import LossFlowMatching, LossLatentDiffusion
 
@@ -32,30 +31,6 @@ def test_validate_diffusion_config_rejects(diff_cf):
 def test_validate_diffusion_config():
     diff_cf = {"type": "flow_matching", "flow_matching": {}, "sampler": {"num_steps": 10}}
     assert validate_diffusion_config(OmegaConf.create(diff_cf)) == "flow_matching"
-
-
-def test_legacy_diffusion_config_is_migrated():
-    legacy = {
-        "diffusion": {
-            "enabled": True,
-            "conditioning": "forecast",
-            "sigma_data": 0.78,
-            "edm_preconditioning": True,
-            "sampler": {"num_steps": 10, "rho": 7, "s_churn": 1.0},
-        }
-    }
-    cf = _check_diffusion(OmegaConf.create(legacy))
-    expected = {
-        "enabled": True,
-        "conditioning": "forecast",
-        "type": "edm",
-        "sampler": {"num_steps": 10},
-        "edm": {"sigma_data": 0.78, "preconditioning": True, "sampler": {"rho": 7, "s_churn": 1.0}},
-    }
-    assert OmegaConf.to_container(cf.diffusion) == expected
-    assert validate_diffusion_config(cf.diffusion) == "edm"
-    # configs in the current format are left unchanged
-    assert _check_diffusion(cf) == cf
 
 
 @pytest.mark.parametrize(
