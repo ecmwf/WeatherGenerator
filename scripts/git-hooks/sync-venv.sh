@@ -10,9 +10,6 @@ case "$hook" in
   post-checkout)
     # Arguments: previous HEAD, new HEAD, 1 for a branch checkout.
     [[ "$3" == 1 && "$1" != "$2" ]] || exit 0
-    # Skip during a rebase: post-rewrite syncs once at the end.
-    [[ -d "$(git rev-parse --git-path rebase-merge)" ]] && exit 0
-    [[ -d "$(git rev-parse --git-path rebase-apply)" ]] && exit 0
     old="$1" ;;
   *) exit 0 ;;
 esac
