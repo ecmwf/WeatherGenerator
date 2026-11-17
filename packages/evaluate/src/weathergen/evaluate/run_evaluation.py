@@ -30,14 +30,10 @@ from weathergen.evaluate.distributed.chunking import (
     windows,
 )
 from weathergen.evaluate.distributed.merge import in_window, merge_results
-from weathergen.evaluate.io.csv_reader import CsvReader
-from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
-from weathergen.evaluate.io.wegen_reader import (
-    WeatherGenJsonReader,
-    WeatherGenZarrReader,
-)
+from weathergen.evaluate.io.readers import get_reader
 from weathergen.evaluate.plotting.animations import build_animations
 from weathergen.evaluate.plotting.colour_ranges import (
+    chunk_colour_ranges,
     colour_ranges_configured,
     data_colour_ranges,
     merge_colour_ranges,
@@ -161,31 +157,6 @@ def config_from_args(argl: list[str]) -> tuple[DictConfig, MlflowClient | None]:
     return cf, mlflow_client
 
 
-def get_reader(
-    reader_type: str,
-    run: dict,
-    run_id: str,
-    private_paths: dict[str, str],
-    region: str | None = None,
-    metric: dict[str, object] | None = None,
-):
-    if reader_type in ("zarr", "anemoi-target"):
-        reader = WeatherGenZarrReader(run, run_id, private_paths)
-    elif reader_type == "csv":
-        reader = CsvReader(run, run_id, private_paths)
-    elif reader_type == "json":
-        reader = WeatherGenJsonReader(run, run_id, private_paths, region, metric)
-    elif reader_type == "merge":
-        reader = WeatherGenMergeReader(run, run_id, private_paths)
-    elif reader_type == "jsonmerge":
-        reader = WeatherGenMergeReader(
-            run, run_id, private_paths, region, metric, reader_type="json"
-        )
-    else:
-        raise ValueError(f"Unknown reader type: {reader_type}")
-    return reader
-
-
 def _process_stream(
     run_id: str,
     run: dict,
@@ -196,6 +167,7 @@ def _process_stream(
     metrics: dict[str, object],
     plot_score_options: dict[str, object],
     chunk: bool = False,
+    rank_sample_map: dict[str, tuple[list[int], int]] | None = None,
 ) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict[int, dict]]:
     """
     Worker function for a single stream of a single run, or for one chunk of it.
@@ -229,9 +201,12 @@ def _process_stream(
         (``distributed.chunking``): the ``metrics`` given are computed for all ``regions``
         without consulting the JSON score files, nothing is written to them, and the score
         maps and videos are left to the end of the whole (run, stream).
+    rank_sample_map:
+        The map of the run's rank files, built by the reader of the chunked run and carried
+        by its tasks, so that the reader built here does not index the files again.
     """
     type_ = run.get("type", "zarr")
-    reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
+    reader = get_reader(type_, run, run_id, private_paths, regions, metrics, rank_sample_map)
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
@@ -476,6 +451,9 @@ def _run_stream_in_chunks(
     if not stream_cfg:
         return run_tasks([(_process_stream, task, whole)])[0]
     plot_score_options = dict(task["plot_score_options"])
+    # The rank files are indexed once, here; every task of the (run, stream) carries the map
+    # and its reader loads it instead of opening the files again.
+    task = task | {"rank_sample_map": {str(p): v for p, v in reader.rank_sample_map().items()}}
 
     results: dict[str, dict[str, MetricResult]] = {}
     computed: dict[str, dict[str, MetricResult]] = {}
@@ -596,30 +574,6 @@ def _run_stream_in_chunks(
     return run_id, stream, results, {}
 
 
-def chunk_colour_ranges(
-    task: dict, samples: list[int], fsteps: list[int], channels: list[str], ensemble: list[str]
-) -> dict[str, dict]:
-    """``data_colour_ranges`` of one chunk of the *task*'s (run, stream), loaded here.
-
-    Belongs in ``plotting.colour_ranges`` with the rest of the family; it is here only for
-    ``get_reader``, which moves out of this module with the rank-sample map of the tasks
-    (plan §4.1, in the next PR), and this function with it.
-    """
-    run_id, run, stream = task["run_id"], task["run"], task["stream"]
-    reader = get_reader(
-        run.get("type", "zarr"),
-        run,
-        run_id,
-        task["private_paths"],
-        task["regions"],
-        task["metrics"],
-    )
-    data = reader.get_data(
-        stream, fsteps=fsteps, samples=samples, channels=channels, ensemble=ensemble
-    )
-    return data_colour_ranges(data.target, data.prediction, channels)
-
-
 def finish_stream(
     run_id: str,
     run: dict,
@@ -632,15 +586,19 @@ def finish_stream(
     computed: dict[str, dict[str, MetricResult]] | None = None,
     score_ranges: dict | None = None,
     animations: bool = True,
+    rank_sample_map: dict[str, tuple[list[int], int]] | None = None,
 ) -> None:
     """Score maps of *computed* (a window of the stream's forecast steps, drawn with the
     colour ranges *score_ranges* of the whole stream) and / or the videos of one (run,
     stream), once all its frames are on disk.
 
-    What a serial ``_process_stream`` call does at its end; here with a reader of its own,
-    so that it can run wherever the chunk tasks ran.
+    What a serial ``_process_stream`` call does at its end; here with a reader of its own
+    (seeded with *rank_sample_map*, see ``_process_stream``), so that it can run wherever
+    the chunk tasks ran.
     """
-    reader = get_reader(run.get("type", "zarr"), run, run_id, private_paths, regions, metrics)
+    reader = get_reader(
+        run.get("type", "zarr"), run, run_id, private_paths, regions, metrics, rank_sample_map
+    )
     if plot_score_options.get("plot_score_maps", False) and computed:
         plot_score_maps(
             reader,

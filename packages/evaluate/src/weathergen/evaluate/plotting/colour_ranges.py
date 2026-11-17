@@ -20,6 +20,7 @@ import fnmatch
 import numpy as np
 import omegaconf as oc
 
+from weathergen.evaluate.io.readers import get_reader
 from weathergen.evaluate.utils.array_utils import calc_bounds
 
 
@@ -216,3 +217,28 @@ def bias_ranges(
             abs_max = data_ranges[var]["bias_vmax"]
         bias_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
     return bias_config
+
+
+def chunk_colour_ranges(
+    task: dict, samples: list[int], fsteps: list[int], channels: list[str], ensemble: list[str]
+) -> dict[str, dict]:
+    """``data_colour_ranges`` of one chunk of the *task*'s (run, stream), loaded here.
+
+    A task of the chunked run, with a reader of its own (seeded with the task's
+    ``rank_sample_map``), so that it can run wherever the chunk tasks run: the ranges of a
+    stream that is plotted but not scored here, one plotting window at a time.
+    """
+    run_id, run, stream = task["run_id"], task["run"], task["stream"]
+    reader = get_reader(
+        run.get("type", "zarr"),
+        run,
+        run_id,
+        task["private_paths"],
+        task["regions"],
+        task["metrics"],
+        task.get("rank_sample_map"),
+    )
+    data = reader.get_data(
+        stream, fsteps=fsteps, samples=samples, channels=channels, ensemble=ensemble
+    )
+    return data_colour_ranges(data.target, data.prediction, channels)

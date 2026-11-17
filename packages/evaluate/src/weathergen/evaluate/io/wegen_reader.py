@@ -405,11 +405,21 @@ class WeatherGenJsonReader(WeatherGenReader):
 
 
 class WeatherGenZarrReader(WeatherGenReader):
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+    def __init__(
+        self,
+        eval_cfg: dict,
+        run_id: str,
+        private_paths: dict | None = None,
+        rank_sample_map: dict[str, tuple[list[int], int]] | None = None,
+    ):
         """Data reader class for WeatherGenerator model outputs stored in Zarr format.
 
         Supports multi-rank inference outputs where each rank file contains a disjoint
         subset of forecast initializations with overlapping local sample indices.
+
+        *rank_sample_map* is the map of the rank files as ``rank_sample_map`` of another
+        reader of the same run gives it, with the paths as strings; a reader seeded with
+        it never opens the rank files to index them.
         """
         super().__init__(eval_cfg, run_id, private_paths)
 
@@ -426,7 +436,11 @@ class WeatherGenZarrReader(WeatherGenReader):
         self._cached_samples: set[int] | None = None
         self._cached_ensemble: dict[str, list[str]] = {}
         self._cached_is_gridded: dict[str, bool] = {}
-        self._rank_sample_map: dict[Path, tuple[list[int], int]] | None = None
+        self._rank_sample_map: dict[Path, tuple[list[int], int]] | None = (
+            {Path(p): (list(local), int(offset)) for p, (local, offset) in rank_sample_map.items()}
+            if rank_sample_map is not None
+            else None
+        )
 
         # Raw I/O worker config (direct zarr access)
         self._max_workers: int | None = eval_cfg.get("max_workers")
@@ -522,11 +536,12 @@ class WeatherGenZarrReader(WeatherGenReader):
                 _logger.warning(f"Failed to open {rank_file.name} for metadata, trying next...")
         raise RuntimeError("No rank files could be opened for metadata queries.")
 
-    def _get_rank_sample_map(self) -> dict[Path, tuple[list[int], int]]:
+    def rank_sample_map(self) -> dict[Path, tuple[list[int], int]]:
         """Build and cache mapping of rank_file → (local_samples, global_offset).
 
         Since all ranks use local indices (0, 1, ...), we assign global offsets:
-        rank0: offset=0, rank1: offset=len(rank0_samples), etc.
+        rank0: offset=0, rank1: offset=len(rank0_samples), etc.  Built once, by opening
+        every rank file, unless the reader was seeded with the map of another reader.
         """
         if self._rank_sample_map is None:
 
@@ -636,7 +651,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             channels or self.get_stream(stream).get("channels", self.get_channels(stream))
         )
 
-        rank_sample_map = self._get_rank_sample_map()
+        rank_sample_map = self.rank_sample_map()
 
         # Determine which ranks to load based on requested global samples
         requested_globals = set(int(s) for s in (samples or self.get_samples()))
@@ -726,7 +741,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         Assigns contiguous global indices: rank0 gets 0..N0-1, rank1 gets N0..N0+N1-1, etc.
         """
         if self._cached_samples is None:
-            rank_sample_map = self._get_rank_sample_map()
+            rank_sample_map = self.rank_sample_map()
             all_samples: set[int] = set()
             for local_samples, offset in rank_sample_map.values():
                 all_samples.update(range(offset, offset + len(local_samples)))
