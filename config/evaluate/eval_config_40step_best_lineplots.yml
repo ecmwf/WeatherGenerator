@@ -1,0 +1,45 @@
+max_workers: 1
+
+global_plotting_options:
+  dpi_val: 300
+  image_format: "pdf"
+
+evaluation:
+  metrics: ["rmse"]
+  regions: ["global"]
+  summary_plots: true
+  ratio_plots: false
+  heat_maps: false
+  summary_dir: "./plots/40step_best_leadtime/"
+  plot_ensemble: false
+  plot_score_maps: false
+  plot_score_animations: false
+  plot_score_timeseries: false
+  print_summary: false
+  score_cards: false
+  bar_plots: false
+
+default_streams:
+  ERA5:
+    regions: ["global"]
+    # channels scored for all three runs (nhv6's evaluation has no msl)
+    channels: ["z_500", "t_850", "2t", "10u", "10v", "u_850", "v_850", "q_850"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+
+# 15 windows x 8 inits (3 Jun - 2 Jul 2023), pooled by monitor/pool_best_for_package.py
+run_ids:
+  nhv60001:
+    label: "nhv6tkln (original)"
+    type: "json"
+    metrics_dir: "./results/score_summary_40step_best/nhv6/"
+  ch7e0001:
+    label: "combo_det"
+    type: "json"
+    metrics_dir: "./results/score_summary_40step_best/ch7e/"
+  c8lv0001:
+    label: "crps8long 4-member mean"
+    type: "json"
+    metrics_dir: "./results/score_summary_40step_best/c8lv/"

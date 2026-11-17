@@ -1,0 +1,28 @@
+max_workers: 1
+
+evaluation:
+  metrics: ["rmse"]
+  summary_plots: false
+  ratio_plots: false
+  heat_maps: false
+  plot_score_maps: false
+  plot_score_animations: false
+  plot_score_timeseries: false
+  print_summary: false
+  score_cards: false
+  bar_plots: false
+
+default_streams:
+  ERA5:
+    regions: ["global"]
+    channels: ["2t", "10u", "10v", "hcc", "mcc", "lcc", "tcc", "z_500", "t_850", "u_850", "u_700", "u_500", "u_400", "u_300", "u_200", "u_100", "v_850", "q_1000", "q_925", "q_850", "q_700", "q_500", "q_400", "q_300", "q_200", "q_150"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+
+run_ids:
+  __RUN_ID__:
+    label: "rrvj score shard __RUN_ID__"
+    results_base_dir: "./results/__RUN_ID__/"
+    type: "anemoi-target"

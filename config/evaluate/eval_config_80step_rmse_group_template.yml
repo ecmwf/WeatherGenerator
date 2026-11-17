@@ -1,0 +1,32 @@
+max_workers: 12
+
+# Per-member RMSE of the 80-step crps8long ensemble (c8lx) for one channel group: all 81 channels
+# at once need ~6 TB of host memory, ~78 GB per channel. __CHANNELS__ and __GROUP__ are set by
+# scripts/evaluate_long_rollout_best_array_jupiter.sbatch (CH_GROUP).
+evaluation:
+  metrics: ["rmse"]
+  summary_plots: false
+  ratio_plots: false
+  heat_maps: false
+  plot_score_maps: false
+  plot_score_animations: false
+  plot_score_timeseries: false
+  print_summary: false
+  score_cards: false
+  bar_plots: false
+
+default_streams:
+  ERA5:
+    regions: ["global"]
+    channels: __CHANNELS__
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+
+run_ids:
+  __RUN_ID__:
+    label: "80-step per-member RMSE, channel group __GROUP__, shard __RUN_ID__"
+    results_base_dir: "./results/__RUN_ID__/"
+    type: "anemoi-target"
+    metrics_dir: "./results/__RUN_ID__/evaluation_g__GROUP__/"

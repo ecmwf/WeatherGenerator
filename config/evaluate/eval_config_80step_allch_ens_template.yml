@@ -1,0 +1,29 @@
+max_workers: 12
+
+evaluation:
+  metrics: ["rmse", "crps", "spread", "ssr"]
+  summary_plots: false
+  ratio_plots: false
+  heat_maps: false
+  plot_score_maps: false
+  plot_score_animations: false
+  plot_score_timeseries: false
+  print_summary: false
+  score_cards: false
+  bar_plots: false
+
+default_streams:
+  ERA5:
+    regions: ["global"]
+    channels: ["10u", "10v", "2d", "2t", "hcc", "lcc", "mcc", "msl", "q_10", "q_1000", "q_150", "q_200", "q_250", "q_300", "q_400", "q_500", "q_600", "q_700", "q_850", "q_925", "skt", "sp", "ssrd", "strd", "t_10", "t_100", "t_1000", "t_150", "t_200", "t_250", "t_300", "t_400", "t_50", "t_500", "t_600", "t_700", "t_850", "t_925", "tcc", "u_10", "u_100", "u_1000", "u_150", "u_200", "u_250", "u_300", "u_400", "u_50", "u_500", "u_600", "u_700", "u_850", "u_925", "v_10", "v_100", "v_1000", "v_150", "v_200", "v_250", "v_300", "v_400", "v_50", "v_500", "v_600", "v_700", "v_850", "v_925", "z_10", "z_100", "z_1000", "z_150", "z_200", "z_250", "z_300", "z_400", "z_50", "z_500", "z_600", "z_700", "z_850", "z_925"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+
+run_ids:
+  __RUN_ID__:
+    label: "80-step all-channel score shard __RUN_ID__"
+    results_base_dir: "./results/__RUN_ID__/"
+    type: "anemoi-target"
+
