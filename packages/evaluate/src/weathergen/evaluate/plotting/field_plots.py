@@ -171,10 +171,12 @@ def plot_data(
     stream: str,
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
-) -> xr.Dataset | None:
-    """Plot prediction/target maps and histograms for a given run and stream; the
-    timeseries (the region means of the plotting samples, ``Timeseries.region_means``) are
-    returned instead of drawn, ``None`` when ``timeseries`` is not in the ``data_plots``.
+) -> dict[str, xr.Dataset]:
+    """Plot prediction/target maps and histograms for a given run and stream; the plots
+    across samples are returned as data statistics instead of drawn: ``{name: Dataset}`` of
+    per-sample quantities of the plotting samples, ``timeseries`` being the region means
+    (``Timeseries.region_means``).  They are merged over the chunks (``merge_statistics``)
+    and drawn once all runs are done (``plot_evaluation``).
 
     The frames of the videos are drawn here; the videos themselves are built from them by
     ``animations.build_animations`` once all the frames of the run exist.
@@ -195,7 +197,7 @@ def plot_data(
     plot_settings = stream_cfg.get("plotting", {})
     spec = parse_data_plots(plot_settings)
     if not spec:
-        return
+        return {}
 
     plotter_cfg = build_plotter_cfg(
         global_plotting_opts,
@@ -208,7 +210,7 @@ def plot_data(
     available_data = reader.check_availability(stream, mode="plotting")
     if not available_data.score_availability:
         _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
-        return
+        return {}
 
     # Per-step images are produced for every requested plot (videos are built from them).
     plot_maps = "predictions" in spec.maps
@@ -244,7 +246,7 @@ def plot_data(
                 f"{sorted(int(f) for f in reader.get_forecast_steps())[:5]}...). "
                 f"Skipping plots."
             )
-            return
+            return {}
         model_output = reader.get_data(
             stream,
             samples=available_data.samples,
@@ -258,7 +260,7 @@ def plot_data(
 
     if not da_tars:
         _logger.info(f"Skipping Plot Data for {stream}. Targets are empty.")
-        return
+        return {}
 
     plot_fstep_set = set(available_data.fsteps) if available_data.fsteps is not None else None
     plot_sample_set = set(available_data.samples) if available_data.samples is not None else None
@@ -276,7 +278,7 @@ def plot_data(
 
     if not da_tars:
         _logger.info(f"Skipping Plot Data for {stream}. No matching fsteps after filtering.")
-        return
+        return {}
 
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
@@ -366,15 +368,16 @@ def plot_data(
             desc=f"Across-samples plots {run_id} - {stream}",
         )
 
-    if not plot_timeseries:
-        return None
-    first = next(iter(da_tars.values()))
-    samples = filter_set(list(np.unique(first.sample.values)), plot_sample_set)
-    channels = filter_set(list(np.atleast_1d(first.channel.values)), plot_channel_set)
-    return Timeseries(
-        {fs: da.sel(sample=samples) for fs, da in da_preds.items()},
-        {fs: da.sel(sample=samples) for fs, da in da_tars.items()},
-    ).region_means(plotter_cfg["regions"], channels)
+    statistics = {}
+    if plot_timeseries:
+        first = next(iter(da_tars.values()))
+        samples = filter_set(list(np.unique(first.sample.values)), plot_sample_set)
+        channels = filter_set(list(np.atleast_1d(first.channel.values)), plot_channel_set)
+        statistics["timeseries"] = Timeseries(
+            {fs: da.sel(sample=samples) for fs, da in da_preds.items()},
+            {fs: da.sel(sample=samples) for fs, da in da_tars.items()},
+        ).region_means(plotter_cfg["regions"], channels)
+    return statistics
 
 
 def plot_timeseries(
@@ -390,7 +393,8 @@ def plot_timeseries(
         The evaluation config (``run_ids``, ``max_workers``).
     timeseries:
         ``timeseries[stream][run_id]``: the region means of the run's plotting samples
-        (``Timeseries.region_means``), as ``accumulate_stream_results`` nests them.
+        (``Timeseries.region_means``), the ``timeseries`` statistic as
+        ``accumulate_stream_results`` nests it.
     summary_dir:
         The summary directory of the run.
     """
@@ -413,12 +417,13 @@ def plot_timeseries(
                         for run_id, ds in at.items()
                         if region in ds.region.values and channel in ds.channel.values
                     }
+                    # the members as the data names them (ints or strings), one figure each
                     members = sorted(
                         {
-                            str(e)
+                            e
                             for p in predictions.values()
                             if "ens" in p.dims
-                            for e in p.ens.values
+                            for e in p.ens.values.tolist()
                         }
                     ) or [None]
                     for ens in members:

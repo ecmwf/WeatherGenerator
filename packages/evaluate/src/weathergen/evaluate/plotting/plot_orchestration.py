@@ -31,9 +31,10 @@ def plot_stream_data(
     stream: str,
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
-) -> xr.Dataset | None:
-    """Field plots of one (run, stream): the maps and histograms are drawn, the timeseries
-    (the region means of the plotting samples) returned, ``None`` when not requested.
+) -> dict[str, xr.Dataset]:
+    """Field plots of one (run, stream): the maps and histograms are drawn; the plots
+    across samples are returned as data statistics, ``{name: Dataset}`` of per-sample
+    quantities (``plot_data``), drawn by ``plot_evaluation`` once all runs are done.
 
     Parameters
     ----------
@@ -50,10 +51,10 @@ def plot_stream_data(
 
 
 def plot_evaluation(
-    cfg: dict, scores_dict: dict, init_hour_scores: dict, timeseries: dict, summary_dir: Path
+    cfg: dict, scores_dict: dict, init_hour_scores: dict, statistics: dict, summary_dir: Path
 ) -> None:
-    """Plots across all runs: the verification plots from the merged scores, the
-    timeseries from the merged region means.
+    """Plots across all runs: the verification plots from the merged scores, the plots
+    across samples from the merged data statistics.
 
     Parameters
     ----------
@@ -64,13 +65,14 @@ def plot_evaluation(
     init_hour_scores : dict
         Same nesting with the ``MetricResult.by_init_hour`` arrays; empty unless
         ``init_hour`` is requested.
-    timeseries : dict
-        ``timeseries[stream][run_id] -> Dataset`` (``Timeseries.region_means``); empty
-        unless a stream's ``data_plots`` has ``timeseries``.
+    statistics : dict
+        ``statistics[name][stream][run_id] -> Dataset``, the data statistics of the runs
+        (``plot_data``) as ``accumulate_stream_results`` nests them: ``timeseries`` are the
+        region means, drawn one figure per initialisation time with every run on it.
     summary_dir : Path
         Directory to write plots to.
     """
     if scores_dict:
         plot_scores(cfg, scores_dict, init_hour_scores, summary_dir)
-    if timeseries:
-        plot_timeseries(cfg, timeseries, summary_dir)
+    if "timeseries" in statistics:
+        plot_timeseries(cfg, statistics["timeseries"], summary_dir)
