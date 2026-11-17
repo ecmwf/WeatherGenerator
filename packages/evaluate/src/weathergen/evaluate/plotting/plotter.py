@@ -12,7 +12,6 @@ import fnmatch
 import logging
 import os
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
 
 import cartopy
@@ -25,7 +24,6 @@ import xarray as xr
 from astropy_healpix import HEALPix as HEALPixGrid
 from cartopy.io import DownloadWarning
 from matplotlib.collections import LineCollection
-from scipy.stats import skew
 from scipy.stats import wasserstein_distance as wd
 
 try:
@@ -37,6 +35,12 @@ except ImportError:
     HAS_DATASHADER = False
 
 from weathergen.common.config import _load_private_conf
+from weathergen.evaluate.plotting.histograms import (
+    DistStats,
+    draw_histogram,
+    histogram_bins,
+    histogram_name,
+)
 from weathergen.evaluate.plotting.plot_utils import (
     DefaultMarkerSize,
     apply_font_settings,
@@ -83,39 +87,6 @@ SCORE_MAP_CMAP = mpl.colors.LinearSegmentedColormap.from_list(
     "score_maps_blue_red",
     [(0.2298057, 0.298717966, 0.753683153), (0.705673158, 0.01555616, 0.150232812)],
 )
-
-
-@dataclass
-class DistStats:
-    """Summary statistics for a 1-D distribution."""
-
-    count: int
-    min: float
-    max: float
-    mean: float
-    median: float
-    std: float
-    skewness: float
-
-    @classmethod
-    def from_array(cls, v: np.typing.NDArray) -> "DistStats":
-        v = np.asarray(v).ravel()
-        return cls(
-            count=len(v),
-            min=float(np.min(v)),
-            max=float(np.max(v)),
-            mean=float(np.mean(v)),
-            median=float(np.median(v)),
-            std=float(np.std(v)),
-            skewness=float(skew(v, nan_policy="omit")),
-        )
-
-    def summary(self, label: str) -> str:
-        return (
-            f"{label:8s} N={self.count}  min={self.min:.3g}  max={self.max:.3g}  "
-            f"mean={self.mean:.3g}  med={self.median:.3g}  "
-            f"std={self.std:.3g}  skew={self.skewness:.3g}"
-        )
 
 
 class Plotter:
@@ -376,96 +347,12 @@ class Plotter:
         -------
             Name of the saved plot file.
         """
-
         tar_vals = np.asarray(target_data).ravel()
         prd_vals = np.asarray(pred_data).ravel()
-
-        # Get common bin edges — use fixed xlim range if provided for consistency
-        xmin, xmax = xlim if xlim else (None, None)
-        # Fall back to data-derived bounds if either limit is missing
-        if xmin is None or xmax is None:
-            vals = np.concatenate([tar_vals, prd_vals])
-            if xmin is None:
-                xmin = float(np.nanmin(vals))
-            if xmax is None:
-                xmax = float(np.nanmax(vals))
-        # Add 5% margin on each side so tails are clearly visible
-        margin = (xmax - xmin) * 0.05
-        xmin -= margin
-        xmax += margin
-        bins = np.linspace(xmin, xmax, self.n_bins + 1)
-
-        # Compute histograms
-        target_counts, _ = np.histogram(tar_vals, bins=bins)
-        pred_counts, _ = np.histogram(prd_vals, bins=bins)
-        bin_centers = (bins[:-1] + bins[1:]) / 2
-
-        color_tar = "black"
-        color_pred = "#00897B"  # teal / green-blue
-
-        # Create figure with three rows: histogram, ratio, and stats text
-        fig = plt.figure(figsize=self.fig_size or (8, 8), constrained_layout=True)
-        gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 0.5])
-        ax_hist = fig.add_subplot(gs[0])
-        ax_ratio = fig.add_subplot(gs[1], sharex=ax_hist)
-        ax_text = fig.add_subplot(gs[2])
-        ax_text.set_axis_off()
-
-        # Upper panel: histogram curves
-        ax_hist.plot(
-            bin_centers, target_counts, alpha=0.7, label="Target", linewidth=1.5, color=color_tar
-        )
-        ax_hist.plot(
-            bin_centers, pred_counts, alpha=0.7, label="Prediction", linewidth=1.5, color=color_pred
-        )
-        ax_hist.set_ylabel("Frequency")
-        ax_hist.set_title(f"{self.stream}, {varname} : fstep = {self.fstep:03}")
-        ax_hist.legend(frameon=False)
-        if self.log_y:
-            ax_hist.set_yscale("log")
-        ax_hist.grid(True, linestyle="--", alpha=0.5)
-
-        # Lower panel: ratio (prediction / target)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = np.where(target_counts > 0, pred_counts / target_counts, np.nan)
-        ax_ratio.plot(bin_centers, ratio, linewidth=1.2, color=color_pred)
-        ax_ratio.axhline(1.0, linestyle="--", color="gray", linewidth=0.8)
-        ax_ratio.set_ylabel("Pred / Target")
-        ax_ratio.set_xlabel(f"Variable: {varname}")
-        ax_ratio.set_ylim(0, 2)
-        ax_ratio.grid(True, linestyle="--", alpha=0.5)
-
-        if self.log_x:
-            ax_hist.set_xscale("log")
-            ax_ratio.set_xscale("log")
-        ax_ratio.set_xlim(xmin, xmax)
-
-        t_s = DistStats.from_array(tar_vals)
-        p_s = DistStats.from_array(prd_vals)
-
-        # Wasserstein distance
-        w_dist = wd(tar_vals, prd_vals)
-
-        stat_text = (
-            f"Wasserstein distance: {w_dist:.4g}\n{t_s.summary('Target:')}\n{p_s.summary('Pred:')}"
-        )
-
-        ax_text.text(
-            0.5,
-            0.5,
-            stat_text,
-            ha="center",
-            va="top",
-            fontsize="x-small",
-            family="monospace",
-            transform=ax_text.transAxes,
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
-        )
+        bins = histogram_bins(xlim, self.n_bins, np.concatenate([tar_vals, prd_vals]))
 
         # For "all_samples" (across-samples) histograms, omit the valid_time from the name
-        is_global = str(self.sample) == "all_samples"
-
-        if is_global:
+        if str(self.sample) == "all_samples":
             valid_time = None
         else:
             valid_time = (
@@ -474,25 +361,23 @@ class Plotter:
                 .astype(datetime.datetime)
                 .strftime("%Y-%m-%dT%H%M")
             )
-
-        parts = [
-            "histogram",
-            str(self.run_id),
-            str(tag) if tag else "",
-            str(self.sample),
-            valid_time,
-            str(self.stream),
-            region if region else "",
+        name = histogram_name(
+            self.run_id, tag, self.sample, valid_time, self.stream, region, varname, self.fstep
+        )
+        draw_histogram(
+            bins,
+            np.histogram(tar_vals, bins=bins)[0],
+            np.histogram(prd_vals, bins=bins)[0],
+            DistStats.from_array(tar_vals),
+            DistStats.from_array(prd_vals),
+            wd(tar_vals, prd_vals),
+            hist_output_dir / f"{name}.{self.image_format}",
+            f"{self.stream}, {varname} : fstep = {self.fstep:03}",
             varname,
-            f"{self.fstep:03d}",
-        ]
-        name = "_".join(filter(None, parts))
-
-        fname = hist_output_dir / f"{name}.{self.image_format}"
-        _logger.debug(f"Saving histogram to {fname}")
-        fig.savefig(fname)
-        plt.close(fig)
-
+            self.fig_size,
+            self.log_x,
+            self.log_y,
+        )
         return name
 
     def create_maps_per_sample(
@@ -895,7 +780,7 @@ class Plotter:
             Colour normalisation instance.
         cmap : matplotlib.colors.Colormap
             Colourmap for the scatter points.
-        marker_size : float or np.ndarray
+        marker_size : float or np.typing.NDArray
             Marker size(s) in matplotlib scatter units (pt²).
         marker : str
             Marker style (e.g. ``'o'``, ``'s'``).

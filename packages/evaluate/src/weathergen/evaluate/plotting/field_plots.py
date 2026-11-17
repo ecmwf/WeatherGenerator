@@ -9,10 +9,11 @@
 
 """Plots of the prediction and target fields: maps, histograms and timeseries.
 
-They are drawn from the loaded data of one (run, stream) (``ReaderOutput``), so they can be
-drawn per chunk of samples and forecast steps.  The drawing itself is done by ``Plotter``
-and ``Timeseries``; the videos of the maps and histograms by ``animations``, once all the
-frames are written.
+The maps and per-sample histograms are drawn from the loaded data of one (run, stream)
+(``ReaderOutput``), so they can be drawn per chunk of samples and forecast steps; the
+drawing itself is done by ``Plotter``, the videos by ``animations`` once all the frames are
+written.  The plots across samples (``timeseries``, ``histograms``) are computed here per
+chunk as per-sample quantities and drawn by their modules once all runs are done.
 """
 
 import logging
@@ -27,6 +28,7 @@ from joblib import delayed
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.colour_ranges import plot_colour_ranges
+from weathergen.evaluate.plotting.histograms import histogram_counts
 from weathergen.evaluate.plotting.plot_utils import (
     apply_font_settings,
     build_plotter_cfg,
@@ -34,54 +36,10 @@ from weathergen.evaluate.plotting.plot_utils import (
 )
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.timeseries import Timeseries
-from weathergen.evaluate.utils.array_utils import select_ensemble_data
+from weathergen.evaluate.utils.array_utils import select_ensemble_data, select_samples
 from weathergen.evaluate.utils.config_compat import parse_data_plots
 
 _logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Timeseries plots
-# ---------------------------------------------------------------------------
-
-
-def _dispatch_timeseries_plots(
-    da_preds: dict,
-    da_tars: dict,
-    output_dir: str,
-    stream: str,
-    regions: list[str],
-    run_id: str,
-    samples: dict,
-    channels: dict,
-    ensemble: list,
-    n_workers: int,
-) -> None:
-    """Build and dispatch timeseries plot tasks for all (channel, sample[, ens]) triples."""
-    data_ts = Timeseries(da_preds, da_tars)
-    has_ens = any("ens" in v.dims for v in da_preds.values())
-    ens_members = ensemble if has_ens else [None]
-    ts_tasks = [
-        {
-            "output_dir": output_dir,
-            "channel": str(channel),
-            "sample": sample,
-            "stream": stream,
-            "region": region,
-            "ens": ens,
-        }
-        for channel in channels
-        for sample in samples
-        for ens in ens_members
-        for region in regions
-    ]
-    calls = [delayed(data_ts.plot_single_timeseries)(**t) for t in ts_tasks]
-    dispatch_parallel(
-        calls,
-        n_workers=n_workers,
-        backend="loky",
-        desc=f"Timeseries {run_id} - {stream}",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -160,61 +118,18 @@ def _plot_single_sample(
     plotter.clean_data_selection()
 
 
-def _plot_histograms_across_samples(
-    plotter_cfg: dict,
-    output_basedir: str,
-    tars: xr.DataArray,
-    preds: xr.DataArray,
-    bias_data: xr.DataArray | None,
-    fstep: int | str,
-    stream: str,
-    plot_chs: list[str],
-    ensemble: list,
-    plot_histograms: bool | str,
-    maps_config: dict,
-    bias_config: dict,
-) -> None:
-    """Plot histograms across all samples for a single fstep.
-
-    Unlike per-sample histograms, these aggregate all samples together.
-    The output filename uses 'global' instead of a sample id and omits the timestep.
-    """
-    if not (plot_histograms is True or plot_histograms == "across-samples"):
-        return
-
-    matplotlib.use("Agg")
-    plotter = Plotter(plotter_cfg, Path(output_basedir))
-
-    data_selection = {"sample": "all_samples", "stream": stream, "forecast_step": fstep}
-
-    for ens in ensemble:
-        preds_ens = select_ensemble_data(preds, ens)
-
-        if ens in ("mean", "std"):
-            preds_tag = f"ens_{ens}"
-        else:
-            preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
-        preds_name = "_".join(filter(None, ["preds", preds_tag]))
-
-        plotter.create_histograms(
-            tars,
-            preds_ens,
-            plot_chs,
-            data_selection,
-            preds_name,
-            ranges=maps_config,
-        )
-
-    plotter.clean_data_selection()
-
-
 def plot_data(
     reader: Reader,
     stream: str,
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
-) -> None:
-    """Plot prediction/target maps, histograms and timeseries for a given run and stream.
+) -> dict[str, xr.Dataset]:
+    """Plot prediction/target maps and per-sample histograms for a given run and stream;
+    the plots across samples are returned instead of drawn, as ``{name: Dataset}`` of
+    per-sample quantities of the plotting samples: ``region_means`` for the timeseries
+    (``Timeseries.region_means``), ``histogram_counts`` for the across-samples histograms
+    (``histograms.histogram_counts``).  They are merged over the chunks
+    (``merge_statistics``) and drawn once all runs are done (``plot_evaluation``).
 
     The frames of the videos are drawn here; the videos themselves are built from them by
     ``animations.build_animations`` once all the frames of the run exist.
@@ -235,7 +150,7 @@ def plot_data(
     plot_settings = stream_cfg.get("plotting", {})
     spec = parse_data_plots(plot_settings)
     if not spec:
-        return
+        return {}
 
     plotter_cfg = build_plotter_cfg(
         global_plotting_opts,
@@ -248,7 +163,7 @@ def plot_data(
     available_data = reader.check_availability(stream, mode="plotting")
     if not available_data.score_availability:
         _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
-        return
+        return {}
 
     # Per-step images are produced for every requested plot (videos are built from them).
     plot_maps = "predictions" in spec.maps
@@ -284,7 +199,7 @@ def plot_data(
                 f"{sorted(int(f) for f in reader.get_forecast_steps())[:5]}...). "
                 f"Skipping plots."
             )
-            return
+            return {}
         model_output = reader.get_data(
             stream,
             samples=available_data.samples,
@@ -298,7 +213,7 @@ def plot_data(
 
     if not da_tars:
         _logger.info(f"Skipping Plot Data for {stream}. Targets are empty.")
-        return
+        return {}
 
     plot_fstep_set = set(available_data.fsteps) if available_data.fsteps is not None else None
     plot_sample_set = set(available_data.samples) if available_data.samples is not None else None
@@ -316,7 +231,7 @@ def plot_data(
 
     if not da_tars:
         _logger.info(f"Skipping Plot Data for {stream}. No matching fsteps after filtering.")
-        return
+        return {}
 
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
@@ -330,7 +245,6 @@ def plot_data(
     )
 
     tasks: list[dict] = []
-    all_samples_tasks: list[dict] = []
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         all_chs = list(np.atleast_1d(tars.channel.values))
         plot_chs = filter_set(all_chs, plot_channel_set)
@@ -343,23 +257,6 @@ def plot_data(
             continue
 
         bias_data = (preds - tars) if plot_bias else None
-
-        all_samples_tasks.append(
-            {
-                "plotter_cfg": plotter_cfg,
-                "output_basedir": output_dir,
-                "tars": tars,
-                "preds": preds,
-                "bias_data": bias_data,
-                "fstep": fstep,
-                "stream": stream,
-                "plot_chs": plot_chs,
-                "ensemble": list(available_data.ensemble),
-                "plot_histograms": plot_histograms,
-                "maps_config": maps_config_dict,
-                "bias_config": bias_config_dict,
-            }
-        )
 
         for sample in plot_samples:
             tasks.append(
@@ -393,29 +290,26 @@ def plot_data(
         calls, n_workers=num_plot_workers, backend="loky", desc=f"Plotting {run_id} - {stream}"
     )
 
-    if all_samples_tasks:
-        _logger.info(
-            f"Parallel plotting: dispatching {len(all_samples_tasks)} across-samples "
-            f"tasks using up to {num_plot_workers} loky workers."
-        )
-        as_calls = [delayed(_plot_histograms_across_samples)(**t) for t in all_samples_tasks]
-        dispatch_parallel(
-            as_calls,
-            n_workers=num_plot_workers,
-            backend="loky",
-            desc=f"Across-samples plots {run_id} - {stream}",
-        )
-
+    # the plots across samples: per-sample quantities of the plotting samples, drawn once
+    # all the samples of all runs are there (plot_evaluation)
+    statistics = {}
+    first = next(iter(da_tars.values()))
+    samples = filter_set(list(np.unique(first.sample.values)), plot_sample_set)
+    channels = filter_set(list(np.atleast_1d(first.channel.values)), plot_channel_set)
+    if "across_samples" in spec.histograms:
+        statistics["histogram_counts"] = histogram_counts(
+            da_tars,
+            da_preds,
+            samples,
+            channels,
+            plotter_cfg["regions"],
+            list(available_data.ensemble),
+            maps_config_dict,
+            plotter_cfg.get("n_bins", 50),
+        ).assign_attrs(runplot_dir=str(reader.runplot_dir))
     if plot_timeseries:
-        _dispatch_timeseries_plots(
-            da_preds=da_preds,
-            da_tars=da_tars,
-            output_dir=output_dir,
-            stream=stream,
-            regions=plotter_cfg["regions"],
-            run_id=run_id,
-            samples=plot_sample_set,
-            channels=plot_channel_set,
-            ensemble=list(available_data.ensemble),
-            n_workers=num_plot_workers,
-        )
+        statistics["region_means"] = Timeseries(
+            {fs: select_samples(da, samples) for fs, da in da_preds.items()},
+            {fs: select_samples(da, samples) for fs, da in da_tars.items()},
+        ).region_means(plotter_cfg["regions"], channels)
+    return statistics

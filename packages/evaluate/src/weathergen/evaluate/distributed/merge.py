@@ -11,7 +11,8 @@
 
 A chunk is one ``_process_stream`` call on a window of samples × forecast steps; its results
 are ``results[region][metric] -> MetricResult`` like those of a whole run, plus the colour
-bounds of its data.  Merging is pure array work on them, no config and no MPI.
+ranges of its data and its data statistics (per-sample quantities of the data, for the
+plots across samples).  Merging is pure array work on them, no config and no MPI.
 """
 
 import logging
@@ -120,7 +121,25 @@ def _merge_metric(parts: list[MetricResult]) -> MetricResult:
     return MetricResult(first.name, first.region, first.stream, first.run_id, score, **aggregated)
 
 
-def _concat(arrays: list[xr.DataArray], dim: str) -> xr.DataArray:
+def merge_statistics(parts: list[dict[str, xr.Dataset]]) -> dict[str, xr.Dataset]:
+    """The data statistics of one (run, stream) from those of its chunks, in any order.
+
+    A chunk's statistics are ``{name: Dataset}`` of per-sample quantities with ``sample``
+    and ``forecast_step`` dims (``plot_data``: ``timeseries`` is the region means, ...).  Per
+    name, the forecast-step windows of each sample window are concatenated along
+    ``forecast_step``, then the sample windows along ``sample``, both sorted.  Exact under
+    any chunking: every statistic is per (sample, forecast step)."""
+    merged = {}
+    for name in {name for part in parts for name in part}:
+        by_samples: dict[tuple[int, ...], list[xr.Dataset]] = {}
+        for ds in [part[name] for part in parts if name in part]:
+            by_samples.setdefault(tuple(int(s) for s in ds.sample.values), []).append(ds)
+        windows = [_concat(by_samples[w], "forecast_step") for w in sorted(by_samples)]
+        merged[name] = _concat(windows, "sample")
+    return merged
+
+
+def _concat(arrays: list, dim: str):
     """Concatenate along *dim* and sort by it; the arrays' other coordinates must agree."""
     if len(arrays) == 1:
         return arrays[0]

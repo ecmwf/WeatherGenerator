@@ -63,29 +63,21 @@ def build_animations(
         frame_dirs.append(plot_dir / "score_maps")
 
     image_format = global_plotting_opts.get("image_format", "png")
-    animation_format = global_plotting_opts.get("animation_format", "mp4")
-    videos: dict[Path, list[Path]] = {}  # video path -> its frames, in forecast-step order
+    frames = []
     for frame_dir in frame_dirs:
         for frame in sorted(frame_dir.glob(f"*.{image_format}")):
-            # per-sample and across-samples histograms are separate video options
+            # per-sample and across-samples histograms are separate video options; the
+            # across-samples frames are drawn and their videos built once all runs are done
             if frame_dir.name == "histograms":
-                kind = "across_samples" if "_all_samples_" in frame.name else "per_sample"
-                if kind not in hist_videos:
+                if "_all_samples_" in frame.name or "per_sample" not in hist_videos:
                     continue
-            # {prefix}_{run_id}_{tag}[_{sample}][_{valid_time}]_{stream}_{region}_{var}_{fstep}
-            # -> animation_{run_id}_{tag}[_{sample}]_{stream}_{region}_{var}
-            stem = re.sub(r"_\d{4}-\d{2}-\d{2}T\d{4}(?=_)", "", frame.stem)
-            stem = re.sub(r"_\d{3}$", "", stem).split("_", 1)[1]
-            video = frame_dir / f"animation_{stem}.{animation_format}"
-            videos.setdefault(video, []).append(frame)
-
+            frames.append(frame)
+    videos = videos_of(frames, global_plotting_opts)
     if not videos:
         return
-    fps = global_plotting_opts.get("fps", 2)
-    duration_ms = int(1000 / fps) if fps > 0 else 400
     calls = [
-        delayed(_build_single_animation)(frames, video, duration_ms)
-        for video, frames in videos.items()
+        delayed(_build_single_animation)(video_frames, video, duration_of(global_plotting_opts))
+        for video, video_frames in videos.items()
     ]
     dispatch_parallel(
         calls,
@@ -93,6 +85,30 @@ def build_animations(
         backend="loky",
         desc=f"Animations {stream}",
     )
+
+
+def videos_of(frames: list[Path], global_plotting_opts: dict) -> dict[Path, list[Path]]:
+    """The videos the *frames* belong to: one per frame name without its valid time and
+    forecast step, next to the frames.
+
+    ``{prefix}_{run_id}_{tag}[_{sample}][_{valid_time}]_{stream}_{region}_{var}_{fstep}`` ->
+    ``animation_{run_id}_{tag}[_{sample}]_{stream}_{region}_{var}``; the frames of a video
+    in the order given (forecast-step order when the frames are sorted).
+    """
+    animation_format = global_plotting_opts.get("animation_format", "mp4")
+    videos: dict[Path, list[Path]] = {}
+    for frame in frames:
+        stem = re.sub(r"_\d{4}-\d{2}-\d{2}T\d{4}(?=_)", "", frame.stem)
+        stem = re.sub(r"_\d{3}$", "", stem).split("_", 1)[1]
+        video = frame.parent / f"animation_{stem}.{animation_format}"
+        videos.setdefault(video, []).append(frame)
+    return videos
+
+
+def duration_of(global_plotting_opts: dict) -> int:
+    """The duration of a video frame in ms, from ``fps``."""
+    fps = global_plotting_opts.get("fps", 2)
+    return int(1000 / fps) if fps > 0 else 400
 
 
 def _build_single_animation(frames: list[Path], out_path: Path, duration_ms: int) -> None:
