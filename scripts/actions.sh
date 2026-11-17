@@ -4,17 +4,14 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 PRIVATE_REPO_PATH="${WEATHERGEN_PRIVATE_REPO_PATH:-$SCRIPT_DIR/../WeatherGenerator-private}"
 
-# uv_link_mode from the HPC's config in WeatherGenerator-private (e.g. hardlink
-# on JUPITER); prints nothing if unset or not on a known HPC.
+# uv_link_mode from WeatherGenerator-private's hpc/<hpc>/config/paths.yml, if set.
 hpc_uv_link_mode() {
   local platform_env="$PRIVATE_REPO_PATH/hpc/platform-env.py"
   [[ -x "$platform_env" ]] && "$platform_env" uv-link-mode 2>/dev/null
 }
 
-# Installs git hooks that re-sync the venv when a pull or branch switch changes
-# the dependencies (scripts/git-hooks/sync-venv.sh). Without them, `uv run`
-# would sync by itself with pyproject.toml's symlink mode. Hooks of other
-# origin are left alone.
+# Git hooks that re-sync the venv when dependencies change, so that `uv run`
+# doesn't sync with symlinks. Existing hooks are left alone.
 install_sync_hooks() {
   local hooks_dir hook file
   hooks_dir=$(git rev-parse --git-path hooks 2>/dev/null) || return
@@ -30,7 +27,7 @@ install_sync_hooks() {
   done
 }
 
-# A hook that runs the checked-out commit's sync-venv.sh, if it has one.
+# Hook that runs scripts/git-hooks/sync-venv.sh, if the checkout has it.
 hook_stub() {
   cat <<EOF
 #!/bin/sh
@@ -42,7 +39,7 @@ exit 0
 EOF
 }
 
-# Names of the venv's packages that are installed as symlinks into the cache.
+# Venv packages installed as symlinks.
 symlinked_packages() {
   local metadata dist_info
   for metadata in .venv/lib/python3*/site-packages/*.dist-info/METADATA; do
@@ -58,9 +55,7 @@ case "$1" in
     shift
     (
       cd "$SCRIPT_DIR" || exit 1
-      # The uv link mode, by precedence: a --link-mode argument (launch-slurm
-      # passes symlink for run folders), UV_LINK_MODE, the HPC config, and
-      # finally pyproject.toml's symlink.
+      # Link mode: --link-mode argument > UV_LINK_MODE > HPC config > pyproject.toml.
       link_mode=""
       if [[ "$*" == *--link-mode* ]]; then
         :
@@ -75,7 +70,7 @@ case "$1" in
           install_sync_hooks
         fi
       fi
-      # Packages still installed as symlinks get reinstalled in the chosen mode.
+      # Reinstall symlinked packages in the chosen link mode.
       relink=()
       if [[ -n "$link_mode" && "$link_mode" != symlink ]]; then
         packages=()

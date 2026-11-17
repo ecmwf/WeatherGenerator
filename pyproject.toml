@@ -170,10 +170,6 @@ enable = ["W0201", "W0141"]
 # Also, trying to resolve some permissions issue, see 44.
 # symlink: faster than copy (ex: torch), but leads to files being deleted
 # when the cache is in SCRATCH with a deletion policy.
-# HPCs can set their own mode for clone venvs (uv_link_mode in
-# WeatherGenerator-private's hpc/<hpc>/config/paths.yml, e.g. hardlink on
-# JUPITER), applied by scripts/actions.sh sync. UV_LINK_MODE, if set,
-# overrides both (not recommended).
 link-mode = "symlink"
 # This guarantees that the build is deterministic and will not be impacted
 # by future releases of dependencies or sub-dependencies.
@@ -187,11 +183,8 @@ exclude-newer-package = {certifi = false}
 # torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
 override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]
 
-# The exact uv version required. Pinned because each uv version keeps its
-# own cache buckets: on a shared cache, mixed versions download and unpack
-# the same wheels (e.g. torch) once per version. The format of uv.lock also
-# changes over revisions. Keep in sync with UV_VERSION in
-# .github/workflows/ci.yml and ci/cscs.yaml.
+# Pinned to avoid many uv cache buckets (one per uv version).
+# Keep in sync with UV_VERSION in .github/workflows/ci.yml and ci/cscs.yaml.
 required-version = "==0.13.7"
 
 # The supported environments
