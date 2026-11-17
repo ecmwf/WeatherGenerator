@@ -27,7 +27,7 @@ from scipy.stats import wasserstein_distance as wd
 
 from weathergen.evaluate.plotting.animations import _build_single_animation, duration_of, videos_of
 from weathergen.evaluate.plotting.plot_utils import apply_font_settings, build_plotter_cfg
-from weathergen.evaluate.utils.array_utils import select_ensemble_data
+from weathergen.evaluate.utils.array_utils import select_ensemble_data, select_samples
 from weathergen.evaluate.utils.config_compat import parse_data_plots
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
@@ -223,7 +223,7 @@ def histogram_counts(
             for k, da in enumerate(_fields(tars, preds, ensemble).values()):
                 for c, channel in enumerate(channels):
                     for i, sample in enumerate(samples):
-                        v = np.asarray(da.sel(channel=channel, sample=sample)).ravel()
+                        v = np.asarray(select_samples(da.sel(channel=channel), [sample])).ravel()
                         v = v[~np.isnan(v)]
                         counts[i, f, c, r, k] = np.histogram(v, bins=edges[channel])[0]
                         statistics[i, f, c, r, k] = _mergeable_statistics(v)

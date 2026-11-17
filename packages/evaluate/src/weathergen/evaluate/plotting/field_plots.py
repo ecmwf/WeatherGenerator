@@ -36,7 +36,7 @@ from weathergen.evaluate.plotting.plot_utils import (
 )
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.timeseries import Timeseries
-from weathergen.evaluate.utils.array_utils import select_ensemble_data
+from weathergen.evaluate.utils.array_utils import select_ensemble_data, select_samples
 from weathergen.evaluate.utils.config_compat import parse_data_plots
 
 _logger = logging.getLogger(__name__)
@@ -309,7 +309,7 @@ def plot_data(
         ).assign_attrs(runplot_dir=str(reader.runplot_dir))
     if plot_timeseries:
         statistics["region_means"] = Timeseries(
-            {fs: da.sel(sample=samples) for fs, da in da_preds.items()},
-            {fs: da.sel(sample=samples) for fs, da in da_tars.items()},
+            {fs: select_samples(da, samples) for fs, da in da_preds.items()},
+            {fs: select_samples(da, samples) for fs, da in da_tars.items()},
         ).region_means(plotter_cfg["regions"], channels)
     return statistics

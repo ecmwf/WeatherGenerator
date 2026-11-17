@@ -88,6 +88,14 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
     return da
 
 
+def select_samples(da: xr.DataArray, samples: list) -> xr.DataArray:
+    """The *samples* of a DataArray: along the ``sample`` dim of gridded data, or the points
+    tagged with them when ``sample`` is a coordinate on ``ipoint`` (scatter data)."""
+    if "sample" in da.dims:
+        return da.sel(sample=samples)
+    return da.where(da.sample.isin(samples), drop=True)
+
+
 def select_ensemble_data(da: xr.DataArray, ens):
     """Return ensemble member, mean or std view of a DataArray."""
     if "ens" not in da.dims:

@@ -73,9 +73,8 @@ class Timeseries:
                 if bbox is not None:
                     da_p = bbox.apply_mask(da_p)
                     da_t = bbox.apply_mask(da_t)
-                vt = da_p.valid_time.isel(ipoint=0).drop_vars("ipoint", errors="ignore")
-                preds_steps.append(da_p.mean(dim="ipoint").assign_coords(valid_time=vt))
-                tars_steps.append(da_t.mean(dim="ipoint").assign_coords(valid_time=vt))
+                preds_steps.append(_mean_per_sample(da_p))
+                tars_steps.append(_mean_per_sample(da_t))
             preds.append(
                 xr.concat(preds_steps, dim="forecast_step", coords="different", compat="equals")
             )
@@ -88,6 +87,23 @@ class Timeseries:
                 "target": xr.concat(tars, dim="region").assign_coords(region=list(regions)),
             }
         ).transpose("sample", "forecast_step", "channel", ..., "region")
+
+
+def _mean_per_sample(da: xr.DataArray) -> xr.DataArray:
+    """The mean over the points of each sample, with the sample's ``valid_time`` and
+    ``init_times``: along the ``sample`` dim of gridded data; by the ``sample`` coordinate
+    of the points of scatter data, whose valid time is the first observation's."""
+    if "sample" in da.dims:
+        vt = da.valid_time.isel(ipoint=0).drop_vars(["ipoint", "lat", "lon"], errors="ignore")
+        return da.mean(dim="ipoint").assign_coords(valid_time=vt)
+    da = da.drop_vars(["lat", "lon"], errors="ignore")  # of the points: nothing per sample
+    mean = da.groupby("sample").mean(dim="ipoint")
+    per_sample = {"valid_time": da.valid_time.groupby("sample").min()}
+    if "ipoint" in da.init_times.dims:
+        per_sample["init_times"] = da.init_times.groupby("sample").min()
+    else:  # one init time for all the points: the same for every sample
+        per_sample["init_times"] = ("sample", np.full(mean.sizes["sample"], da.init_times.values))
+    return mean.assign_coords(per_sample)
 
 
 def plot_timeseries(
