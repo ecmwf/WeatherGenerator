@@ -16,6 +16,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import xarray as xr
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
@@ -29,7 +30,7 @@ from weathergen.evaluate.distributed.chunking import (
     parse_distributed_config,
     windows,
 )
-from weathergen.evaluate.distributed.merge import in_window, merge_results
+from weathergen.evaluate.distributed.merge import in_window, merge_results, merge_timeseries
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
@@ -196,15 +197,17 @@ def _process_stream(
     metrics: dict[str, object],
     plot_score_options: dict[str, object],
     chunk: bool = False,
-) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict[int, dict]]:
+) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict[int, dict], xr.Dataset | None]:
     """
     Worker function for a single stream of a single run, or for one chunk of it.
 
-    Returns ``(run_id, stream, results, colour_ranges)`` with ``results[region][metric] ->
-    MetricResult``: the scores loaded from the JSON files, overridden by the ones computed
-    here, empty when the stream is not scored; and, for a chunk that loaded data, the
-    ``data_colour_ranges`` of that data per forecast step (empty otherwise), from which the
-    chunked run sets the colour ranges of the whole (run, stream).
+    Returns ``(run_id, stream, results, colour_ranges, timeseries)`` with
+    ``results[region][metric] -> MetricResult``: the scores loaded from the JSON files,
+    overridden by the ones computed here, empty when the stream is not scored; for a chunk
+    that loaded data, the ``data_colour_ranges`` of that data per forecast step (empty
+    otherwise), from which the chunked run sets the colour ranges of the whole (run,
+    stream); and the data timeseries (``Timeseries.region_means`` of the plotting samples)
+    when the stream's ``data_plots`` ask for them, else ``None``.
     Parameters
     ----------
 
@@ -236,7 +239,7 @@ def _process_stream(
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
-        return run_id, stream, {}, {}
+        return run_id, stream, {}, {}, None
 
     # Data plots, score maps and init-hour scores need the data: readers that load it only
     reads_data = type_ in ("zarr", "anemoi-target")
@@ -282,8 +285,9 @@ def _process_stream(
             )
 
     # Field plots: pass pre-loaded data if available, otherwise plot_data loads its own subset
+    timeseries = None
     if needs_plotting:
-        plot_stream_data(reader, stream, global_plotting_opts, output_data=output_data)
+        timeseries = plot_stream_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
     computed: dict[str, dict[str, MetricResult]] = {}
@@ -320,7 +324,7 @@ def _process_stream(
 
     for region, by_metric in computed.items():
         results.setdefault(region, {}).update(by_metric)
-    return run_id, stream, results, colour_ranges
+    return run_id, stream, results, colour_ranges, timeseries
 
 
 def cached_scores_and_metrics_to_compute(
@@ -447,7 +451,7 @@ def run_tasks(tasks: list[tuple]) -> list:
 
 def _run_stream_in_chunks(
     task: dict, sample_size: int | None, fstep_size: int | None, run_tasks=run_tasks
-) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict]:
+) -> tuple[str, str, dict[str, dict[str, MetricResult]], dict, xr.Dataset | None]:
     """``_process_stream`` of one (run, stream), as batches of chunk tasks.
 
     A task is ``(function, kwargs, description)``, the description being its log line for
@@ -456,7 +460,8 @@ def _run_stream_in_chunks(
     workers of an MPI run (``distributed.runner``).
 
     Scoring chunk tasks first (their results merged, the missing scores written), then the
-    plotting chunk tasks with the colour ranges of the whole (run, stream), then
+    plotting chunk tasks with the colour ranges of the whole (run, stream) (their data
+    timeseries merged), then
     ``finish_stream``: the score maps, one scoring window at a time with the colour ranges
     of the whole stream, and last the videos.  A run whose reader does not load data has
     nothing to chunk and goes through ``_process_stream`` as it is.
@@ -481,6 +486,7 @@ def _run_stream_in_chunks(
     computed: dict[str, dict[str, MetricResult]] = {}
     score_windows: list[list[int]] = []  # the forecast steps (sub-steps) of each scoring chunk
     chunk_ranges: list[dict[int, dict]] = []  # colour ranges per scoring chunk, per step
+    timeseries = None  # the region means of the plotting samples, merged over the chunks
     if stream_cfg.get("evaluation"):
         available = reader.check_availability(stream, mode="evaluation")
         if len(windows(available.samples, sample_size)) > 1:
@@ -557,12 +563,14 @@ def _run_stream_in_chunks(
             fstep_size,
             colour_ranges,
         )
-        run_tasks(
+        outputs = run_tasks(
             [
                 (_process_stream, t, _chunk_description(t, i, len(tasks)))
                 for i, t in enumerate(tasks)
             ]
         )
+        parts = [o[4] for o in outputs if o[4] is not None]
+        timeseries = merge_timeseries(parts) if parts else None
 
     # The spatial scores of a whole stream are too big for one task (GBs: an MPI message
     # must stay under 2 GiB): the maps are drawn one scoring window at a time, with the
@@ -593,7 +601,7 @@ def _run_stream_in_chunks(
             ]
         )
     run_tasks([(finish_stream, task, f"RUN {run_id} - {stream}: videos of the whole stream")])
-    return run_id, stream, results, {}
+    return run_id, stream, results, {}, timeseries
 
 
 def chunk_colour_ranges(
@@ -740,45 +748,54 @@ def build_stream_tasks(cfg: dict) -> list[dict]:
 
 
 def accumulate_stream_results(
-    stream_results: list[tuple[str, str, dict[str, dict[str, MetricResult]], dict]],
-) -> tuple[dict, dict]:
+    stream_results: list[tuple[str, str, dict[str, dict[str, MetricResult]], dict, object]],
+) -> tuple[dict, dict, dict]:
     """Nest the ``_process_stream`` results of all (run, stream) for the cross-run steps.
 
     Parameters
     ----------
     stream_results:
-        ``(run_id, stream, results[region][metric] -> MetricResult, colour_ranges)`` per
-        (run, stream), as ``_process_stream`` returns them.
+        ``(run_id, stream, results[region][metric] -> MetricResult, colour_ranges,
+        timeseries)`` per (run, stream), as ``_process_stream`` returns them.
 
     Returns
     -------
-    tuple[dict, dict]
-        ``scores_dict[metric][region][stream][run_id] -> MetricResult.score`` and
-        ``init_hour_scores`` with the same nesting for ``MetricResult.by_init_hour``.
+    tuple[dict, dict, dict]
+        ``scores_dict[metric][region][stream][run_id] -> MetricResult.score``,
+        ``init_hour_scores`` with the same nesting for ``MetricResult.by_init_hour``, and
+        ``timeseries[stream][run_id] -> Dataset`` for the (run, stream) that returned one.
     """
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     # init_hour_scores[metric][region][stream][run_id] = xr.DataArray(init_hour, forecast_step, ...)
     init_hour_scores: dict = {}
-    for _run_id, _stream, results, _colour_ranges in stream_results:
+    timeseries: dict = {}
+    for run_id, stream, results, _colour_ranges, stream_timeseries in stream_results:
         for metric, regions_dict in results_to_dict(results, "score").items():
             for region, streams_dict in regions_dict.items():
                 for stream_key, runs_dict in streams_dict.items():
                     scores_dict[metric][region][stream_key].update(runs_dict)
 
         merge(init_hour_scores, results_to_dict(results, "by_init_hour"))
-    return scores_dict, init_hour_scores
+        if stream_timeseries is not None:
+            timeseries.setdefault(stream, {})[run_id] = stream_timeseries
+    return scores_dict, init_hour_scores, timeseries
 
 
 def finalise(
-    cfg: dict, scores_dict: dict, init_hour_scores: dict, mlflow_client: MlflowClient | None
+    cfg: dict,
+    scores_dict: dict,
+    init_hour_scores: dict,
+    timeseries: dict,
+    mlflow_client: MlflowClient | None,
 ) -> None:
-    """Steps across runs, once all (run, stream) are done: MLflow upload and score plots.
+    """Steps across runs, once all (run, stream) are done: MLflow upload, score plots and
+    timeseries plots.
 
     Parameters
     ----------
     cfg:
         Configuration input stored as dictionary.
-    scores_dict, init_hour_scores:
+    scores_dict, init_hour_scores, timeseries:
         Output of ``accumulate_stream_results``.
     mlflow_client:
         Optional MLFlow client for uploading scores.
@@ -791,9 +808,9 @@ def finalise(
     if mlflow_client:
         upload_scores_to_mlflow(mlflow_client, runs, scores_dict, private_paths)
 
-    # verification plots across runs
-    if scores_dict:
-        plot_evaluation(cfg, scores_dict, init_hour_scores, summary_dir)
+    # verification and timeseries plots across runs
+    if scores_dict or timeseries:
+        plot_evaluation(cfg, scores_dict, init_hour_scores, timeseries, summary_dir)
 
 
 if __name__ == "__main__":

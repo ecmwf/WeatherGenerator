@@ -9,10 +9,12 @@
 
 """Plots of the prediction and target fields: maps, histograms and timeseries.
 
-They are drawn from the loaded data of one (run, stream) (``ReaderOutput``), so they can be
-drawn per chunk of samples and forecast steps.  The drawing itself is done by ``Plotter``
-and ``Timeseries``; the videos of the maps and histograms by ``animations``, once all the
-frames are written.
+The maps and histograms are drawn from the loaded data of one (run, stream)
+(``ReaderOutput``), so they can be drawn per chunk of samples and forecast steps; the
+drawing itself is done by ``Plotter``, the videos by ``animations`` once all the frames are
+written.  The timeseries are the region means of the data (``Timeseries.region_means``),
+which ``plot_data`` computes and returns per chunk; ``plot_timeseries`` draws them once all
+runs are done, every run on the same figure.
 """
 
 import logging
@@ -33,55 +35,11 @@ from weathergen.evaluate.plotting.plot_utils import (
     filter_set,
 )
 from weathergen.evaluate.plotting.plotter import Plotter
-from weathergen.evaluate.plotting.timeseries import Timeseries
+from weathergen.evaluate.plotting.timeseries import Timeseries, plot_single_timeseries
 from weathergen.evaluate.utils.array_utils import select_ensemble_data
 from weathergen.evaluate.utils.config_compat import parse_data_plots
 
 _logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Timeseries plots
-# ---------------------------------------------------------------------------
-
-
-def _dispatch_timeseries_plots(
-    da_preds: dict,
-    da_tars: dict,
-    output_dir: str,
-    stream: str,
-    regions: list[str],
-    run_id: str,
-    samples: dict,
-    channels: dict,
-    ensemble: list,
-    n_workers: int,
-) -> None:
-    """Build and dispatch timeseries plot tasks for all (channel, sample[, ens]) triples."""
-    data_ts = Timeseries(da_preds, da_tars)
-    has_ens = any("ens" in v.dims for v in da_preds.values())
-    ens_members = ensemble if has_ens else [None]
-    ts_tasks = [
-        {
-            "output_dir": output_dir,
-            "channel": str(channel),
-            "sample": sample,
-            "stream": stream,
-            "region": region,
-            "ens": ens,
-        }
-        for channel in channels
-        for sample in samples
-        for ens in ens_members
-        for region in regions
-    ]
-    calls = [delayed(data_ts.plot_single_timeseries)(**t) for t in ts_tasks]
-    dispatch_parallel(
-        calls,
-        n_workers=n_workers,
-        backend="loky",
-        desc=f"Timeseries {run_id} - {stream}",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +171,10 @@ def plot_data(
     stream: str,
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
-) -> None:
-    """Plot prediction/target maps, histograms and timeseries for a given run and stream.
+) -> xr.Dataset | None:
+    """Plot prediction/target maps and histograms for a given run and stream; the
+    timeseries (the region means of the plotting samples, ``Timeseries.region_means``) are
+    returned instead of drawn, ``None`` when ``timeseries`` is not in the ``data_plots``.
 
     The frames of the videos are drawn here; the videos themselves are built from them by
     ``animations.build_animations`` once all the frames of the run exist.
@@ -406,16 +366,80 @@ def plot_data(
             desc=f"Across-samples plots {run_id} - {stream}",
         )
 
-    if plot_timeseries:
-        _dispatch_timeseries_plots(
-            da_preds=da_preds,
-            da_tars=da_tars,
-            output_dir=output_dir,
-            stream=stream,
-            regions=plotter_cfg["regions"],
-            run_id=run_id,
-            samples=plot_sample_set,
-            channels=plot_channel_set,
-            ensemble=list(available_data.ensemble),
-            n_workers=num_plot_workers,
-        )
+    if not plot_timeseries:
+        return None
+    first = next(iter(da_tars.values()))
+    samples = filter_set(list(np.unique(first.sample.values)), plot_sample_set)
+    channels = filter_set(list(np.atleast_1d(first.channel.values)), plot_channel_set)
+    return Timeseries(
+        {fs: da.sel(sample=samples) for fs, da in da_preds.items()},
+        {fs: da.sel(sample=samples) for fs, da in da_tars.items()},
+    ).region_means(plotter_cfg["regions"], channels)
+
+
+def plot_timeseries(
+    cfg: dict, timeseries: dict[str, dict[str, xr.Dataset]], summary_dir: Path
+) -> None:
+    """The timeseries figures of all runs: one per (stream, region, channel, initialisation
+    time[, ensemble member]), with the region mean of every run's prediction and of the
+    target along the valid time, into ``summary_dir/<run_ids>/timeseries/``.
+
+    Parameters
+    ----------
+    cfg:
+        The evaluation config (``run_ids``, ``max_workers``).
+    timeseries:
+        ``timeseries[stream][run_id]``: the region means of the run's plotting samples
+        (``Timeseries.region_means``), as ``accumulate_stream_results`` nests them.
+    summary_dir:
+        The summary directory of the run.
+    """
+    output_dir = Path(summary_dir) / "_".join(sorted(cfg.run_ids.keys())) / "timeseries"
+    tasks = []
+    for stream, by_run in timeseries.items():
+        init_times = sorted({t for ds in by_run.values() for t in ds.init_times.values})
+        for init_time in init_times:
+            # the sample of this init time in each run that has it
+            at = {
+                run_id: ds.isel(sample=int(np.flatnonzero(ds.init_times.values == init_time)[0]))
+                for run_id, ds in by_run.items()
+                if (ds.init_times.values == init_time).any()
+            }
+            target_run = next(iter(at.values()))
+            for region in [str(r) for r in target_run.region.values]:
+                for channel in [str(c) for c in target_run.channel.values]:
+                    predictions = {
+                        run_id: ds.prediction.sel(region=region, channel=channel)
+                        for run_id, ds in at.items()
+                        if region in ds.region.values and channel in ds.channel.values
+                    }
+                    members = sorted(
+                        {
+                            str(e)
+                            for p in predictions.values()
+                            if "ens" in p.dims
+                            for e in p.ens.values
+                        }
+                    ) or [None]
+                    for ens in members:
+                        tasks.append(
+                            {
+                                "output_dir": output_dir,
+                                "channel": channel,
+                                "region": region,
+                                "stream": stream,
+                                "init_time": init_time,
+                                "predictions": predictions,
+                                "target": target_run.target.sel(region=region, channel=channel),
+                                "ens": ens,
+                            }
+                        )
+    if not tasks:
+        return
+    _logger.info(f"Timeseries: {len(tasks)} figure(s) of {len(timeseries)} stream(s).")
+    dispatch_parallel(
+        [delayed(plot_single_timeseries)(**t) for t in tasks],
+        n_workers=get_num_workers(check_process_headroom=True, max_workers=cfg.get("max_workers")),
+        backend="loky",
+        desc="Timeseries",
+    )

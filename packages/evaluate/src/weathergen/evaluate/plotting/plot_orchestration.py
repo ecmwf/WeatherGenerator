@@ -19,8 +19,10 @@ run loop.
 
 from pathlib import Path
 
+import xarray as xr
+
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
-from weathergen.evaluate.plotting.field_plots import plot_data
+from weathergen.evaluate.plotting.field_plots import plot_data, plot_timeseries
 from weathergen.evaluate.plotting.verification_plots import plot_scores
 
 
@@ -29,8 +31,9 @@ def plot_stream_data(
     stream: str,
     global_plotting_opts: dict,
     output_data: ReaderOutput | None = None,
-) -> None:
-    """Field plots of one (run, stream): maps, histograms and timeseries.
+) -> xr.Dataset | None:
+    """Field plots of one (run, stream): the maps and histograms are drawn, the timeseries
+    (the region means of the plotting samples) returned, ``None`` when not requested.
 
     Parameters
     ----------
@@ -43,13 +46,14 @@ def plot_stream_data(
     output_data : ReaderOutput | None
         Pre-loaded data; when provided ``reader.get_data()`` is skipped.
     """
-    plot_data(reader, stream, global_plotting_opts, output_data=output_data)
+    return plot_data(reader, stream, global_plotting_opts, output_data=output_data)
 
 
 def plot_evaluation(
-    cfg: dict, scores_dict: dict, init_hour_scores: dict, summary_dir: Path
+    cfg: dict, scores_dict: dict, init_hour_scores: dict, timeseries: dict, summary_dir: Path
 ) -> None:
-    """Verification plots of all runs, from the merged scores.
+    """Plots across all runs: the verification plots from the merged scores, the
+    timeseries from the merged region means.
 
     Parameters
     ----------
@@ -60,7 +64,13 @@ def plot_evaluation(
     init_hour_scores : dict
         Same nesting with the ``MetricResult.by_init_hour`` arrays; empty unless
         ``init_hour`` is requested.
+    timeseries : dict
+        ``timeseries[stream][run_id] -> Dataset`` (``Timeseries.region_means``); empty
+        unless a stream's ``data_plots`` has ``timeseries``.
     summary_dir : Path
         Directory to write plots to.
     """
-    plot_scores(cfg, scores_dict, init_hour_scores, summary_dir)
+    if scores_dict:
+        plot_scores(cfg, scores_dict, init_hour_scores, summary_dir)
+    if timeseries:
+        plot_timeseries(cfg, timeseries, summary_dir)
