@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import abc
 import logging
 
 import torch
@@ -22,10 +23,18 @@ from weathergen.utils.train_logger import Stage
 _logger = logging.getLogger(__name__)
 
 
-class LossLatentDiffusion(LossModuleBase):
+class LossLatentDiffusionBase(LossModuleBase, abc.ABC):
     """
-    Calculates loss in latent space.
+    Base of the latent diffusion losses (LossLatentDiffusion for diffusion.type edm,
+    LossFlowMatching for diffusion.type flow_matching): regresses the predicted clean latent
+    tokens against the target of DiffusionLatentTargetEncoder, per sample, weighted by the
+    per-sample noise level weight (during training only) and mapped to the space the loss is
+    computed in (see _to_loss_space).
     """
+
+    # diffusion.type this loss belongs to
+    diffusion_type: str
+    name: str
 
     def __init__(
         self,
@@ -39,10 +48,12 @@ class LossLatentDiffusion(LossModuleBase):
         self.cf = cf
         self.stage = stage
         self.device = device
-        self.name = "LossLatentDiff"
 
         self.diff_cf = self.cf.diffusion
-        self.sigma_data = self.diff_cf.sigma_data
+        assert self.diff_cf.get("type") == self.diffusion_type, (
+            f"{type(self).__name__} requires diffusion.type '{self.diffusion_type}', "
+            f"got {self.diff_cf.get('type')!r}"
+        )
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -56,31 +67,16 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.random_target = None
 
-    def _get_noise_weight(self, sigma):
-        # Select the per-noise-level loss weighting. The default "edm" weight is only
-        # balanced when the denoiser uses EDM preconditioning (c_skip/c_out). When the
-        # model predicts x0 directly (c_skip=0, c_out=1 in diffusion.denoise), that weight
-        # behaves like ~1/sigma^2 and lets trivial near-clean (low-sigma) samples dominate
-        # the gradient. The alternatives below are appropriate for direct x0-prediction.
-        weighting = self.diff_cf.get("loss_weighting", "edm")
-        if weighting == "edm":
-            # lambda(sigma) = (sigma^2 + sigma_data^2) / (sigma * sigma_data)^2
-            return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
-        elif weighting == "min_snr_gamma":
-            # Min-SNR-gamma weighting (Hang et al., 2023) for direct x0-prediction.
-            # SNR = sigma_data^2 / sigma^2; capping at gamma prevents low-noise samples
-            # from dominating while still down-weighting the untrained high-noise tail.
-            gamma = self.diff_cf.get("min_snr_gamma", 5.0)
-            snr = (self.sigma_data / sigma) ** 2
-            return torch.clamp(snr, max=gamma) / self.sigma_data**2
-        elif weighting == "uniform_x0":
-            # Uniform weight in x0-space, normalised by the data variance.
-            return torch.ones_like(sigma) / self.sigma_data**2
-        else:
-            raise ValueError(
-                f"Unknown diffusion.loss_weighting '{weighting}'. "
-                "Expected one of: 'edm', 'min_snr_gamma', 'uniform_x0'."
-            )
+    @abc.abstractmethod
+    def _get_noise_weight(self, sigma: torch.Tensor) -> torch.Tensor | None:
+        """Per-sample training loss weight (B,) for the per-sample noise level sigma (B,), or
+        None for an unweighted loss."""
+
+    def _to_loss_space(self, tokens: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+        """Map clean-latent tokens (B, H, D) to the space the loss is computed in, given the
+        per-sample noise level sigma (B,). Default: identity, i.e. regress x0 directly.
+        """
+        return tokens
 
     def _get_fstep_weights(self, forecast_steps):
         timestep_weight_config = self.cf.get("timestep_weight")
@@ -168,6 +164,8 @@ class LossLatentDiffusion(LossModuleBase):
             ctr_loss_fcts = 0
             # if forecast_offset==0, then the timepoints correspond.
             # Otherwise targets don't encode the source timestep, so we don't need to skip
+            target_tokens = self._to_loss_space(target_tokens, sigma)
+            pred_tokens = self._to_loss_space(pred_tokens, sigma)
             for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
                 loss_lfct = self._loss_per_loss_function(
                     loss_fct,
@@ -206,3 +204,50 @@ class LossLatentDiffusion(LossModuleBase):
             losses_all=losses_all,
             stddev_all={"latent": torch.tensor(torch.nan).to(self.device)},
         )
+
+
+class LossLatentDiffusion(LossLatentDiffusionBase):
+    """
+    EDM latent diffusion loss (diffusion.type edm), see EDMForecastEngine.
+    """
+
+    diffusion_type = "edm"
+    name = "LossLatentDiff"
+
+    def __init__(
+        self,
+        cf: DictConfig,
+        mode_cfg: DictConfig,
+        stage: Stage,
+        device: str,
+        **loss_fcts: dict,
+    ):
+        super().__init__(cf, mode_cfg, stage, device, **loss_fcts)
+        self.edm_cf = self.diff_cf.edm
+        self.sigma_data = self.edm_cf.sigma_data
+
+    def _get_noise_weight(self, sigma):
+        # Select the per-noise-level loss weighting. The default "edm" weight is only
+        # balanced when the denoiser uses EDM preconditioning (c_skip/c_out). When the
+        # model predicts x0 directly (c_skip=0, c_out=1 in EDMForecastEngine.denoise), that weight
+        # behaves like ~1/sigma^2 and lets trivial near-clean (low-sigma) samples dominate
+        # the gradient. The alternatives below are appropriate for direct x0-prediction.
+        weighting = self.edm_cf.get("loss_weighting", "edm")
+        if weighting == "edm":
+            # lambda(sigma) = (sigma^2 + sigma_data^2) / (sigma * sigma_data)^2
+            return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
+        elif weighting == "min_snr_gamma":
+            # Min-SNR-gamma weighting (Hang et al., 2023) for direct x0-prediction.
+            # SNR = sigma_data^2 / sigma^2; capping at gamma prevents low-noise samples
+            # from dominating while still down-weighting the untrained high-noise tail.
+            gamma = self.edm_cf.get("min_snr_gamma", 5.0)
+            snr = (self.sigma_data / sigma) ** 2
+            return torch.clamp(snr, max=gamma) / self.sigma_data**2
+        elif weighting == "uniform_x0":
+            # Uniform weight in x0-space, normalised by the data variance.
+            return torch.ones_like(sigma) / self.sigma_data**2
+        else:
+            raise ValueError(
+                f"Unknown diffusion.edm.loss_weighting '{weighting}'. "
+                "Expected one of: 'edm', 'min_snr_gamma', 'uniform_x0'."
+            )

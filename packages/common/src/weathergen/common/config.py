@@ -314,6 +314,61 @@ def _apply_fixes(config: Config) -> Config:
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
     config = _check_streams(config)
+    config = _check_diffusion(config)
+    return config
+
+
+# legacy flat diffusion keys of the EDM engine: legacy key -> key in diffusion.edm
+_LEGACY_EDM_KEYS = {
+    "sigma_data": "sigma_data",
+    "edm_preconditioning": "preconditioning",
+    "loss_weighting": "loss_weighting",
+    "min_snr_gamma": "min_snr_gamma",
+}
+_LEGACY_EDM_SAMPLER_KEYS = (
+    "rho",
+    "sigma_min",
+    "sigma_max",
+    "sigma_min_quantile",
+    "s_churn",
+    "s_min",
+    "s_max",
+    "s_noise",
+)
+
+
+def _check_diffusion(config: Config) -> Config:
+    """
+    Move the EDM options of configs without diffusion.type (which predate the flow-matching
+    engine) from the diffusion section to diffusion.edm, and set diffusion.type to edm.
+    """
+    diff_cf = config.get("diffusion", None)
+    if diff_cf is None or diff_cf.get("type", "edm") != "edm":
+        return config
+    config = config.copy()
+    with open_dict(config):
+        diff_cf = config.diffusion
+        set_type = "type" not in diff_cf
+        diff_cf.type = "edm"
+        moved = []
+        edm_cf = diff_cf.get("edm", None) or OmegaConf.create({})
+        for key, new_key in _LEGACY_EDM_KEYS.items():
+            if key in diff_cf:
+                edm_cf[new_key] = diff_cf.pop(key)
+                moved.append(key)
+        sampler_cf = diff_cf.get("sampler", None) or {}
+        for key in _LEGACY_EDM_SAMPLER_KEYS:
+            if key in sampler_cf:
+                if "sampler" not in edm_cf:
+                    edm_cf.sampler = {}
+                edm_cf.sampler[key] = sampler_cf.pop(key)
+                moved.append(f"sampler.{key}")
+        if len(edm_cf) > 0:
+            diff_cf.edm = edm_cf
+    if set_type or moved:
+        _logger.warning(
+            f"Legacy diffusion config: moved {moved} to diffusion.edm and set diffusion.type=edm."
+        )
     return config
 
 
@@ -445,6 +500,7 @@ def load_merge_configs(
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
+    c = _check_diffusion(c)
 
     return c
 

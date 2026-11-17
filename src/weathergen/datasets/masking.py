@@ -121,8 +121,15 @@ def sample_noise_level(rng: np.random.Generator, noise_level_cfg: dict) -> float
 
     log_uniform: log(sigma) ~ Uniform[log(sigma_min), log(sigma_max)]
     log_normal: log(sigma) ~ N(p_mean, p_std)
+    uniform: path time t ~ Uniform[t_min, t_max] (flow matching, condot path)
     """
     distribution = noise_level_cfg.get("distribution", "log_normal")
+    if distribution == "uniform":
+        # Flow matching: draw the path time t ~ Unif[t_min, t_max] directly at the
+        # source; the flow engine consumes noise_level as t (course Alg. 3).
+        return float(
+            rng.uniform(noise_level_cfg.get("t_min", 0.0), noise_level_cfg.get("t_max", 1.0))
+        )
     if distribution == "log_uniform":
         log_sigma = rng.uniform(
             np.log(noise_level_cfg["sigma_min"]), np.log(noise_level_cfg["sigma_max"])
