@@ -4,63 +4,89 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 PRIVATE_REPO_PATH="${WEATHERGEN_PRIVATE_REPO_PATH:-$SCRIPT_DIR/../WeatherGenerator-private}"
 
+# uv_link_mode from the HPC's config in WeatherGenerator-private (e.g. hardlink
+# on JUPITER); prints nothing if unset or not on a known HPC.
+hpc_uv_link_mode() {
+  local platform_env="$PRIVATE_REPO_PATH/hpc/platform-env.py"
+  [[ -x "$platform_env" ]] && "$platform_env" uv-link-mode 2>/dev/null
+}
+
+# Installs git hooks that re-sync the venv when a pull or branch switch changes
+# the dependencies (scripts/git-hooks/sync-venv.sh). Without them, `uv run`
+# would sync by itself with pyproject.toml's symlink mode. Hooks of other
+# origin are left alone.
+install_sync_hooks() {
+  local hooks_dir hook file
+  hooks_dir=$(git rev-parse --git-path hooks 2>/dev/null) || return
+  mkdir -p "$hooks_dir"
+  for hook in post-merge post-rewrite post-checkout; do
+    file="$hooks_dir/$hook"
+    if [[ -e "$file" ]] && ! grep -q weathergen-sync-venv "$file"; then
+      echo "Not installing the $hook hook: $file exists." >&2
+      continue
+    fi
+    hook_stub "$hook" > "$file"
+    chmod +x "$file"
+  done
+}
+
+# A hook that runs the checked-out commit's sync-venv.sh, if it has one.
+hook_stub() {
+  cat <<EOF
+#!/bin/sh
+# weathergen-sync-venv: installed by scripts/actions.sh sync
+top=\$(git rev-parse --show-toplevel) || exit 0
+f="\$top/scripts/git-hooks/sync-venv.sh"
+[ -x "\$f" ] && exec "\$f" $1 "\$@"
+exit 0
+EOF
+}
+
+# Names of the venv's packages that are installed as symlinks into the cache.
+symlinked_packages() {
+  local metadata dist_info
+  for metadata in .venv/lib/python3*/site-packages/*.dist-info/METADATA; do
+    [[ -L "$metadata" ]] || continue
+    dist_info=$(basename "$(dirname "$metadata")")
+    echo "${dist_info%%-*}"
+  done
+}
+
 case "$1" in
   sync)
-    # Extra arguments go to uv sync (launch-slurm passes --link-mode=symlink
-    # for run folders).
+    # Extra arguments go to uv sync.
     shift
     (
       cd "$SCRIPT_DIR" || exit 1
-      # uv link mode, in order of precedence: a --link-mode argument
-      # (launch-slurm passes symlink for run folders), UV_LINK_MODE from the
-      # shell (not recommended, but respected), uv_link_mode in the HPC's
-      # paths.yml in WeatherGenerator-private (e.g. hardlink on JUPITER),
-      # pyproject.toml's symlink.
+      # The uv link mode, by precedence: a --link-mode argument (launch-slurm
+      # passes symlink for run folders), UV_LINK_MODE, the HPC config, and
+      # finally pyproject.toml's symlink.
       link_mode=""
       if [[ "$*" == *--link-mode* ]]; then
         :
       elif [[ -n "${UV_LINK_MODE:-}" ]]; then
         link_mode="$UV_LINK_MODE"
         echo "uv link mode from UV_LINK_MODE in your environment: $link_mode"
-      elif [[ -x "$PRIVATE_REPO_PATH/hpc/platform-env.py" ]]; then
-        link_mode=$("$PRIVATE_REPO_PATH/hpc/platform-env.py" uv-link-mode 2>/dev/null)
+      else
+        link_mode=$(hpc_uv_link_mode)
         if [[ -n "$link_mode" ]]; then
           echo "uv link mode from the HPC config: $link_mode"
           export UV_LINK_MODE="$link_mode"
-          # `uv run` doesn't see the HPC config: git hooks re-sync after a pull
-          # or branch switch when dependencies changed, so that `uv run` has
-          # nothing to sync (scripts/git-hooks/sync-venv.sh). Hooks of other
-          # origin are left alone.
-          hooks_dir=$(git rev-parse --git-path hooks 2>/dev/null)
-          if [[ -n "$hooks_dir" ]]; then
-            mkdir -p "$hooks_dir"
-            for h in post-merge post-rewrite post-checkout; do
-              if [[ -e "$hooks_dir/$h" ]] && ! grep -q weathergen-sync-venv "$hooks_dir/$h"; then
-                echo "Not installing the $h hook: $hooks_dir/$h exists." >&2
-                continue
-              fi
-              printf '%s\n' '#!/bin/sh' \
-                '# weathergen-sync-venv: installed by scripts/actions.sh sync' \
-                'top=$(git rev-parse --show-toplevel) || exit 0' \
-                'f="$top/scripts/git-hooks/sync-venv.sh"' \
-                "[ -x \"\$f\" ] && exec \"\$f\" $h \"\$@\"" \
-                'exit 0' > "$hooks_dir/$h"
-              chmod +x "$hooks_dir/$h"
-            done
-          fi
+          install_sync_hooks
         fi
       fi
-      # Packages installed as symlinks (by an older sync, or by a sync that
-      # `uv run` did by itself) are reinstalled in the chosen mode.
+      # Packages still installed as symlinks get reinstalled in the chosen mode.
       relink=()
       if [[ -n "$link_mode" && "$link_mode" != symlink ]]; then
-        for m in .venv/lib/python3*/site-packages/*.dist-info/METADATA; do
-          [[ -L "$m" ]] || continue
-          d=$(basename "$(dirname "$m")")
-          relink+=(--reinstall-package "${d%%-*}")
-        done
-        if (( ${#relink[@]} )); then
-          echo "Relinking $(( ${#relink[@]} / 2 )) symlinked packages as $link_mode"
+        packages=()
+        while read -r package; do
+          packages+=("$package")
+        done < <(symlinked_packages)
+        if (( ${#packages[@]} )); then
+          echo "Relinking ${#packages[@]} symlinked packages as $link_mode"
+          for package in "${packages[@]}"; do
+            relink+=(--reinstall-package "$package")
+          done
         fi
       fi
       # Creates a virtual environment without checking the integrity of the cache.
