@@ -96,7 +96,8 @@ def plot_timeseries(
     """The timeseries figures of all runs from their ``region_means``, merged over the
     chunks: one per (stream, region, channel, initialisation time[, ensemble member]), with
     the region mean of every run's prediction in its colour and of the target dashed along
-    the valid time, into ``summary_dir/<run_ids>/timeseries/``.
+    the valid time, into ``summary_dir/<run_ids>/timeseries/``.  Runs are matched by
+    initialisation time; an init time that only some runs have is drawn with those.
 
     Parameters
     ----------
@@ -113,68 +114,76 @@ def plot_timeseries(
     matplotlib.use("Agg")
     n_figures = 0
     for stream, by_run in timeseries.items():
-        init_times = sorted({t for ds in by_run.values() for t in ds.init_times.values})
-        for init_time in init_times:
-            # the sample of this init time in each run that has it
-            at = {
-                run_id: ds.isel(sample=int(np.flatnonzero(ds.init_times.values == init_time)[0]))
-                for run_id, ds in by_run.items()
-                if (ds.init_times.values == init_time).any()
-            }
-            target_run = next(iter(at.values()))
-            init = np.datetime_as_string(np.datetime64(init_time), unit="m")
-            for region in [str(r) for r in target_run.region.values]:
-                for channel in [str(c) for c in target_run.channel.values]:
+        for init_time in sorted({t for ds in by_run.values() for t in ds.init_times.values}):
+            at = _runs_at(by_run, init_time)
+            first = next(iter(at.values()))
+            for region in [str(r) for r in first.region.values]:
+                for channel in [str(c) for c in first.channel.values]:
                     predictions = {
                         run_id: ds.prediction.sel(region=region, channel=channel)
                         for run_id, ds in at.items()
                         if region in ds.region.values and channel in ds.channel.values
                     }
-                    target = target_run.target.sel(region=region, channel=channel)
-                    valid_times = np.atleast_1d(target.valid_time.values)
-                    members = sorted(
-                        {
-                            e
-                            for p in predictions.values()
-                            if "ens" in p.dims
-                            for e in p.ens.values.tolist()
-                        }
-                    ) or [None]
-                    for ens in members:
-                        has_ens = ens is not None and ens != "mean"
-                        fig, ax = plt.subplots(figsize=(15, 7))
-                        for run_id, prediction in predictions.items():
-                            if ens is not None and "ens" in prediction.dims:
-                                prediction = prediction.sel(ens=ens)
-                            label = run_id if not has_ens else f"{run_id} (ens {ens})"
-                            ax.plot(valid_times, np.atleast_1d(prediction.values), label=label)
-                        ax.plot(
-                            valid_times,
-                            np.atleast_1d(target.values),
-                            label=stream,
-                            linestyle="--",
-                            color="k",
+                    target = first.target.sel(region=region, channel=channel)
+                    for ens in _members(predictions):
+                        _draw(
+                            output_dir, stream, region, channel, init_time, predictions, target, ens
                         )
-                        fig.suptitle(
-                            f"Timeseries Average - {region.capitalize()} - {stream} - "
-                            f"initialised {init}",
-                            fontsize="x-large",
-                            fontweight="bold",
-                        )
-                        ax.set_ylabel(channel)
-                        ax.set_xlabel("Valid Time")
-                        ax.legend()
-                        day_interval = max(1, len(valid_times) // 20)
-                        ax.xaxis.set_major_locator(
-                            matplotlib.dates.DayLocator(interval=day_interval)
-                        )
-                        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter("%Y-%m-%d"))
-                        ax.grid(True, linestyle="--", alpha=0.5)
-                        fig.autofmt_xdate()
-                        fname = f"timeseries_{region}_{stream}_{channel}_{init.replace(':', '')}"
-                        if has_ens:
-                            fname += f"_ens_{ens}"
-                        fig.savefig(output_dir / f"{fname}.png", bbox_inches="tight")
-                        plt.close(fig)
                         n_figures += 1
     _logger.info(f"Timeseries: {n_figures} figure(s) of {len(timeseries)} stream(s).")
+
+
+def _runs_at(by_run: dict[str, xr.Dataset], init_time) -> dict[str, xr.Dataset]:
+    """The sample of *init_time* in each run that has it (the first when a run has several)."""
+    return {
+        run_id: ds.isel(sample=int(np.flatnonzero(ds.init_times.values == init_time)[0]))
+        for run_id, ds in by_run.items()
+        if (ds.init_times.values == init_time).any()
+    }
+
+
+def _members(predictions: dict[str, xr.DataArray]) -> list:
+    """The ensemble members to draw, one figure each; ``[None]`` without an ``ens`` dim."""
+    members = {e for p in predictions.values() if "ens" in p.dims for e in p.ens.values.tolist()}
+    return sorted(members) or [None]
+
+
+def _draw(
+    output_dir: Path,
+    stream: str,
+    region: str,
+    channel: str,
+    init_time,
+    predictions: dict[str, xr.DataArray],
+    target: xr.DataArray,
+    ens,
+) -> None:
+    """One figure: every run's prediction (member *ens* when the predictions have members)
+    and the target along the valid time of one initialisation time."""
+    valid_times = np.atleast_1d(target.valid_time.values)
+    has_ens = ens is not None and ens != "mean"
+    init = np.datetime_as_string(np.datetime64(init_time), unit="m")
+    fig, ax = plt.subplots(figsize=(15, 7))
+    for run_id, prediction in predictions.items():
+        if ens is not None and "ens" in prediction.dims:
+            prediction = prediction.sel(ens=ens)
+        label = run_id if not has_ens else f"{run_id} (ens {ens})"
+        ax.plot(valid_times, np.atleast_1d(prediction.values), label=label)
+    ax.plot(valid_times, np.atleast_1d(target.values), label=stream, linestyle="--", color="k")
+    fig.suptitle(
+        f"Timeseries Average - {region.capitalize()} - {stream} - initialised {init}",
+        fontsize="x-large",
+        fontweight="bold",
+    )
+    ax.set_ylabel(channel)
+    ax.set_xlabel("Valid Time")
+    ax.legend()
+    ax.xaxis.set_major_locator(matplotlib.dates.DayLocator(interval=max(1, len(valid_times) // 20)))
+    ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter("%Y-%m-%d"))
+    ax.grid(True, linestyle="--", alpha=0.5)
+    fig.autofmt_xdate()
+    fname = f"timeseries_{region}_{stream}_{channel}_{init.replace(':', '')}"
+    if has_ens:
+        fname += f"_ens_{ens}"
+    fig.savefig(output_dir / f"{fname}.png", bbox_inches="tight")
+    plt.close(fig)

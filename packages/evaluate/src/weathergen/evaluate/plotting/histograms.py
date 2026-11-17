@@ -40,76 +40,68 @@ def histogram_counts(
 ) -> xr.Dataset:
     """The across-samples histograms as per-sample counts: the ``histogram_counts`` statistic.
 
-    Per (sample, forecast step, channel, region) the counts of the target and, per ensemble
-    tag (a member, the mean or the std, as ``select_ensemble_data`` names them in the file
-    names), of the prediction on the channel's bins (``Plotter.histogram_bins`` of the
-    channel's ``vmin`` / ``vmax`` in *ranges*: the same edges in every chunk), with the
-    count, min, max and sums of the values, squares and cubes for the statistics panel.
-    Summed over the samples, these draw the across-samples histogram of the whole stream
-    (``plot_histograms_across_samples``), chunked or not.  ``plot_data`` records the run's plot
-    directory in the attrs (``runplot_dir``), where the figures go.
+    Per (sample, forecast step, channel, region) and field, the target or a prediction tag
+    (a member, the mean or the std, as ``select_ensemble_data`` names them in the file
+    names), the ``counts`` on the channel's bins (``histogram_bins`` of the channel's
+    ``vmin`` / ``vmax`` in *ranges*: the same ``edges`` in every chunk) and the
+    ``statistics`` that merge by summing (``_mergeable_statistics``).  Summed over the
+    samples, these draw the across-samples histogram of the whole stream
+    (``plot_histograms_across_samples``), chunked or not.  ``plot_data`` records the run's
+    plot directory in the attrs (``runplot_dir``), where the figures go.
     """
-    bins = {}
-    for channel in channels:
-        var_range = ranges.get(channel, {})
-        values = np.concatenate(
-            [np.asarray(da.sel(channel=channel)).ravel() for da in da_tars.values()]
-            + [np.asarray(da.sel(channel=channel)).ravel() for da in da_preds.values()]
-        )
-        bins[channel] = histogram_bins(
-            (var_range.get("vmin"), var_range.get("vmax")), n_bins, values
-        )
-    first = next(iter(da_preds.values()))
-    tags = []
-    for ens in ensemble:
-        if ens in ("mean", "std"):
-            tags.append(f"preds_ens_{ens}")
-        else:
-            tags.append("preds" if "ens" not in first.dims else f"preds_ens_{ens}")
+    edges = {c: _bins(da_tars, da_preds, c, ranges.get(c, {}), n_bins) for c in channels}
     fsteps = list(da_tars)
-    stats = ["count", "min", "max", "sum", "sum2", "sum3"]
-    shape = (len(samples), len(fsteps), len(channels), len(regions))
-    target_counts = np.zeros(shape + (n_bins,))
-    target_moments = np.zeros(shape + (len(stats),))
-    pred_counts = np.zeros(shape + (len(tags), n_bins))
-    pred_moments = np.zeros(shape + (len(tags), len(stats)))
+    fields = list(_fields(da_tars[fsteps[0]], da_preds[fsteps[0]], ensemble))
+    counts = np.zeros((len(samples), len(fsteps), len(channels), len(regions), len(fields), n_bins))
+    statistics = np.zeros(counts.shape[:-1] + (6,))
     for f, fstep in enumerate(fsteps):
         for r, region in enumerate(regions):
             bbox = None if region == "global" else RegionBoundingBox.from_region_name(region)
             tars = da_tars[fstep] if bbox is None else bbox.apply_mask(da_tars[fstep])
             preds = da_preds[fstep] if bbox is None else bbox.apply_mask(da_preds[fstep])
-            for c, channel in enumerate(channels):
-                for i, sample in enumerate(samples):
-                    v = np.asarray(tars.sel(channel=channel, sample=sample)).ravel()
-                    v = v[~np.isnan(v)]
-                    target_counts[i, f, c, r] = np.histogram(v, bins=bins[channel])[0]
-                    target_moments[i, f, c, r] = _mergeable_statistics(v)
-                for t, ens in enumerate(ensemble):
-                    preds_ens = select_ensemble_data(preds, ens)
+            for k, da in enumerate(_fields(tars, preds, ensemble).values()):
+                for c, channel in enumerate(channels):
                     for i, sample in enumerate(samples):
-                        v = np.asarray(preds_ens.sel(channel=channel, sample=sample)).ravel()
+                        v = np.asarray(da.sel(channel=channel, sample=sample)).ravel()
                         v = v[~np.isnan(v)]
-                        pred_counts[i, f, c, r, t] = np.histogram(v, bins=bins[channel])[0]
-                        pred_moments[i, f, c, r, t] = _mergeable_statistics(v)
-    dims = ("sample", "forecast_step", "channel", "region")
+                        counts[i, f, c, r, k] = np.histogram(v, bins=edges[channel])[0]
+                        statistics[i, f, c, r, k] = _mergeable_statistics(v)
+    dims = ("sample", "forecast_step", "channel", "region", "field")
     return xr.Dataset(
-        {
-            "target_counts": (dims + ("bin",), target_counts),
-            "target_moments": (dims + ("stat",), target_moments),
-            "prediction_counts": (dims + ("tag", "bin"), pred_counts),
-            "prediction_moments": (dims + ("tag", "stat"), pred_moments),
-        },
+        {"counts": (dims + ("bin",), counts), "statistics": (dims + ("stat",), statistics)},
         coords={
             "sample": list(samples),
             "forecast_step": fsteps,
             "channel": list(channels),
             "region": list(regions),
-            "tag": tags,
+            "field": fields,
             "bin": np.arange(n_bins),
-            "stat": stats,
-            "edges": (("channel", "edge"), np.stack([bins[c] for c in channels])),
+            "stat": ["count", "min", "max", "sum", "sum2", "sum3"],
+            "edges": (("channel", "edge"), np.stack([edges[c] for c in channels])),
         },
     )
+
+
+def _bins(da_tars: dict, da_preds: dict, channel: str, var_range: dict, n_bins: int):
+    """The bin edges of *channel*: its configured range, else the range of the data."""
+    values = np.concatenate(
+        [
+            np.asarray(da.sel(channel=channel)).ravel()
+            for da in (*da_tars.values(), *da_preds.values())
+        ]
+    )
+    return histogram_bins((var_range.get("vmin"), var_range.get("vmax")), n_bins, values)
+
+
+def _fields(tars: xr.DataArray, preds: xr.DataArray, ensemble: list) -> dict[str, xr.DataArray]:
+    """The target and the prediction per ensemble entry, keyed as the file names tag them."""
+    fields = {"target": tars}
+    for ens in ensemble:
+        if ens in ("mean", "std") or "ens" in preds.dims:
+            fields[f"preds_ens_{ens}"] = select_ensemble_data(preds, ens)
+        else:
+            fields["preds"] = preds
+    return fields
 
 
 def _mergeable_statistics(v: np.typing.NDArray) -> list[float]:
@@ -125,9 +117,8 @@ def plot_histograms_across_samples(
 ) -> None:
     """The across-samples histograms of all runs from their ``histogram_counts``, merged
     over the chunks: per (run, stream) one figure per (forecast step, channel, region,
-    ensemble tag) under the run's plot directory, the counts and the statistics summed over
-    the samples (the median and the Wasserstein distance read off the binned counts), then
-    their video when the stream's ``data_plots`` ask for one.
+    prediction tag) under the run's plot directory, the counts and the statistics summed
+    over the samples, then their video when the stream's ``data_plots`` ask for one.
 
     Parameters
     ----------
@@ -152,71 +143,63 @@ def plot_histograms_across_samples(
                 plotter.update_data_selection(
                     {"sample": "all_samples", "stream": stream, "forecast_step": int(fstep)}
                 )
-                hist_output_dir = plotter.get_hist_output_dir()
-                hist_output_dir.mkdir(parents=True, exist_ok=True)
-                at_step = histogram.sel(forecast_step=fstep).sum("sample", keep_attrs=True)
-                extrema = histogram.sel(forecast_step=fstep)
-                for region in histogram.region.values:
-                    for channel in histogram.channel.values:
-                        bins = histogram.edges.sel(channel=channel).values
-                        centers = (bins[:-1] + bins[1:]) / 2
-                        target = at_step.sel(region=region, channel=channel)
-                        t_counts = target.target_counts.values
-                        t_s = _dist_stats_across_samples(
-                            target.target_moments,
-                            extrema.sel(region=region, channel=channel).target_moments,
-                            centers,
-                            t_counts,
-                        )
-                        for tag in histogram.tag.values:
-                            pred = target.sel(tag=tag)
-                            p_counts = pred.prediction_counts.values
-                            p_s = _dist_stats_across_samples(
-                                pred.prediction_moments,
-                                extrema.sel(
-                                    region=region, channel=channel, tag=tag
-                                ).prediction_moments,
-                                centers,
-                                p_counts,
-                            )
-                            w_dist = wd(centers, centers, u_weights=t_counts, v_weights=p_counts)
-                            name = plotter.draw_histogram(
-                                bins,
-                                t_counts,
-                                p_counts,
-                                t_s,
-                                p_s,
-                                w_dist,
-                                hist_output_dir,
-                                str(channel),
-                                tag=str(tag),
-                                region=str(region),
-                            )
-                            frames.append(hist_output_dir / f"{name}.{plotter.image_format}")
+                frames += _draw_step(plotter, histogram.sel(forecast_step=fstep))
             plotter.clean_data_selection()
-            spec = parse_data_plots(stream_cfg.get("plotting"))
-            if "across_samples" in spec.histogram_videos():
+            if "across_samples" in parse_data_plots(stream_cfg.get("plotting")).histogram_videos():
                 for video, video_frames in videos_of(sorted(frames), global_plotting_opts).items():
                     _build_single_animation(video_frames, video, duration_of(global_plotting_opts))
 
 
-def _dist_stats_across_samples(
-    summed, per_sample, centers: np.typing.NDArray, counts: np.typing.NDArray
-) -> DistStats:
-    """``DistStats`` of the samples together: the sums from *summed* (``stat`` dim), the min
-    and max over the samples from *per_sample*, the median from the *counts* on *centers*."""
+def _draw_step(plotter: Plotter, step: xr.Dataset) -> list[Path]:
+    """The figures of one forecast step, one per (region, channel, prediction tag): the
+    target against the prediction, from the counts summed over the samples.  The frames."""
+    hist_output_dir = plotter.get_hist_output_dir()
+    hist_output_dir.mkdir(parents=True, exist_ok=True)
+    frames = []
+    for region in step.region.values:
+        for channel in step.channel.values:
+            bins = step.edges.sel(channel=channel).values
+            centers = (bins[:-1] + bins[1:]) / 2
+            at = step.sel(region=region, channel=channel)
+            t_counts, t_s = _counts_and_dist_stats(at.sel(field="target"), centers)
+            for tag in [f for f in step.field.values if f != "target"]:
+                p_counts, p_s = _counts_and_dist_stats(at.sel(field=tag), centers)
+                w_dist = wd(centers, centers, u_weights=t_counts, v_weights=p_counts)
+                name = plotter.draw_histogram(
+                    bins,
+                    t_counts,
+                    p_counts,
+                    t_s,
+                    p_s,
+                    w_dist,
+                    hist_output_dir,
+                    str(channel),
+                    tag=str(tag),
+                    region=str(region),
+                )
+                frames.append(hist_output_dir / f"{name}.{plotter.image_format}")
+    return frames
+
+
+def _counts_and_dist_stats(field: xr.Dataset, centers: np.typing.NDArray):
+    """The counts of one field summed over the samples, and its ``DistStats``: the sums from
+    the summed ``statistics``, the min and max over the samples, the median read off the
+    counts on *centers* (the Wasserstein distance is read off the counts too)."""
+    counts = field.counts.sum("sample").values
+    summed = field.statistics.sum("sample")
     cumulative = np.cumsum(counts)
     median = (
         float(centers[np.searchsorted(cumulative, cumulative[-1] / 2)])
         if cumulative[-1]
         else np.nan
     )
-    return DistStats.from_moments(
+    stats = DistStats.from_moments(
         float(summed.sel(stat="count")),
-        float(per_sample.sel(stat="min").min()),
-        float(per_sample.sel(stat="max").max()),
+        float(field.statistics.sel(stat="min").min()),
+        float(field.statistics.sel(stat="max").max()),
         float(summed.sel(stat="sum")),
         float(summed.sel(stat="sum2")),
         float(summed.sel(stat="sum3")),
         median,
     )
+    return counts, stats
