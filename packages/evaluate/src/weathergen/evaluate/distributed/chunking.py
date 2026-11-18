@@ -33,9 +33,6 @@ _logger = logging.getLogger(__name__)
 def parse_distributed_config(cfg: dict) -> tuple[bool, int | None, int | None]:
     """``(enabled, sample window, forecast-step window)`` of the ``distributed`` block.
 
-    The block's ``workers`` (default 1) is read by ``run_chunked``: how many chunk tasks a
-    chunked run in one process runs at a time, each with its own ``max_workers`` threads.
-
     A window of ``None`` means one chunk along that dimension.  ``enabled: auto`` is
     ``False`` here; an MPI run resolves it to ``True`` when it has more than one rank.
     """
