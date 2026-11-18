@@ -378,7 +378,7 @@ def cached_scores_and_metrics_to_compute(
     for region, by_metric in stream_loaded_scores.items():
         for metric, score in by_metric.items():
             cached.setdefault(region, {})[metric] = MetricResult(
-                metric, region, stream, reader.run_id, score
+                metric, region, stream, reader.run_id, score, curves=score.attrs.pop("curves", None)
             )
 
     if recomputable_metrics:
@@ -749,7 +749,7 @@ def build_stream_tasks(cfg: dict) -> list[dict]:
 
 def accumulate_stream_results(
     stream_results: list[tuple[str, str, dict[str, dict[str, MetricResult]], dict, object]],
-) -> tuple[dict, dict, dict]:
+) -> tuple[dict, dict, dict, dict]:
     """Nest the ``_process_stream`` results of all (run, stream) for the cross-run steps.
 
     Parameters
@@ -762,12 +762,14 @@ def accumulate_stream_results(
     -------
     tuple[dict, dict, dict]
         ``scores_dict[metric][region][stream][run_id] -> MetricResult.score``,
-        ``init_hour_scores`` with the same nesting for ``MetricResult.by_init_hour``, and
+        ``init_hour_scores`` and ``curves`` with the same nesting for
+        ``MetricResult.by_init_hour`` and ``MetricResult.curves``, and
         ``statistics[name][stream][run_id] -> Dataset`` for the data statistics.
     """
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     # init_hour_scores[metric][region][stream][run_id] = xr.DataArray(init_hour, forecast_step, ...)
     init_hour_scores: dict = {}
+    curves: dict = {}
     statistics: dict = {}
     for run_id, stream, results, _colour_ranges, stream_statistics in stream_results:
         for metric, regions_dict in results_to_dict(results, "score").items():
@@ -776,15 +778,17 @@ def accumulate_stream_results(
                     scores_dict[metric][region][stream_key].update(runs_dict)
 
         merge(init_hour_scores, results_to_dict(results, "by_init_hour"))
+        merge(curves, results_to_dict(results, "curves"))
         for name, dataset in stream_statistics.items():
             statistics.setdefault(name, {}).setdefault(stream, {})[run_id] = dataset
-    return scores_dict, init_hour_scores, statistics
+    return scores_dict, init_hour_scores, curves, statistics
 
 
 def finalise(
     cfg: dict,
     scores_dict: dict,
     init_hour_scores: dict,
+    curves: dict,
     statistics: dict,
     mlflow_client: MlflowClient | None,
 ) -> None:
@@ -795,7 +799,7 @@ def finalise(
     ----------
     cfg:
         Configuration input stored as dictionary.
-    scores_dict, init_hour_scores, statistics:
+    scores_dict, init_hour_scores, curves, statistics:
         Output of ``accumulate_stream_results``.
     mlflow_client:
         Optional MLFlow client for uploading scores.
@@ -810,7 +814,7 @@ def finalise(
 
     # verification plots and plots across samples, across runs
     if scores_dict or statistics:
-        plot_evaluation(cfg, scores_dict, init_hour_scores, statistics, summary_dir)
+        plot_evaluation(cfg, scores_dict, init_hour_scores, curves, statistics, summary_dir)
 
 
 if __name__ == "__main__":

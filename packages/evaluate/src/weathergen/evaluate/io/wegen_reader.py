@@ -289,7 +289,12 @@ class WeatherGenReader(Reader):
 
             for score_version in data_dict["scores"]:
                 if score_version["attrs"] == parameters:
+                    curves = score_version.pop("curves", None)
+                    if curves is None and metric in ("psd", "qq_analysis"):
+                        return None  # a file of the old layout (curves in the attrs): recompute
                     score = xr.DataArray.from_dict(score_version)
+                    if curves is not None:
+                        score.attrs["curves"] = xr.Dataset.from_dict(curves)
                     break
         return score
 

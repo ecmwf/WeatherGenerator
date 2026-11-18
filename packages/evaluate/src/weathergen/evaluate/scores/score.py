@@ -1876,23 +1876,23 @@ class Scores:
         # Calculate overall Q-Q score (mean absolute deviation across all quantiles)
         overall_qq_score = qq_deviation.mean(dim="quantile")
 
-        # Store Q-Q data as xarray attributes for automatic JSON serialization
-        overall_qq_score.attrs.update(
+        # The quantiles travel as the score's ``curves``, one Dataset over the quantile
+        # levels and the other dims; the orchestration takes them out of the attrs.
+        overall_qq_score.attrs["curves"] = xr.Dataset(
             {
-                "p_quantiles": p_quantiles.values.tolist(),
-                "gt_quantiles": gt_quantiles.values.tolist(),
-                "qq_deviation": qq_deviation.values.tolist(),
-                "qq_deviation_normalized": qq_deviation_normalized.values.tolist(),
-                "extreme_low_mse": extreme_low_mse.values.tolist(),
-                "extreme_high_mse": extreme_high_mse.values.tolist(),
-                "quantile_levels": quantile_levels.tolist(),
+                "p_quantiles": p_quantiles,
+                "gt_quantiles": gt_quantiles,
+                "qq_deviation": qq_deviation,
+                "qq_deviation_normalized": qq_deviation_normalized,
+                "extreme_low_mse": extreme_low_mse,
+                "extreme_high_mse": extreme_high_mse,
+            },
+            attrs={
                 "extreme_percentiles": list(extreme_percentiles),
                 "iqr_percentiles": list(iqr_percentiles),
-            }
+            },
         )
-
-        _logger.info(f"Q-Q analysis completed with {len(overall_qq_score.attrs)} attributes")
-
+        _logger.info("Q-Q analysis completed")
         return overall_qq_score
 
     def calc_psd(
@@ -1979,39 +1979,29 @@ class Scores:
         other_dims = [d for d in gt.dims if d != spatial_dim]
         preserve_dims = [d for d in other_dims if d not in ("sample", "ens")]
 
+        # The spectra travel as the score's ``curves`` (a Dataset over the preserved dims and
+        # the wavenumber); the orchestration takes them out of the attrs.
         if not preserve_dims:
             gt_np, p_np = self._stack_for_psd(gt, p, spatial_dim, n_points)
-            slice_score, slice_attrs = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
+            slice_score, spectra = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
             score = xr.DataArray(slice_score)
-            score.attrs.update(slice_attrs)
-            score.attrs["psd_method"] = psd_method
+            if spectra:
+                score.attrs["curves"] = _psd_curves([spectra], (), {}, psd_method)
             return score
 
-        # Iterate over preserved dims (typically per channel)
         shape = tuple(gt.sizes[d] for d in preserve_dims)
         score_values = np.empty(shape)
-        all_attrs: dict = {}
-
+        all_spectra = []
         for idx in np.ndindex(*shape):
             sel = dict(zip(preserve_dims, idx, strict=False))
-            gt_slice = gt.isel(**sel)
-            p_slice = p.isel(**sel)
-            gt_np, p_np = self._stack_for_psd(gt_slice, p_slice, spatial_dim, n_points)
-
-            slice_score, slice_attrs = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
+            gt_np, p_np = self._stack_for_psd(gt.isel(**sel), p.isel(**sel), spatial_dim, n_points)
+            slice_score, spectra = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
             score_values[idx] = slice_score
-
-            key = "_".join(
-                str(gt.coords[d].values[i]) if d in gt.coords else str(i) for d, i in sel.items()
-            )
-            for k, v in slice_attrs.items():
-                all_attrs[f"{key}/{k}"] = v
-
+            all_spectra.append(spectra)
         coords = {d: gt.coords[d] for d in preserve_dims if d in gt.coords}
         score = xr.DataArray(score_values, dims=preserve_dims, coords=coords)
-        all_attrs["psd_method"] = psd_method
-        all_attrs["preserve_dims"] = preserve_dims
-        score.attrs.update(all_attrs)
+        if all(all_spectra):
+            score.attrs["curves"] = _psd_curves(all_spectra, shape, coords, psd_method)
         return score
 
     @staticmethod
@@ -2078,3 +2068,18 @@ class Scores:
             gt_np = gt.values.reshape(1, -1)
             p_np = p.values.reshape(1, -1)
         return gt_np, p_np
+
+
+def _psd_curves(spectra: list[dict], shape: tuple, coords: dict, psd_method: str) -> xr.Dataset:
+    """The PSD curves of the slices *spectra* (``compute_psd_score`` dicts, in ``np.ndindex``
+    order of *shape*) as one Dataset: ``psd_target`` and ``psd_prediction`` over the
+    preserved dims and ``wavenumber`` (the frequencies, the same for every slice)."""
+    dims = tuple(coords) + ("wavenumber",)
+    curves = {}
+    for name in ("psd_target", "psd_prediction"):
+        stacked = np.stack([np.asarray(sp[name]) for sp in spectra]).reshape(shape + (-1,))
+        curves[name] = xr.DataArray(stacked, dims=dims, coords=coords)
+    # the frequencies of the spectra (the fft path returns one more than the spectrum has)
+    n = curves["psd_target"].sizes["wavenumber"]
+    frequencies = np.asarray(spectra[0]["frequencies"])[:n]
+    return xr.Dataset(curves, coords={"wavenumber": frequencies}, attrs={"psd_method": psd_method})

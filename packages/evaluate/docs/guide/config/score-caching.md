@@ -37,3 +37,7 @@ Manual cache invalidation is still required for other changes, e.g.:
 
 - Climatology files
 - Underlying Zarr data changes without forecast-step changes
+
+The spectra of `psd` and the quantiles of `qq_analysis` are stored next to the scores, as
+`curves`. Files of these two metrics written before that layout (the arrays in the score's
+attributes) are not read: the metric is recomputed and the file rewritten.

@@ -49,9 +49,13 @@ class MetricResult:
         What the result belongs to.
     score
         Per-sample score, dims ``(sample, forecast_step, channel, ens)`` with a scalar
-        ``metric`` coordinate.  Its ``attrs`` are the metric parameters plus any
-        per-forecast-step payload a metric produced (``fstep_<n>/<key>``,
-        ``attr_fsteps``).  This is what the JSON score files store.
+        ``metric`` coordinate.  Its ``attrs`` are the metric parameters.  This is what the
+        JSON score files store, with the ``curves``.
+    curves
+        What some metrics draw besides the score, per forecast step: the spectra of ``psd``
+        (``psd_target`` / ``psd_prediction`` over ``channel`` and ``wavenumber``), the
+        quantiles of ``qq_analysis`` (over ``quantile`` and the other dims); ``None`` for
+        the other metrics.
     spatial
         Score aggregated over samples, dims ``(ipoint, forecast_step, channel[, ens])``
         with ``lat``/``lon`` on ``ipoint``.  ``None`` unless computed.
@@ -71,6 +75,7 @@ class MetricResult:
     score: xr.DataArray
     spatial: xr.DataArray | None = None
     by_init_hour: xr.DataArray | None = None
+    curves: xr.Dataset | None = None
 
 
 def results_to_dict(results: dict[str, dict[str, MetricResult]], field: str = "score") -> dict:
@@ -173,6 +178,7 @@ def _score_single_fstep(
     for metric_name, score in zip(valid_metric_names, valid_scores, strict=False):
         if score.attrs:
             metric_attrs[(int(fstep), metric_name)] = score.attrs.copy()
+            score.attrs.pop("curves", None)  # a Dataset: not for the concat below
 
     combined = xr.concat(
         valid_scores,
@@ -534,24 +540,19 @@ def store_metrics_for_region(
 
     region_results: dict[str, MetricResult] = {}
     for metric, parameters in metrics.items():
+        # the attrs are the parameters: what the JSON files match a cached score on
         metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
-
-        # Restore attrs from all fsteps, keyed by fstep so downstream code
-        # (plotting) can produce one plot per forecast step.
-        for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
-            if stored_metric == metric and attrs:
-                for k, v in attrs.items():
-                    metric_data.attrs[f"fstep_{_stored_fstep}/{k}"] = v
-        # Also store the list of fsteps that have attrs
-        attr_fsteps = sorted(
-            {fs for (fs, m) in all_metric_attrs if m == metric and all_metric_attrs[(fs, m)]}
+        # the per-step curves of the metric (psd, qq_analysis), concatenated over the steps
+        # (without the data's scalar coords such as lead_time, which the JSON files cannot hold)
+        per_step = [
+            attrs["curves"].reset_coords(drop=True).expand_dims(forecast_step=[fs])
+            for (fs, m), attrs in sorted(all_metric_attrs.items())
+            if m == metric and "curves" in attrs
+        ]
+        curves = xr.concat(per_step, dim="forecast_step") if per_step else None
+        region_results[metric] = MetricResult(
+            metric, region, stream, run_id, metric_data, curves=curves
         )
-        if attr_fsteps:
-            metric_data.attrs["attr_fsteps"] = attr_fsteps
-            _logger.debug(f"Stored per-fstep attributes for {metric}: fsteps={attr_fsteps}")
-
-        region_results[metric] = MetricResult(metric, region, stream, run_id, metric_data)
-
     return region_results
 
 
@@ -587,6 +588,8 @@ def metric_list_to_json(
                 / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
             )
             metric_data_dict = metric_data.to_dict()
+            if result.curves is not None:
+                metric_data_dict["curves"] = result.curves.to_dict()
 
             if save_path.exists():
                 _logger.debug(f"{save_path} already present")
