@@ -634,8 +634,12 @@ def metric_list_to_json(
                 _logger.debug(f"Saving results to new file {save_path}")
                 data_dict = {"eval_settings": eval_settings, "scores": [metric_data_dict]}
 
-            with open(save_path, "w") as f:
+            # written next to the file and moved into place: a failing dump leaves no
+            # truncated file for the next run to choke on
+            tmp_path = save_path.with_suffix(".json.tmp")
+            with open(tmp_path, "w") as f:
                 json.dump(data_dict, f, indent=4)
+            tmp_path.replace(save_path)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "
