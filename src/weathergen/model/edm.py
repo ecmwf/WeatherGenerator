@@ -107,12 +107,8 @@ class EDMForecastEngine(DiffusionForecastEngineBase):
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
 
-        # y is always the target to denoise (set by DiffusionLatentTargetEncoder.pre_compute)
+        # y is the clean latent to denoise
         y = tokens
-        assert y is not None, (
-            "diffusion_target_tokens not found in meta_info — "
-            "DiffusionLatentTargetEncoder.pre_compute must be called before training_forward"
-        )
 
         c = self._get_conditioning(meta_info)
 
