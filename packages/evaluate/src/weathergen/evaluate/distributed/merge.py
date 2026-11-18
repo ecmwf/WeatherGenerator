@@ -119,11 +119,18 @@ def _merge_curves(window: list[MetricResult], metric: str) -> xr.Dataset:
             else:
                 weights = [xr.DataArray(float(r.score.sizes["sample"])) for r in window]
             total = sum(weights)
-            mean = sum(p * w for p, w in zip(parts, weights, strict=True)) / total.where(total > 0)
-            merged[name] = mean.transpose(*first[name].dims).assign_attrs(first[name].attrs)
+            # rmse is the root of a mean of squares: averaged through its square, exactly;
+            # a mean of per-sample quantities (mae, bias, a spectrum) directly
+            power = 2 if metric == "rmse" else 1
+            mean = sum(p**power * w for p, w in zip(parts, weights, strict=True)) / total.where(
+                total > 0
+            )
+            merged[name] = (mean ** (1 / power)).transpose(*first[name].dims)
+            merged[name].attrs = first[name].attrs
     _logger.warning(
-        f"{metric}: the curves of {len(window)} sample chunks of a window were merged: "
-        "means over the samples averaged with the sample counts as weights."
+        f"{metric}: the curves of {len(window)} sample chunks of a window were merged: means "
+        "over the samples averaged with the sample counts as weights (exact for means and "
+        "rmse; approximate for ratio or correlation scores)."
     )
     return xr.Dataset(merged, attrs=first.attrs)
 

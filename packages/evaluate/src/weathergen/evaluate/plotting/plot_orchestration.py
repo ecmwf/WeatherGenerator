@@ -55,7 +55,6 @@ def plot_stream_data(
 def plot_evaluation(
     cfg: dict,
     scores_dict: dict,
-    init_hour_scores: dict,
     curves: dict,
     statistics: dict,
     summary_dir: Path,
@@ -69,9 +68,6 @@ def plot_evaluation(
         Configuration dictionary.
     scores_dict : dict
         ``scores_dict[metric][region][stream][run_id] -> DataArray`` (``MetricResult.score``).
-    init_hour_scores : dict
-        Same nesting with the ``by_init_hour`` curves of the results; empty unless
-        ``init_hour`` is requested.
     statistics : dict
         ``statistics[name][stream][run_id] -> Dataset``, the per-sample quantities of the
         plots across samples (``plot_data``) as ``accumulate_stream_results`` nests them:
@@ -84,7 +80,7 @@ def plot_evaluation(
         Directory to write plots to.
     """
     if scores_dict:
-        plot_scores(cfg, scores_dict, init_hour_scores, curves, summary_dir)
+        plot_scores(cfg, scores_dict, curves, summary_dir)
     if "region_means" in statistics:
         plot_timeseries(cfg, statistics["region_means"], summary_dir)
     if "histogram_counts" in statistics:

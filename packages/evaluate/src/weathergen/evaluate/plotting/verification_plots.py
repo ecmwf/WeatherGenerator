@@ -44,9 +44,7 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def plot_scores(
-    cfg: dict, scores_dict: dict, init_hour_scores: dict, curves: dict, summary_dir: Path
-) -> None:
+def plot_scores(cfg: dict, scores_dict: dict, curves: dict, summary_dir: Path) -> None:
     """Plot the scores of all runs: one figure per ``score_plots`` entry, metric and region.
 
     Parameters
@@ -55,11 +53,9 @@ def plot_scores(
         Configuration dictionary.
     scores_dict : dict
         ``scores_dict[metric][region][stream][run_id] -> DataArray`` (``MetricResult.score``).
-    init_hour_scores : dict
-        Same nesting with the ``by_init_hour`` curves of the results; empty unless
-        ``init_hour`` is requested.
     curves : dict
-        Same nesting with the ``MetricResult.curves`` of ``psd`` and ``qq_analysis``.
+        Same nesting with the ``MetricResult.curves``: ``by_init_hour`` for the init-hour
+        plots, the spectra of ``psd`` and the quantiles of ``qq_analysis``.
     summary_dir : Path
         Directory to write plots to.
     """
@@ -104,7 +100,13 @@ def plot_scores(
     do_scorecard = "scorecard" in _sp or eval_opt.get("score_cards", False)
     do_bar = "bar" in _sp or eval_opt.get("bar_plots", False)
     # by-init-hour scores are only computed when init_hour is requested (_process_stream)
-    do_init_hour = bool(init_hour_scores)
+    do_init_hour = any(
+        "by_init_hour" in ds
+        for by_region in curves.values()
+        for by_stream in by_region.values()
+        for by_run in by_stream.values()
+        for ds in by_run.values()
+    )
     # Drawn with raw matplotlib: own directory and dpi default until it goes through LinePlots.
     init_hour_dir = summary_dir / "_".join(runs) / "score_by_init_hour"
     init_hour_dpi = plt_opt.get("dpi_val", 150)
@@ -142,9 +144,7 @@ def plot_scores(
 
             if do_metric_plots:
                 if metric == "qq_analysis":
-                    quantile_plot_metric_region(
-                        metric, region, runs, scores_dict, curves, quantile_plotter
-                    )
+                    quantile_plot_metric_region(metric, region, runs, curves, quantile_plotter)
                 else:
                     lead_time_plot_metric_region(
                         metric, region, runs, scores_dict, plotter, print_summary
@@ -157,12 +157,12 @@ def plot_scores(
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if do_bar:
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
-            if do_init_hour and region in init_hour_scores.get(metric, {}):
+            if do_init_hour and region in curves.get(metric, {}):
                 init_hour_metric_region(
                     metric,
                     region,
                     runs,
-                    init_hour_scores,
+                    curves,
                     plot_cfg["image_format"],
                     init_hour_dpi,
                     init_hour_dir,
@@ -471,51 +471,53 @@ def quantile_plot_metric_region(
     metric: str,
     region: str,
     runs: dict,
-    scores_dict: dict,
     curves: dict,
     plotter: object,
 ) -> None:
     """
     Create quantile-quantile (Q-Q) plots for extreme value analysis for all streams
-    and channels for a given metric and region.
+    and channels for a given metric and region, from the ``curves`` of ``qq_analysis``
+    (``curves[metric][region][stream][run_id]``: the quantiles over ``quantile`` and the
+    other dims, averaged over those for the figure), every run on one figure.
 
     Parameters
     ----------
     metric: str
-        String specifying the metric to plot (should be 'qq_analysis')
+        String specifying the metric to plot
     region: str
         String specifying the region to plot
     runs: dict
         Dictionary containing the config for all runs
-    scores_dict : dict
-        The dictionary containing all computed metrics.
-    plotter:
-        Plotter object to handle the plotting part. Must have a qq_plot method.
+    curves: dict
+        ``curves[metric][region][stream][run_id] -> Dataset``
+    plotter: QuantilePlots
+        Plotter object to handle Q-Q plot creation.
     """
     streams_set = collect_streams(runs)
-    channels_set = collect_channels(scores_dict, metric, region, runs)
+    by_region = curves.get(metric, {}).get(region, {})
+    channels_set = sorted(
+        {
+            str(c)
+            for by_run in by_region.values()
+            for ds in by_run.values()
+            for c in ds.channel.values
+        }
+    )
 
     for stream in streams_set:
         for ch in channels_set:
             selected_data, labels, run_ids = [], [], []
             qq_full_data = []  # Store full Q-Q datasets for detailed plotting
 
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+            for run_id, data in by_region.get(stream, {}).items():
                 # skip if channel is missing
                 if ch not in np.atleast_1d(data.channel.values):
                     continue
-
-                # Select channel
                 data_for_channel = data.sel(channel=ch) if "channel" in data.dims else data
 
-                # Check for NaN
-                if data_for_channel.isnull().all():
-                    continue
-
-                # the quantiles of qq_analysis: its curves, averaged over the steps (and ens)
-                at = curves.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-                if at is not None:
-                    at = at.sel(channel=ch) if "channel" in at.dims else at
+                # the quantiles, averaged over the steps (and samples, ens) for the figure
+                at = data_for_channel
+                if "p_quantiles" in at:
                     extra = [d for d in at.dims if d != "quantile"]
                     at = at.mean(extra) if extra else at
                     qq_dataset = xr.Dataset(
@@ -623,7 +625,7 @@ def init_hour_metric_region(
     metric: str,
     region: str,
     runs: dict,
-    init_hour_scores: dict,
+    curves: dict,
     image_format: str,
     dpi_val: int,
     out_dir: Path,
@@ -640,8 +642,8 @@ def init_hour_metric_region(
         String specifying the region to plot
     runs: dict
         Dictionary containing the config for all runs
-    init_hour_scores : dict
-        ``init_hour_scores[metric][region][stream][run_id] -> DataArray`` with dims
+    curves : dict
+        ``curves[metric][region][stream][run_id] -> Dataset``; its ``by_init_hour`` has dims
         ``(init_hour, forecast_step, channel[, ens])`` (the ``by_init_hour`` curve).
     image_format : str
         Image format of the figures.
@@ -652,7 +654,10 @@ def init_hour_metric_region(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for stream, run_dict in init_hour_scores[metric][region].items():
+    for stream, by_run in curves[metric][region].items():
+        run_dict = {
+            run_id: ds["by_init_hour"] for run_id, ds in by_run.items() if "by_init_hour" in ds
+        }
         if not run_dict:
             continue
 
