@@ -70,7 +70,7 @@ def plot_evaluation(
     scores_dict : dict
         ``scores_dict[metric][region][stream][run_id] -> DataArray`` (``MetricResult.score``).
     init_hour_scores : dict
-        Same nesting with the ``MetricResult.by_init_hour`` arrays; empty unless
+        Same nesting with the ``by_init_hour`` curves of the results; empty unless
         ``init_hour`` is requested.
     statistics : dict
         ``statistics[name][stream][run_id] -> Dataset``, the per-sample quantities of the

@@ -56,7 +56,7 @@ def plot_scores(
     scores_dict : dict
         ``scores_dict[metric][region][stream][run_id] -> DataArray`` (``MetricResult.score``).
     init_hour_scores : dict
-        Same nesting with the ``MetricResult.by_init_hour`` arrays; empty unless
+        Same nesting with the ``by_init_hour`` curves of the results; empty unless
         ``init_hour`` is requested.
     curves : dict
         Same nesting with the ``MetricResult.curves`` of ``psd`` and ``qq_analysis``.
@@ -642,7 +642,7 @@ def init_hour_metric_region(
         Dictionary containing the config for all runs
     init_hour_scores : dict
         ``init_hour_scores[metric][region][stream][run_id] -> DataArray`` with dims
-        ``(init_hour, forecast_step, channel[, ens])`` (``MetricResult.by_init_hour``).
+        ``(init_hour, forecast_step, channel[, ens])`` (the ``by_init_hour`` curve).
     image_format : str
         Image format of the figures.
     dpi_val : int

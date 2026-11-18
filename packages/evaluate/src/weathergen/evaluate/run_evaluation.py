@@ -490,17 +490,6 @@ def _run_stream_in_chunks(
     statistics: dict = {}  # the data statistics of the plotting samples, merged over the chunks
     if stream_cfg.get("evaluation"):
         available = reader.check_availability(stream, mode="evaluation")
-        if len(windows(available.samples, sample_size)) > 1:
-            # means over the samples: not merged across sample chunks (merge_results)
-            for option, name in (
-                ("plot_score_maps", "score maps"),
-                ("plot_score_init_hour", "init-hour scores"),
-            ):
-                if plot_score_options.get(option, False):
-                    _logger.warning(
-                        f"RUN {run_id} - {stream}: {name} are skipped when the samples are chunked."
-                    )
-                    plot_score_options[option] = False
         task = task | {"plot_score_options": plot_score_options}
         results, metrics_to_compute, recomputable_metrics = cached_scores_and_metrics_to_compute(
             reader, stream, task["regions"], task["metrics"], plot_score_options, True
@@ -576,7 +565,9 @@ def _run_stream_in_chunks(
     # must stay under 2 GiB): the maps are drawn one scoring window at a time, with the
     # colour ranges of the whole stream; the videos are then built from the frames on disk.
     spatial = {
-        region: {m: r.spatial for m, r in by_metric.items() if r.spatial is not None}
+        region: {
+            m: r.curve("spatial") for m, r in by_metric.items() if r.curve("spatial") is not None
+        }
         for region, by_metric in computed.items()
     }
     if plot_score_options.get("plot_score_maps", False) and any(spatial.values()):
@@ -763,7 +754,7 @@ def accumulate_stream_results(
     tuple[dict, dict, dict]
         ``scores_dict[metric][region][stream][run_id] -> MetricResult.score``,
         ``init_hour_scores`` and ``curves`` with the same nesting for
-        ``MetricResult.by_init_hour`` and ``MetricResult.curves``, and
+        the ``by_init_hour`` curve of the ``MetricResult`` and ``MetricResult.curves``, and
         ``statistics[name][stream][run_id] -> Dataset`` for the data statistics.
     """
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))

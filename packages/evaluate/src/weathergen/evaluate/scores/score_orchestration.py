@@ -52,10 +52,15 @@ class MetricResult:
         ``metric`` coordinate.  Its ``attrs`` are the metric parameters.  This is what the
         JSON score files store, with the ``curves``.
     curves
-        What some metrics draw besides the score, per forecast step: the spectra of ``psd``
-        (``psd_target`` / ``psd_prediction`` over ``channel`` and ``wavenumber``), the
-        quantiles of ``qq_analysis`` (over ``quantile`` and the other dims); ``None`` for
-        the other metrics.
+        What is computed besides the per-sample score, per forecast step, as one Dataset:
+        ``spatial``, the score per point averaged over the samples (``ipoint``, for the
+        score maps; not stored in the JSON files); ``by_init_hour``, the score averaged over
+        the samples of each initialisation hour (``init_hour``), with ``by_init_hour_counts``
+        the number of samples per hour; the spectra of ``psd`` (``psd_target`` /
+        ``psd_prediction`` over ``channel`` and ``wavenumber``); the quantiles of
+        ``qq_analysis`` (over ``quantile`` and the other dims).  ``None`` when there is none.
+        A chunk's curves merge exactly: per-sample ones concatenate, counts add up, the
+        others are means over the chunk's samples and average with the counts as weights.
     spatial
         Score aggregated over samples, dims ``(ipoint, forecast_step, channel[, ens])``
         with ``lat``/``lon`` on ``ipoint``.  ``None`` unless computed.
@@ -73,22 +78,29 @@ class MetricResult:
     stream: str
     run_id: str
     score: xr.DataArray
-    spatial: xr.DataArray | None = None
-    by_init_hour: xr.DataArray | None = None
     curves: xr.Dataset | None = None
+
+    def curve(self, name: str) -> xr.DataArray | None:
+        """The curve *name*, ``None`` when the result has none."""
+        return self.curves[name] if self.curves is not None and name in self.curves else None
+
+    def add_curve(self, name: str, da: xr.DataArray, stored: bool = True) -> None:
+        """Add the curve *name*; ``stored=False`` keeps it out of the JSON files (``spatial``)."""
+        curves = self.curves if self.curves is not None else xr.Dataset()
+        self.curves = curves.assign({name: da.assign_attrs(stored=stored)})
 
 
 def results_to_dict(results: dict[str, dict[str, MetricResult]], field: str = "score") -> dict:
     """``d[metric][region][stream][run_id] -> MetricResult.<field>`` (``None`` fields skipped).
 
     With ``field="score"`` this is the nested shape ``plot_scores``, ``collect_channels``
-    and the MLflow upload consume; with ``field="by_init_hour"`` it is what
-    ``init_hour_metric_region`` reads.
+    and the MLflow upload consume; ``field="curves"`` gives the whole Datasets; any other
+    *field* is a curve by name (``by_init_hour`` for ``init_hour_metric_region``).
     """
     d: dict = {}
     for region, by_metric in results.items():
         for metric, r in by_metric.items():
-            value = vars(r)[field]
+            value = {"score": r.score, "curves": r.curves}.get(field, r.curve(field))
             if value is not None:
                 d.setdefault(metric, {}).setdefault(region, {}).setdefault(r.stream, {})[
                     r.run_id
@@ -329,7 +341,9 @@ def calc_scores_per_stream(
             # same dim order as score, with ipoint in place of sample
             spatial = spatial.transpose("ipoint", "forecast_step", ...)
             for metric in spatial.metric.values:
-                results[region][str(metric)].spatial = spatial.sel(metric=metric, drop=True)
+                results[region][str(metric)].add_curve(
+                    "spatial", spatial.sel(metric=metric, drop=True), stored=False
+                )
 
     return results
 
@@ -588,8 +602,11 @@ def metric_list_to_json(
                 / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
             )
             metric_data_dict = metric_data.to_dict()
-            if result.curves is not None:
-                metric_data_dict["curves"] = result.curves.to_dict()
+            stored = [
+                v for v in (result.curves or {}) if result.curves[v].attrs.get("stored", True)
+            ]
+            if stored:
+                metric_data_dict["curves"] = result.curves[stored].to_dict()
 
             if save_path.exists():
                 _logger.debug(f"{save_path} already present")
