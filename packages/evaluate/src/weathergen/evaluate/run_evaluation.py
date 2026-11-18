@@ -11,12 +11,14 @@
 
 # Standard library
 import argparse
+import functools
 import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import xarray as xr
+from joblib import delayed
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
@@ -32,6 +34,7 @@ from weathergen.evaluate.distributed.chunking import (
 )
 from weathergen.evaluate.distributed.merge import in_window, merge_results, merge_statistics
 from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJsonReader,
@@ -435,8 +438,13 @@ def run_chunked(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     hands the same tasks to its workers.
     """
     _, sample_size, fstep_size = parse_distributed_config(cfg)
+    # distributed.workers chunk tasks at a time, on processes; each keeps its own pool of
+    # max_workers threads, so workers x max_workers is what the node should hold
+    workers = int(cfg.get("distributed", {}).get("workers", 1))
+    run = functools.partial(run_tasks_parallel, n_workers=workers) if workers > 1 else run_tasks
     stream_results = [
-        _run_stream_in_chunks(task, sample_size, fstep_size) for task in build_stream_tasks(cfg)
+        _run_stream_in_chunks(task, sample_size, fstep_size, run)
+        for task in build_stream_tasks(cfg)
     ]
     finalise(cfg, *accumulate_stream_results(stream_results), mlflow_client)
 
@@ -448,6 +456,22 @@ def run_tasks(tasks: list[tuple]) -> list:
         _logger.info(description)
         outputs.append(fn(**kwargs))
     return outputs
+
+
+def run_tasks_parallel(tasks: list[tuple], n_workers: int) -> list:
+    """``run_tasks`` with the *tasks* of a batch run *n_workers* at a time, on processes
+    (``distributed.workers`` of a chunked run in one process); their return values, in order.
+    The MPI run hands the same batches to its ranks instead."""
+    if n_workers <= 1 or len(tasks) <= 1:
+        return run_tasks(tasks)
+    for _, _, description in tasks:
+        _logger.info(description)
+    return dispatch_parallel(
+        [delayed(fn)(**kwargs) for fn, kwargs, _ in tasks],
+        n_workers=min(n_workers, len(tasks)),
+        backend="loky",
+        desc=f"{len(tasks)} chunk tasks",
+    )
 
 
 def _run_stream_in_chunks(
