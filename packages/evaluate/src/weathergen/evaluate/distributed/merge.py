@@ -55,8 +55,9 @@ def merge_results(
       under sample chunking.
     - attrs: the metric parameters, which must agree between chunks (``ValueError``).
     - ``curves`` (the spectra of ``psd``, the quantiles of ``qq_analysis``): the windows are
-      concatenated along ``forecast_step``; several sample chunks of one window keep the
-      first chunk's, with a warning (they are quantities of one set of samples).
+      concatenated along ``forecast_step``; the sample chunks of one window are concatenated
+      along ``sample`` when the curves are per sample, else averaged with the chunks' sample
+      counts as weights, with a warning (exact for a mean over the samples, as the PSD is).
     """
     parts: dict[str, dict[str, list[MetricResult]]] = {}
     for chunk, window in zip(chunks, fsteps or [None] * len(chunks), strict=True):
@@ -114,15 +115,28 @@ def _merge_metric(parts: list[MetricResult]) -> MetricResult:
                     "(mean over the samples)."
                 )
             aggregated[field] = _concat([vars(w[0])[field] for w in windows], "forecast_step")
-    # the curves are quantities of one set of samples: the first chunk's of each window
     if any(r.curves is not None for r in parts):
-        if any(len(w) > 1 for w in windows):
-            _logger.warning(
-                f"{first.name}: the curves of several sample chunks of a window cannot be "
-                "merged; keeping the first chunk's."
-            )
-        aggregated["curves"] = _concat([w[0].curves for w in windows], "forecast_step")
+        aggregated["curves"] = _concat(
+            [_merge_curves(w, first.name) for w in windows], "forecast_step"
+        )
     return MetricResult(first.name, first.region, first.stream, first.run_id, score, **aggregated)
+
+
+def _merge_curves(window: list[MetricResult], metric: str) -> xr.Dataset:
+    """The curves of one forecast-step window from its sample chunks: concatenated along
+    ``sample`` when they are per sample (``qq_analysis``), else averaged with the chunks'
+    sample counts as weights, which is exact for a mean over the samples (``psd``)."""
+    if len(window) == 1:
+        return window[0].curves
+    if "sample" in window[0].curves.dims:
+        return _concat([r.curves for r in window], "sample")
+    counts = np.array([r.score.sizes["sample"] for r in window], dtype=float)
+    _logger.warning(
+        f"{metric}: the curves of {len(window)} sample chunks are averaged with their sample "
+        f"counts {counts.astype(int).tolist()} as weights (exact for a mean over the samples)."
+    )
+    weighted = sum(r.curves * n for r, n in zip(window, counts, strict=True)) / counts.sum()
+    return weighted.assign_attrs(window[0].curves.attrs)
 
 
 def merge_statistics(parts: list[dict[str, xr.Dataset]]) -> dict[str, xr.Dataset]:

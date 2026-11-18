@@ -576,38 +576,46 @@ def psd_plot_metric_region(
     curves: dict,
     plotter: object,
 ) -> None:
-    """Create PSD plots for all streams and channels for a given metric and region, one
-    figure per run, stream, channel and forecast step, from the ``curves`` of ``psd``
-    (``curves[metric][region][stream][run_id]``: ``psd_target`` / ``psd_prediction`` over
-    ``forecast_step``, ``channel`` and ``wavenumber``).
+    """Create PSD plots for a given metric and region: one figure per stream, channel and
+    forecast step with every run's spectrum on it and the target of the first run, from the
+    ``curves`` of ``psd`` (``curves[metric][region][stream][run_id]``: ``psd_target`` /
+    ``psd_prediction`` over ``forecast_step``, ``channel`` and ``wavenumber``).
     """
     for stream, by_run in curves.get(metric, {}).get(region, {}).items():
-        for run_id, ds in by_run.items():
-            label = runs[run_id].get("label", run_id)
-            method_tag = ds.attrs.get("psd_method", "sht")
-            for ch in [str(c) for c in np.atleast_1d(ds.channel.values)]:
-                for fstep in [int(f) for f in ds.forecast_step.values]:
+        channels = sorted(
+            {str(c) for ds in by_run.values() for c in np.atleast_1d(ds.channel.values)}
+        )
+        fsteps = sorted({int(f) for ds in by_run.values() for f in ds.forecast_step.values})
+        for ch in channels:
+            for fstep in fsteps:
+                psd_datasets, labels, run_ids = [], [], []
+                for run_id, ds in by_run.items():
+                    if fstep not in ds.forecast_step.values or ch not in np.atleast_1d(
+                        ds.channel.values
+                    ):
+                        continue
                     at = ds.sel(forecast_step=fstep)
                     at = at.sel(channel=ch) if "channel" in at.dims else at
-                    name = create_filename(
-                        prefix=[metric, method_tag, region],
-                        middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
+                    psd_datasets.append(
+                        {
+                            "frequencies": at.wavenumber.values,
+                            "psd_target": at.psd_target.values,
+                            "psd_prediction": at.psd_prediction.values,
+                            "psd_method": ds.attrs.get("psd_method", "sht"),
+                        }
                     )
-                    plotter.psd_plot(
-                        [
-                            {
-                                "frequencies": at.wavenumber.values,
-                                "psd_target": at.psd_target.values,
-                                "psd_prediction": at.psd_prediction.values,
-                                "psd_method": method_tag,
-                            }
-                        ],
-                        [label],
-                        tag=name,
-                        variable=ch,
-                        forecast_step=str(fstep),
-                    )
+                    labels.append(runs[run_id].get("label", run_id))
+                    run_ids.append(run_id)
+                if not psd_datasets:
+                    continue
+                name = create_filename(
+                    prefix=[metric, psd_datasets[0]["psd_method"], region],
+                    middle=sorted(set(run_ids)),
+                    suffix=[stream, ch, f"fstep{fstep}"],
+                )
+                plotter.psd_plot(
+                    psd_datasets, labels, tag=name, variable=ch, forecast_step=str(fstep)
+                )
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 
