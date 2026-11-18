@@ -154,7 +154,9 @@ def _concat(arrays: list, dim: str):
     """Concatenate along *dim* and sort by it; the arrays' other coordinates must agree."""
     if len(arrays) == 1:
         return arrays[0]
-    return xr.concat(arrays, dim=dim, coords="different", compat="equals").sortby(dim)
+    # data_vars is a Dataset-only argument (xarray warns about its changing default)
+    kwargs = {"data_vars": "all"} if isinstance(arrays[0], xr.Dataset) else {}
+    return xr.concat(arrays, dim=dim, coords="different", compat="equals", **kwargs).sortby(dim)
 
 
 def _merge_attrs(attrs_list: list[dict], metric: str) -> dict:

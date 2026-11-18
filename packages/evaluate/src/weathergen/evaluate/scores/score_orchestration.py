@@ -605,8 +605,11 @@ def metric_list_to_json(
             stored = [
                 v for v in (result.curves or {}) if result.curves[v].attrs.get("stored", True)
             ]
-            if stored:
-                metric_data_dict["curves"] = result.curves[stored].to_dict()
+            if stored:  # with their dimension coordinates only: selecting the stored variables
+                # keeps every coordinate on their dims, such as the lead_time (a timedelta)
+                # the spatial curve carries along forecast_step
+                curves = result.curves[stored].reset_coords(drop=True)
+                metric_data_dict["curves"] = curves.to_dict()
 
             if save_path.exists():
                 _logger.debug(f"{save_path} already present")
