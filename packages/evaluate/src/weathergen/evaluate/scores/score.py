@@ -1807,7 +1807,8 @@ class Scores:
         Returns
         -------
         xr.DataArray
-            Dataset containing Q-Q analysis results with the following variables:
+            The overall Q-Q score per sample; its ``attrs["curves"]`` is a Dataset, averaged
+            over the samples, with the following variables:
             - 'quantile': Theoretical quantile levels (0 to 1)
             - 'p_quantiles': Quantile values from prediction data
             - 'gt_quantiles': Quantile values from ground truth data
@@ -1877,8 +1878,10 @@ class Scores:
         overall_qq_score = qq_deviation.mean(dim="quantile")
 
         # The quantiles travel as the score's ``curves``, one Dataset over the quantile
-        # levels and the other dims; the orchestration takes them out of the attrs.
-        overall_qq_score.attrs["curves"] = xr.Dataset(
+        # levels and the other dims; the orchestration takes them out of the attrs.  Only
+        # their mean over the samples, which is what the figure draws: the per-sample
+        # quantiles would grow with the length of the run (the score stays per sample).
+        curves = xr.Dataset(
             {
                 "p_quantiles": p_quantiles,
                 "gt_quantiles": gt_quantiles,
@@ -1886,12 +1889,15 @@ class Scores:
                 "qq_deviation_normalized": qq_deviation_normalized,
                 "extreme_low_mse": extreme_low_mse,
                 "extreme_high_mse": extreme_high_mse,
-            },
-            attrs={
-                "extreme_percentiles": list(extreme_percentiles),
-                "iqr_percentiles": list(iqr_percentiles),
-            },
+            }
         )
+        if "sample" in curves.dims:
+            curves = curves.mean("sample")
+        curves.attrs = {
+            "extreme_percentiles": list(extreme_percentiles),
+            "iqr_percentiles": list(iqr_percentiles),
+        }
+        overall_qq_score.attrs["curves"] = curves
         _logger.info("Q-Q analysis completed")
         return overall_qq_score
 

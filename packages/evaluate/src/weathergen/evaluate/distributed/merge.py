@@ -99,7 +99,6 @@ def _merge_metric(parts: list[MetricResult]) -> MetricResult:
 
 def _merge_curves(window: list[MetricResult], metric: str) -> xr.Dataset:
     """The curves of one forecast-step window from its sample chunks, variable by variable:
-    per-sample ones (the quantiles of ``qq_analysis``) are concatenated along ``sample``,
     counts (``*_counts``) add up, the others are means over the chunk's samples and are
     averaged with the counts as weights (``<name>_counts`` when there is one, else the
     chunk's number of samples), which is exact."""
@@ -109,9 +108,7 @@ def _merge_curves(window: list[MetricResult], metric: str) -> xr.Dataset:
     merged = {}
     for name in first.data_vars:
         parts = [r.curves[name] for r in window]
-        if "sample" in first[name].dims:
-            merged[name] = _concat(parts, "sample")
-        elif name.endswith("_counts"):
+        if name.endswith("_counts"):
             merged[name] = sum(parts).assign_attrs(first[name].attrs)
         else:
             if f"{name}_counts" in first:
