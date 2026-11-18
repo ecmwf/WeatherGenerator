@@ -105,8 +105,9 @@ def compute_scores_by_init_hour(
         )
         if "init_hour" not in scores.dims:  # a single init hour: get_score does not group
             scores = scores.expand_dims(init_hour=[int(hours[fsteps[0]].values[0])])
-        # same dim order as MetricResult.score, with init_hour in place of sample
-        scores = scores.transpose("init_hour", "forecast_step", ...)
+        # same dim order as MetricResult.score, with init_hour in place of sample; only the
+        # dimension coordinates (a lead_time coordinate of the data is not JSON-serialisable)
+        scores = scores.transpose("init_hour", "forecast_step", ...).reset_coords(drop=True)
         sample_hours = np.asarray(hours[fsteps[0]].values)
         counts = xr.DataArray(
             [int((sample_hours == h).sum()) for h in scores.init_hour.values],
