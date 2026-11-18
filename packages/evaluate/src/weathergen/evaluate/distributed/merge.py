@@ -49,14 +49,10 @@ def merge_results(
     -----
     - ``score``: the sample chunks of each window are concatenated along ``sample``, then
       the windows along ``forecast_step``.  Exact.
-    - ``spatial`` and ``by_init_hour``: the windows are concatenated along
-      ``forecast_step``.  Both are means over the samples, so several sample chunks of one
-      window cannot be merged exactly (``ValueError``); a chunked run does not compute them
-      under sample chunking.
-    - attrs: the metric parameters must agree between chunks (``ValueError``); the per-step
-      payloads (``fstep_<n>/...``, ``attr_fsteps``) are the union over the windows, and
-      within a window those of the first chunk, with a warning when the chunks disagree
-      (``psd`` and the histogram metrics are quantities of one set of samples).
+    - attrs: the metric parameters, which must agree between chunks (``ValueError``).
+    - ``curves`` (``spatial``, ``by_init_hour``, the spectra of ``psd``, the quantiles of
+      ``qq_analysis``): the windows are concatenated along ``forecast_step``; the sample
+      chunks of one window merge variable by variable (``_merge_curves``), exactly.
     """
     parts: dict[str, dict[str, list[MetricResult]]] = {}
     for chunk, window in zip(chunks, fsteps or [None] * len(chunks), strict=True):
@@ -70,7 +66,7 @@ def merge_results(
 
 
 def in_window(r: MetricResult, window: list[int] | None) -> MetricResult:
-    """*r* restricted to the forecast steps of *window* (arrays and per-step attrs)."""
+    """*r* restricted to the forecast steps of *window* (the score and the per-step fields)."""
     if window is None:
         return r
     keep = [int(f) for f in r.score.forecast_step.values if int(f) in window]
@@ -80,18 +76,7 @@ def in_window(r: MetricResult, window: list[int] | None) -> MetricResult:
     def trim(da):
         return None if da is None else da.sel(forecast_step=keep)
 
-    score = trim(r.score)
-    score.attrs = {
-        k: v
-        for k, v in r.score.attrs.items()
-        if not k.startswith("fstep_") or int(k[len("fstep_") :].split("/")[0]) in keep
-    }
-    attr_fsteps = [f for f in score.attrs.pop("attr_fsteps", []) if f in keep]
-    if attr_fsteps:
-        score.attrs["attr_fsteps"] = attr_fsteps
-    return MetricResult(
-        r.name, r.region, r.stream, r.run_id, score, trim(r.spatial), trim(r.by_init_hour)
-    )
+    return MetricResult(r.name, r.region, r.stream, r.run_id, trim(r.score), trim(r.curves))
 
 
 def _merge_metric(parts: list[MetricResult]) -> MetricResult:
@@ -104,21 +89,47 @@ def _merge_metric(parts: list[MetricResult]) -> MetricResult:
     windows = [
         sorted(by_window[w], key=lambda r: int(r.score.sample.values[0])) for w in sorted(by_window)
     ]
-
     score = _concat([_concat([r.score for r in w], "sample") for w in windows], "forecast_step")
     score.attrs = _merge_attrs([r.score.attrs for w in windows for r in w], first.name)
+    curves = None
+    if any(r.curves is not None for r in parts):
+        curves = _concat([_merge_curves(w, first.name) for w in windows], "forecast_step")
+    return MetricResult(first.name, first.region, first.stream, first.run_id, score, curves)
 
-    # means over the samples: one chunk per window, concatenated over the windows
-    aggregated = {}
-    for field in ("spatial", "by_init_hour"):
-        if any(vars(r)[field] is not None for r in parts):
-            if any(len(w) > 1 for w in windows):
-                raise ValueError(
-                    f"{first.name}: the {field} scores of several sample chunks cannot be merged "
-                    "(mean over the samples)."
-                )
-            aggregated[field] = _concat([vars(w[0])[field] for w in windows], "forecast_step")
-    return MetricResult(first.name, first.region, first.stream, first.run_id, score, **aggregated)
+
+def _merge_curves(window: list[MetricResult], metric: str) -> xr.Dataset:
+    """The curves of one forecast-step window from its sample chunks, variable by variable:
+    counts (``*_counts``) add up, the others are means over the chunk's samples and are
+    averaged with the counts as weights (``<name>_counts`` when there is one, else the
+    chunk's number of samples), which is exact."""
+    if len(window) == 1:
+        return window[0].curves
+    first = window[0].curves
+    merged = {}
+    for name in first.data_vars:
+        parts = [r.curves[name] for r in window]
+        if name.endswith("_counts"):
+            merged[name] = sum(parts).assign_attrs(first[name].attrs)
+        else:
+            if f"{name}_counts" in first:
+                weights = [r.curves[f"{name}_counts"] for r in window]
+            else:
+                weights = [xr.DataArray(float(r.score.sizes["sample"])) for r in window]
+            total = sum(weights)
+            # rmse is the root of a mean of squares: averaged through its square, exactly;
+            # a mean of per-sample quantities (mae, bias, a spectrum) directly
+            power = 2 if metric == "rmse" else 1
+            mean = sum(p**power * w for p, w in zip(parts, weights, strict=True)) / total.where(
+                total > 0
+            )
+            merged[name] = (mean ** (1 / power)).transpose(*first[name].dims)
+            merged[name].attrs = first[name].attrs
+    _logger.warning(
+        f"{metric}: the curves of {len(window)} sample chunks of a window were merged: means "
+        "over the samples averaged with the sample counts as weights (exact for means and "
+        "rmse; approximate for ratio or correlation scores)."
+    )
+    return xr.Dataset(merged, attrs=first.attrs)
 
 
 def merge_statistics(parts: list[dict[str, xr.Dataset]]) -> dict[str, xr.Dataset]:
@@ -143,38 +154,18 @@ def _concat(arrays: list, dim: str):
     """Concatenate along *dim* and sort by it; the arrays' other coordinates must agree."""
     if len(arrays) == 1:
         return arrays[0]
-    return xr.concat(arrays, dim=dim, coords="different", compat="equals").sortby(dim)
+    # data_vars is a Dataset-only argument (xarray warns about its changing default)
+    kwargs = {"data_vars": "all"} if isinstance(arrays[0], xr.Dataset) else {}
+    return xr.concat(arrays, dim=dim, coords="different", compat="equals", **kwargs).sortby(dim)
 
 
 def _merge_attrs(attrs_list: list[dict], metric: str) -> dict:
-    """Metric parameters (must agree) plus the union of the per-step payloads."""
-    params = {k: v for k, v in attrs_list[0].items() if _is_param(k)}
-    merged = dict(params)
-    attr_fsteps: set[int] = set()
-    warned = False
-    for attrs in attrs_list:
-        other = {k: v for k, v in attrs.items() if _is_param(k)}
-        if not _same(other, params):
-            raise ValueError(f"{metric}: parameters differ between chunks: {params}, {other}")
-        attr_fsteps.update(int(f) for f in attrs.get("attr_fsteps", []))
-        for k, v in attrs.items():
-            if not k.startswith("fstep_"):
-                continue
-            if k not in merged:
-                merged[k] = v
-            elif not warned and not _same(merged[k], v):
-                warned = True
-                _logger.warning(
-                    f"{metric}: per-step attrs differ between the sample chunks of a window; "
-                    "keeping the first chunk's (they are quantities of one set of samples)."
-                )
-    if attr_fsteps:
-        merged["attr_fsteps"] = sorted(attr_fsteps)
-    return merged
-
-
-def _is_param(key: str) -> bool:
-    return not key.startswith("fstep_") and key != "attr_fsteps"
+    """The metric parameters, which must agree between the chunks."""
+    params = attrs_list[0]
+    for attrs in attrs_list[1:]:
+        if not _same(attrs, params):
+            raise ValueError(f"{metric}: parameters differ between chunks: {params}, {attrs}")
+    return dict(params)
 
 
 def _same(a, b) -> bool:

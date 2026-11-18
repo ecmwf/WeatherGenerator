@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Score maps: the spatial scores (``MetricResult.spatial``) of one (run, stream) as maps.
+"""Score maps: the spatial scores (the ``spatial`` curve of a ``MetricResult``) of one (run,
+stream) as maps.
 
 They are drawn from scores averaged over samples, so from complete (merged) results.
 The drawing itself is done by ``Plotter.scatter_plot``; the videos by ``animations``.
@@ -34,7 +35,7 @@ _logger = logging.getLogger(__name__)
 def score_map_ranges(spatial: dict[str, dict[str, xr.DataArray]]) -> dict:
     """Colour range of each (metric, region, channel) over all the forecast steps.
 
-    ``spatial[region][metric]`` are the ``MetricResult.spatial`` arrays; the ranges are
+    ``spatial[region][metric]`` are the ``spatial`` curves of the results; the ranges are
     ``{metric: {region: {channel: ...}}}`` as ``common_ranges`` gives them.  Computed from
     the whole (run, stream) so that the maps of all its forecast steps share one scale.
     """
@@ -83,7 +84,9 @@ def plot_score_maps(
 
     # {region: {metric: spatial DataArray(ipoint, forecast_step, channel[, ens])}}
     spatial = {
-        region: {m: r.spatial for m, r in by_metric.items() if r.spatial is not None}
+        region: {
+            m: r.curve("spatial") for m, r in by_metric.items() if r.curve("spatial") is not None
+        }
         for region, by_metric in results.items()
     }
     spatial = {region: by_metric for region, by_metric in spatial.items() if by_metric}

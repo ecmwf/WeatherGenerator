@@ -21,7 +21,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from numpy.typing import NDArray
 
 from weathergen.evaluate.plotting.bar_plots import BarPlots
 from weathergen.evaluate.plotting.line_plots import LinePlots
@@ -45,7 +44,7 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def plot_scores(cfg: dict, scores_dict: dict, init_hour_scores: dict, summary_dir: Path) -> None:
+def plot_scores(cfg: dict, scores_dict: dict, curves: dict, summary_dir: Path) -> None:
     """Plot the scores of all runs: one figure per ``score_plots`` entry, metric and region.
 
     Parameters
@@ -54,9 +53,9 @@ def plot_scores(cfg: dict, scores_dict: dict, init_hour_scores: dict, summary_di
         Configuration dictionary.
     scores_dict : dict
         ``scores_dict[metric][region][stream][run_id] -> DataArray`` (``MetricResult.score``).
-    init_hour_scores : dict
-        Same nesting with the ``MetricResult.by_init_hour`` arrays; empty unless
-        ``init_hour`` is requested.
+    curves : dict
+        Same nesting with the ``MetricResult.curves``: ``by_init_hour`` for the init-hour
+        plots, the spectra of ``psd`` and the quantiles of ``qq_analysis``.
     summary_dir : Path
         Directory to write plots to.
     """
@@ -101,7 +100,13 @@ def plot_scores(cfg: dict, scores_dict: dict, init_hour_scores: dict, summary_di
     do_scorecard = "scorecard" in _sp or eval_opt.get("score_cards", False)
     do_bar = "bar" in _sp or eval_opt.get("bar_plots", False)
     # by-init-hour scores are only computed when init_hour is requested (_process_stream)
-    do_init_hour = bool(init_hour_scores)
+    do_init_hour = any(
+        "by_init_hour" in ds
+        for by_region in curves.values()
+        for by_stream in by_region.values()
+        for by_run in by_stream.values()
+        for ds in by_run.values()
+    )
     # Drawn with raw matplotlib: own directory and dpi default until it goes through LinePlots.
     init_hour_dir = summary_dir / "_".join(runs) / "score_by_init_hour"
     init_hour_dpi = plt_opt.get("dpi_val", 150)
@@ -134,12 +139,12 @@ def plot_scores(cfg: dict, scores_dict: dict, init_hour_scores: dict, summary_di
             # psd is a spectrum, so none of the other score plots apply to it.
             if metric == "psd":
                 if do_metric_plots:
-                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                    psd_plot_metric_region(metric, region, runs, curves, plotter)
                 continue
 
             if do_metric_plots:
                 if metric == "qq_analysis":
-                    quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
+                    quantile_plot_metric_region(metric, region, runs, curves, quantile_plotter)
                 else:
                     lead_time_plot_metric_region(
                         metric, region, runs, scores_dict, plotter, print_summary
@@ -152,12 +157,12 @@ def plot_scores(cfg: dict, scores_dict: dict, init_hour_scores: dict, summary_di
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if do_bar:
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
-            if do_init_hour and region in init_hour_scores.get(metric, {}):
+            if do_init_hour and region in curves.get(metric, {}):
                 init_hour_metric_region(
                     metric,
                     region,
                     runs,
-                    init_hour_scores,
+                    curves,
                     plot_cfg["image_format"],
                     init_hour_dpi,
                     init_hour_dir,
@@ -466,74 +471,70 @@ def quantile_plot_metric_region(
     metric: str,
     region: str,
     runs: dict,
-    scores_dict: dict,
+    curves: dict,
     plotter: object,
 ) -> None:
     """
     Create quantile-quantile (Q-Q) plots for extreme value analysis for all streams
-    and channels for a given metric and region.
+    and channels for a given metric and region, from the ``curves`` of ``qq_analysis``
+    (``curves[metric][region][stream][run_id]``: the quantiles over ``quantile`` and the
+    other dims, averaged over those for the figure), every run on one figure.
 
     Parameters
     ----------
     metric: str
-        String specifying the metric to plot (should be 'qq_analysis')
+        String specifying the metric to plot
     region: str
         String specifying the region to plot
     runs: dict
         Dictionary containing the config for all runs
-    scores_dict : dict
-        The dictionary containing all computed metrics.
-    plotter:
-        Plotter object to handle the plotting part. Must have a qq_plot method.
+    curves: dict
+        ``curves[metric][region][stream][run_id] -> Dataset``
+    plotter: QuantilePlots
+        Plotter object to handle Q-Q plot creation.
     """
     streams_set = collect_streams(runs)
-    channels_set = collect_channels(scores_dict, metric, region, runs)
+    by_region = curves.get(metric, {}).get(region, {})
+    channels_set = sorted(
+        {
+            str(c)
+            for by_run in by_region.values()
+            for ds in by_run.values()
+            for c in ds.channel.values
+        }
+    )
 
     for stream in streams_set:
         for ch in channels_set:
             selected_data, labels, run_ids = [], [], []
             qq_full_data = []  # Store full Q-Q datasets for detailed plotting
 
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+            for run_id, data in by_region.get(stream, {}).items():
                 # skip if channel is missing
                 if ch not in np.atleast_1d(data.channel.values):
                     continue
-
-                # Select channel
                 data_for_channel = data.sel(channel=ch) if "channel" in data.dims else data
 
-                # Check for NaN
-                if data_for_channel.isnull().all():
-                    continue
-
-                # For qq_analysis, extract Q-Q data from attributes
-                if metric == "qq_analysis" and "p_quantiles" in data_for_channel.attrs:
-                    attrs = data_for_channel.attrs
-                    # Convert to numpy arrays once
-                    p_quantiles_arr = np.array(attrs["p_quantiles"])
-                    gt_quantiles_arr = np.array(attrs["gt_quantiles"])
-                    qq_deviation_arr = np.array(attrs["qq_deviation"])
-                    qq_deviation_norm_arr = np.array(attrs["qq_deviation_normalized"])
-                    quantile_levels = np.array(attrs["quantile_levels"])
-                    extreme_low_mse = float(np.mean(np.array(attrs["extreme_low_mse"])))
-                    extreme_high_mse = float(np.mean(np.array(attrs["extreme_high_mse"])))
-
+                # the quantiles, averaged over the steps (and samples, ens) for the figure
+                at = data_for_channel
+                if "p_quantiles" in at:
+                    extra = [d for d in at.dims if d != "quantile"]
+                    at = at.mean(extra) if extra else at
                     qq_dataset = xr.Dataset(
                         {
-                            "quantile_levels": (["quantile"], quantile_levels),
-                            "p_quantiles": (["quantile"], _flatten_or_average(p_quantiles_arr)),
-                            "gt_quantiles": (["quantile"], _flatten_or_average(gt_quantiles_arr)),
-                            "qq_deviation": (["quantile"], _flatten_or_average(qq_deviation_arr)),
+                            "quantile_levels": (["quantile"], at["quantile"].values),
+                            "p_quantiles": (["quantile"], at.p_quantiles.values),
+                            "gt_quantiles": (["quantile"], at.gt_quantiles.values),
+                            "qq_deviation": (["quantile"], at.qq_deviation.values),
                             "qq_deviation_normalized": (
                                 ["quantile"],
-                                _flatten_or_average(qq_deviation_norm_arr),
+                                at.qq_deviation_normalized.values,
                             ),
-                            "extreme_low_mse": ([], extreme_low_mse),
-                            "extreme_high_mse": ([], extreme_high_mse),
+                            "extreme_low_mse": ([], float(at.extreme_low_mse)),
+                            "extreme_high_mse": ([], float(at.extreme_high_mse)),
                         }
                     )
-                    # Store extreme percentiles for plotting
-                    qq_dataset.attrs["extreme_percentiles"] = tuple(attrs["extreme_percentiles"])
+                    qq_dataset.attrs["extreme_percentiles"] = tuple(at.attrs["extreme_percentiles"])
                     qq_full_data.append(qq_dataset)
 
                 selected_data.append(data_for_channel)
@@ -570,95 +571,53 @@ def quantile_plot_metric_region(
                     )
 
 
-def _flatten_or_average(arr: NDArray) -> NDArray:
-    """Flatten array or average across non-quantile dimensions.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Input array, possibly multi-dimensional.
-
-    Returns
-    -------
-    np.ndarray
-        Flattened 1D array, averaged across extra dimensions if needed.
-    """
-    if arr.ndim > 1:
-        return np.mean(arr, axis=tuple(range(1, arr.ndim))).flatten()
-    return arr
-
-
-def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict] | None:
-    """Extract PSD curve data from DataArray attrs for a given fstep/channel.
-
-    Returns a single-element list of dicts ready for the plotter, or None if keys are missing.
-    """
-    attrs = data_ch.attrs
-    fp = f"fstep_{fstep}/"
-
-    for prefix in (f"{fp}{ch}/", fp):
-        if f"{prefix}frequencies" in attrs and f"{prefix}psd_target" in attrs:
-            return [
-                {
-                    "frequencies": np.array(attrs[f"{prefix}frequencies"]),
-                    "psd_target": np.array(attrs[f"{prefix}psd_target"]),
-                    "psd_prediction": np.array(attrs[f"{prefix}psd_prediction"]),
-                    "psd_method": attrs.get(f"{fp}psd_method", attrs.get("psd_method", "sht")),
-                }
-            ]
-    return None
-
-
 def psd_plot_metric_region(
     metric: str,
     region: str,
     runs: dict,
-    scores_dict: dict,
+    curves: dict,
     plotter: object,
 ) -> None:
-    """Create PSD plots for all streams and channels for a given metric and region.
-
-    PSD curves (frequencies, target PSD, prediction PSD) are stored in
-    ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+    """Create PSD plots for a given metric and region: one figure per stream, channel and
+    forecast step with every run's spectrum on it and the target of the first run, from the
+    ``curves`` of ``psd`` (``curves[metric][region][stream][run_id]``: ``psd_target`` /
+    ``psd_prediction`` over ``forecast_step``, ``channel`` and ``wavenumber``).
     """
-    streams_set = collect_streams(runs)
-    channels_set = collect_channels(scores_dict, metric, region, runs)
-
-    for stream in streams_set:
-        for ch in channels_set:
-            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
-                if ch not in np.atleast_1d(data.channel.values):
-                    continue
-
-                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
-                if data_ch.isnull().all():
-                    continue
-
-                attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
-                if not attr_fsteps:
-                    _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
-                    continue
-
-                label = runs[run_id].get("label", run_id)
-
-                for fstep in attr_fsteps:
-                    psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
-                    if psd_datasets is None:
+    for stream, by_run in curves.get(metric, {}).get(region, {}).items():
+        channels = sorted(
+            {str(c) for ds in by_run.values() for c in np.atleast_1d(ds.channel.values)}
+        )
+        fsteps = sorted({int(f) for ds in by_run.values() for f in ds.forecast_step.values})
+        for ch in channels:
+            for fstep in fsteps:
+                psd_datasets, labels, run_ids = [], [], []
+                for run_id, ds in by_run.items():
+                    if fstep not in ds.forecast_step.values or ch not in np.atleast_1d(
+                        ds.channel.values
+                    ):
                         continue
-
-                    method_tag = psd_datasets[0].get("psd_method", "sht")
-                    name = create_filename(
-                        prefix=[metric, method_tag, region],
-                        middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
+                    at = ds.sel(forecast_step=fstep)
+                    at = at.sel(channel=ch) if "channel" in at.dims else at
+                    psd_datasets.append(
+                        {
+                            "frequencies": at.wavenumber.values,
+                            "psd_target": at.psd_target.values,
+                            "psd_prediction": at.psd_prediction.values,
+                            "psd_method": ds.attrs.get("psd_method", "sht"),
+                        }
                     )
-                    plotter.psd_plot(
-                        psd_datasets,
-                        [label],
-                        tag=name,
-                        variable=ch,
-                        forecast_step=str(fstep),
-                    )
+                    labels.append(runs[run_id].get("label", run_id))
+                    run_ids.append(run_id)
+                if not psd_datasets:
+                    continue
+                name = create_filename(
+                    prefix=[metric, psd_datasets[0]["psd_method"], region],
+                    middle=sorted(set(run_ids)),
+                    suffix=[stream, ch, f"fstep{fstep}"],
+                )
+                plotter.psd_plot(
+                    psd_datasets, labels, tag=name, variable=ch, forecast_step=str(fstep)
+                )
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 
@@ -666,7 +625,7 @@ def init_hour_metric_region(
     metric: str,
     region: str,
     runs: dict,
-    init_hour_scores: dict,
+    curves: dict,
     image_format: str,
     dpi_val: int,
     out_dir: Path,
@@ -683,9 +642,9 @@ def init_hour_metric_region(
         String specifying the region to plot
     runs: dict
         Dictionary containing the config for all runs
-    init_hour_scores : dict
-        ``init_hour_scores[metric][region][stream][run_id] -> DataArray`` with dims
-        ``(init_hour, forecast_step, channel[, ens])`` (``MetricResult.by_init_hour``).
+    curves : dict
+        ``curves[metric][region][stream][run_id] -> Dataset``; its ``by_init_hour`` has dims
+        ``(init_hour, forecast_step, channel[, ens])`` (the ``by_init_hour`` curve).
     image_format : str
         Image format of the figures.
     dpi_val : int
@@ -695,7 +654,10 @@ def init_hour_metric_region(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for stream, run_dict in init_hour_scores[metric][region].items():
+    for stream, by_run in curves[metric][region].items():
+        run_dict = {
+            run_id: ds["by_init_hour"] for run_id, ds in by_run.items() if "by_init_hour" in ds
+        }
         if not run_dict:
             continue
 

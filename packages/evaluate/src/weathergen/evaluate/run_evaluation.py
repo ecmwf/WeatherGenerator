@@ -11,12 +11,14 @@
 
 # Standard library
 import argparse
+import functools
 import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import xarray as xr
+from joblib import delayed
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
@@ -32,6 +34,7 @@ from weathergen.evaluate.distributed.chunking import (
 )
 from weathergen.evaluate.distributed.merge import in_window, merge_results, merge_statistics
 from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJsonReader,
@@ -378,7 +381,7 @@ def cached_scores_and_metrics_to_compute(
     for region, by_metric in stream_loaded_scores.items():
         for metric, score in by_metric.items():
             cached.setdefault(region, {})[metric] = MetricResult(
-                metric, region, stream, reader.run_id, score
+                metric, region, stream, reader.run_id, score, curves=score.attrs.pop("curves", None)
             )
 
     if recomputable_metrics:
@@ -435,8 +438,13 @@ def run_chunked(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     hands the same tasks to its workers.
     """
     _, sample_size, fstep_size = parse_distributed_config(cfg)
+    # distributed.workers chunk tasks at a time, on processes; each keeps its own pool of
+    # max_workers threads, so workers x max_workers is what the node should hold
+    workers = int(cfg.get("distributed", {}).get("workers", 1))
+    run = functools.partial(run_tasks_parallel, n_workers=workers) if workers > 1 else run_tasks
     stream_results = [
-        _run_stream_in_chunks(task, sample_size, fstep_size) for task in build_stream_tasks(cfg)
+        _run_stream_in_chunks(task, sample_size, fstep_size, run)
+        for task in build_stream_tasks(cfg)
     ]
     finalise(cfg, *accumulate_stream_results(stream_results), mlflow_client)
 
@@ -448,6 +456,22 @@ def run_tasks(tasks: list[tuple]) -> list:
         _logger.info(description)
         outputs.append(fn(**kwargs))
     return outputs
+
+
+def run_tasks_parallel(tasks: list[tuple], n_workers: int) -> list:
+    """``run_tasks`` with the *tasks* of a batch run *n_workers* at a time, on processes
+    (``distributed.workers`` of a chunked run in one process); their return values, in order.
+    The MPI run hands the same batches to its ranks instead."""
+    if n_workers <= 1 or len(tasks) <= 1:
+        return run_tasks(tasks)
+    for _, _, description in tasks:
+        _logger.info(description)
+    return dispatch_parallel(
+        [delayed(fn)(**kwargs) for fn, kwargs, _ in tasks],
+        n_workers=min(n_workers, len(tasks)),
+        backend="loky",
+        desc=f"{len(tasks)} chunk tasks",
+    )
 
 
 def _run_stream_in_chunks(
@@ -490,17 +514,6 @@ def _run_stream_in_chunks(
     statistics: dict = {}  # the data statistics of the plotting samples, merged over the chunks
     if stream_cfg.get("evaluation"):
         available = reader.check_availability(stream, mode="evaluation")
-        if len(windows(available.samples, sample_size)) > 1:
-            # means over the samples: not merged across sample chunks (merge_results)
-            for option, name in (
-                ("plot_score_maps", "score maps"),
-                ("plot_score_init_hour", "init-hour scores"),
-            ):
-                if plot_score_options.get(option, False):
-                    _logger.warning(
-                        f"RUN {run_id} - {stream}: {name} are skipped when the samples are chunked."
-                    )
-                    plot_score_options[option] = False
         task = task | {"plot_score_options": plot_score_options}
         results, metrics_to_compute, recomputable_metrics = cached_scores_and_metrics_to_compute(
             reader, stream, task["regions"], task["metrics"], plot_score_options, True
@@ -576,7 +589,9 @@ def _run_stream_in_chunks(
     # must stay under 2 GiB): the maps are drawn one scoring window at a time, with the
     # colour ranges of the whole stream; the videos are then built from the frames on disk.
     spatial = {
-        region: {m: r.spatial for m, r in by_metric.items() if r.spatial is not None}
+        region: {
+            m: r.curve("spatial") for m, r in by_metric.items() if r.curve("spatial") is not None
+        }
         for region, by_metric in computed.items()
     }
     if plot_score_options.get("plot_score_maps", False) and any(spatial.values()):
@@ -762,29 +777,27 @@ def accumulate_stream_results(
     -------
     tuple[dict, dict, dict]
         ``scores_dict[metric][region][stream][run_id] -> MetricResult.score``,
-        ``init_hour_scores`` with the same nesting for ``MetricResult.by_init_hour``, and
+        ``curves`` with the same nesting for ``MetricResult.curves``, and
         ``statistics[name][stream][run_id] -> Dataset`` for the data statistics.
     """
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    # init_hour_scores[metric][region][stream][run_id] = xr.DataArray(init_hour, forecast_step, ...)
-    init_hour_scores: dict = {}
+    curves: dict = {}
     statistics: dict = {}
     for run_id, stream, results, _colour_ranges, stream_statistics in stream_results:
         for metric, regions_dict in results_to_dict(results, "score").items():
             for region, streams_dict in regions_dict.items():
                 for stream_key, runs_dict in streams_dict.items():
                     scores_dict[metric][region][stream_key].update(runs_dict)
-
-        merge(init_hour_scores, results_to_dict(results, "by_init_hour"))
+        merge(curves, results_to_dict(results, "curves"))
         for name, dataset in stream_statistics.items():
             statistics.setdefault(name, {}).setdefault(stream, {})[run_id] = dataset
-    return scores_dict, init_hour_scores, statistics
+    return scores_dict, curves, statistics
 
 
 def finalise(
     cfg: dict,
     scores_dict: dict,
-    init_hour_scores: dict,
+    curves: dict,
     statistics: dict,
     mlflow_client: MlflowClient | None,
 ) -> None:
@@ -795,7 +808,7 @@ def finalise(
     ----------
     cfg:
         Configuration input stored as dictionary.
-    scores_dict, init_hour_scores, statistics:
+    scores_dict, curves, statistics:
         Output of ``accumulate_stream_results``.
     mlflow_client:
         Optional MLFlow client for uploading scores.
@@ -810,7 +823,7 @@ def finalise(
 
     # verification plots and plots across samples, across runs
     if scores_dict or statistics:
-        plot_evaluation(cfg, scores_dict, init_hour_scores, statistics, summary_dir)
+        plot_evaluation(cfg, scores_dict, curves, statistics, summary_dir)
 
 
 if __name__ == "__main__":

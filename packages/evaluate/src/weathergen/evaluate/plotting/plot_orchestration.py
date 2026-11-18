@@ -53,7 +53,11 @@ def plot_stream_data(
 
 
 def plot_evaluation(
-    cfg: dict, scores_dict: dict, init_hour_scores: dict, statistics: dict, summary_dir: Path
+    cfg: dict,
+    scores_dict: dict,
+    curves: dict,
+    statistics: dict,
+    summary_dir: Path,
 ) -> None:
     """Plots across all runs: the verification plots from the merged scores, the plots
     across samples from the merged data statistics.
@@ -64,19 +68,19 @@ def plot_evaluation(
         Configuration dictionary.
     scores_dict : dict
         ``scores_dict[metric][region][stream][run_id] -> DataArray`` (``MetricResult.score``).
-    init_hour_scores : dict
-        Same nesting with the ``MetricResult.by_init_hour`` arrays; empty unless
-        ``init_hour`` is requested.
     statistics : dict
         ``statistics[name][stream][run_id] -> Dataset``, the per-sample quantities of the
         plots across samples (``plot_data``) as ``accumulate_stream_results`` nests them:
         ``region_means`` for the timeseries, ``histogram_counts`` for the across-samples
         histograms.
+    curves : dict
+        Same nesting with the ``MetricResult.curves`` of the metrics that have them (the
+        spectra of ``psd``, the quantiles of ``qq_analysis``).
     summary_dir : Path
         Directory to write plots to.
     """
     if scores_dict:
-        plot_scores(cfg, scores_dict, init_hour_scores, summary_dir)
+        plot_scores(cfg, scores_dict, curves, summary_dir)
     if "region_means" in statistics:
         plot_timeseries(cfg, statistics["region_means"], summary_dir)
     if "histogram_counts" in statistics:

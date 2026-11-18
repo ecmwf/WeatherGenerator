@@ -16,11 +16,13 @@ how skill depends on the time of day a forecast starts; it is plotted by
 
 Scoring goes through ``compute_scores_for_region``, as for the per-sample scores; this
 module only attaches the ``init_hour`` coordinate it groups by and stacks the per-step
-results into ``MetricResult.by_init_hour``.
+results into the ``by_init_hour`` curve of the ``MetricResult`` (with ``by_init_hour_counts``,
+the samples per hour, the weights of the merge over chunks of samples).
 """
 
 import logging
 
+import numpy as np
 import xarray as xr
 
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
@@ -41,7 +43,7 @@ def compute_scores_by_init_hour(
     metrics_dict: dict,
     climatology: dict | None = None,
 ) -> None:
-    """Fill ``results[region][metric].by_init_hour`` for every region of *results*.
+    """Add the ``by_init_hour`` curve to ``results[region][metric]`` for every region.
 
     Parameters
     ----------
@@ -103,10 +105,18 @@ def compute_scores_by_init_hour(
         )
         if "init_hour" not in scores.dims:  # a single init hour: get_score does not group
             scores = scores.expand_dims(init_hour=[int(hours[fsteps[0]].values[0])])
-        # same dim order as MetricResult.score, with init_hour in place of sample
-        scores = scores.transpose("init_hour", "forecast_step", ...)
+        # same dim order as MetricResult.score, with init_hour in place of sample; only the
+        # dimension coordinates (a lead_time coordinate of the data is not JSON-serialisable)
+        scores = scores.transpose("init_hour", "forecast_step", ...).reset_coords(drop=True)
+        sample_hours = np.asarray(hours[fsteps[0]].values)
+        counts = xr.DataArray(
+            [int((sample_hours == h).sum()) for h in scores.init_hour.values],
+            dims="init_hour",
+            coords={"init_hour": scores.init_hour.values},
+        )
         for metric in scores.metric.values:
-            by_metric[str(metric)].by_init_hour = scores.sel(metric=metric, drop=True)
+            by_metric[str(metric)].add_curve("by_init_hour", scores.sel(metric=metric, drop=True))
+            by_metric[str(metric)].add_curve("by_init_hour_counts", counts)
 
 
 def _with_init_hour(da_dict: dict | None, hours: dict) -> dict | None:
