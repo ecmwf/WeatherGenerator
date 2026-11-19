@@ -1,0 +1,8 @@
+# sdnbfpve's own input streams, to score a model fine-tuned on other inputs (rkl3g2o9:
+# 2024-26 live-like stores, which do not cover 2023) on sdnbfpve's validation windows.
+# Values copied from sdnbfpve's checkpoint; bare names resolve through data_paths.
+# statistics = the store itself (the same as having none)
+ERA5_in:
+  filenames:
+  - aifs-od-an-oper-0001-mars-n320-2016-2025-6h-v1-for-single-v2.zarr
+  statistics: /ec/ai/project/ai-ml/datasets/aifs-od-an-oper-0001-mars-n320-2016-2025-6h-v1-for-single-v2.zarr

@@ -1,0 +1,50 @@
+# Fine-tune sdnbfpve towards the operational analysis on its own years, stage 2: encoder
+# and forecasting engine with the 8-step rollout, decoder frozen again (as stage 1 left
+# it). As config/finetune_analysis/stage2_latent.yml (dikak2l0, rkl3g2o9) with sdnbfpve's
+# inputs and dates, and 4x the samples on 16 GPUs (7 years of data, not 22 months).
+# Run with --from-run-id <stage-1 run>, stage train_continue. See README.md.
+streams_directory: config/finetune_analysis_2022/streams  # relative to the checkout root (run from there)
+
+data_paths:
+  - /home/mlx/ai-ml/datasets
+  - /lus/h2resw01/fws4/lb/project/ai-ml/observations/v1
+  - /ec/weathergen/
+  - /ec/weathergen/geos
+  - /ec/weathergen/avhrr
+  - /home/mlx/ai-ml/observations/v2
+
+general:
+  istep: 0
+
+# sdnbfpve's own freeze_modules: decoder, latent heads and encoder norms/queries frozen
+freeze_modules: "latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\\.ln.*|encoder\\.q_cells.*|encoder\\.q_aux.*"
+# the encoder's and forecasting engine's layers in eval mode (no dropout); the
+# ForecastingEngine module itself stays in train mode, so its latent noise
+# (fe_impute_latent_noise_std, as sdnbfpve was trained) stays on
+eval_modules: "encoder|forecast_engine\\..*"
+
+training_config:
+  start_date: "2016-01-02T00:00"
+  end_date: "2022-12-31T00:00"
+  # 8 x 8192 on 16 GPUs: 4096 steps per GPU (dikak2l0: 8 x 2048 on 4, plateau from 4).
+  # ~9-10 s per sample per GPU (smoke runs) -> ~11-12 h with the validations
+  num_mini_epochs: 8
+  samples_per_mini_epoch: 8192
+  learning_rate_scheduling:
+    parallel_scaling_policy: "constant"
+    lr_start: 1.0e-07
+    lr_max: 1.5e-05  # as run gi0v1zz7 (submitted with lr_max=1.5e-05 over the 5.0e-06 first set here)
+    lr_final_decay: 1.0e-06
+    num_steps_warmup: 128
+    num_steps_cooldown: 256
+  forecast:
+    time_step: "06:00:00"
+    num_steps: 8
+    offset: 1
+    policy: fixed
+
+validation_config:
+  start_date: "2023-10-01T00:00"
+  end_date: "2023-12-31T00:00"
+  samples_per_mini_epoch: 256
+  validate_before_training: true

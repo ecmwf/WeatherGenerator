@@ -1,0 +1,34 @@
+# sdnbfpve's own input streams, to score a model fine-tuned on other inputs (rkl3g2o9:
+# 2024-26 live-like stores, which do not cover 2023) on sdnbfpve's validation windows.
+# Values copied from sdnbfpve's checkpoint; bare names resolve through data_paths.
+AVHRR:
+  filenames:
+  - observations-file-2001-2023-eumetsat-avhrr-o256-v4.zarr
+  coords_channels:
+  - latitude
+  - longitude
+METOP_ABC_IASI:
+  filenames:
+  - observations-ea-ofb-0001-2007-2021-metop-a-iasi-radiances-v1.zarr
+  - observations-ea-ofb-0001-2013-2023-metop-b-iasi-radiances-v1.zarr
+  - observations-ea-ofb-0001-2019-2023-metop-c-iasi-radiances-v1.zarr
+METEOSAT_SEVIRI_IR:
+  filenames:
+  - observations-file-2014-2024-seviri-o256-wegen-v3.zarr
+GOES_ABI_IR:
+  filenames:
+  - observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr
+HIMAWARI_AHI_IR:
+  filenames:
+  - observations-file-2015-2022-himawari8-IR-o256-v1.zarr
+  - observations-file-2022-2024-himawari9-IR-o256-v1.zarr
+GOES_ABI_VIS:
+  filenames:
+  - observations-file-2017-2024-abi-goes16-VIS-o256-v2.zarr
+HIMAWARI_AHI_VIS:
+  filenames:
+  - observations-file-2015-2022-himawari8-VIS-o256-v1.zarr
+  - observations-file-2022-2024-himawari9-VIS-o256-v1.zarr
+SurfaceCombined:
+  filenames:
+  - observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr

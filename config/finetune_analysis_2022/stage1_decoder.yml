@@ -1,0 +1,54 @@
+# Fine-tune sdnbfpve towards the operational analysis on its own years (train 2016-2022,
+# validate Q4 2023, as sdnbfpve), stage 1: the ERA5 decoder only, 2 forecast steps.
+# As config/finetune_analysis/stage1_decoder.yml (the 2025-26 fine-tune, j71aykhe) with
+# sdnbfpve's own inputs (no observations/analysis overrides: the checkpoint's streams),
+# the z/t-weighted target with sp trained (streams/target.yml) and sdnbfpve's dates.
+# Run with --from-run-id sdnbfpve, stage train_continue. See README.md.
+streams_directory: config/finetune_analysis_2022/streams  # relative to the checkout root (run from there)
+
+# sdnbfpve's input stores (bare names in its checkpoint) by paths ag mounts: ag's
+# private config lacks preprint_data_symlinks/ (as forecast/test_latent)
+data_paths:
+  - /home/mlx/ai-ml/datasets
+  - /lus/h2resw01/fws4/lb/project/ai-ml/observations/v1
+  - /ec/weathergen/
+  - /ec/weathergen/geos
+  - /ec/weathergen/avhrr
+  - /home/mlx/ai-ml/observations/v2
+
+# a fresh run, not a continuation of sdnbfpve's schedule and optimizer state
+general:
+  istep: 0
+
+# everything except the decoder (embed_target_coords, target_token_engines, pred_heads)
+freeze_modules: "encoder|forecast_engine|latent.*|deep_ssl.*"
+# the decoder trains in eval mode, as it runs in inference (its hardcoded 0.1 dropout
+# otherwise costs the gain in eval: pathtests avauz837 vs ka65d7vu)
+eval_modules: "embed_target_coords|target_token_engines|pred_heads"
+
+training_config:
+  start_date: "2016-01-02T00:00"
+  end_date: "2022-12-31T00:00"
+  # short, validated each mini-epoch, best by validation (j71aykhe plateaued from 4)
+  num_mini_epochs: 8
+  samples_per_mini_epoch: 256
+  learning_rate_scheduling:
+    # sdnbfpve's checkpoint says 'const', which this code rejects ('constant')
+    parallel_scaling_policy: "constant"
+    lr_start: 1.0e-07
+    lr_max: 1.0e-05
+    lr_final_decay: 1.0e-06
+    # in steps per GPU: 8 x 256 samples on 4 GPUs is 512 steps
+    num_steps_warmup: 16
+    num_steps_cooldown: 32
+  forecast:
+    time_step: "06:00:00"
+    num_steps: 2
+    offset: 1
+    policy: fixed
+
+validation_config:
+  start_date: "2023-10-01T00:00"
+  end_date: "2023-12-31T00:00"
+  samples_per_mini_epoch: 256
+  validate_before_training: true

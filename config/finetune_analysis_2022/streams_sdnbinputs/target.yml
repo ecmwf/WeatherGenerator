@@ -1,0 +1,94 @@
+# Target for fine-tuning sdnbfpve towards the operational analysis on its own years
+# (train 2016-2022, validate 2023): the analysis store with its own statistics, as the
+# 2025-26 fine-tune. In 2016..2024-05 the store is plain od/0001, so sp is the real
+# surface field and keeps sdnbfpve's weight (the 2025-26 fine-tune set it to 0: lnsp-
+# derived sp in its research-experiment segments). strd/ssrd 0 (6-h accumulations here,
+# 1-h in ERA5); z_* 100, t_* 20, msl 50, 2t 30 (rkl3g2o9's weights); the rest
+# sdnbfpve's. q_10, absent from the store, is NaN (fill_missing_channels, masked).
+# Channel order: sdnbfpve's val_target_channels. Written by hand (see README.md).
+ERA5:
+  filenames:
+  - /ec/ai/project/ai-ml/datasets/aifs-od-an-oper-0001-mars-n320-2016-2026-6h-v4-for-single-v3.zarr
+  fill_missing_channels: true
+  target_channel_weights:
+  - 2.0
+  - 2.0
+  - 1.0
+  - 30.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 50.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 0.0
+  - 0.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 20.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0
+  - 100.0

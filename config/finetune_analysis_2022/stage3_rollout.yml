@@ -1,0 +1,51 @@
+# Fine-tune sdnbfpve towards the operational analysis on its own years, stage 3 (new):
+# stage 2 again with a 12-step (3-day) rollout at a lower learning rate. rkl3g2o9's
+# lesson: weighting improves the starting state, not error growth, so the day 3-5 gap
+# to AIFS needs longer-rollout training. 12, not 16: the loss grows with lead (step 12
+# ~3x step 1, step 16 ~5x, sdnbfpve's 2023 validation with these weights), so with 16
+# steps the first 12 h would carry ~5% of it (10% with 12, 18% with stage 2's 8) and the
+# MSE-optimal smoothing of days 3-4 would dominate; 72 h is also where GraphCast and AIFS
+# stop. If the 6-12 h scores fall below stage 2's, rerun with mild lead balancing:
+#   training_config.forecast.timestep_weight: {gamma_decay: {decay_factor: 0.95}}
+# (weights 0.95^k, normalised to mean 1). Size from a smoke run (memory, s/sample).
+# Run with --from-run-id <stage-2 run>. See README.md.
+streams_directory: config/finetune_analysis_2022/streams  # relative to the checkout root (run from there)
+
+data_paths:
+  - /home/mlx/ai-ml/datasets
+  - /lus/h2resw01/fws4/lb/project/ai-ml/observations/v1
+  - /ec/weathergen/
+  - /ec/weathergen/geos
+  - /ec/weathergen/avhrr
+  - /home/mlx/ai-ml/observations/v2
+
+general:
+  istep: 0
+
+freeze_modules: "latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\\.ln.*|encoder\\.q_cells.*|encoder\\.q_aux.*"
+eval_modules: "encoder|forecast_engine\\..*"
+
+training_config:
+  start_date: "2016-01-02T00:00"
+  end_date: "2022-12-31T00:00"
+  # placeholder until the smoke run: 12 steps cost ~1.5x stage 2 per sample
+  num_mini_epochs: 4
+  samples_per_mini_epoch: 8192
+  learning_rate_scheduling:
+    parallel_scaling_policy: "constant"
+    lr_start: 1.0e-07
+    lr_max: 2.0e-06
+    lr_final_decay: 5.0e-07
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
+  forecast:
+    time_step: "06:00:00"
+    num_steps: 12
+    offset: 1
+    policy: fixed
+
+validation_config:
+  start_date: "2023-10-01T00:00"
+  end_date: "2023-12-31T00:00"
+  samples_per_mini_epoch: 256
+  validate_before_training: true
