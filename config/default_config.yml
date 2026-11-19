@@ -73,8 +73,9 @@ rope_2D: False
 # 2D RoPE in forecast engine only (e.g. encoder trained without RoPE). If null, rope_2D is used
 fe_rope_2D: null
 # Scale of lat/lon for 2D RoPE, at healpix_level 5 about 30 makes neighbouring cells differ by 1.
-# Not stored in checkpoints, thus a run must use the scale it was trained with.
-rope_2D_coord_scale: 1.0
+rope_2D_coord_scale: 30.0
+# Base of 2D RoPE frequencies, sets the slowest one (fastest is set by rope_2D_coord_scale).
+rope_2D_base: 10000.0
 
 with_mixed_precision: True
 with_flash_attention: True

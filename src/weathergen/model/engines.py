@@ -411,6 +411,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                     )
                 )
             else:
@@ -487,6 +488,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                     )
                 )
             else:
@@ -504,6 +506,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                     )
                 )
             # MLP block
@@ -578,6 +581,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=with_2d_rope,
+                            rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                         )
                     )
                 else:
@@ -596,6 +600,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=with_2d_rope,
+                            rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                         )
                     )
                 # Add MLP block
