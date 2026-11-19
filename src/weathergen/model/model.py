@@ -140,8 +140,8 @@ class ModelParams(torch.nn.Module):
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
-        # RoPE coordinates
-        self.rope_2D = cf.get("rope_2D", False)
+        # rope coordinates used by encoder (rope_2D) or forecast engine (fe_rope_2D)
+        self.rope_2D = cf.get("rope_2D", False) or bool(cf.get("fe_rope_2D", None))
         if self.rope_2D:
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
             total_tokens = (
@@ -236,6 +236,20 @@ class ModelParams(torch.nn.Module):
             # Shape: (num_healpix_cells, ae_local_num_queries, 2)
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            # scale lat/lon for rope, cells are 0.03 rad apart thus x30 gives steps of about 1
+            scale = cf.get("rope_2D_coord_scale", 1.0)
+            coords = coords * scale
+            if "rope_2D_coord_scale" not in cf:
+                # older runs have no key and were trained without scaling
+                logger.warning(
+                    "2D RoPE: rope_2D_coord_scale not in config (older run), using 1.0. "
+                    "Set rope_2D_coord_scale if the model was trained with another scale."
+                )
+            logger.info(
+                "2D RoPE with rope_2D_coord_scale=%s and rope_2D_base=%s",
+                scale,
+                cf.get("rope_2D_base", 10000.0),
+            )
             # Per-cell coords for QueryAggregationEngine (no query expansion)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)

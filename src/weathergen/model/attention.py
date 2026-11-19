@@ -55,6 +55,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
         use_xsa=False,
+        rope_2d_base=10000.0,
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -65,6 +66,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.with_residual = with_residual
         self.use_xsa = use_xsa
         self.with_2d_rope = with_2d_rope
+        self.rope_2d_base = rope_2d_base
         self.use_xsa = use_xsa
 
         assert dim_embed % num_heads == 0
@@ -115,7 +117,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         if self.with_2d_rope:
             if coords is None:
                 raise ValueError("coords must be provided when with_2d_rope=True")
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, base=self.rope_2d_base, unsqueeze_dim=1)
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
@@ -253,6 +255,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         with_2d_rope=False,
         is_dit=False,
         dit_is_cond=False,
+        rope_2d_base=10000.0,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -262,6 +265,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.with_residual = with_residual
         self.use_xsa = use_xsa
         self.with_2d_rope = with_2d_rope
+        self.rope_2d_base = rope_2d_base
         self.dtype = attention_dtype
         self.use_xsa = use_xsa
 
@@ -348,7 +352,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         if self.with_2d_rope:
             if coords is None:
                 raise ValueError("coords must be provided when with_2d_rope=True")
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, base=self.rope_2d_base, unsqueeze_dim=1)
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
@@ -605,6 +609,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         with_2d_rope=False,
         is_dit=False,  # should only be True for diffusion model
         dit_is_cond=False,  # whether the attention is used for conditioning in the diffusion model (as opposed to denoising). Should only be True for cross attention layers in the diffusion model, and will control whether ada_ln_aux is applied to the input or output of the attention layer
+        rope_2d_base=10000.0,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -615,6 +620,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.with_residual = with_residual
         self.use_xsa = use_xsa
         self.with_2d_rope = with_2d_rope
+        self.rope_2d_base = rope_2d_base
         self.use_xsa = use_xsa
 
         assert dim_embed % num_heads == 0
@@ -695,7 +701,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         if self.with_2d_rope:
             if coords is None:
                 raise ValueError("coords must be provided when with_2d_rope=True")
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=2)
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, base=self.rope_2d_base, unsqueeze_dim=2)
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
