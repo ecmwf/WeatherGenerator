@@ -85,6 +85,24 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
     return IOReaderData.combine(rdatas)
 
 
+def parse_date_ranges(
+    date_ranges: Sequence | None,
+) -> tuple[list[tuple[np.datetime64, np.datetime64]] | None, np.typing.NDArray | None]:
+    """
+    Parse date_ranges, which is either a list of {start_date, end_date} periods or a list of
+    single forecast init dates. Returns (periods, None) or (None, sorted init dates).
+    """
+    assert date_ranges, "date_ranges (or start_date and end_date) has to be specified"
+    is_period = [OmegaConf.is_dict(entry) for entry in date_ranges]
+    assert all(is_period) or not any(is_period), (
+        "date_ranges has to be either a list of {start_date, end_date} periods "
+        "or a list of init dates, not a mix of both"
+    )
+    if all(is_period):
+        return [(period.start_date, period.end_date) for period in date_ranges], None
+    return None, np.sort([str_to_datetime64(date) for date in date_ranges])
+
+
 @dataclasses.dataclass
 class _Stream:
     info: Config
@@ -124,54 +142,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_timedelta = mode_cfg.time_window_len
         self.step_timedelta = mode_cfg.time_window_step
 
-        # needed as offset for permutations; computed early since it feeds into the
-        # t_start/t_end widening for the init_dates case below
+        # needed as offset for permutations
         source_cfgs = self.mode_cfg.get("model_input")
         self.max_input_steps = np.array(
             [sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()]
         ).max()
 
-        # date_ranges has two mutually exclusive forms:
-        # - a list of {start_date, end_date} dicts: non-contiguous training periods, indices
-        #   that fall in gaps are excluded.
-        # - a flat list of single dates: fixed forecast init dates, only indices whose init
-        #   time exactly matches one of these dates are kept (e.g. inference initialized on
-        #   the 1st of every month).
-        raw_ranges = mode_cfg.get("date_ranges")
-        self._valid_ranges: list[tuple] | None = None
-        self._valid_init_dates: np.typing.NDArray | None = None
-        if raw_ranges is not None:
-            is_range_entry = [OmegaConf.is_dict(r) for r in raw_ranges]
-            assert all(is_range_entry) or not any(is_range_entry), (
-                "date_ranges entries must either all be {start_date, end_date} dicts, "
-                "or all be single init dates, not a mix of both"
-            )
-            if all(is_range_entry):
-                self._valid_ranges = [(r.start_date, r.end_date) for r in raw_ranges]
-                t_start = min(r[0] for r in self._valid_ranges)
-                t_end = max(r[1] for r in self._valid_ranges)
-            else:
-                self._valid_init_dates, t_start, t_end = self._resolve_init_dates(raw_ranges)
-                # reset() pads/repeats perms with random fillers when repeat_data is enabled,
-                # which would silently duplicate some init dates and run them more than once
-                assert not self.repeat_data, (
-                    "repeat_data_in_mini_epoch must be False when date_ranges is a list of "
-                    "single init dates, otherwise some init dates would be sampled more than "
-                    "once to pad out samples_per_mini_epoch"
-                )
-        else:
-            t_start = self.mode_cfg.start_date
-            t_end = self.mode_cfg.end_date
-            assert t_start is not None and t_end is not None, (
-                "start_date and end_date must be set when date_ranges is not specified"
-            )
-
-        tw = TimeWindowHandler(
-            t_start,
-            t_end,
-            self.len_timedelta,
-            self.step_timedelta,
-        )
+        self._date_ranges, self._init_dates = parse_date_ranges(mode_cfg.get("date_ranges"))
+        if self._init_dates is not None:
+            self._check_init_dates()
+        tw = TimeWindowHandler(*self._get_time_span(), self.len_timedelta, self.step_timedelta)
 
         self.time_window_handler = tw
         if is_root():
@@ -238,64 +218,54 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if not self.repeat_data:
             assert n_duplicates <= 0
 
-    def _resolve_init_dates(
-        self, raw_ranges: Sequence
-    ) -> tuple[np.typing.NDArray, np.datetime64, np.datetime64]:
-        """
-        Parse a flat date_ranges list of single init dates (fixed forecast init dates mode,
-        e.g. inference initialized on the 1st of every month) into sorted timestamps, and
-        compute the widened [t_start, t_end) range needed so every init date still has room
-        for its full input window and forecast rollout.
-        """
-        valid_init_dates = np.array(sorted(str_to_datetime64(r) for r in raw_ranges))
-        # init dates must sit on the sampling grid, or _calc_baseperms would silently
-        # drop them instead of matching an index
-        misaligned = (valid_init_dates - valid_init_dates.min()) % self.step_timedelta
-        assert np.all(misaligned == np.timedelta64(0)), (
-            "All date_ranges init dates must be spaced by a multiple of "
-            f"time_window_step ({self.step_timedelta})"
+    def _check_init_dates(self):
+        """Assert that each init date of date_ranges is sampled exactly once."""
+        offsets = (self._init_dates - self._init_dates[0]) % self.step_timedelta
+        assert np.all(offsets == np.timedelta64(0)), (
+            "date_ranges init dates have to be spaced by multiples of "
+            f"time_window_step ({self.step_timedelta}) to match a sample"
         )
+        # reset() pads the samples of a mini epoch with random repetitions otherwise
+        assert not self.repeat_data, (
+            "repeat_data_in_mini_epoch has to be False when date_ranges is a list of init dates"
+        )
+
+    def _get_time_span(self) -> tuple[np.datetime64, np.datetime64]:
+        """
+        Return [t_start, t_end) spanning all date ranges or, for init dates, from the input
+        window of the first to the end of the longest forecast of the last init date.
+        """
+        if self._init_dates is None:
+            return min(s for s, _ in self._date_ranges), max(e for _, e in self._date_ranges)
+
         input_horizon = self.max_input_steps * self.step_timedelta
-        forecast_horizon = (
+        max_forecast_horizon = (
             self.list_num_forecast_steps.max() + self.output_offset
         ) * self.time_step
-        t_start = valid_init_dates.min() - input_horizon
-        t_end = valid_init_dates.max() + forecast_horizon + self.len_timedelta
-        return valid_init_dates, t_start, t_end
+        t_start = self._init_dates[0] - input_horizon
+        t_end = self._init_dates[-1] + max_forecast_horizon + self.len_timedelta
+        return t_start, t_end
 
-    def _mask_init_dates(
-        self, all_indices: np.typing.NDArray, times: np.typing.NDArray
-    ) -> np.typing.NDArray:
-        """Restrict indices to those whose init time exactly matches a requested init date."""
-        mask = np.isin(times, self._valid_init_dates.astype(times.dtype))
-        return all_indices[mask]
+    def _in_date_ranges(self, window_starts: np.typing.NDArray, fsm: int) -> np.typing.NDArray:
+        """Mask of samples whose input and forecast steps lie within one of the date ranges."""
+        first_input_starts = window_starts - self.max_input_steps * self.step_timedelta
+        last_forecast_starts = window_starts + (fsm + self.output_offset) * self.time_step
+        mask = np.zeros(len(window_starts), dtype=bool)
+        for start, end in self._date_ranges:
+            mask |= (first_input_starts >= start) & (last_forecast_starts < end)
+        return mask
 
     def _calc_baseperms(self, fsm: int) -> np.typing.NDArray:
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
-        # global end guard: prevent forward index access beyond t_end
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
+        idxs = np.arange(self.max_input_steps, perms_len)
 
-        all_indices = np.arange(self.max_input_steps, perms_len)
-        if self._valid_ranges is None and self._valid_init_dates is None:
-            return all_indices
-
-        t_start = self.time_window_handler.t_start
-        step = self.time_window_handler.t_window_step
-        times = t_start + all_indices * step
-
-        if self._valid_init_dates is not None:
-            return self._mask_init_dates(all_indices, times)
-
-        # include only indices whose full sample footprint (input steps through forecast
-        # target steps) falls within one of the valid periods
-        input_horizon = self.max_input_steps * step
-        forecast_horizon = (fsm + self.output_offset) * self.time_step
-        mask = np.zeros(len(all_indices), dtype=bool)
-        for p_start, p_end in self._valid_ranges:
-            mask |= (times - input_horizon >= p_start) & (times + forecast_horizon < p_end)
-        return all_indices[mask]
+        window_starts = self.time_window_handler.t_start + idxs * self.step_timedelta
+        if self._init_dates is not None:
+            return idxs[np.isin(window_starts, self._init_dates.astype(window_starts.dtype))]
+        return idxs[self._in_date_ranges(window_starts, fsm)]
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""

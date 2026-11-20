@@ -159,7 +159,7 @@ def config_fresh(private_config_file):
 def base_config():
     return OmegaConf.create(DUMMY_BASE_CONF)
 
-@pytest.fixure
+@pytest.fixture
 def base_file(base_config):
     with tempfile.NamedTemporaryFile("w+") as temp:
         temp.write(OmegaConf.to_yaml(base_config))
@@ -230,6 +230,46 @@ def test_load_multiple_overwrites(private_config_file):
     cf = config.load_merge_configs(private_config_file, None, None, None, *overwrites)
 
     assert contains(cf, expected)
+
+
+PERIOD_A = {"start_date": "1979-01-01T00:00", "end_date": "1985-12-31T00:00"}
+PERIOD_B = {"start_date": "1993-01-01T00:00", "end_date": "2010-12-31T00:00"}
+
+
+@pytest.mark.parametrize(
+    "base_dates,overwrite_dates,expected_periods",
+    [
+        (PERIOD_A, {"date_ranges": [PERIOD_B]}, [PERIOD_B]),
+        ({"date_ranges": [PERIOD_A, PERIOD_B]}, PERIOD_B, [PERIOD_B]),
+        ({"date_ranges": [PERIOD_A, PERIOD_B]}, {"date_ranges": [PERIOD_A]}, [PERIOD_A]),
+    ],
+)
+def test_overwrite_replaces_dates(
+    private_config_file, base_dates, overwrite_dates, expected_periods
+):
+    base = OmegaConf.create({"training_config": base_dates})
+    overwrite = {"training_config": overwrite_dates}
+
+    cf = config.load_merge_configs(private_config_file, None, None, base, overwrite)
+
+    periods = [(p.start_date, p.end_date) for p in cf.training_config.date_ranges]
+    expected = [
+        (config.str_to_datetime64(p["start_date"]), config.str_to_datetime64(p["end_date"]))
+        for p in expected_periods
+    ]
+    assert periods == expected
+    assert "start_date" not in cf.training_config
+
+
+@pytest.mark.parametrize(
+    "stage_dates",
+    [{"start_date": "2000-01-01T00:00"}, PERIOD_A | {"date_ranges": [PERIOD_B]}],
+)
+def test_ambiguous_dates_raise(private_config_file, stage_dates):
+    overwrite = {"training_config": stage_dates}
+
+    with pytest.raises(AssertionError):
+        config.load_merge_configs(private_config_file, None, None, None, overwrite)
 
 
 @pytest.mark.parametrize("mini_epoch", [None, 0, 1, 2, -1])
