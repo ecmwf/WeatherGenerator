@@ -20,6 +20,7 @@ Is this PR a draft? Mark it as draft.
 ## Checklist before asking for review
 
 -   [ ] I have performed a self-review of my code
+-   [ ] I have had an LLM review my code and addressed its relevant findings
 -   [ ] My changes comply with basic sanity checks:
       - I have fixed formatting issues with `./scripts/actions.sh lint`
       - I have run unit tests with `./scripts/actions.sh unit-test`
