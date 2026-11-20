@@ -411,6 +411,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                     )
                 )
             else:
@@ -487,6 +488,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                     )
                 )
             else:
@@ -504,6 +506,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                     )
                 )
             # MLP block
@@ -555,6 +558,10 @@ class ForecastingEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
+        # fe_rope_2D sets 2D rope for forecast engine only.
+        # None, null in config, uses rope_2D like the encoder
+        fe_rope = self.cf.get("fe_rope_2D", None)
+        with_2d_rope = self.cf.get("rope_2D", False) if fe_rope is None else fe_rope
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
@@ -573,7 +580,8 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_2d_rope=self.cf.get("rope_2D", False),
+                            with_2d_rope=with_2d_rope,
+                            rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                         )
                     )
                 else:
@@ -591,7 +599,8 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_2d_rope=self.cf.get("rope_2D", False),
+                            with_2d_rope=with_2d_rope,
+                            rope_2d_base=self.cf.get("rope_2D_base", 10000.0),
                         )
                     )
                 # Add MLP block
