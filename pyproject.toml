@@ -183,12 +183,9 @@ exclude-newer-package = {certifi = false}
 # torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
 override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]
 
-# The minimum version of uv required.
-# It is tightly controlled because the format of uv.lock has changed
-# and we rely on newer options (extra-build-dependencies)
-# over revisions, causing reformats to happen without reason.
-# Also, relatively recent versions are required to support workspaces.
-required-version = ">=0.10.0"
+# Pinned to avoid many uv cache buckets (one per uv version).
+# Keep in sync with UV_VERSION in .github/workflows/ci.yml and ci/cscs.yaml.
+required-version = "==0.13.7"
 
 # The supported environments
 # TODO: add macos and windows (CPU only, for running tests)
