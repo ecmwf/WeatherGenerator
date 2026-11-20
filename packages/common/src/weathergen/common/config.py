@@ -90,11 +90,12 @@ def _patch_time(key, sub_conf, resolver):
 
 
 def _sanitize_start_end_time_keys(sub_conf):
-    """Convert start_date and end_date keys to datetime resolvers."""
-    time_keys = ["start_date", "end_date"]
-    for key in time_keys:
-        if key in sub_conf:
-            sub_conf = _patch_time(key, sub_conf, _DATETIME_TYPE_NAME)
+    """Convert start_date and end_date of the date_ranges periods to datetime resolvers."""
+    for period in sub_conf.get("date_ranges") or []:
+        # single init dates (instead of periods) are parsed where they are consumed
+        if OmegaConf.is_dict(period):
+            for key in ("start_date", "end_date"):
+                _patch_time(key, period, _DATETIME_TYPE_NAME)
 
 
 def _sanitize_delta_time_keys(sub_conf):
@@ -423,6 +424,32 @@ def merge_configs(base_config: Config, update_config: Config):
     return OmegaConf.merge(base_config, update_config)
 
 
+def _start_end_to_date_ranges(config: Config) -> Config:
+    """
+    Replace start_date/end_date of each stage config by the equivalent single-period
+    date_ranges. Applied to every config before merging, so that date_ranges is the only date
+    representation and an overwrite replaces the dates of the base config instead of mixing
+    with them.
+    """
+    config = config.copy()
+    for stage in ("training_config", "validation_config", "test_config"):
+        stage_cfg = config.get(stage)
+        if stage_cfg is None:
+            continue
+        start_date = stage_cfg.pop("start_date", None)
+        end_date = stage_cfg.pop("end_date", None)
+        if start_date is None and end_date is None:
+            continue
+        assert start_date is not None and end_date is not None, (
+            f"{stage}: start_date and end_date have to be specified together"
+        )
+        assert stage_cfg.get("date_ranges") is None, (
+            f"{stage}: specify either start_date/end_date or date_ranges, not both"
+        )
+        stage_cfg.date_ranges = [{"start_date": start_date, "end_date": end_date}]
+    return config
+
+
 def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
@@ -477,8 +504,11 @@ def load_merge_configs(
         # streams from an overwrite's streams_directory replace inherited streams
         if any(o.get("streams_directory") is not None for o in overwrite_configs):
             base_config.streams = None
+    configs = [
+        _start_end_to_date_ranges(cfg) for cfg in (base_config, private_config, *overwrite_configs)
+    ]
     # use OmegaConf.unsafe_merge if too slow
-    c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
+    c = OmegaConf.merge(*configs)
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
 

@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, str_to_datetime64
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
@@ -85,6 +85,24 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
     return IOReaderData.combine(rdatas)
 
 
+def parse_date_ranges(
+    date_ranges: Sequence | None,
+) -> tuple[list[tuple[np.datetime64, np.datetime64]] | None, np.typing.NDArray | None]:
+    """
+    Parse date_ranges, which is either a list of {start_date, end_date} periods or a list of
+    single forecast init dates. Returns (periods, None) or (None, sorted init dates).
+    """
+    assert date_ranges, "date_ranges (or start_date and end_date) has to be specified"
+    is_period = [OmegaConf.is_dict(entry) for entry in date_ranges]
+    assert all(is_period) or not any(is_period), (
+        "date_ranges has to be either a list of {start_date, end_date} periods "
+        "or a list of init dates, not a mix of both"
+    )
+    if all(is_period):
+        return [(period.start_date, period.end_date) for period in date_ranges], None
+    return None, np.sort([str_to_datetime64(date) for date in date_ranges])
+
+
 @dataclasses.dataclass
 class _Stream:
     info: Config
@@ -123,18 +141,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.len_timedelta = mode_cfg.time_window_len
         self.step_timedelta = mode_cfg.time_window_step
-        tw = TimeWindowHandler(
-            self.mode_cfg.start_date,
-            self.mode_cfg.end_date,
-            self.len_timedelta,
-            self.step_timedelta,
-        )
 
         # needed as offset for permutations
         source_cfgs = self.mode_cfg.get("model_input")
         self.max_input_steps = np.array(
             [sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()]
         ).max()
+
+        self._date_ranges, self._init_dates = parse_date_ranges(mode_cfg.get("date_ranges"))
+        if self._init_dates is not None:
+            self._check_init_dates()
+        tw = TimeWindowHandler(*self._get_time_span(), self.len_timedelta, self.step_timedelta)
 
         self.time_window_handler = tw
         if is_root():
@@ -157,15 +174,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        max_index = self.index_range.end - (
-            (  # max time units needed to make a forecast
-                self.time_step * (fsm + self.output_offset)  # translation due to forecasting
-                + self.len_timedelta  # length of forecasting window
-            )
-            // self.step_timedelta  # as number of indexs
-        )
-
-        available_samples = max_index * self.batch_size  # as number of samples
+        available_samples = len(self._calc_baseperms(fsm)) * self.batch_size
 
         assert available_samples > 0, (
             "There is an insufficient date range to \
@@ -209,13 +218,54 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if not self.repeat_data:
             assert n_duplicates <= 0
 
+    def _check_init_dates(self):
+        """Assert that each init date of date_ranges is sampled exactly once."""
+        offsets = (self._init_dates - self._init_dates[0]) % self.step_timedelta
+        assert np.all(offsets == np.timedelta64(0)), (
+            "date_ranges init dates have to be spaced by multiples of "
+            f"time_window_step ({self.step_timedelta}) to match a sample"
+        )
+        # reset() pads the samples of a mini epoch with random repetitions otherwise
+        assert not self.repeat_data, (
+            "repeat_data_in_mini_epoch has to be False when date_ranges is a list of init dates"
+        )
+
+    def _get_time_span(self) -> tuple[np.datetime64, np.datetime64]:
+        """
+        Return [t_start, t_end) spanning all date ranges or, for init dates, from the input
+        window of the first to the end of the longest forecast of the last init date.
+        """
+        if self._init_dates is None:
+            return min(s for s, _ in self._date_ranges), max(e for _, e in self._date_ranges)
+
+        input_horizon = self.max_input_steps * self.step_timedelta
+        max_forecast_horizon = (
+            self.list_num_forecast_steps.max() + self.output_offset
+        ) * self.time_step
+        t_start = self._init_dates[0] - input_horizon
+        t_end = self._init_dates[-1] + max_forecast_horizon + self.len_timedelta
+        return t_start, t_end
+
+    def _in_date_ranges(self, window_starts: np.typing.NDArray, fsm: int) -> np.typing.NDArray:
+        """Mask of samples whose input and forecast steps lie within one of the date ranges."""
+        first_input_starts = window_starts - self.max_input_steps * self.step_timedelta
+        last_forecast_starts = window_starts + (fsm + self.output_offset) * self.time_step
+        mask = np.zeros(len(window_starts), dtype=bool)
+        for start, end in self._date_ranges:
+            mask |= (first_input_starts >= start) & (last_forecast_starts < end)
+        return mask
+
     def _calc_baseperms(self, fsm: int) -> np.typing.NDArray:
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
+        idxs = np.arange(self.max_input_steps, perms_len)
 
-        return np.arange(self.max_input_steps, perms_len)
+        window_starts = self.time_window_handler.t_start + idxs * self.step_timedelta
+        if self._init_dates is not None:
+            return idxs[np.isin(window_starts, self._init_dates.astype(window_starts.dtype))]
+        return idxs[self._in_date_ranges(window_starts, fsm)]
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""
