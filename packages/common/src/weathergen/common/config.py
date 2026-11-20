@@ -109,6 +109,13 @@ def _sanitize_delta_time_keys(sub_conf):
         if key in sub_conf.forecast:
             sub_conf.forecast = _patch_time(key, sub_conf.forecast, _TIMEDELTA_TYPE_NAME)
 
+    if sub_conf.get("output") is not None:
+        key = "aggregation_frequency"
+        value = sub_conf.output.get(key)
+        # "monthly" is calendar-based (variable bin width) and not a fixed timedelta
+        if value is not None and str(value).strip().lower() != "monthly":
+            sub_conf.output = _patch_time(key, sub_conf.output, _TIMEDELTA_TYPE_NAME)
+
 
 def _sanitize_time_keys(conf: Config) -> Config:
     """
@@ -386,6 +393,7 @@ def _check_time_interpolation(config: Config) -> Config:
     time_keys = ["start_date", "end_date"]
     delta_keys = ["time_window_step", "time_window_len"]
     forecast_step_dt = "time_step"
+    aggregation_frequency = "aggregation_frequency"
 
     config = config.copy()
     subconfs = [
@@ -400,6 +408,8 @@ def _check_time_interpolation(config: Config) -> Config:
                 _convert_interpolation(subconf, key)
             if "forecast" in subconf:
                 _convert_interpolation(subconf.forecast, forecast_step_dt)
+            if "output" in subconf:
+                _convert_interpolation(subconf.output, aggregation_frequency)
 
     return config
 

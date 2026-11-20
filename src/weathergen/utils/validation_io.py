@@ -8,10 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from collections.abc import Iterator
 
 import astropy_healpix as hp
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 import torch
 
 import weathergen.common.config as config
@@ -189,8 +191,15 @@ def write_output(
 
     store_path = config.get_path_results(cf, mini_epoch, batch_idx)
 
+    aggregation_frequency = val_cfg.get("output", {}).get("aggregation_frequency")
+    items = (
+        data.items()
+        if aggregation_frequency is None
+        else _aggregate_items(data, aggregation_frequency)
+    )
+
     with zarrio_writer(store_path) as zio:
-        for subset in data.items():
+        for subset in items:
             zio.write_zarr(subset)
         # Write latent data directly to zarr store without using OutputItem validation
         if data.latents:
@@ -202,6 +211,146 @@ def write_output(
                 batch_idx,
                 batch_size,
             )
+
+
+# -----------------------------------------------------------------------------
+# Temporal aggregation (output.aggregation_frequency) of target/prediction output.
+#
+# Operates on already denormalized, point-aligned OutputDataset instances (i.e.
+# after OutputBatchData.extract()), so it needs no changes to the extraction or
+# zarr-writing code in common/io.py. Only target/prediction are aggregated; the
+# source dataset (fstep 0, the initial condition) is always written unchanged.
+# -----------------------------------------------------------------------------
+
+_AGGREGATED_DATASETS = ("target", "prediction")
+
+
+def _aggregate_items(
+    data: io.OutputBatchData, frequency: np.timedelta64 | str
+) -> Iterator[io.OutputItem]:
+    """Replace per forecast-step target/prediction output with `frequency`-sized temporal means."""
+    if data.forecast_offset != 1:
+        _logger.warning(
+            "output.aggregation_frequency is only supported with forecast.offset=1; "
+            "writing un-aggregated output instead."
+        )
+        yield from data.items()
+        return
+
+    for sample in data.samples:
+        for stream in data.streams:
+            yield from _aggregate_sample_stream(data, int(sample), stream, frequency)
+
+
+def _aggregate_sample_stream(
+    data: io.OutputBatchData, sample: int, stream: str, frequency: np.timedelta64 | str
+) -> Iterator[io.OutputItem]:
+    """Yield the unaggregated source item followed by the frequency-binned target/prediction
+    items."""
+    key0 = io.ItemKey(sample, 0, stream)
+    fsteps = data.forecast_steps
+    if key0.with_source:
+        yield data.extract(key0)
+        fsteps = fsteps[1:]
+
+    bins: dict[str, dict[np.datetime64, dict]] = {name: {} for name in _AGGREGATED_DATASETS}
+    for fstep in fsteps:
+        item = data.extract(io.ItemKey(sample, int(fstep), stream))
+        for name in _AGGREGATED_DATASETS:
+            dataset: io.OutputDataset | None = getattr(item, name)
+            if dataset is None or dataset.data.shape[0] == 0:
+                continue
+            bin_starts = _compute_bin_starts(dataset.times, frequency, dataset.source_interval.end)
+            _accumulate_bins(bins[name], dataset, bin_starts)
+
+    bin_starts_all = sorted({start for buckets in bins.values() for start in buckets})
+    frequency_label = (
+        frequency if isinstance(frequency, str) else config.timedelta_to_str(frequency)
+    )
+
+    for ordinal, start in enumerate(bin_starts_all, start=1):
+        key = io.ItemKey(sample, ordinal, stream)
+        target = _finalize_bin(key, "target", bins["target"].get(start), start, frequency_label)
+        prediction = _finalize_bin(
+            key, "prediction", bins["prediction"].get(start), start, frequency_label
+        )
+        if target is not None or prediction is not None:
+            yield io.OutputItem(key, forecast_offset=1, target=target, prediction=prediction)
+
+
+def _compute_bin_starts(
+    times: npt.NDArray, frequency: np.timedelta64 | str, anchor: np.datetime64
+) -> npt.NDArray:
+    """Map each row's valid time to the start timestamp of its aggregation bin."""
+    times = np.asarray(times).astype("datetime64[ns]")
+    if isinstance(frequency, str):  # "monthly": calendar-based, variable bin width
+        starts = pd.PeriodIndex(pd.to_datetime(times), freq="M").start_time.values
+        return starts.astype("datetime64[ns]")
+    window = np.timedelta64(frequency, "ns").astype(np.int64)
+    anchor = np.datetime64(anchor, "ns")
+    delta = (times - anchor).astype("timedelta64[ns]").astype(np.int64)
+    # right-closed bins: a step landing exactly on a boundary (e.g. +24h) belongs to
+    # the window it completes (day 1), not the one it starts (day 2)
+    bin_idx = -(-delta // window) - 1
+    return anchor + (bin_idx * window).astype("timedelta64[ns]")
+
+
+def _accumulate_bins(
+    bins: dict[np.datetime64, dict], dataset: "io.OutputDataset", bin_starts: npt.NDArray
+) -> None:
+    """NaN-aware accumulation of one dataset's rows into per-bin-start sum/count buckets.
+
+    `dataset.data` is (datapoints, channels) for target or (datapoints, channels, ens) for
+    prediction; handled generically via the trailing shape.
+    """
+    data = np.asarray(dataset.data, dtype=np.float64)
+    for start in np.unique(bin_starts):
+        mask = bin_starts == start
+        bucket = bins.get(start)
+        if bucket is None:
+            bucket = bins[start] = {
+                "sum": np.zeros_like(data),
+                "count": np.zeros_like(data),
+                "coords": np.asarray(dataset.coords),
+                "geoinfo": np.asarray(dataset.geoinfo),
+                "channels": dataset.channels,
+                "geoinfo_channels": dataset.geoinfo_channels,
+                "source_interval": dataset.source_interval,
+            }
+        else:
+            assert bucket["sum"].shape == data.shape, (
+                "output.aggregation_frequency requires a consistent number and order of points "
+                f"across forecast steps for stream {dataset.item_key.stream!r}."
+            )
+        chunk = data[mask]
+        valid = ~np.isnan(chunk)
+        bucket["sum"][mask] += np.where(valid, chunk, 0.0)
+        bucket["count"][mask] += valid
+
+
+def _finalize_bin(
+    key: io.ItemKey,
+    name: str,
+    bucket: dict | None,
+    start: np.datetime64,
+    frequency_label: str,
+) -> "io.OutputDataset | None":
+    if bucket is None:
+        return None
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = np.where(bucket["count"] > 0, bucket["sum"] / bucket["count"], np.nan)
+    return io.OutputDataset(
+        name,
+        key,
+        bucket["source_interval"],
+        mean.astype(np.float32),
+        np.full(mean.shape[0], start, dtype="datetime64[ns]"),
+        bucket["coords"],
+        bucket["geoinfo"],
+        bucket["channels"],
+        bucket["geoinfo_channels"],
+        aggregation_frequency=frequency_label,
+    )
 
 
 def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
