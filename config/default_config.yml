@@ -222,6 +222,10 @@ validation_config:
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
+    # channels that will be written; default all
+    channels: {
+      "ERA5": "all"
+      }
     }
 
   # run validation before training starts (mainly for model development)
