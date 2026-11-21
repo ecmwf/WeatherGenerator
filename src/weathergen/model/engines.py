@@ -48,7 +48,7 @@ class EmbeddingEngine(torch.nn.Module):
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.streams = cf.streams
+        self.streams = {k: v for k, v in cf.streams.items() if not v.get("timestep_conditioning")}
 
         for i, (stream_name, si) in enumerate(self.streams.items()):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
