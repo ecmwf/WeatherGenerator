@@ -47,7 +47,7 @@ from weathergen.evaluate.utils.regions import RegionBoundingBox
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
+work_dir = Path(_load_private_conf()["path_shared_working_dir"]) / "assets/cartopy"
 
 cartopy.config["data_dir"] = str(work_dir)
 cartopy.config["pre_existing_data_dir"] = str(work_dir)
