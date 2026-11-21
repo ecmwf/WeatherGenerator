@@ -37,8 +37,8 @@ training_config:
 
   num_mini_epochs: 16
 
-  start_date: 2014-01-01T00:00
-  end_date: 2022-12-31T00:00
+  start_date: 2003-01-01T00:00
+  end_date: 2013-12-31T00:00
   
   learning_rate_scheduling :
     lr_start: 1e-6
