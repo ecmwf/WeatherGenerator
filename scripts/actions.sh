@@ -102,7 +102,7 @@ case "$1" in
   unit-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --extra cpu pytest src/
+      uv run --extra cpu pytest
     )
     ;;
   toml-check)

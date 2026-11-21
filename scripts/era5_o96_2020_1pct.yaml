@@ -1,0 +1,22 @@
+description: |
+  Approximately 1% time slice of ECMWF Anemoi ERA5 O96 dataset.
+
+name: era5-o96-2020-1pct-6h-v1
+licence: CC-BY-4.0
+attribution: ECMWF
+
+dates:
+  start: "2020-01-01T00:00:00"
+  end: "2020-06-02T06:00:00"
+  frequency: 6h
+
+input:
+  anemoi-dataset:
+    dataset: "https://data.ecmwf.int/anemoi-datasets/era5-o96-1979-2023-6h-v8.zarr"
+
+output:
+  layout: gridded
+  dtype: float32
+
+build:
+  group_by: 10
