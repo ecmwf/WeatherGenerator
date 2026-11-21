@@ -363,6 +363,20 @@ class Trainer(TrainerBase):
         if self.cf.general.istep > 0 and is_root():
             logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
+        # handle ending of HL curriculum
+        if is_root() and self.cf.get("healpix_curriculum", None):
+            if self.cf.get("_curriculum_exit_step", None):
+                logger.info(
+                    f"Curriculum active: Training HEALPix level {self.cf.healpix_level}. "
+                    f"Next stage will begin at istep {self.cf._curriculum_exit_step}. "
+                    f"(Note: Total run length is dictated by num_mini_epochs)"
+                )
+            else:
+                logger.info(
+                    "Curriculum max level reached. "
+                    "Continuing standard training until num_mini_epochs limit."
+                )
+
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
         val_cfg = self.validation_cfg
@@ -412,8 +426,16 @@ class Trainer(TrainerBase):
                 )
             self.save_model(mini_epoch)
 
+            if self.cf.get("_curriculum_exit", False):
+                if is_root():
+                    logger.info("Curriculum stage completed. Exiting training loop.")
+                break
+
         # log final model
-        self.save_model(self.training_cfg.num_mini_epochs)
+        if self.cf.get("_curriculum_exit", False):
+            self.save_model(-1)
+        else:
+            self.save_model(self.training_cfg.num_mini_epochs)
 
         # Without this, NCCL's heartbeat monitor keeps polling a TCPStore whose server has
         # already gone away, and the ranks never exit.
@@ -577,6 +599,19 @@ class Trainer(TrainerBase):
                 self.save_model(-1)
 
             self.cf.general.istep += 1
+
+            # exit HL curriculum stage
+            if (
+                self.cf.get("_curriculum_exit_step", None)
+                and self.cf.general.istep >= self.cf._curriculum_exit_step
+            ):
+                if is_root():
+                    logger.info(
+                        f"Curriculum stage for HEALPix level {self.cf.healpix_level} "
+                        f"finished at istep {self.cf.general.istep}. Exiting early."
+                    )
+                self.cf._curriculum_exit = True
+                break
 
         self.dataset.advance()
 

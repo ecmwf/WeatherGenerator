@@ -1,0 +1,11 @@
+healpix_curriculum:
+  3: 250
+  4: 250
+  5: 250
+  6: 250
+
+curriculum_streams:
+  3: "./config/streams/era5_1deg/"
+  4: "./config/streams/era5_1deg/"
+  5: "./config/streams/era5_1deg/"
+  6: "./config/streams/era5_1deg/"
