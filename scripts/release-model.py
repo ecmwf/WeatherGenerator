@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-make_release.py - Create a release tag for a machine learning model across
+release-model.py - Create a release tag for a machine learning model across
  WeatherGenerator and WeatherGenerator-private repositories.
 
 Usage:
-    python make_release.py --release-name atmo-foo-bar --release-version 1.2 --run-id 12345
-    python make_release.py --release-name atmo-forecast --release-version 1.2rc1 \
+    python scripts/release-model.py --release-name atmo-foo-bar --release-version 1.2 \
+        --run-id 12345
+    python scripts/release-model.py --release-name atmo-forecast --release-version 1.2rc1 \
         --run-id 12345 --dry-run
 
-Generated with Claude, manually reviewed and tested.        
+    # Test against forks: pass the local remote names to tag and push to instead
+    python scripts/release-model.py --release-name atmo-test --release-version 0.1 \
+        --run-id 12345 --remote-public my-fork --remote-private my-private-fork
+
+Generated with Claude, manually reviewed and tested.
 """
 
 import argparse
@@ -18,16 +23,23 @@ import subprocess
 import sys
 from pathlib import Path
 
-logger = logging.getLogger("make_release")
+logger = logging.getLogger("release_model")
 
 
 # ---------------------------------------------------------------------------
-# Repo paths  (script lives at WeatherGenerator/scripts/make_release.py)
+# Repo paths  (script lives at WeatherGenerator/scripts/release-model.py)
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR = Path(__file__).resolve().parent  # WeatherGenerator/scripts/
 WeatherGenerator_DIR = SCRIPT_DIR.parent  # WeatherGenerator/
 WeatherGeneratorPrivate_DIR = WeatherGenerator_DIR.parent / "WeatherGenerator-private"
+
+# Canonical remotes: tags are checked against and pushed to these by default.
+# Matched against each remote's push URL, so the local remote name does not matter.
+CANONICAL_REMOTE_URLS = {
+    WeatherGenerator_DIR: "github.com/ecmwf/WeatherGenerator",
+    WeatherGeneratorPrivate_DIR: "gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private",
+}
 
 # ---------------------------------------------------------------------------
 # Regexes
@@ -53,12 +65,34 @@ def run(cmd: list, cwd: Path) -> subprocess.CompletedProcess:
     return result
 
 
-def git_fetch_tags(repo: Path) -> None:
-    logger.info("Fetching tags in %s …", repo)
-    run(["git", "fetch", "--tags", "origin"], cwd=repo)
+def normalise_remote_url(url: str) -> str:
+    """Reduce a git URL to lowercase host/path, e.g. github.com/ecmwf/weathergenerator."""
+    url = re.sub(r"^[a-z+]+://", "", url.strip())  # https://, ssh://, git+ssh://
+    url = re.sub(r"^[^@/]+@", "", url)  # git@
+    url = url.replace(":", "/", 1)  # scp-style host:path
+    url = re.sub(r"^([^/]+)/\d+/", r"\1/", url)  # ssh port, e.g. host:22/path
+    return url.removesuffix("/").removesuffix(".git").lower()
 
 
-def git_all_tags(repo: Path) -> list:
+def git_find_remote(repo: Path, canonical_url: str) -> str:
+    """Return the name of the remote whose push URL points to canonical_url."""
+    for name in run(["git", "remote"], cwd=repo).stdout.split():
+        url = run(["git", "remote", "get-url", "--push", name], cwd=repo).stdout
+        if normalise_remote_url(url) == canonical_url.lower():
+            return name
+    logger.error("No remote pointing to %r found in %s.", canonical_url, repo.name)
+    sys.exit(1)
+
+
+def git_remote_tags(repo: Path, remote: str) -> list:
+    logger.info("Listing tags of %r in %s …", remote, repo.name)
+    result = run(["git", "ls-remote", "--tags", "--refs", remote], cwd=repo)
+    return [
+        line.split("\t", 1)[1].removeprefix("refs/tags/") for line in result.stdout.splitlines()
+    ]
+
+
+def git_local_tags(repo: Path) -> list:
     result = run(["git", "tag", "--list"], cwd=repo)
     return [t.strip() for t in result.stdout.splitlines() if t.strip()]
 
@@ -79,9 +113,9 @@ def git_tag(repo: Path, tag: str, message: str) -> None:
     run(["git", "tag", "-a", tag, "-m", message], cwd=repo)
 
 
-def git_push_tags(repo: Path) -> None:
-    logger.info("Pushing tags in %s …", repo.name)
-    run(["git", "push", "origin", "--tags"], cwd=repo)
+def git_push_tag(repo: Path, remote: str, tag: str) -> None:
+    logger.info("Pushing tag %r to %r in %s …", tag, remote, repo.name)
+    run(["git", "push", remote, f"refs/tags/{tag}"], cwd=repo)
 
 
 # ---------------------------------------------------------------------------
@@ -152,13 +186,27 @@ def check_not_dirty(repos: list) -> None:
             sys.exit(1)
 
 
-def check_tag_absent(tags: list, full_tag: str) -> None:
+def check_tag_absent(tags, full_tag: str) -> None:
     if full_tag in tags:
         logger.error("Tag %r already exists.", full_tag)
         sys.exit(1)
 
 
-def check_no_smaller_version(tags: list, release_name: str, new_ver: str) -> None:
+def check_tag_absent_locally(repos: list, full_tag: str) -> None:
+    """Fail before tagging anything if a stale local tag (e.g. from a fork test) exists."""
+    for repo in repos:
+        if full_tag in git_local_tags(repo):
+            logger.error(
+                "Tag %r already exists locally in %s but not on the remote "
+                "(left over from a test release?). Delete it with: git tag -d %s",
+                full_tag,
+                repo.name,
+                full_tag,
+            )
+            sys.exit(1)
+
+
+def check_no_smaller_version(tags, release_name: str, new_ver: str) -> None:
     """Refuse to release a version older than one that already exists."""
     prefix = f"{release_name}-"
     new_tuple = parse_version(new_ver)
@@ -208,7 +256,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run all checks and fetch tags, but skip tagging and pushing.",
+        help="Run all checks, but skip tagging and pushing.",
+    )
+    parser.add_argument(
+        "--remote-public",
+        metavar="NAME",
+        help="Git remote to use for WeatherGenerator instead of the canonical ecmwf remote. "
+        "Intended for testing against a fork.",
+    )
+    parser.add_argument(
+        "--remote-private",
+        metavar="NAME",
+        help="Git remote to use for WeatherGenerator-private instead of the canonical remote. "
+        "Intended for testing against a fork.",
     )
     return parser.parse_args()
 
@@ -252,18 +312,27 @@ def main() -> None:
     logger.info("[3/6] Checking repositories …")
     check_repos_exist()
 
-    # 4 – Fetch tags (done even in dry-run)
-    logger.info("[4/6] Fetching tags from origin …")
-    for repo in repos:
-        git_fetch_tags(repo)
+    # 4 – Resolve remotes and list their tags (done even in dry-run)
+    logger.info("[4/6] Listing remote tags …")
+    remote_overrides = {
+        WeatherGenerator_DIR: args.remote_public,
+        WeatherGeneratorPrivate_DIR: args.remote_private,
+    }
+    remotes = {
+        repo: remote_overrides[repo] or git_find_remote(repo, CANONICAL_REMOTE_URLS[repo])
+        for repo in repos
+    }
 
-    # Use WeatherGenerator as the authoritative tag source
-    all_tags = git_all_tags(WeatherGenerator_DIR)
+    # Check against the remote tags of both repos: a tag present in either one blocks the
+    # release. Version checks use only remote tags, so leftovers from fork tests don't
+    # interfere; a local tag with the exact release name is caught separately below.
+    all_tags = {t for repo in repos for t in git_remote_tags(repo, remotes[repo])}
 
     # 5 – Tag must not exist + no smaller version
     logger.info("[5/6] Checking version constraints …")
     check_tag_absent(all_tags, full_tag)
     check_no_smaller_version(all_tags, name, ver)
+    check_tag_absent_locally(repos, full_tag)
 
     # 6 – Repos must be clean
     logger.info("[6/6] Checking repositories are clean …")
@@ -282,7 +351,7 @@ def main() -> None:
     # Push
     logger.info("Pushing tags …")
     for repo in repos:
-        git_push_tags(repo)
+        git_push_tag(repo, remotes[repo], full_tag)
 
     logger.info("Release %r created and pushed successfully.", full_tag)
 
