@@ -1,0 +1,42 @@
+# Combined CRPS fine-tune: the winner of the CRPS line (crps8long axhby5w8: crps8 + anchored
+# pushforward 4 + 4 + lead balancing at power 0.5; set load_chkpt to crps8 klbklwf7 if crps8 wins
+# the 40-step ensemble eval, and drop the rollout configs then) plus the two short-range fixes of
+# the deterministic line:
+# - z and msl loss weights x10 of the usual ones (streams ..._mnt_cw_zmsl10),
+# - the ERA5 decoder trained, without dropout (pred_dropout_rate 0).
+# The forecast engine's dropout stays on: it is the ensemble mechanism.
+# Signal: val CRPS at steps 1-8 vs crps8long final; then the 40-step ensemble eval.
+# Launch from the WeatherGenerator root (smoke test first: combo_crps_smoke.yml):
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-22/combo_crps.yml
+parallelize: true
+stages:
+  - name: combocrps
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - load_chkpt.run_id=axhby5w8
+      - load_chkpt.mini_epoch=10
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.0
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.lead_balance.power=0.5
+      # 4 + 4 scored steps with gradient, as crps8long (8 + 8 do not fit with 2 members)
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=4
+      - training_config.forecast.rollout_loss_steps=4
+      - training_config.forecast.num_steps=[8,12,16,20,24,28,32,36,40]
+      - training_config.num_mini_epochs=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 3
+    nodes: 8

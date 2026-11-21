@@ -1,0 +1,18 @@
+# Resume crps8 (CRPS on the 8-step objective, 25 mini-epochs): 21 mini-epochs left at ~1.75 h, in place (run_id == from_run_id) from its mini-epoch 3 checkpoint.
+# Its chain broke: later chain parts load klbklwf7_latest.chkpt, which the trainer only writes every
+# train_logging.checkpoint (500) batches within a mini-epoch, never reached with 256-batch
+# mini-epochs; after the 2026-10-20 filesystem incident every further part failed at startup.
+# train_logging.checkpoint=128 makes the _latest checkpoint exist for the parts of this resume.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-20/resume_klbklwf7.yml
+parallelize: true
+stages:
+  - name: crps8resume
+    stage: train
+    run_id: klbklwf7
+    from_run_id: klbklwf7
+    mini_epoch: 3
+    options:
+      - train_logging.checkpoint=128
+    chain_jobs: 4
+    nodes: 8

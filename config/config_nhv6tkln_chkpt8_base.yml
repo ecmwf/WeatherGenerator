@@ -1,0 +1,2170 @@
+# Full run config of nhv6tkln (8-step forecast fine-tune) at mini-epoch 8, as saved with
+# the checkpoint. Use as base_config together with load_chkpt {run_id: nhv6tkln,
+# mini_epoch: 8} to continue from nhv6tkln with the code of the current checkout
+# (a from_run_id stage would run nhv6tkln's code snapshot).
+latent_noise_kl_weight: 0.0
+latent_noise_gamma: 2.0
+latent_noise_use_additive_noise: false
+latent_noise_deterministic_latents: true
+latent_noise_saturate_encodings: 5
+fe_diffusion_model: false
+embed_orientation: channels
+embed_unembed_mode: block
+embed_dropout_rate: 0.1
+ae_local_dim_embed: 1024
+ae_local_num_blocks: 4
+ae_local_num_heads: 16
+ae_local_dropout_rate: 0.1
+ae_local_with_qk_lnorm: true
+ae_local_num_queries: 1
+ae_local_queries_per_cell: false
+ae_adapter_num_heads: 16
+ae_adapter_embed: 128
+ae_adapter_with_qk_lnorm: true
+ae_adapter_with_residual: true
+ae_adapter_dropout_rate: 0.1
+ae_global_dim_embed: 2048
+ae_global_num_blocks: 5
+ae_global_num_heads: 16
+ae_global_dropout_rate: 0.1
+ae_global_with_qk_lnorm: true
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 4
+ae_global_trailing_layer_norm: true
+ae_aggregation_num_blocks: 5
+ae_aggregation_num_heads: 16
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: true
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 4
+decoder_type: PerceiverIOCoordConditioning
+pred_adapter_kv: false
+pred_self_attention: true
+pred_dyadic_dims: false
+pred_mlp_adaln: true
+num_class_tokens: 0
+num_register_tokens: 64
+noise_pre_predictor_std: 0
+fe_num_blocks: 16
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: true
+fe_layer_norm_after_blocks:
+- 7
+fe_impute_latent_noise_std: 1.0e-05
+forecast_att_dense_rate: 1.0
+with_step_conditioning: true
+healpix_level: 5
+rope_2D: true
+mlp_type: swiglu
+use_xsa: true
+with_mixed_precision: true
+with_flash_attention: true
+compile_model: false
+with_fsdp: false
+ddp_find_unused_parameters: false
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1.0e-05
+norm_eps: 0.0001
+freeze_modules: .*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*|.*encoder.*
+norm_type: LayerNorm
+qk_norm_type: RMSNorm
+zarr_store: zip
+streams_directory: ./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+streams:
+  ERA5_in:
+    type: anemoi_operan
+    filenames:
+    - aifs-ea-an-oper-0001-mars-n320-1979-2024-1h-v2-with-era51.zarr
+    stream_id: 0
+    source:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - msl
+    - skt
+    - sp
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    target:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - msl
+    - skt
+    - sp
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    geoinfo_channels:
+    - z
+    - lsm
+    - slor
+    - sdor
+    - insolation
+    - cos_local_time
+    - sin_local_time
+    - cos_julian_day
+    - sin_julian_day
+    loss_weight: 1.0
+    location_weight: cosine_latitude
+    token_size: 32
+    tokenize_spacetime: false
+    frequency: 06:00:00
+    nominal_time_mapping:
+      '0': 5
+      '6': 11
+      '12': 17
+      '18': 23
+    embed:
+      net: linear
+    embed_target_coords:
+      net: linear
+      dim_embed: 512
+    target_readout:
+      num_layers: 2
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: ERA5_in
+    train_source_channels:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - msl
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - skt
+    - sp
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    train_target_channels:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - msl
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - skt
+    - sp
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - msl
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - skt
+    - sp
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    val_target_channels:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - msl
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - skt
+    - sp
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    forcing: true
+  AVHRR:
+    type: obs
+    stream_id: 22
+    filenames:
+    - observations-file-2001-2023-eumetsat-avhrr-o256-v4.zarr
+    geoinfo_channels:
+    - cos_local_time
+    - sin_local_time
+    - cos_julian_day
+    - sin_julian_day
+    coords_channels:
+    - latitude
+    - longitude
+    loss_weight: 1.0
+    token_size: 256
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 2
+      dim_embed: 256
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 256
+    target_readout:
+      num_layers: 2
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: AVHRR
+    train_source_channels:
+    - obsvalue_rawbt_1
+    - obsvalue_rawbt_2
+    - obsvalue_rawbt_3
+    - obsvalue_refl_1
+    - obsvalue_refl_2
+    train_target_channels:
+    - obsvalue_rawbt_1
+    - obsvalue_rawbt_2
+    - obsvalue_rawbt_3
+    - obsvalue_refl_1
+    - obsvalue_refl_2
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - obsvalue_rawbt_1
+    - obsvalue_rawbt_2
+    - obsvalue_rawbt_3
+    - obsvalue_refl_1
+    - obsvalue_refl_2
+    val_target_channels:
+    - obsvalue_rawbt_1
+    - obsvalue_rawbt_2
+    - obsvalue_rawbt_3
+    - obsvalue_refl_1
+    - obsvalue_refl_2
+    forcing: true
+  METOP_ABC_IASI:
+    type: obs
+    stream_id: 21
+    filenames:
+    - observations-ea-ofb-0001-2007-2021-metop-a-iasi-radiances-v1.zarr
+    - observations-ea-ofb-0001-2013-2023-metop-b-iasi-radiances-v1.zarr
+    - observations-ea-ofb-0001-2019-2023-metop-c-iasi-radiances-v1.zarr
+    geoinfo_channels:
+    - cos_local_time
+    - sin_local_time
+    - cos_julian_day
+    - sin_julian_day
+    source:
+    - obsvalue_rawbt_138
+    - obsvalue_rawbt_16
+    - obsvalue_rawbt_170
+    - obsvalue_rawbt_185
+    - obsvalue_rawbt_224
+    - obsvalue_rawbt_249
+    - obsvalue_rawbt_271
+    - obsvalue_rawbt_2907
+    - obsvalue_rawbt_2991
+    - obsvalue_rawbt_3093
+    - obsvalue_rawbt_3160
+    - obsvalue_rawbt_445
+    - obsvalue_rawbt_5383
+    - obsvalue_rawbt_63
+    - obsvalue_rawbt_756
+    - obsvalue_rawbt_867
+    - obsvalue_rawbt_921
+    target:
+    - obsvalue_rawbt_138
+    - obsvalue_rawbt_16
+    - obsvalue_rawbt_170
+    - obsvalue_rawbt_185
+    - obsvalue_rawbt_224
+    - obsvalue_rawbt_249
+    - obsvalue_rawbt_271
+    - obsvalue_rawbt_2907
+    - obsvalue_rawbt_2991
+    - obsvalue_rawbt_3093
+    - obsvalue_rawbt_3160
+    - obsvalue_rawbt_445
+    - obsvalue_rawbt_5383
+    - obsvalue_rawbt_63
+    - obsvalue_rawbt_756
+    - obsvalue_rawbt_867
+    - obsvalue_rawbt_921
+    loss_weight: 1.0
+    token_size: 512
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 2
+      dim_embed: 256
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 256
+    target_readout:
+      num_layers: 2
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: METOP_ABC_IASI
+    train_source_channels:
+    - obsvalue_rawbt_16
+    - obsvalue_rawbt_63
+    - obsvalue_rawbt_138
+    - obsvalue_rawbt_170
+    - obsvalue_rawbt_185
+    - obsvalue_rawbt_224
+    - obsvalue_rawbt_249
+    - obsvalue_rawbt_271
+    - obsvalue_rawbt_445
+    - obsvalue_rawbt_756
+    - obsvalue_rawbt_867
+    - obsvalue_rawbt_921
+    - obsvalue_rawbt_2907
+    - obsvalue_rawbt_2991
+    - obsvalue_rawbt_3093
+    - obsvalue_rawbt_3160
+    - obsvalue_rawbt_5383
+    train_target_channels:
+    - obsvalue_rawbt_16
+    - obsvalue_rawbt_63
+    - obsvalue_rawbt_138
+    - obsvalue_rawbt_170
+    - obsvalue_rawbt_185
+    - obsvalue_rawbt_224
+    - obsvalue_rawbt_249
+    - obsvalue_rawbt_271
+    - obsvalue_rawbt_445
+    - obsvalue_rawbt_756
+    - obsvalue_rawbt_867
+    - obsvalue_rawbt_921
+    - obsvalue_rawbt_2907
+    - obsvalue_rawbt_2991
+    - obsvalue_rawbt_3093
+    - obsvalue_rawbt_3160
+    - obsvalue_rawbt_5383
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - obsvalue_rawbt_16
+    - obsvalue_rawbt_63
+    - obsvalue_rawbt_138
+    - obsvalue_rawbt_170
+    - obsvalue_rawbt_185
+    - obsvalue_rawbt_224
+    - obsvalue_rawbt_249
+    - obsvalue_rawbt_271
+    - obsvalue_rawbt_445
+    - obsvalue_rawbt_756
+    - obsvalue_rawbt_867
+    - obsvalue_rawbt_921
+    - obsvalue_rawbt_2907
+    - obsvalue_rawbt_2991
+    - obsvalue_rawbt_3093
+    - obsvalue_rawbt_3160
+    - obsvalue_rawbt_5383
+    val_target_channels:
+    - obsvalue_rawbt_16
+    - obsvalue_rawbt_63
+    - obsvalue_rawbt_138
+    - obsvalue_rawbt_170
+    - obsvalue_rawbt_185
+    - obsvalue_rawbt_224
+    - obsvalue_rawbt_249
+    - obsvalue_rawbt_271
+    - obsvalue_rawbt_445
+    - obsvalue_rawbt_756
+    - obsvalue_rawbt_867
+    - obsvalue_rawbt_921
+    - obsvalue_rawbt_2907
+    - obsvalue_rawbt_2991
+    - obsvalue_rawbt_3093
+    - obsvalue_rawbt_3160
+    - obsvalue_rawbt_5383
+    forcing: true
+  METEOSAT_SEVIRI_IR:
+    type: obs
+    stream_id: 10
+    filenames:
+    - observations-file-2014-2024-seviri-o256-wegen-v3.zarr
+    geoinfo_channels:
+    - cos_local_time
+    - sin_local_time
+    - cos_julian_day
+    - sin_julian_day
+    - zenith
+    - cos_sza
+    loss_weight: 1.0
+    location_weight: cosine_latitude
+    token_size: 1024
+    tokenize_spacetime: false
+    max_num_targets: 131072
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 4
+      dim_embed: 512
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 512
+    target_readout:
+      num_layers: 2
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: METEOSAT_SEVIRI_IR
+    train_source_channels:
+    - obsvalue_rawbt_065
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    train_target_channels:
+    - obsvalue_rawbt_065
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - obsvalue_rawbt_065
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    val_target_channels:
+    - obsvalue_rawbt_065
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    forcing: true
+  GOES_ABI_IR:
+    type: obs
+    stream_id: 11
+    filenames:
+    - observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr
+    geoinfo_channels:
+    - cos_local_time
+    - sin_local_time
+    - cos_julian_day
+    - sin_julian_day
+    - zenith
+    - cos_sza
+    loss_weight: 1.0
+    location_weight: cosine_latitude
+    token_size: 1024
+    tokenize_spacetime: false
+    max_num_targets: 131072
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 4
+      dim_embed: 512
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 512
+    target_readout:
+      num_layers: 2
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: GOES_ABI_IR
+    train_source_channels:
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    train_target_channels:
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    val_target_channels:
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    forcing: true
+  HIMAWARI_AHI_IR:
+    type: obs
+    stream_id: 12
+    filenames:
+    - observations-file-2015-2022-himawari8-IR-o256-v1.zarr
+    - observations-file-2022-2024-himawari9-IR-o256-v1.zarr
+    geoinfo_channels:
+    - cos_local_time
+    - sin_local_time
+    - cos_julian_day
+    - sin_julian_day
+    - zenith
+    - cos_sza
+    loss_weight: 1.0
+    location_weight: cosine_latitude
+    token_size: 1024
+    tokenize_spacetime: false
+    max_num_targets: 131072
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 4
+      dim_embed: 512
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 512
+    target_readout:
+      num_layers: 2
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: HIMAWARI_AHI_IR
+    train_source_channels:
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    train_target_channels:
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    val_target_channels:
+    - obsvalue_rawbt_380
+    - obsvalue_rawbt_620
+    - obsvalue_rawbt_730
+    - obsvalue_rawbt_850
+    - obsvalue_rawbt_960
+    - obsvalue_rawbt_105
+    - obsvalue_rawbt_120
+    - obsvalue_rawbt_133
+    forcing: true
+  GOES_ABI_VIS:
+    type: obs
+    stream_id: 13
+    filenames:
+    - observations-file-2017-2024-abi-goes16-VIS-o256-v2.zarr
+    geoinfo_channels:
+    - zenith
+    loss_weight: 1.0
+    location_weight: cosine_latitude
+    token_size: 1024
+    tokenize_spacetime: false
+    max_num_targets: 131072
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 4
+      dim_embed: 512
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 512
+    target_readout:
+      num_layers: 2
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: GOES_ABI_VIS
+    train_source_channels:
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    train_target_channels:
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    val_target_channels:
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    forcing: true
+  HIMAWARI_AHI_VIS:
+    type: obs
+    stream_id: 14
+    filenames:
+    - observations-file-2015-2022-himawari8-VIS-o256-v1.zarr
+    - observations-file-2022-2024-himawari9-VIS-o256-v1.zarr
+    geoinfo_channels:
+    - zenith
+    loss_weight: 1.0
+    location_weight: cosine_latitude
+    token_size: 1024
+    tokenize_spacetime: false
+    max_num_targets: 131072
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 4
+      dim_embed: 512
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 512
+    target_readout:
+      num_layers: 2
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: HIMAWARI_AHI_VIS
+    train_source_channels:
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    train_target_channels:
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    val_target_channels:
+    - obsvalue_rawbt_086
+    - obsvalue_rawbt_160
+    forcing: true
+  SurfaceCombined:
+    type: obs
+    stream_id: 30
+    filenames:
+    - observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr
+    source:
+    - obsvalue_tsts_0
+    - obsvalue_t2m_0
+    - obsvalue_td2m_0
+    - obsvalue_u10m_0
+    - obsvalue_v10m_0
+    - obsvalue_pmsl_0
+    - obsvalue_ps_0
+    target:
+    - obsvalue_tsts_0
+    - obsvalue_t2m_0
+    - obsvalue_td2m_0
+    - obsvalue_u10m_0
+    - obsvalue_v10m_0
+    - obsvalue_pmsl_0
+    - obsvalue_ps_0
+    geoinfo_channels:
+    - stalt
+    - lsm
+    - cos_sza
+    - cos_local_time
+    - sin_local_time
+    - cos_julian_day
+    - sin_julian_day
+    loss_weight: 1.0
+    token_size: 256
+    tokenize_spacetime: false
+    max_num_targets: -1
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 2
+      dim_embed: 512
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 512
+    target_readout:
+      num_layers: 1
+      num_heads: 4
+      self_attention: false
+      mlp_hidden_factor: 1
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: SurfaceCombined
+    train_source_channels:
+    - obsvalue_tsts_0
+    - obsvalue_t2m_0
+    - obsvalue_td2m_0
+    - obsvalue_u10m_0
+    - obsvalue_v10m_0
+    - obsvalue_pmsl_0
+    - obsvalue_ps_0
+    train_target_channels:
+    - obsvalue_tsts_0
+    - obsvalue_t2m_0
+    - obsvalue_td2m_0
+    - obsvalue_u10m_0
+    - obsvalue_v10m_0
+    - obsvalue_pmsl_0
+    - obsvalue_ps_0
+    target_channel_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    val_source_channels:
+    - obsvalue_tsts_0
+    - obsvalue_t2m_0
+    - obsvalue_td2m_0
+    - obsvalue_u10m_0
+    - obsvalue_v10m_0
+    - obsvalue_pmsl_0
+    - obsvalue_ps_0
+    val_target_channels:
+    - obsvalue_tsts_0
+    - obsvalue_t2m_0
+    - obsvalue_td2m_0
+    - obsvalue_u10m_0
+    - obsvalue_v10m_0
+    - obsvalue_pmsl_0
+    - obsvalue_ps_0
+    forcing: true
+  ERA5:
+    type: anemoi
+    filenames:
+    - aifs-ea-an-oper-0001-mars-n320-1979-2024-1h-v2-with-era51.zarr
+    stream_id: 1
+    source:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - lcc
+    - mcc
+    - hcc
+    - tcc
+    - msl
+    - skt
+    - sp
+    - ssrd
+    - strd
+    - q_10
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    target:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - lcc
+    - mcc
+    - hcc
+    - tcc
+    - msl
+    - skt
+    - sp
+    - ssrd
+    - strd
+    - q_10
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    geoinfo_channels:
+    - z
+    - lsm
+    - slor
+    - sdor
+    - insolation
+    - cos_local_time
+    - sin_local_time
+    - cos_julian_day
+    - sin_julian_day
+    - cos_latitude
+    - sin_latitude
+    - cos_longitude
+    - sin_longitude
+    loss_weight: 1.0
+    location_weight: cosine_latitude
+    token_size: 32
+    tokenize_spacetime: false
+    max_num_targets: 108416
+    diagnostic: true
+    embed:
+      net: transformer
+      num_tokens: 1
+      num_heads: 4
+      dim_embed: 512
+      num_blocks: 2
+    embed_target_coords:
+      net: linear
+      dim_embed: 512
+    target_readout:
+      num_layers: 4
+      num_heads: 4
+    pred_head:
+      ens_size: 1
+      num_layers: 1
+    name: ERA5
+    train_source_channels:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - hcc
+    - lcc
+    - mcc
+    - msl
+    - q_10
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - skt
+    - sp
+    - ssrd
+    - strd
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - tcc
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    train_target_channels:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - hcc
+    - lcc
+    - mcc
+    - msl
+    - q_10
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - skt
+    - sp
+    - ssrd
+    - strd
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - tcc
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    target_channel_weights:
+    - 2.0
+    - 2.0
+    - 1.0
+    - 10.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    val_source_channels:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - hcc
+    - lcc
+    - mcc
+    - msl
+    - q_10
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - skt
+    - sp
+    - ssrd
+    - strd
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - tcc
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    val_target_channels:
+    - 10u
+    - 10v
+    - 2d
+    - 2t
+    - hcc
+    - lcc
+    - mcc
+    - msl
+    - q_10
+    - q_1000
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - skt
+    - sp
+    - ssrd
+    - strd
+    - t_10
+    - t_100
+    - t_1000
+    - t_150
+    - t_200
+    - t_250
+    - t_300
+    - t_400
+    - t_50
+    - t_500
+    - t_600
+    - t_700
+    - t_850
+    - t_925
+    - tcc
+    - u_10
+    - u_100
+    - u_1000
+    - u_150
+    - u_200
+    - u_250
+    - u_300
+    - u_400
+    - u_50
+    - u_500
+    - u_600
+    - u_700
+    - u_850
+    - u_925
+    - v_10
+    - v_100
+    - v_1000
+    - v_150
+    - v_200
+    - v_250
+    - v_300
+    - v_400
+    - v_50
+    - v_500
+    - v_600
+    - v_700
+    - v_850
+    - v_925
+    - z_10
+    - z_100
+    - z_1000
+    - z_150
+    - z_200
+    - z_250
+    - z_300
+    - z_400
+    - z_50
+    - z_500
+    - z_600
+    - z_700
+    - z_850
+    - z_925
+    channel_weights:
+      2t: 10.0
+      10u: 2.0
+      10v: 2.0
+      q_10: 1.0
+      q_50: 1.0
+      q_100: 1.0
+      q_150: 1.0
+      q_200: 1.0
+      q_250: 1.0
+      q_300: 1.0
+      q_400: 1.0
+      q_500: 1.0
+      q_600: 1.0
+      q_700: 1.0
+      q_850: 1.0
+      q_925: 1.0
+      q_1000: 1.0
+      t_10: 5.0
+      t_50: 5.0
+      t_100: 5.0
+      t_150: 5.0
+      t_200: 5.0
+      t_250: 5.0
+      t_300: 5.0
+      t_400: 5.0
+      t_500: 5.0
+      t_600: 5.0
+      t_700: 5.0
+      t_850: 5.0
+      t_925: 5.0
+      t_1000: 5.0
+      u_10: 1.0
+      u_50: 1.0
+      u_100: 1.0
+      u_150: 1.0
+      u_200: 1.0
+      u_250: 1.0
+      u_300: 1.0
+      u_400: 1.0
+      u_500: 1.0
+      u_600: 1.0
+      u_700: 1.0
+      u_850: 1.0
+      u_925: 1.0
+      u_1000: 1.0
+      v_10: 1.0
+      v_50: 1.0
+      v_100: 1.0
+      v_150: 1.0
+      v_200: 1.0
+      v_250: 1.0
+      v_300: 1.0
+      v_400: 1.0
+      v_500: 1.0
+      v_600: 1.0
+      v_700: 1.0
+      v_850: 1.0
+      v_925: 1.0
+      v_1000: 1.0
+      z_10: 10.0
+      z_50: 10.0
+      z_100: 10.0
+      z_150: 10.0
+      z_200: 10.0
+      z_250: 10.0
+      z_300: 10.0
+      z_400: 10.0
+      z_500: 10.0
+      z_600: 10.0
+      z_700: 10.0
+      z_850: 10.0
+      z_925: 10.0
+      z_1000: 10.0
+general:
+  istep: 2048
+  rank: ???
+  world_size: ???
+  multiprocessing_method: spawn
+  run_id: nhv6tkln
+  run_history:
+  - - wduc34ev
+    - 11200
+  - - wduc34ev
+    - 21900
+  - - wduc34ev
+    - 33100
+  - - wduc34ev
+    - 0
+  - - rrvj7vjv
+    - 4060
+  - - rrvj7vjv
+    - 10680
+  - - rrvj7vjv
+    - 17300
+  - - rrvj7vjv
+    - 0
+train_logging:
+  terminal: 100
+  metrics: 20
+  checkpoint: 500
+  log_grad_norms: true
+data_loading:
+  num_workers: 8
+  num_workers_validation: 4
+  rng_seed: 1785859974
+  repeat_data_in_mini_epoch: false
+  persistent_workers: false
+  prefetch_factor: 1
+  memory_pinning: false
+training_config:
+  training_mode:
+  - masking
+  teacher_time_offset: 0
+  deep_ssl:
+    enabled: false
+    tap_after:
+    - local2global
+    - global:0
+    - global:1
+    fusion_hidden_factor: 4
+    level_weights:
+    - 0.25
+    - 0.25
+    - 0.25
+    - 0.25
+  context_loss:
+    enabled: false
+  num_mini_epochs: 8
+  samples_per_mini_epoch: 8192
+  shuffle: true
+  start_date: 1980-01-01T00:00
+  end_date: 2022-12-31T00:00
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+  window_offset_prediction: 0
+  learning_rate_scheduling:
+    lr_start: 1.0e-06
+    lr_max: 0.0001
+    lr_final_decay: 2.0e-06
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 512
+    policy_warmup: cosine
+    policy_decay: cosine
+    policy_cooldown: linear
+    parallel_scaling_policy: const
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    adamw:
+      beta1: 0.9953125
+      beta2: 0.996875
+      eps: 1.0e-08
+    log_grad_norms: false
+  losses:
+    physical:
+      enabled: false
+      type: Disabled
+    student-teacher:
+      enabled: false
+      type: Disabled
+      weight: 1.0
+      loss_fcts:
+        JEPA:
+          weight: 1
+          loss_extra_args:
+            temporal: true
+          out_dim: 2048
+          head: transformer
+          num_blocks: 6
+          num_heads: 16
+          with_qk_lnorm: true
+          intermediate_dim: 1024
+          dropout_rate: 0.1
+          target_source_correspondence:
+            '0':
+              '0': independent
+      target_and_aux_calc:
+        EMATeacher:
+          ema_ramp_up_ratio: null
+          ema_halflife_in_thousands: 400000
+          model_param_overrides:
+            training_config:
+              losses:
+                student-teacher:
+                  loss_fcts:
+                    JEPA:
+                      head: identity
+    forecast:
+      type: LossPhysical
+      loss_fcts:
+        mse: {}
+  model_input:
+    random_easy:
+      masking_strategy: forecast
+      num_samples: 0
+      num_steps_input: 1
+      masking_strategy_config: {}
+      enabled: false
+    forecasting:
+      masking_strategy: forecast
+  target_input:
+    random_easy_target:
+      masking_strategy: forecast
+      num_samples: 1
+      masking_strategy_config: {}
+      enabled: false
+  forecast:
+    time_step: 06:00:00
+    num_steps: 8
+    offset: 1
+    policy: fixed
+validation_config:
+  samples_per_mini_epoch: 256
+  shuffle: false
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+  validate_with_ema:
+    enabled: true
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 600
+  output:
+    num_samples: 0
+    normalized_samples: false
+    streams: null
+  validate_before_training: false
+wgtags:
+  org: null
+  issue: null
+  exp: null
+  grid: null
+from_run_id: rrvj7vjv
+data_path_anemoi: /e/data1/slmet/ml_training
+data_path_obs: /e/data1/slmet/ml_training
+data_path_eobs: /e/data1/slmet/ml_training
+data_path_aux: /e/scratch/weatherai/shared_work/assets/
+path_shared_working_dir: /e/scratch/weatherai/shared_work
+path_shared_slurm_dir: /e/scratch/weatherai/slurm/
+data_path_fesom: /p/project1/hclimrep/koldunovn1
+data_path_icon: /p/scratch/hclimrep/shared/weather_generator_data/icon_art
+data_paths:
+- /e/data1/slmet/ml_training
+- /p/project1/hclimrep/koldunovn1
+- /p/scratch/hclimrep/shared/weather_generator_data/icon_art
+mlflow:
+  tracking_uri: https://dbc-080c3210-c159.cloud.databricks.com/
+stage: train_continue
+world_size: 32
+rank: 0
+local_rank: 0
+with_ddp: true
+world_size_original: 8
+test_config:
+  samples_per_mini_epoch: 128
+  shuffle: false
+  start_date: 2023-06-01T00:00
+  end_date: 2023-08-31T00:00
+  output:
+    num_samples: 128
+    normalized_samples: false
+    streams: null

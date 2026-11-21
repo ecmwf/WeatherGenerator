@@ -1,0 +1,34 @@
+# Smoke test of crps8_long.yml (same stage) at the largest rollout (K = 40, 4 + 4 scored steps with
+# gradient x 2 members, lead balancing up to step 40): 1 node, 24 steps, 32 validation samples.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-21/crps8_long_smoke.yml
+parallelize: true
+stages:
+  - name: smokecrps8long
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - load_chkpt.run_id=klbklwf7
+      - load_chkpt.mini_epoch=12
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.lead_balance.power=0.5
+      # 4 + 4 scored steps with gradient (8 + 8 do not fit with 2 members: OOM at 90 GiB in the
+      # smoke test ioq8yjj6), so the memory is that of crps8 and C
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=4
+      - training_config.forecast.rollout_loss_steps=4
+      - training_config.forecast.num_steps=[40]
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=32
+      - train_logging.terminal=4
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]

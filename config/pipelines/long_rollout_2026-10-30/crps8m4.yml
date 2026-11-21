@@ -1,0 +1,43 @@
+# crps8long with 4 training members instead of 2 (fair CRPS): a less noisy estimate of the spread term
+# and of the predictive distribution in every batch (AIFS-CRPS trains with 4).
+# Everything else is crps8long's (crps8_long.yml): klbklwf7 chkpt 12, anchored pushforward (anchor 4 +
+# final 4 with gradient, K in [8, 12, ..., 40]), fair kernel CRPS, lead balance power 0.5, 10 mini-epochs at
+# lr_max 5e-5, validation with 2 members (comparable with crps8long). 4 members cost ~2x compute per step,
+# so chain_jobs 6 (crps8long needed 2 of 4). Smoke test first: crps8m4_smoke.yml (memory).
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-30/crps8m4.yml
+parallelize: true
+stages:
+  - name: crps8m4
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - load_chkpt.run_id=klbklwf7
+      - load_chkpt.mini_epoch=12
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      # latent noise of 2 stacked members per sample as in crps8long's training (torch.norm over the
+      # stacked tensor would give 4 members sqrt(2) more noise): only the member count changes
+      - fe_impute_latent_noise_ref_members=2
+      - training_config.forecast.lead_balance.power=0.5
+      # 4 + 4 scored steps with gradient (8 + 8 do not fit with 2 members: OOM at 90 GiB in the
+      # smoke test ioq8yjj6), so the memory is that of crps8 and C
+      # 4 MC-dropout members in training (crps8long: 2): 6 pairs in the CRPS spread term
+      - training_config.forecast.ensemble_size=4
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=4
+      - training_config.forecast.rollout_loss_steps=4
+      # K in steps of 4, so that the final windows of 4 steps tile 6h - 10 days (K = 8 is crps8's objective)
+      - training_config.forecast.num_steps=[8,12,16,20,24,28,32,36,40]
+      - training_config.num_mini_epochs=10
+      - training_config.learning_rate_scheduling.lr_max=5.0e-05
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 6
+    nodes: 8

@@ -18,13 +18,12 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-import torch
 
 import weathergen.common.config as config
 
 # from weathergen.train.trainer import cfg_keys_to_filter
 from weathergen.train.utils import Stage, flatten_dict
-from weathergen.utils.distributed import ddp_average
+from weathergen.utils.distributed import all_gather_object, ddp_average
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
 _weathergen_timestamp = "weathergen.timestamp"
@@ -269,27 +268,38 @@ def prepare_losses_for_logging(
     """
     Aggregates across ranks loss and standard deviation data for logging.
 
+    Ranks can log different keys, e.g. per-step losses when the number of scored forecast steps
+    differs between ranks, so the per-key values are gathered with a single collective (one
+    collective per key would deadlock) and pooled by key.
+
     Returns:
         real_loss (list): List of ddp-averaged scaler losses used for backpropagation.
-        losses_all (dict): Dictionary mapping each stream name to its
-            per-channel loss tensor.
-        stddev_all (dict): Dictionary mapping each stream name to its
-            per-channel standard deviation tensor.
+        losses_all (dict): Dictionary mapping each loss key to its values on all ranks and
+            batches where the key was logged.
+        stddev_all (dict): Dictionary mapping each stddev key to its values on all ranks and
+            batches where the key was logged.
     """
 
     real_loss = [ddp_average(loss).item() for loss in loss_hist]
 
-    losses_all = defaultdict(list)
-    stddev_all = defaultdict(list)
+    losses_local = defaultdict(list)
+    stddev_local = defaultdict(list)
 
     for d in losses_unweighted_hist:
         for key, value in flatten_dict(d).items():
-            value = torch.tensor(value, device="cuda") if type(value) is float else value
-            losses_all[key].append(ddp_average(value).item())
+            losses_local[key].append(float(value))
 
     for d in stddev_unweighted_hist:
         for key, value in flatten_dict(d).items():
             if value:
-                stddev_all[key].append(ddp_average(value).item())
+                stddev_local[key].append(float(value))
+
+    losses_all = defaultdict(list)
+    stddev_all = defaultdict(list)
+    for rank_losses, rank_stddev in all_gather_object((dict(losses_local), dict(stddev_local))):
+        for key, values in rank_losses.items():
+            losses_all[key].extend(values)
+        for key, values in rank_stddev.items():
+            stddev_all[key].extend(values)
 
     return real_loss, losses_all, stddev_all

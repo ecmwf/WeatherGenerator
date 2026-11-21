@@ -1,0 +1,22 @@
+# Rerun of ctrl8nd (A') from anchor_nodrop.yml, identical stage. The first launch (ofquqwtp,
+# pipeline ped2nqpa) failed at import on one rank (ModuleNotFoundError for
+# torch.distributed.fsdp._init_utils, a file present in the shared uv cache), so part 1 never
+# trained and part 2 found no checkpoint.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-19/anchor_nodrop_ctrl_rerun.yml
+parallelize: true
+stages:
+  - name: ctrl8nd
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_fe_no_dropout.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=8
+    chain_jobs: 2
+    nodes: 8

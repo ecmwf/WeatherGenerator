@@ -1,0 +1,28 @@
+# Continuation of C (pfcrps, cbqstu8f; long_rollout_2026-10-17/abc.yml): does CRPS + MC-dropout
+# training just need more training? Same objective and configs as C (pushforward, K from
+# [8, 16, 24, 32, 40], last 8 scored, fair kernel CRPS over 2 MC-dropout members, forecast-engine
+# dropout kept as the ensemble mechanism, no anchor), from C's final checkpoint (mini-epoch 5)
+# with a fresh optimizer and schedule over 10 more mini-epochs. lr_max 5e-5 instead of 1e-4: in C
+# the short range degraded during the high learning rate phase.
+#   pfcrpslong : 10 mini-epochs (81920 samples), ~22 h on 8 nodes at C's 0.037 s/sec per GPU;
+#                chain_jobs 3 so that the run continues over the 12 h limit
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-19/crps_long.yml
+parallelize: true
+stages:
+  - name: pfcrpslong
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_crps.yml
+    options:
+      - load_chkpt.run_id=cbqstu8f
+      - load_chkpt.mini_epoch=5
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=10
+      - training_config.learning_rate_scheduling.lr_max=5.0e-05
+    chain_jobs: 3
+    nodes: 8

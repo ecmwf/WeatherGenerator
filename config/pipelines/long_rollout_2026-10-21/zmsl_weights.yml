@@ -1,0 +1,48 @@
+# Does the loss under-weight z and msl? Continue A' (yaoib7os, A without forecast-engine dropout) from
+# its final checkpoint (mini-epoch 8) for 2 mini-epochs with the A' recipe (only the forecast engine
+# trains), once with the ERA5 target weights of z (all levels) and msl raised 10x (z 10 -> 100,
+# msl 1 -> 10; streams directory ..._mnt_cw_zmsl10) and once unchanged as the control. In A' the 14 z
+# levels are ~2% of the weighted step-1 loss and the cloud covers (lcc, mcc, hcc, tcc) ~30%; with
+# the change z is ~18%. A' ended at lr 0, so both stages re-warm to a low lr_max of 1e-5 (A' 1e-4).
+# Signal: z500/msl val MSE at steps 1-8 down by more than ~5% vs the control, others within 1-2%.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-21/zmsl_weights.yml
+parallelize: true
+stages:
+  - name: ctrl8ndzw10
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_fe_no_dropout.yml
+    options:
+      - load_chkpt.run_id=yaoib7os
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=2
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 1
+    nodes: 8
+  - name: ctrl8ndcont
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_fe_no_dropout.yml
+    options:
+      - load_chkpt.run_id=yaoib7os
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=2
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      - train_logging.checkpoint=128
+    chain_jobs: 1
+    nodes: 8

@@ -115,12 +115,11 @@ def kernel_crps(
     # apply point weighting
     if weights_points is not None:
         kcrps_locs_chs = kcrps_locs_chs * weights_points
-    # apply channel weighting
+    # apply channel weighting (to the loss only: the per-channel values are logged unweighted)
     kcrps_chs = torch.mean(torch.mean(kcrps_locs_chs, 0), -1)
-    if weights_channels is not None:
-        kcrps_chs = kcrps_chs * weights_channels
+    loss = torch.mean(kcrps_chs * weights_channels if weights_channels is not None else kcrps_chs)
 
-    return torch.mean(kcrps_chs), kcrps_chs
+    return loss, kcrps_chs
 
 
 def lp_loss(
@@ -222,6 +221,27 @@ def mse(
         weights_channels=weights_channels,
         weights_points=weights_points,
     )
+
+
+def ens_var(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None = None,
+    weights_points: torch.Tensor | None = None,
+):
+    """
+    Ensemble variance (unbiased over members), averaged over data points as in lp_loss. A
+    diagnostic logged next to the ensemble-mean mse, so that error and spread can be separated.
+    pred : tensor of shape ( ens_dim , num_data_points , num_channels)
+    """
+    mask_nan = ~torch.isnan(target)
+    var = torch.where(mask_nan, pred.var(0, unbiased=True), 0)
+    if weights_points is not None:
+        var = (var.transpose(1, 0) * weights_points).transpose(1, 0)
+    loss_chs = var.mean(0)
+    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
+
+    return loss, loss_chs
 
 
 def rss(

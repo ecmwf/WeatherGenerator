@@ -1,0 +1,126 @@
+# Rerun of the long-rollout benchmark (benchmark.yml) after the fix of step checkpointing
+# under FSDP2: with forecast.checkpoint_steps, the forecast engine is now one FSDP unit with the
+# inputs of each block cast to bf16 (model_interface.shard_forecast_engine). In benchmark.yml,
+# bpf40 and bpf40crps crashed with a CheckpointError, and bbptt40 / bbptt40crps ran on the
+# per-block FSDP units, whose step recomputation is not correct (see tests/test_long_rollout.py).
+#   brefckpt   : bref (p0sw4ta6, already run) with step checkpointing and the same data
+#                (fixed_rng_seed = p0sw4ta6's rng_seed): loss and gradient norms should match
+#                p0sw4ta6 up to dropout noise; checks the fix at full scale with 4 ranks
+#   bpf40      : 40 steps, gradient and loss on the last 8 (pushforward), without step
+#                checkpointing (not needed for 8 gradient steps; default per-block FSDP units)
+#   bbptt40    : 40 steps, gradient through all 40, loss on the last 8, step checkpointing
+#   bpf40crps  : bpf40 with CRPS, 2 MC-dropout members
+#   bbptt40crps: bbptt40 with CRPS, 2 MC-dropout members
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-16/benchmark_fix.yml
+parallelize: true
+stages:
+  - name: brefckpt
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.checkpoint_steps=true
+      - data_loading.fixed_rng_seed=1792164225
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+
+  - name: bpf40
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.policy=fixed
+      - training_config.forecast.num_steps=40
+      - training_config.forecast.checkpoint_steps=false
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+
+  - name: bbptt40
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.policy=fixed
+      - training_config.forecast.num_steps=40
+      - training_config.forecast.rollout_grad_steps=-1
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+
+  - name: bpf40crps
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_crps.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.policy=fixed
+      - training_config.forecast.num_steps=40
+      - training_config.forecast.checkpoint_steps=false
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]
+
+  - name: bbptt40crps
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_crps.yml
+    options:
+      - load_chkpt.run_id=nhv6tkln
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=96
+      - validation_config.samples_per_mini_epoch=8
+      - train_logging.terminal=4
+      - training_config.forecast.policy=fixed
+      - training_config.forecast.num_steps=40
+      - training_config.forecast.rollout_grad_steps=-1
+    chain_jobs: 1
+    nodes: 1
+    slurm_args: ["--time=01:00:00"]

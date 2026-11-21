@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
 import itertools
 import logging
 
@@ -61,6 +62,63 @@ def _has_trainable_params(module: torch.nn.Module) -> bool:
     return any(p.requires_grad for p in module.parameters())
 
 
+def shard_forecast_engine(
+    forecast_engine: torch.nn.Module,
+    fe_blocks: torch.nn.Module,
+    modules_to_shard: tuple[type, ...],
+    checkpoint_steps: bool,
+    reshard_after_forward: bool,
+    mp_policy: MixedPrecisionPolicy | None,
+) -> None:
+    """
+    Shard the forecast engine with FSDP2.
+
+    By default every attention and MLP block is its own FSDP unit. With checkpoint_steps
+    (utils/rollout.py), whole forecast steps are checkpointed, which needs the forecast engine to
+    be a single FSDP unit: when a step is recomputed in backward, FSDP2's forward hooks skip the
+    unshard and the cast of the inputs, and leave the unshard to the pre-backward hook. That hook
+    fires before the recomputation only for the module the checkpoint wraps, so per-block units
+    would recompute with sharded parameters (DTensor error) or in a different dtype
+    (CheckpointError).
+
+    The single unit does not cast its inputs. Instead each block casts its inputs to the
+    parameter dtype in a plain forward pre-hook, which also runs in the recomputation. This
+    gives the same casts, and so the same numerics, as the per-block units.
+
+    reshard_after_forward=False keeps the forecast engine parameters unsharded during the
+    rollout, so that they are not all-gathered again for every forecast step (long rollouts);
+    costs the memory of the unsharded forecast engine.
+    """
+    # passed on as given (also None), as for the other modules
+    mp_kwargs = {"mp_policy": mp_policy}
+    if not checkpoint_steps:
+        for module in fe_blocks.modules():
+            if isinstance(module, modules_to_shard):
+                fully_shard(module, reshard_after_forward=reshard_after_forward, **mp_kwargs)
+        return
+
+    if (
+        mp_policy is not None
+        and mp_policy.param_dtype is not None
+        and mp_policy.cast_forward_inputs
+    ):
+        dtype = mp_policy.param_dtype
+
+        def cast(x):
+            if isinstance(x, torch.Tensor) and torch.is_floating_point(x) and x.dtype != dtype:
+                return x.to(dtype)
+            return x
+
+        def cast_inputs(module, args, kwargs):
+            return tuple(cast(a) for a in args), {k: cast(v) for k, v in kwargs.items()}
+
+        for module in fe_blocks.modules():
+            if isinstance(module, modules_to_shard):
+                module.register_forward_pre_hook(cast_inputs, with_kwargs=True)
+        mp_kwargs = {"mp_policy": dataclasses.replace(mp_policy, cast_forward_inputs=False)}
+    fully_shard(forecast_engine, reshard_after_forward=reshard_after_forward, **mp_kwargs)
+
+
 def init_model_and_shard(
     cf,
     dataset,
@@ -78,6 +136,13 @@ def init_model_and_shard(
 
     # freeze request model part
     apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
+    # opt-in: freeze weights WITHOUT eval mode (freeze_modules also sets eval mode in every mini-epoch), e.g.
+    # freeze_weights_only: "forecast_engine" trains only the decoder while the forecast engine's dropout, the
+    # MC-dropout ensemble mechanism, stays active
+    if cf.get("freeze_weights_only", None):
+        apply_fct_to_blocks(model, cf.freeze_weights_only, freeze_weights)
+        n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        logger.info(f"freeze_weights_only={cf.freeze_weights_only}: {n_train / 1e6:.2f} M trainable parameters left")
 
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
@@ -134,9 +199,14 @@ def init_model_and_shard(
             model_fe_blocks = model.forecast_engine.net.fe_blocks
         else:
             model_fe_blocks = model.forecast_engine.fe_blocks
-        for module in model_fe_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+        shard_forecast_engine(
+            model.forecast_engine,
+            model_fe_blocks,
+            modules_to_shard,
+            checkpoint_steps=cf.training_config.get("forecast", {}).get("checkpoint_steps", False),
+            reshard_after_forward=cf.get("fe_reshard_after_forward", True),
+            mp_policy=fsdp_kwargs["mp_policy"],
+        )
 
         for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):

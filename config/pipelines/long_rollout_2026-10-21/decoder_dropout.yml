@@ -1,0 +1,53 @@
+# Does the decoder's dropout set the short-range error floor? The ERA5 decoder was trained only in
+# rrvj7vjv, with a hard-coded dropout of 0.1 and an unweighted loss, and frozen since. Switched on
+# at inference, that dropout raises the A' step-1 MSE of z500 9x, msl 2.8x, t850 2x (recon_diag,
+# job 2433022). Continue A' (yaoib7os, chkpt 8) for 4 mini-epochs with the decoder trainable
+# (config_decoder_trainable.yml, encoder frozen) and the z/msl x10 weights of k18ec1md, once without
+# decoder dropout and once with 0.1 as the control; otherwise as k18ec1md.
+# Signal: z500/msl/t850 val MSE at steps 1-8 of decnodrop vs decdrop, and both vs k18ec1md
+# (forecast engine only, same weights: z500 step 1 -2.5% vs its control).
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-21/decoder_dropout.yml
+parallelize: true
+stages:
+  - name: decnodrop
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - load_chkpt.run_id=yaoib7os
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.0
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 2
+    nodes: 8
+  - name: decdrop
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - load_chkpt.run_id=yaoib7os
+      - load_chkpt.mini_epoch=8
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.1
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      - train_logging.checkpoint=128
+    chain_jobs: 2
+    nodes: 8

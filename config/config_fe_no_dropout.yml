@@ -1,0 +1,4 @@
+# No dropout in the forecast engine, so that training and inference run the same forecast engine
+# (with the nhv6tkln recipe the encoder and decoders are frozen and run in eval mode anyway, and
+# fe_dropout_rate = 0 removes all dropout of the forecast engine: zmv0 inference check).
+fe_dropout_rate: 0.0

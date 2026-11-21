@@ -1,0 +1,6 @@
+# Train the ERA5 decoder (embed_target_coords_ERA5, TargetPredictionEngine_ERA5,
+# EnsPredictionHead_ERA5) together with the forecast engine; the encoder stays frozen. As the
+# freeze_modules of config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml with .*ERA5.*
+# (which matches the decoder and the ERA5_in embedding) narrowed to .*ERA5_in.*.
+# Decoder dropout: pred_dropout_rate.
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5_in.*|.*encoder.*"

@@ -1,0 +1,48 @@
+# Long-lead CRPS continuation of crps8 (klbklwf7: fair CRPS over 2 MC-dropout members on the fixed
+# 8-step objective from nhv6tkln). crps8 is calibrated and close to IFS-ENS from day 3 but never
+# trained beyond 2 days; C (pushforward + CRPS from nhv6tkln) damaged the short range. This
+# continues crps8 with anchored pushforward (every batch scores steps 1-4 and the last 4 of K in
+# [8, 12, ..., 40]; B' used 8 + 8, which does not fit with 2 members) and lead balancing, so that
+# the long lead times are trained without the short range losing weight.
+# - From crps8's latest mini-epoch checkpoint (12; crps8 itself keeps running to 25 and is the
+#   8-step control). Its learning rate was still at lr_max 5e-5, so this re-warms to the same.
+# - Forecast-engine dropout kept (it is the ensemble mechanism), decoder frozen as in crps8,
+#   standard channel weights (no z/msl x10, so the change is only the long-lead objective).
+# - Lead balancing with B''s MSE growth table at power 0.5: the CRPS grows like the RMSE, i.e. the
+#   square root of the MSE (z_500 day 1 -> 10: crps8's 40-step eval 9.9x, sqrt of B''s MSE growth
+#   10.1x; C-long's own training CRPS only 6.2x because C's short range is damaged). Every scored
+#   step then counts about as much as the first.
+# - Validation as crps8 (fixed 8 steps, 2 members), so the val CRPS shows whether the short range
+#   holds; the long lead times need the 40-step ensemble eval.
+# Launch from the WeatherGenerator root (smoke test first: crps8_long_smoke.yml):
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-21/crps8_long.yml
+parallelize: true
+stages:
+  - name: crps8long
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_long_rollout_crps.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+    options:
+      - load_chkpt.run_id=klbklwf7
+      - load_chkpt.mini_epoch=12
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw/
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.forecast.lead_balance.power=0.5
+      # 4 + 4 scored steps with gradient (8 + 8 do not fit with 2 members: OOM at 90 GiB in the
+      # smoke test ioq8yjj6), so the memory is that of crps8 and C
+      - training_config.forecast.rollout_anchor_steps=4
+      - training_config.forecast.rollout_grad_steps=4
+      - training_config.forecast.rollout_loss_steps=4
+      # K in steps of 4, so that the final windows of 4 steps tile 6h - 10 days (K = 8 is crps8's objective)
+      - training_config.forecast.num_steps=[8,12,16,20,24,28,32,36,40]
+      - training_config.num_mini_epochs=10
+      - training_config.learning_rate_scheduling.lr_max=5.0e-05
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 4
+    nodes: 8

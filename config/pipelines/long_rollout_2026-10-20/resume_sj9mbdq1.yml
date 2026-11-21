@@ -1,0 +1,18 @@
+# Resume C-long (C continued for 10 mini-epochs): 8 mini-epochs left at ~3.3 h, in place (run_id == from_run_id) from its mini-epoch 1 checkpoint.
+# Its chain broke: later chain parts load sj9mbdq1_latest.chkpt, which the trainer only writes every
+# train_logging.checkpoint (500) batches within a mini-epoch, never reached with 256-batch
+# mini-epochs; after the 2026-10-20 filesystem incident every further part failed at startup.
+# train_logging.checkpoint=128 makes the _latest checkpoint exist for the parts of this resume.
+# Launch from the WeatherGenerator root:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-20/resume_sj9mbdq1.yml
+parallelize: true
+stages:
+  - name: clongresume
+    stage: train
+    run_id: sj9mbdq1
+    from_run_id: sj9mbdq1
+    mini_epoch: 1
+    options:
+      - train_logging.checkpoint=128
+    chain_jobs: 3
+    nodes: 8

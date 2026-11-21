@@ -1,0 +1,38 @@
+# Combined deterministic fine-tune: the winner of the long-lead deterministic line (B'' seymbjh2,
+# anchored pushforward + lead balancing; set load_chkpt to B' xxlm80yw mini-epoch 5 if B' wins
+# the 40-step eval) plus the two short-range fixes found on A':
+# - z and msl loss weights x10 of the usual ones (z 10 -> 100, msl 1 -> 10; k18ec1md: z500 step-1
+#   MSE -2.5% at no cost elsewhere),
+# - the ERA5 decoder trained, without dropout (decoder_dropout.yml: z500 MSE -13% at step 1, -6.5%
+#   at day 1 vs k18ec1md; the decoder was trained only in rrvj7vjv, with dropout 0.1).
+# The rollout objective and lead balancing are B'''s, so B'' is the control. Learning rate as
+# the decoder test (re-warm to 1e-5 over 64 steps, 4 mini-epochs).
+# Signal: val MSE at steps 1-8 vs B'' final, z500/msl down by ~5-13% at step 1; then the 40-step eval.
+# Launch from the WeatherGenerator root (smoke test first: combo_det_smoke.yml):
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/pipelines/long_rollout_2026-10-22/combo_det.yml
+parallelize: true
+stages:
+  - name: combodet
+    stage: train
+    base_config: ./config/config_nhv6tkln_chkpt8_base.yml
+    config_files:
+      - ./config/config_gjl_repro_finetune_forecast_n320_rollout_8_nodes.yml
+      - ./config/config_long_rollout_pushforward.yml
+      - ./config/config_long_rollout_anchor.yml
+      - ./config/config_fe_no_dropout.yml
+      - ./config/config_lead_balance_xxlm80yw.yml
+      - ./config/config_decoder_trainable.yml
+    options:
+      - load_chkpt.run_id=seymbjh2
+      - load_chkpt.mini_epoch=5
+      - streams_directory=./config/streams/gjl6a0kb_reproduction_n320_new_channels_forecast_iasi_channels_mnt_cw_zmsl10/
+      - pred_dropout_rate=0.0
+      - fe_impute_latent_noise_std=1.0e-05
+      - training_config.num_mini_epochs=4
+      - training_config.learning_rate_scheduling.lr_max=1.0e-05
+      - training_config.learning_rate_scheduling.num_steps_warmup=64
+      - training_config.learning_rate_scheduling.num_steps_cooldown=128
+      # write the _latest checkpoint within each 256-batch mini-epoch so chain parts can resume
+      - train_logging.checkpoint=128
+    chain_jobs: 3
+    nodes: 8

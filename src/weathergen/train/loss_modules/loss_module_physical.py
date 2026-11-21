@@ -18,6 +18,7 @@ import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
+from weathergen.train.loss_modules.lead_balance import get_lead_balance
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.train.utils import TRAIN, VAL, Stage
 
@@ -66,6 +67,11 @@ class LossPhysical(LossModuleBase):
             ]
             for name, params in loss_fcts.items()
         ]
+
+        # lead-time balancing of the training loss (validation stays unweighted)
+        self.lead_balance = (
+            get_lead_balance(self.mode_cfg.get("forecast", {})) if self.stage == TRAIN else None
+        )
 
     def _get_weights(self, stream_info):
         """
@@ -246,6 +252,18 @@ class LossPhysical(LossModuleBase):
 
                 output_step_weight = output_step_loss_weights[timestep_idx]
 
+                # channel weights at this output step, with lead-time balancing
+                weights_channels_step = weights_channels
+                if self.lead_balance is not None:
+                    weights_lead = self.lead_balance.weights(
+                        stream_name, list(target_channels), timestep_idx, self.device
+                    )
+                    weights_channels_step = (
+                        weights_lead
+                        if weights_channels is None
+                        else weights_channels * weights_lead
+                    )
+
                 # loss_timestep: loss for given timestep
                 loss_timestep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_batch = 0
@@ -310,7 +328,7 @@ class LossPhysical(LossModuleBase):
                             target,
                             pred,
                             substep_masks,
-                            weights_channels,
+                            weights_channels_step,
                             weights_locations,
                         )
 
@@ -324,6 +342,22 @@ class LossPhysical(LossModuleBase):
                         loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
                         loss_st_corr = loss_st_corr + loss_cur_w
                         ctr_loss_fcts += 1 if (loss_cur_w > 0.0 and not is_spoof) else 0
+
+                    # diagnostic only, not part of the loss: ensemble variance per channel, logged
+                    # as ens_var next to the ensemble-mean mse
+                    if (
+                        ctr_loss_fcts > 0
+                        and pred.dim() == 3
+                        and pred.shape[0] > 1
+                        and pred.shape[1:] == target.shape
+                    ):
+                        with torch.no_grad():
+                            _, var_chs = self._loss_per_loss_function(
+                                loss_fns.ens_var, target, pred, substep_masks, None, weights_locations
+                            )
+                        losses_all[stream_name][str(timestep_idx)]["ens_var"] = dict(
+                            zip(target_channels, var_chs, strict=True)
+                        )
 
                     loss_timestep = loss_timestep + loss_st_corr
                     ctr_batch += 1 if ctr_loss_fcts > 0.0 else 0

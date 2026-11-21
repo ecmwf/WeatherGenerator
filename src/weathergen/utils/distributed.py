@@ -74,6 +74,20 @@ def ddp_average(data: torch.Tensor) -> torch.Tensor:
     return data.cpu()
 
 
+def all_gather_object(obj) -> list:
+    """
+    Gather a picklable object from all ranks
+
+    Return :
+        list with the object of each rank, in rank order ([obj] without DDP)
+    """
+    if not _is_distributed_initialized():
+        return [obj]
+    objs = [None] * dist.get_world_size()
+    dist.all_gather_object(objs, obj)
+    return objs
+
+
 def all_gather_vlen(tensor: torch.Tensor, group=None) -> list[torch.Tensor]:
     """Gather tensors with the same number of dimensions but different lengths."""
 
