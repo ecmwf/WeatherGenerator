@@ -1,0 +1,35 @@
+# sdnbfpve reproduction, stage 4: operational-analysis fine-tune (original run sdnbfpve)
+# Copied from config/config_gjl_repro_forecast_n320_operan_finetune.yml at commit 1298747f.
+# Use: overlay on stage 3 checkpoint (train_continue). See README.md in this directory.
+# Changes vs source: streams_directory points at the copies in ./streams/; launch-time overrides written in: freeze_modules (was --options at launch).
+
+general:
+  # Restart the lr schedule and the mini-epoch counter for a new fine-tuning run.
+  istep: 0
+
+
+streams_directory: ./config/repro_sdnbfpve/streams/n320_new_channels_forecast_iasi_channels_mnt_cw_operan/
+
+# Launch-time override via --options. The source config froze more (also encoder\.ae_.* and all
+# stream embedders except ERA5_in); sdnbfpve was trained with this shorter regex, so those were trainable.
+freeze_modules: 'latent.*|pred_heads|target_token_engines|embed_target_coords|Ens.*|Target.*|Bilinear.*|encoder\.ln.*|encoder\.q_cells.*|encoder\.q_aux.*'
+
+validation_config:
+  validate_before_training: True
+
+training_config:
+  start_date: 2016-01-02T00:00
+  end_date: 2022-12-31T00:00
+
+
+  num_mini_epochs: 4
+
+  learning_rate_scheduling:
+    lr_max: 3e-5
+    num_steps_warmup: 64
+    num_steps_cooldown: 128
+    policy_decay: cosine
+    parallel_scaling_policy: "const"
+
+train_logging:
+  checkpoint: 100
