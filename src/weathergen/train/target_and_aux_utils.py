@@ -56,9 +56,9 @@ def get_target_aux_calculator(
             "latent_heads",
             "latent_pre_norm",
         ):
-            if hasattr(model, attr) and getattr(model, attr) is not None:
+            if hasattr(model, attr) and getattr(model, attr) is not None:  # pylint: disable=bad-builtin
                 delattr(model, attr)
-                setattr(model, attr, None)
+                setattr(model, attr, None)  # pylint: disable=bad-builtin
         torch.cuda.empty_cache()
 
         target_aux = DiffusionLatentTargetEncoder(cf, model, is_model_sharded=False)

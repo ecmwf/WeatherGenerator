@@ -17,6 +17,7 @@ from numpy.typing import NDArray
 
 from weathergen.common.config import timedelta_to_str
 from weathergen.utils.better_abc import ABCMeta, abstract_attribute
+from weathergen.utils.io_timing import io_timer
 
 _logger = logging.getLogger(__name__)
 
@@ -185,8 +186,11 @@ class ReaderData:
         Returns
         -------
         length of data
+
+        Datapoints can come without values (`data` with zero rows), e.g. the target points
+        of inference without targets.
         """
-        return len(self.data)
+        return len(self.datetimes)
 
     def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
         """
@@ -204,11 +208,11 @@ class ReaderData:
         idx_valid_geoinfos = ~np.isnan(self.geoinfos).any(axis=1)
         idx_valid = np.logical_and(idx_valid, idx_valid_geoinfos)
 
-        # apply
+        # apply (datapoints without values have no data rows)
         return ReaderData(
             self.coords[idx_valid],
             self.geoinfos[idx_valid],
-            self.data[idx_valid],
+            self.data[idx_valid] if len(self.data) > 0 else self.data,
             self.datetimes[idx_valid],
         )
 
@@ -243,7 +247,8 @@ class ReaderData:
 
         self.coords = self.coords[idxs_subset]
         self.geoinfos = self.geoinfos[idxs_subset]
-        self.data = self.data[idxs_subset]
+        # datapoints without values have no data rows
+        self.data = self.data[idxs_subset] if len(self.data) > 0 else self.data
         self.datetimes = self.datetimes[idxs_subset]
 
         return self
@@ -273,16 +278,13 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
 
-    assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
-    assert rdata.geoinfos.shape[0] == rdata.data.shape[0], "geoinfos and data must have same length"
+    # datapoints without values have no data rows
+    assert rdata.data.shape[0] in (0, rdata.coords.shape[0]), (
+        "coords and data must have same length"
+    )
 
     # Check that all fields have the same length
-    assert (
-        rdata.coords.shape[0]
-        == rdata.geoinfos.shape[0]
-        == rdata.data.shape[0]
-        == rdata.datetimes.shape[0]
-    ), (
+    assert rdata.coords.shape[0] == rdata.geoinfos.shape[0] == rdata.datetimes.shape[0], (
         f"coords, geoinfos, data and datetimes must have the same length "
         f"{rdata.coords.shape[0]}, {rdata.geoinfos.shape[0]}, {rdata.data.shape[0]}, "
         f"{rdata.datetimes.shape[0]}"
@@ -346,10 +348,10 @@ class DataReaderBase(metaclass=ABCMeta):
         self.geoinfo_idx = []
         self.target_channel_weights = []
 
-        self.mean = np.zeros(0)
-        self.stdev = np.ones(0)
-        self.mean_geoinfo = np.zeros(0)
-        self.stdev_geoinfo = np.ones(0)
+        self.mean = np.zeros(0, dtype=np.float32)
+        self.stdev = np.ones(0, dtype=np.float32)
+        self.mean_geoinfo = np.zeros(0, dtype=np.float32)
+        self.stdev_geoinfo = np.ones(0, dtype=np.float32)
 
     @abstractmethod
     def length(self) -> int:
@@ -385,7 +387,8 @@ class DataReaderBase(metaclass=ABCMeta):
         source data (coords, geoinfos, data, datetimes)
         """
 
-        rdata = self._get(idx, self.source_idx)
+        with io_timer(self.stream_info["name"], "reader get_source"):
+            rdata = self._get(idx, self.source_idx)
 
         return rdata
 
@@ -403,7 +406,43 @@ class DataReaderBase(metaclass=ABCMeta):
         target data (coords, geoinfos, data, datetimes)
         """
 
+        with io_timer(self.stream_info["name"], "reader get_target"):
+            rdata = self._get(idx, self.target_idx)
+
+        return rdata
+
+    def get_target_points(self, idx: TIndex) -> ReaderData:
+        """
+        Get the target points for idx without their values
+
+        Inference without targets only needs where and when to predict, so readers that know
+        their points without reading the data skip the read.
+
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        target points (coords, geoinfos, datetimes), data with zero rows
+        """
+
+        with io_timer(self.stream_info["name"], "reader get_target_points"):
+            rdata = self._get_points(idx)
+
+        return rdata
+
+    def _get_points(self, idx: TIndex) -> ReaderData:
+        """
+        Get the target points for window idx, with data with zero rows
+
+        The default reads the target data and drops the values; readers whose points are known
+        without reading the data override this.
+        """
+
         rdata = self._get(idx, self.target_idx)
+        rdata.data = rdata.data[:0]
 
         return rdata
 
@@ -558,7 +597,8 @@ class DataReaderBase(metaclass=ABCMeta):
             )
         # Equivalent to (data[..., i] - mean[ch]) / stdev[ch] per channel.
         # Stats keep their dtype so float32 data minus float64 mean still promotes,
-        # matching the original loop.
+        # matching the original loop. The anemoi and obs readers keep float32 stats, so
+        # their data takes the in-place path below.
         idx_arr = np.asarray(idx, dtype=np.intp)
         mean_vec = np.asarray(mean)[idx_arr]
         std_vec = np.asarray(stdev)[idx_arr]
@@ -568,7 +608,7 @@ class DataReaderBase(metaclass=ABCMeta):
             data /= std_vec
             return data
 
-        # Mixed dtypes (typically float32 data, float64 anemoi/obs stats): promote the same
+        # Mixed dtypes (float32 data, float64 stats of other readers): promote the same
         # way the original channel loop did. Row-chunked ufuncs avoid a full-size float64
         # temporary; few-channel or non-contiguous last axes stay on the scalar loop.
         n_ch = data.shape[-1]
@@ -710,6 +750,10 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Denormalized target data
         """
+
+        if len(target) == 0:
+            return target
+
         return self._denormalize(target, self.target_idx, self.mean, self.stdev, "target")
 
 

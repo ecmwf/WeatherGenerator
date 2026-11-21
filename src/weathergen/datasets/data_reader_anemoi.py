@@ -15,6 +15,7 @@ import anemoi.datasets as anemoi_datasets
 import numpy as np
 from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
+from anemoi.utils.dates import frequency_to_timedelta
 from numpy.typing import NDArray
 
 from weathergen.common.config import timedelta_to_str
@@ -26,6 +27,7 @@ from weathergen.datasets.data_reader_base import (
     check_reader_data,
 )
 from weathergen.train.utils import Stage
+from weathergen.utils.io_timing import io_timer
 
 _logger = logging.getLogger(__name__)
 
@@ -81,9 +83,13 @@ class DataReaderAnemoi(DataReaderTimestep):
         """
 
         # open  dataset to peak that it is compatible with requested parameters
-        ds0: Dataset = anemoi_datasets.open_dataset(filename)
+        sname = stream_info["name"]
+        with io_timer(sname, "anemoi init : open_dataset"):
+            ds0: Dataset = anemoi_datasets.open_dataset(filename)
         # If there is no overlap with the time range, the dataset will be empty
-        if tw_handler.t_start >= ds0.dates[-1] or tw_handler.t_end <= ds0.dates[0]:
+        with io_timer(sname, "anemoi init : read dates"):
+            ds0_dates = ds0.dates
+        if tw_handler.t_start >= ds0_dates[-1] or tw_handler.t_end <= ds0_dates[0]:
             name = stream_info["name"]
             _logger.warning(f"{name} is not supported over data loader window. Stream is skipped.")
             super().__init__(tw_handler, stream_info)
@@ -100,11 +106,16 @@ class DataReaderAnemoi(DataReaderTimestep):
                 f"subsampling_rate specified for anemoi dataset for stream {name}. "
                 + "Use frequency instead."
             )
-        ds: Dataset = anemoi_datasets.open_dataset(
-            ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
-        )
+        with io_timer(sname, "anemoi init : open_dataset subset"):
+            ds: Dataset = anemoi_datasets.open_dataset(
+                ds0, **kwargs, start=tw_handler.t_start, end=tw_handler.t_end
+            )
 
-        period = np.timedelta64(ds.frequency)
+        # force_frequency overrides the frequency the dataset reports
+        if stream_info.get("force_frequency") is None:
+            period = np.timedelta64(ds.frequency)
+        else:
+            period = np.timedelta64(frequency_to_timedelta(stream_info.get("force_frequency")))
         data_start_time = ds.dates[0]
         data_end_time = ds.dates[-1]
         assert data_start_time is not None and data_end_time is not None, (
@@ -127,8 +138,9 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.len = len(ds)
 
         # caches lats and lons
-        self.latitudes = _clip_lat(ds.latitudes)
-        self.longitudes = _clip_lon(ds.longitudes)
+        with io_timer(sname, "anemoi init : read lat/lon"):
+            self.latitudes = _clip_lat(ds.latitudes)
+            self.longitudes = _clip_lon(ds.longitudes)
         self._latlon = np.column_stack((self.latitudes, self.longitudes))
 
         # select/filter requested source channels
@@ -162,9 +174,11 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
 
         # set geoinfo normalization statistics
+        with io_timer(sname, "anemoi init : read statistics"):
+            statistics = ds.statistics
         if len(self.geoinfo_idx) > 0:
-            self.mean_geoinfo = ds.statistics["mean"][self.geoinfo_idx]
-            self.stdev_geoinfo = ds.statistics["stdev"][self.geoinfo_idx]
+            self.mean_geoinfo = statistics["mean"][self.geoinfo_idx]
+            self.stdev_geoinfo = statistics["stdev"][self.geoinfo_idx]
         else:
             self.mean_geoinfo = np.zeros(0)
             self.stdev_geoinfo = np.ones(0)
@@ -177,8 +191,8 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.properties = {
             "stream_id": 0,
         }
-        self.mean = ds.statistics["mean"]
-        self.stdev = ds.statistics["stdev"]
+        self.mean = np.asarray(statistics["mean"], dtype=np.float32)
+        self.stdev = np.asarray(statistics["stdev"], dtype=np.float32)
 
     @override
     def init_empty(self) -> None:
@@ -223,28 +237,66 @@ class DataReaderAnemoi(DataReaderTimestep):
         # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
+        sname = self.stream_info["name"]
         try:
             # (time, var, ensemble, grid) → (time, var, grid). Already float32 on disk.
-            cube = np.asarray(self.ds[didx_start:didx_end][:, :, 0], dtype=np.float32)
+            with io_timer(sname, "anemoi _get : read data"):
+                cube = np.asarray(self.ds[didx_start:didx_end][:, :, 0], dtype=np.float32)
         except MissingDateError as e:
             _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        geoinfos = _take_var_axis(cube, self.geoinfo_idx)
-        data = _take_var_axis(cube, channels_idx)
-        coords = np.tile(self._latlon, (len(t_idxs), 1))
+        with io_timer(sname, "anemoi _get : select channels + coords"):
+            geoinfos = _take_var_axis(cube, self.geoinfo_idx)
+            data = _take_var_axis(cube, channels_idx)
+            coords = np.tile(self._latlon, (len(t_idxs), 1))
 
-        # date time matching #data points of data
-        # Assuming a fixed frequency for the dataset
-        datetimes = np.repeat(self.ds.dates[didx_start:didx_end], len(data) // len(t_idxs))
+            # date time matching #data points of data
+            # Assuming a fixed frequency for the dataset
+            datetimes = np.repeat(self.ds.dates[didx_start:didx_end], len(data) // len(t_idxs))
 
         rd = ReaderData(
             coords=coords,
             geoinfos=geoinfos,
             data=data,
             datetimes=datetimes,
+        )
+        check_reader_data(rd, dtr)
+
+        return rd
+
+    @override
+    def _get_points(self, idx: TIndex) -> ReaderData:
+        """
+        Get the target points for window idx without reading the data
+
+        The grid and the dates are known, so only geoinfo channels, which are variables of the
+        dataset, require reading the window.
+        """
+
+        if len(self.geoinfo_idx) > 0:
+            return super()._get_points(idx)
+
+        (t_idxs, dtr) = self._get_dataset_idxs(idx)
+
+        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+            return ReaderData.empty(
+                num_data_fields=len(self.target_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
+        assert t_idxs[0] >= 0, "index must be non-negative"
+        didx_start = t_idxs[0]
+        # End is inclusive
+        didx_end = t_idxs[-1] + 1
+
+        coords = np.tile(self._latlon, (len(t_idxs), 1))
+        rd = ReaderData(
+            coords=coords,
+            geoinfos=np.zeros((len(coords), 0), dtype=np.float32),
+            data=np.zeros((0, len(self.target_idx)), dtype=np.float32),
+            datetimes=np.repeat(self.ds.dates[didx_start:didx_end], len(self._latlon)),
         )
         check_reader_data(rd, dtr)
 

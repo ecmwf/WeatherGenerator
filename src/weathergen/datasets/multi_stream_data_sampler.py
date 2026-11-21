@@ -35,6 +35,7 @@ from weathergen.datasets.utils import (
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
+from weathergen.utils.io_timing import io_timer
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
@@ -50,11 +51,14 @@ FORECAST_DEFAULTS = {
 }
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
+def collect_datasources(
+    stream_datasets: list, idx: int, type: str, rng, with_values: bool = True
+) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
 
-    rng and num_subset are used to drop data
+    rng and num_subset are used to drop data; with_values=False collects the target points
+    without their values (inference without targets)
     """
 
     rdatas = []
@@ -68,22 +72,26 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
             normalize_channels = ds.normalize_source_channels
             shuffle = ds.stream_info.get("shuffle_source", False)
         elif type == "target":
-            get_reader_data = ds.get_target
+            get_reader_data = ds.get_target if with_values else ds.get_target_points
             normalize_channels = ds.normalize_target_channels
             num_subset = ds.stream_info.get("max_num_targets", -1)
             shuffle = ds.stream_info.get("shuffle_target", False)
         else:
             assert False, "invalid value for argument `type`"
 
+        sname = ds.stream_info["name"]
         # get source (of potentially multi-step length)
-        rdata = (
-            get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
-        )
-        rdata.data = normalize_channels(rdata.data)
-        rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
+        rdata = get_reader_data(idx)
+        with io_timer(sname, f"{type} shuffle + remove nan coords"):
+            rdata = rdata.shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
+        with io_timer(sname, f"{type} normalize"):
+            rdata.data = normalize_channels(rdata.data)
+            rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
 
-    return IOReaderData.combine(rdatas)
+    sname = stream_datasets[0].stream_info["name"] if stream_datasets else ""
+    with io_timer(sname, f"{type} combine readers"):
+        return IOReaderData.combine(rdatas)
 
 
 @dataclasses.dataclass
@@ -279,7 +287,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"Opening dataset with type: {ds_type}"
                         + f" from stream config {stream_name}.",
                     )
-                ds = dataset(filename=filename, **kwargs)
+                with io_timer(stream_name, f"reader construction ({ds_type})"):
+                    ds = dataset(filename=filename, **kwargs)
 
                 streams_datasets[stream_info["name"]].readers += [ds]
 
@@ -519,14 +528,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 continue
 
             if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+                (dts, cc, tc, tc_l, idxs_inv) = self.tokenizer.get_target_coords(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(
+                    self._stage, timestep_idx, dts, cc, tc, tc_l, idxs_inv, rdata.is_spoof
+                )
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
@@ -584,27 +595,30 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             self.num_healpix_cells,
         )
 
-        stream_data = self._build_stream_data_input(
-            modes,
-            stream_data,
-            base_idx,
-            stream_info,
-            num_steps_input,
-            input_data,
-            input_tokens,
-            input_mask,
-        )
+        sname = stream_info["name"]
+        with io_timer(sname, "build stream data input"):
+            stream_data = self._build_stream_data_input(
+                modes,
+                stream_data,
+                base_idx,
+                stream_info,
+                num_steps_input,
+                input_data,
+                input_tokens,
+                input_mask,
+            )
 
-        stream_data = self._build_stream_data_output(
-            modes,
-            stream_data,
-            base_idx,
-            stream_info,
-            num_forecast_steps,
-            output_data,
-            output_tokens,
-            output_mask,
-        )
+        with io_timer(sname, "build stream data output"):
+            stream_data = self._build_stream_data_output(
+                modes,
+                stream_data,
+                base_idx,
+                stream_info,
+                num_forecast_steps,
+                output_data,
+                output_tokens,
+                output_mask,
+            )
 
         return stream_data
 
@@ -632,19 +646,24 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         time_win.start,
                         stream_ds[0].get_geoinfo_size(),
                         len(stream_ds[0].mean[stream_ds[0].source_idx]),
+                        self.rng,
                     )
                     rdata.is_spoof = True
 
                 input_data += [rdata]
 
         # target data: collect for all forecast steps
+        # without targets only the points to predict at are needed, not the values there
+        with_values = self.mode_cfg.get("with_targets", True)
         output_data = []
         if not is_stream_forcing(stream_ds[0].stream_info, self._stage):
             num_output_steps = self._get_output_length(num_forecast_steps)
             for timestep_idx in range(self.output_offset, num_output_steps):
                 step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-                rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
+                rdata = collect_datasources(
+                    stream_ds, step_forecast_dt, "target", self.rng, with_values
+                )
 
                 if rdata.is_empty():
                     # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -655,6 +674,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         time_win.start,
                         stream_ds[0].get_geoinfo_size(),
                         len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                        self.rng,
                     )
                     rdata.is_spoof = True
 
@@ -733,9 +753,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
+        # inference without targets: the target coords (on the source side) suffice to predict
+        # and write the output, so neither target values nor teacher inputs are prepared
+        if not self.mode_cfg.get("with_targets", True):
+            target_select = []
         # remove duplicates
         source_select, target_select = list(set(source_select)), list(set(target_select))
-        if len(source_select) == 0 or len(target_select) == 0:
+        if len(source_select) == 0:
             raise NotImplementedError(f"Unsupported training mode {mode}.")
 
         num_output_steps = self._get_output_length(num_forecast_steps)
@@ -775,9 +799,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # input_data and output_data is conceptually consecutive but differs
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
-            (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds.readers
-            )
+            with io_timer(stream_name, "get data windows (read + preprocess)"):
+                (input_data, output_data) = self._get_data_windows(
+                    idx, num_forecast_steps, i_max, stream_ds.readers
+                )
 
             # When teacher_time_offset > 0, load a separate set of data windows
             # shifted forward in time for the teacher (target) samples.
@@ -791,15 +816,18 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
-            output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+            with io_timer(stream_name, "tokenize input windows"):
+                input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
+            with io_timer(stream_name, "tokenize output windows"):
+                output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
             if self.teacher_time_offset > 0:
-                input_tokens_target = self.tokenizer.get_tokens_windows(
-                    stream_info, input_data_target, True
-                )
-                output_tokens_target = self.tokenizer.get_tokens_windows(
-                    stream_info, output_data_target, False
-                )
+                with io_timer(stream_name, "tokenize teacher windows"):
+                    input_tokens_target = self.tokenizer.get_tokens_windows(
+                        stream_info, input_data_target, True
+                    )
+                    output_tokens_target = self.tokenizer.get_tokens_windows(
+                        stream_info, output_data_target, False
+                    )
             else:
                 input_tokens_target = input_tokens
                 output_tokens_target = output_tokens
@@ -908,8 +936,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # ensure the batch is valid, i.e. not completely empty and no NaN values
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
+                with_targets = self.mode_cfg.get("with_targets", True)
                 not_valid = batch.sources_empty() or batch.is_nan()
-                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
+                if with_targets and "masking" in mode:
+                    not_valid = not_valid or batch.targets_empty()
 
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not_valid:

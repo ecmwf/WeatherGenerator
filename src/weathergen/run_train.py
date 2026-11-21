@@ -15,16 +15,36 @@ import logging
 import os
 import pdb
 import sys
-import time
 import traceback
 from pathlib import Path
 
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
+from weathergen.common.config import Config
 from weathergen.common.logger import init_loggers
+from weathergen.train.profiling_trainer import ProfilingTrainer
 from weathergen.train.trainer import Trainer
+from weathergen.utils.nsys_windows import NsysWindows
+from weathergen.utils.performance import MemoryTracker, ThroughputTracker
+from weathergen.utils.profiling import ProfilingConfig
 
 logger = logging.getLogger(__name__)
+
+
+def get_trainer(cf: Config) -> Trainer:
+    """Select the trainer: the ProfilingTrainer if the run is measured, a plain one otherwise."""
+    profiling_cfg = ProfilingConfig.from_config(cf)
+    measured = (
+        profiling_cfg.enabled
+        or NsysWindows.from_config(cf) is not None
+        or ThroughputTracker.is_enabled(cf)
+        or MemoryTracker.is_enabled(cf)
+    )
+    if measured:
+        logger.info("Profiling or performance logging enabled: running with ProfilingTrainer.")
+        return ProfilingTrainer(cf.train_logging, profiling_cfg)
+
+    return Trainer(cf.train_logging)
 
 
 def train() -> None:
@@ -101,6 +121,7 @@ def run_inference(args):
 
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
+    cf = Trainer.init_seeds(cf)
 
     init_loggers(cf.general.run_id)
 
@@ -108,7 +129,7 @@ def run_inference(args):
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_logging)
+    trainer = get_trainer(cf)
     try:
         trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
     except Exception:
@@ -141,13 +162,14 @@ def run_continue(args):
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
+    cf = Trainer.init_seeds(cf)
 
     init_loggers(cf.general.run_id)
 
     # track history of run to ensure traceability of results
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_logging)
+    trainer = get_trainer(cf)
 
     try:
         trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
@@ -170,11 +192,11 @@ def run_train(args):
         args.private_config, None, None, args.base_config, *args.config, cli_overwrite
     )
     cf = config.set_run_id(cf, args.run_id, False)
-    cf.data_loading.rng_seed = int(time.time())
     cf.stage = args.stage
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
+    cf = Trainer.init_seeds(cf)
 
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
@@ -187,7 +209,7 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.train_logging)
+    trainer = get_trainer(cf)
 
     try:
         trainer.run(cf, devices)

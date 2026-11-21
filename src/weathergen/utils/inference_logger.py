@@ -18,7 +18,6 @@ disk rather than rendered inline, for later inspection by standalone scripts. Th
 concrete writers here are inference-only.
 """
 
-
 from __future__ import annotations
 
 import abc
@@ -146,9 +145,7 @@ class DiffusionStepsZarrWriter(AnalyticsOutputWriter):
                 for key in ("predictions", "target", "coords", "times"):
                     # times are stored as int64 ns-since-epoch since zarr has no datetime64 dtype
                     attrs = {"units": "datetime64[ns] (int64 view)"} if key == "times" else None
-                    stream_group.create_array(
-                        key, data=np.asarray(data[key]), attributes=attrs
-                    )
+                    stream_group.create_array(key, data=np.asarray(data[key]), attributes=attrs)
 
 
 def write_diffusion_steps_output(
@@ -174,7 +171,7 @@ def write_diffusion_steps_output(
     sample/stream. See :class:`DiffusionStepsZarrWriter` and
     ``scripts/analytics/diffusion/plot_diffusion_steps.py``.
     """
-    analytics_output = getattr(model_output, "diffusion_steps_output", None)
+    analytics_output = model_output.diffusion_steps_output
     if analytics_output is None or cf.stage != "inference":
         return
 

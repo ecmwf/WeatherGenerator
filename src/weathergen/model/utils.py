@@ -30,7 +30,7 @@ def freeze_weights(block):
 
 
 def reset_weights(block):
-    block_name = getattr(block, "name", type(block).__name__)
+    block_name = getattr(block, "name", type(block).__name__)  # pylint: disable=bad-builtin
     if hasattr(block, "reset_parameters"):
         logger.info(f"Reset weights of block {block_name}")
         block.reset_parameters()

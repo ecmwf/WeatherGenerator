@@ -7,165 +7,198 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Utilities for measuring training throughput metrics."""
+"""
+Performance logging: cheap metrics of the whole run (throughput, peak memory), and nvtx
+ranges.
 
+Tracing a bounded stretch of training lives in `weathergen.utils.profiling`. Both are
+driven by `weathergen.train.profiling_trainer.ProfilingTrainer`.
+"""
+
+import functools
 import logging
-import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 
 import torch
 
-from weathergen.utils.distributed import is_root
+from weathergen.common.config import Config
 
 logger = logging.getLogger(__name__)
 
+_GIB = 1024**3
+
+
+def _throughput_section(cf: Config) -> Config | dict:
+    return (cf.get("performance_logging") or {}).get("throughput") or {}
+
+
+def _memory_section(cf: Config) -> Config | dict:
+    return (cf.get("performance_logging") or {}).get("memory") or {}
+
 
 class ThroughputTracker:
-    """Tracks training throughput metrics.
+    """Tracks training throughput as cumulative global counts.
 
-    Accumulates per-batch sample and source-byte counts across ranks, with the warmup
-    / accumulation logic required to produce stable global throughput metrics.
+    `step` only accumulates this rank's batch, sample and source-megabyte counts, without
+    device synchronization or collectives. `compute_metrics` reduces them across ranks once
+    per logging interval. Throughput is the difference between two logged records divided
+    by the difference of their timestamps, which also discards the warmup steps.
+
+    Configured by `performance_logging.throughput.enabled`, which is absent from
+    `config/default_config.yml`. Cheap and does not change training, so safe for full runs.
     """
 
-    def __init__(
-        self,
-        device: torch.device,
-        warmup_steps: int,
-        batch_size_per_gpu: int,
-    ) -> None:
+    @staticmethod
+    def is_enabled(cf: Config) -> bool:
+        """Whether the run config asks for throughput logging."""
+        return _throughput_section(cf).get("enabled", False)
+
+    @classmethod
+    def from_config(
+        cls, cf: Config, device: torch.device, batch_size_per_gpu: int
+    ) -> "ThroughputTracker | None":
+        """The tracker the run config asks for, or None if throughput logging is off."""
+        if not cls.is_enabled(cf):
+            return None
+
+        return cls(device=device, batch_size_per_gpu=batch_size_per_gpu)
+
+    def __init__(self, device: torch.device, batch_size_per_gpu: int) -> None:
         self._device = device
-        self._warmup_steps = warmup_steps
         self.batch_size_per_gpu = batch_size_per_gpu
-        self._t0: float | None = None
-        self._warmup_done: bool = False
         self._total_batches: int = 0
         self._total_samples: int = 0
         self._total_mb: float = 0.0
-        self._synced_elapsed: float | None = None
-        self._synced_global_batches: int = 0
-        self._synced_global_samples: int = 0
-        self._synced_global_mb: float = 0.0
 
-    def step(
-        self,
-        batch,
-        istep: int,
-        log_fn: Callable[[dict[str, float]], None] | None = None,
-    ) -> None:
-        """Record one training step and optionally log metrics.
-
-        Wrapper around ``update`` and ``compute_metrics`` that also computes
-        source bytes from the batch on the fly. When metrics are available and
-        the current rank is root, ``log_fn`` is called with the metrics dict.
+    def step(self, batch) -> None:
+        """Accumulate one training step's counts on this rank. No sync, no collective.
 
         Args:
             batch: The current training batch (must expose ``get_source_samples()``).
-            batch_size_per_gpu: Number of samples processed on this rank.
-            istep: Global training step index.
-            log_fn: Called with the metrics dict on the root rank once warmup is
-                    complete. Typically ``lambda m: logger.log_metrics(stage, m, step=istep)``.
         """
-        source_mb = compute_source_bytes(batch.get_source_samples()) / 1e6
-        self.update(istep, source_mb)
-        self._sync()  # collective: all ranks must participate
-        if log_fn is not None and is_root():
-            metrics = self.compute_metrics()
-            if metrics is not None:
-                log_fn(metrics)
+        # computed per step since the number of source tokens varies across batches
+        self.update(compute_source_bytes(batch.get_source_samples()) / 1e6)
 
-    def update(self, istep: int, source_mb: float) -> None:
-        """Record one training step, handling warmup internally.
-
-        Args:
-            batch_size_per_gpu: Number of samples processed on this rank.
-            istep: Global training step index (used for warmup countdown).
-            source_mb: Source tensor megabytes for this batch. Should be computed
-                       fresh each step via ``compute_source_bytes`` as batch sizes
-                       can vary across samples.
-        """
-        if not self._warmup_done:
-            if istep >= self._warmup_steps - 1:
-                self._t0 = time.time()
-                self._warmup_done = True
-        else:
-            torch.cuda.synchronize()
-            self._total_batches += 1
-            self._total_samples += self.batch_size_per_gpu
-            self._total_mb += source_mb
-
-    def _sync(self) -> None:
-        """Collective: reduce per-rank counters across all ranks and cache the result.
-
-        Must be called on every rank at the same point in the training loop.
-        The cached values are later read by ``compute_metrics()`` on the root rank.
-        """
-        if self._total_batches == 0 or self._t0 is None:
-            return
-
-        elapsed = time.time() - self._t0
-
-        global_batches = torch.tensor(self._total_batches, dtype=torch.int64, device=self._device)
-        global_samples = torch.tensor(self._total_samples, dtype=torch.int64, device=self._device)
-        global_total_mb = torch.tensor(self._total_mb, dtype=torch.float32, device=self._device)
-
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            elapsed_tensor = torch.tensor(elapsed, dtype=torch.float32, device=self._device)
-            torch.distributed.all_reduce(elapsed_tensor, op=torch.distributed.ReduceOp.AVG)
-            elapsed = elapsed_tensor.item()
-
-            torch.distributed.all_reduce(global_batches)
-            torch.distributed.all_reduce(global_samples)
-            torch.distributed.all_reduce(global_total_mb)
-
-        self._synced_elapsed = elapsed
-        self._synced_global_batches = int(global_batches.item())
-        self._synced_global_samples = int(global_samples.item())
-        self._synced_global_mb = global_total_mb.item()
+    def update(self, source_mb: float) -> None:
+        """Accumulate one batch with `source_mb` megabytes of source tokens on this rank."""
+        self._total_batches += 1
+        self._total_samples += self.batch_size_per_gpu
+        self._total_mb += source_mb
 
     def compute_metrics(self) -> dict[str, float] | None:
-        """Return performance metrics dict, or None if warmup is not yet complete.
+        """Return the cumulative global counts, or None before the first step.
+
+        Collective: a single all-reduce, so it must be called on every rank at the same
+        point in the training loop. The returned dict is identical on all ranks.
 
         Returns:
-            Dict of ``"performance.<key>": value`` pairs, or None if no data yet.
+            Dict of ``"performance.throughput.global.<count>": value`` pairs.
         """
-        if self._total_batches == 0 or self._t0 is None:
-            return None
-        elapsed = time.time() - self._t0
-
-        if elapsed <= 0 or self._synced_elapsed is None or self._synced_elapsed <= 0:
+        if self._total_batches == 0:
             return None
 
-        metrics: dict[str, float] = {}
+        totals = [self._total_batches, self._total_samples, self._total_mb]
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            reduced = torch.tensor(totals, dtype=torch.float64, device=self._device)
+            torch.distributed.all_reduce(reduced, op=torch.distributed.ReduceOp.SUM)
+            totals = reduced.tolist()
 
-        # Device-level throughput (this rank only).
-        metrics["performance.throughput.device.batches_per_sec"] = self._total_batches / elapsed
-        metrics["performance.throughput.device.samples_per_sec"] = self._total_samples / elapsed
-        metrics["performance.throughput.device.mb_per_sec"] = self._total_mb / elapsed
-
-        # Global throughput: use values already reduced across all ranks by _sync().
-        synced_elapsed = self._synced_elapsed
-        metrics["performance.throughput.global.batches_per_sec"] = (
-            self._synced_global_batches / synced_elapsed
-        )
-        metrics["performance.throughput.global.samples_per_sec"] = (
-            self._synced_global_samples / synced_elapsed
-        )
-        metrics["performance.throughput.global.mb_per_sec"] = (
-            self._synced_global_mb / synced_elapsed
-        )
-
-        return metrics
+        batches, samples, mb = totals
+        return {
+            "performance.throughput.global.batches": batches,
+            "performance.throughput.global.samples": samples,
+            "performance.throughput.global.mb": mb,
+        }
 
 
-class NullThroughputTracker:
-    """No-op throughput tracker used when performance tracking is disabled.
+class MemoryTracker:
+    """Tracks the global (max across all ranks) peak GPU memory per window.
 
-    Implements the same interface as ``ThroughputTracker`` so call sites in the
-    training loop need no ``if`` guards.
+    Reads the CUDA caching allocator's high-water marks and resets them, so each window gets
+    the peak since the previous read. `close_window` folds that peak into a window locally,
+    e.g. to keep a checkpoint's peak out of the training window; `collect` reports a window,
+    with the MAX across all ranks.
+
+    `max_memory_allocated` is the peak of memory occupied by live tensors (parameters,
+    gradients, optimizer states, activations): the model's actual demand, comparable to
+    analytic memory estimates. `max_memory_reserved` is the peak of memory the caching
+    allocator has claimed from the device; it also counts cached blocks that are free but not
+    returned to CUDA, so reserved >= allocated and the gap measures fragmentation / caching
+    slack. An OOM is raised when a new cudaMalloc fails, so reserved (plus non-PyTorch usage
+    such as NCCL buffers and cuBLAS workspaces, which neither counter sees) is what determines
+    headroom against the device's capacity.
+
+    Configured by `performance_logging.memory.enabled`, which is absent from
+    `config/default_config.yml`. Cheap and does not change training, so safe for full runs.
     """
 
-    def step(self, batch, istep: int, log_fn=None) -> None:
-        pass
+    @staticmethod
+    def is_enabled(cf: Config) -> bool:
+        """Whether the run config asks for peak-memory logging."""
+        return _memory_section(cf).get("enabled", False)
+
+    @classmethod
+    def from_config(cls, cf: Config, device: torch.device) -> "MemoryTracker | None":
+        """The tracker the run config asks for, or None if it is off or CUDA is unavailable."""
+        if not cls.is_enabled(cf):
+            return None
+        if not torch.cuda.is_available():
+            logger.warning("Peak-memory logging requested, but CUDA is unavailable.")
+            return None
+
+        return cls(device=device)
+
+    def __init__(self, device: torch.device) -> None:
+        self._device = device
+        # local (allocated, reserved) peaks of windows closed but not yet collected
+        self._pending: dict[str, tuple[int, int]] = {}
+        # start with a clean window so the first collect reports its own peak
+        torch.cuda.reset_peak_memory_stats(device)
+
+    def close_window(self, window: str) -> None:
+        """Attribute the peak since the last read to `window`, without reporting it yet.
+
+        Local: no synchronization across ranks.
+        """
+        max_allocated = torch.cuda.max_memory_allocated(self._device)
+        max_reserved = torch.cuda.max_memory_reserved(self._device)
+        torch.cuda.reset_peak_memory_stats(self._device)
+
+        pending_allocated, pending_reserved = self._pending.get(window, (0, 0))
+        self._pending[window] = (
+            max(pending_allocated, max_allocated),
+            max(pending_reserved, max_reserved),
+        )
+
+    def collect(self, window: str) -> dict[str, float]:
+        """Close `window` and return its peak-memory metrics since it was last collected.
+
+        Collective: must be called on every rank at the same point in the training loop
+        (the cross-rank MAX reduction and the peak-stat reset run on every rank). The
+        returned dict is identical on all ranks.
+
+        Args:
+            window: what the window covers (e.g. ``"train"``, ``"validation"``,
+                ``"save_model"``); becomes part of the metric key.
+
+        Returns:
+            Dict of ``"performance.memory.<window>.max_{allocated,reserved}_gib"`` pairs.
+        """
+        self.close_window(window)
+        max_allocated, max_reserved = self._pending.pop(window)
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            peaks = torch.tensor(
+                [max_allocated, max_reserved], dtype=torch.int64, device=self._device
+            )
+            torch.distributed.all_reduce(peaks, op=torch.distributed.ReduceOp.MAX)
+            max_allocated, max_reserved = peaks.tolist()
+
+        return {
+            f"performance.memory.{window}.max_allocated_gib": max_allocated / _GIB,
+            f"performance.memory.{window}.max_reserved_gib": max_reserved / _GIB,
+        }
 
 
 def compute_source_bytes(source_samples) -> int:
@@ -184,3 +217,88 @@ def compute_source_bytes(source_samples) -> int:
             for t in stream_data.source_tokens_cells:
                 total += t.nbytes
     return total
+
+
+@contextmanager
+def nvtx_range(name):
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+
+
+def nvtx_batches[T](batches: Iterable[tuple[int, T]]) -> Iterator[tuple[int, T]]:
+    """Wrap the consumer's work on each yielded (index, batch) in an nvtx range."""
+    for bidx, batch in batches:
+        # the range stays open while the consumer runs the step on the yielded batch
+        with nvtx_range(f"batch_{bidx}"):
+            yield bidx, batch
+
+
+def nvtx_next[T](iterable: Iterable[T], name: str) -> Iterator[T]:
+    """Yield the items of `iterable`, each `next()` call inside an nvtx range `name`.
+
+    Makes the time the training loop waits for the data loader visible as a range.
+    """
+    it = iter(iterable)
+    while True:
+        with nvtx_range(name):
+            try:
+                item = next(it)
+            except StopIteration:
+                return
+        yield item
+
+
+def nvtx_annotator(enabled: bool) -> Callable[[str], AbstractContextManager]:
+    """`nvtx_range` if `enabled`, else a no-op context with the same signature."""
+    return nvtx_range if enabled else lambda name: nullcontext()
+
+
+def nvtx_wrap(obj: object, method: str, name: str) -> None:
+    """Run every call of `obj.<method>` inside an nvtx range `name`.
+
+    Patches the instance (not its class), so only use it on objects of a run that is
+    being profiled.
+    """
+    original = getattr(obj, method)  # pylint: disable=bad-builtin
+
+    @functools.wraps(original)
+    def wrapped(*args, **kwargs):
+        with nvtx_range(name):
+            return original(*args, **kwargs)
+
+    setattr(obj, method, wrapped)  # pylint: disable=bad-builtin
+
+
+@contextmanager
+def nvtx_patched(obj: object, method: str, name: str) -> Generator[None]:
+    """Like `nvtx_wrap`, for the duration of the `with` block only (e.g. on a module)."""
+    original = getattr(obj, method)  # pylint: disable=bad-builtin
+    nvtx_wrap(obj, method, name)
+    try:
+        yield
+    finally:
+        setattr(obj, method, original)  # pylint: disable=bad-builtin
+
+
+def _nvtx_push(name: str):
+    torch.cuda.nvtx.range_push(name)
+
+
+def _nvtx_pop():
+    torch.cuda.nvtx.range_pop()
+
+
+def register_nvtx_hooks(model, scope: str = "global"):
+    torch.nn.modules.module.register_module_forward_pre_hook(
+        lambda m, args: _nvtx_push(f"{m.__class__.__name__}.forward")
+    )
+    torch.nn.modules.module.register_module_forward_hook(
+        lambda m, input, output: _nvtx_pop(), always_call=True
+    )
+    torch.nn.modules.module.register_module_full_backward_pre_hook(
+        lambda m, args: _nvtx_push(f"{m.__class__.__name__}.backward")
+    )
+    torch.nn.modules.module.register_module_full_backward_hook(lambda m, input, output: _nvtx_pop())

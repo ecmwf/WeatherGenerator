@@ -12,10 +12,11 @@ the named 1D series recorded for that call (e.g. one value per ODE step). By def
 most recent call is plotted; use --call-index to pick another one, or --all to overlay
 every call.
 
-Usage:
-    uv run python scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py --run-id <id>
-    uv run python scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py --path <run_dir> --call-index 3
-    uv run python scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py --run-id <id> --all
+Usage (from the repository root):
+    SCRIPT=scripts/analytics/diffusion/plot_diffusion_sampling_diagnostics.py
+    uv run python $SCRIPT --run-id <id>
+    uv run python $SCRIPT --path <run_dir> --call-index 3
+    uv run python $SCRIPT --run-id <id> --all
 """
 
 import argparse
@@ -28,6 +29,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 
 import weathergen.common.config as config
 
@@ -53,7 +55,7 @@ def _resolve_store_path(run_id: str | None, path: str | None, mini_epoch: int | 
     return store_path
 
 
-def _plot_call(axes, steps: np.ndarray, series: dict[str, np.ndarray], label: str | None) -> None:
+def _plot_call(axes, steps: NDArray, series: dict[str, NDArray], label: str | None) -> None:
     kwargs = {"label": label} if label else {}
 
     axes[0].semilogy(steps, series["sigma"], "o-", markersize=3, **kwargs)
@@ -73,7 +75,9 @@ def _plot_call(axes, steps: np.ndarray, series: dict[str, np.ndarray], label: st
     axes[3].semilogy(steps, series["d_cur_step_norm"], "^-", markersize=3)
     axes[3].set_ylabel("norm (log scale)")
 
-    axes[4].semilogy(steps, series["residual_std"], "s-", markersize=3, color="tab:orange", **kwargs)
+    axes[4].semilogy(
+        steps, series["residual_std"], "s-", markersize=3, color="tab:orange", **kwargs
+    )
     axes[4].set_ylabel("std (log scale)")
 
     axes[5].plot(steps, series["residual_std"], "s-", markersize=3, color="tab:orange", **kwargs)
@@ -90,7 +94,9 @@ def _read_calls(store_path: Path) -> list[dict[str, list[float]]]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def plot_diagnostics(calls: list[dict[str, list[float]]], call_indices: list[int], out_path: Path) -> None:
+def plot_diagnostics(
+    calls: list[dict[str, list[float]]], call_indices: list[int], out_path: Path
+) -> None:
     num_steps = len(calls[call_indices[0]]["sigma"])
     steps = np.arange(num_steps)
 
@@ -131,7 +137,9 @@ def plot_diagnostics(calls: list[dict[str, list[float]]], call_indices: list[int
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", default=None, help="Run id to load the config/path from.")
-    parser.add_argument("--path", default=None, help="Run directory, as an alternative to --run-id.")
+    parser.add_argument(
+        "--path", default=None, help="Run directory, as an alternative to --run-id."
+    )
     parser.add_argument(
         "--mini-epoch",
         type=int,
@@ -146,7 +154,9 @@ def main() -> None:
         "--all", action="store_true", help="Overlay every recorded call instead of just one."
     )
     parser.add_argument(
-        "--output", default=None, help="Output image path (default: <run>/dev/%s/sampling_diagnostics.png)" % STORE_NAME
+        "--output",
+        default=None,
+        help=f"Output image path (default: <run>/dev/{STORE_NAME}/sampling_diagnostics.png)",
     )
     args = parser.parse_args()
 
@@ -155,11 +165,7 @@ def main() -> None:
     num_calls = len(calls)
 
     call_indices = list(range(num_calls)) if args.all else [args.call_index % num_calls]
-    out_path = (
-        Path(args.output)
-        if args.output
-        else store_path.parent / "sampling_diagnostics.png"
-    )
+    out_path = Path(args.output) if args.output else store_path.parent / "sampling_diagnostics.png"
 
     plot_diagnostics(calls, call_indices, out_path)
 

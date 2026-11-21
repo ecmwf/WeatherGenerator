@@ -240,7 +240,7 @@ class BatchSamples:
 
     def stack_sample_meta_info(self) -> dict[str, np.typing.NDArray]:
         """
-        Stack the stream-independent meta information (e.g. diffusion noise level, timestamp) 
+        Stack the stream-independent meta information (e.g. diffusion noise level, timestamp)
         of all samples along the sample dim.
         Returns one array of length num_samples per key; empty if there are no samples.
         """

@@ -13,28 +13,20 @@ Self-contained: no WeatherGenerator data structures required.
 Runs on CPU with small synthetic tensors.
 """
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
 
 from weathergen.utils.performance import (
+    MemoryTracker,
     ThroughputTracker,
     compute_source_bytes,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def _no_cuda_sync():
-    """Disable cuda.synchronize globally — tests run on CPU."""
-    with patch("weathergen.utils.performance.torch.cuda.synchronize"):
-        yield
-
 
 def _make_mock_source_samples(tensor_shapes: list[list[tuple]]):
     """Build a minimal mock of the source_samples object.
@@ -98,111 +90,136 @@ def test_compute_source_bytes_empty():
 
 @pytest.fixture()
 def tracker():
-    """A tracker with warmup_steps=2 on CPU."""
-    return ThroughputTracker(device=torch.device("cpu"), warmup_steps=2, batch_size_per_gpu=4)
+    """A throughput tracker on CPU with batch_size_per_gpu=4."""
+    return ThroughputTracker(device=torch.device("cpu"), batch_size_per_gpu=4)
 
 
-def test_no_metrics_before_warmup(tracker):
-    """compute_metrics returns None during the warmup phase."""
-    tracker.update(istep=0, source_mb=1.0)
+def test_no_metrics_before_any_step(tracker):
+    """compute_metrics returns None until at least one step is recorded."""
     assert tracker.compute_metrics() is None
 
 
-def test_metrics_available_after_warmup(tracker):
-    """After warmup_steps, metrics become available."""
-    tracker.update(istep=1, source_mb=1.0)
-    tracker.update(istep=2, source_mb=1.0)
-    tracker._sync()
-    metrics = tracker.compute_metrics()
-    assert metrics is not None
+def test_metrics_available_after_step(tracker):
+    """After a step is recorded, metrics become available."""
+    tracker.update(source_mb=1.0)
+    assert tracker.compute_metrics() is not None
 
 
 def test_metrics_keys(tracker):
-    """All expected metric keys are present."""
-    tracker.update(istep=1, source_mb=1.0)
-    tracker.update(istep=2, source_mb=2.0)
-    tracker._sync()
+    """compute_metrics reports exactly the expected global count keys."""
+    tracker.update(source_mb=1.0)
+    tracker.update(source_mb=2.0)
     metrics = tracker.compute_metrics()
 
-    expected_keys = [
-        "performance.throughput.device.batches_per_sec",
-        "performance.throughput.device.samples_per_sec",
-        "performance.throughput.device.mb_per_sec",
-        "performance.throughput.global.batches_per_sec",
-        "performance.throughput.global.samples_per_sec",
-        "performance.throughput.global.mb_per_sec",
-    ]
-    for key in expected_keys:
-        assert key in metrics, f"Missing metric key: {key}"
+    assert set(metrics) == {
+        "performance.throughput.global.batches",
+        "performance.throughput.global.samples",
+        "performance.throughput.global.mb",
+    }
 
 
-def test_accumulates_batches_and_samples(tracker):
-    """Counters accumulate correctly after warmup."""
-    tracker.update(istep=1, source_mb=0.5)
-    tracker.update(istep=2, source_mb=1.0)
-    tracker.update(istep=3, source_mb=1.5)
+def test_accumulates_batches_samples_and_mb(tracker):
+    """Each update adds one batch, batch_size_per_gpu samples, and its source mb."""
+    tracker.update(source_mb=0.5)
+    tracker.update(source_mb=1.0)
+    tracker.update(source_mb=1.5)
+
+    assert tracker._total_batches == 3
+    assert tracker._total_samples == 12  # 3 batches × batch_size_per_gpu (4)
+    assert tracker._total_mb == pytest.approx(3.0)
+
+
+def test_step_accumulates_from_batch(tracker):
+    """step() derives the source mb from the batch and accumulates counts."""
+    # 1 sample × 1 stream × (2, 2) float32 = 16 bytes = 16 / 1e6 MB per step
+    source = _make_mock_source_samples([[(2, 2)]])
+    batch = _make_mock_batch(source)
+
+    tracker.step(batch)
+    tracker.step(batch)
 
     assert tracker._total_batches == 2
-    assert tracker._total_samples == 8
-    assert tracker._total_mb == pytest.approx(2.5)
+    assert tracker._total_samples == 8  # 2 batches × batch_size_per_gpu (4)
+    assert tracker._total_mb == pytest.approx(2 * 16 / 1e6)
 
 
-def test_warmup_steps_not_counted():
-    """Steps during warmup do not contribute to totals."""
-    tracker = ThroughputTracker(device=torch.device("cpu"), warmup_steps=3, batch_size_per_gpu=4)
-    for istep in range(3):
-        tracker.update(istep=istep, source_mb=1.0)
+def test_metrics_report_cumulative_counts(tracker):
+    """compute_metrics reports the accumulated global counts.
 
-    assert tracker._total_batches == 0
-    assert tracker._total_samples == 0
-
-
-def test_throughput_values_positive(tracker):
-    """Throughput values are positive after real steps elapse."""
-    tracker.update(istep=1, source_mb=1.0)
-    tracker._t0 = time.time() - 0.1
-    tracker.update(istep=2, source_mb=1.0)
-    tracker._sync()
+    Without a process group the global counts equal the local per-device totals.
+    """
+    tracker.update(source_mb=1.0)
+    tracker.update(source_mb=2.0)
     metrics = tracker.compute_metrics()
 
-    assert metrics is not None
-    assert metrics["performance.throughput.device.batches_per_sec"] > 0
-    assert metrics["performance.throughput.device.samples_per_sec"] > 0
-    assert metrics["performance.throughput.device.mb_per_sec"] > 0
+    assert metrics["performance.throughput.global.batches"] == pytest.approx(2)
+    assert metrics["performance.throughput.global.samples"] == pytest.approx(8)
+    assert metrics["performance.throughput.global.mb"] == pytest.approx(3.0)
 
 
-def test_step_calls_log_fn_on_root(tracker):
-    """step() invokes log_fn with metrics on the root rank after warmup."""
-    source = _make_mock_source_samples([[(2, 2)]])
-    batch = _make_mock_batch(source)
+# ---------------------------------------------------------------------------
+# MemoryTracker
+# ---------------------------------------------------------------------------
 
-    logged = {}
-
-    def log_fn(m):
-        logged.update(m)
-
-    tracker.step(batch, istep=1, log_fn=log_fn)
-    assert logged == {}
-
-    tracker._t0 = time.time() - 0.1
-
-    with patch("weathergen.utils.performance.is_root", return_value=True):
-        tracker.step(batch, istep=2, log_fn=log_fn)
-
-    assert "performance.throughput.device.batches_per_sec" in logged
+_GIB = 1024**3
 
 
-def test_step_does_not_log_on_non_root(tracker):
-    """step() does not invoke log_fn on non-root ranks."""
-    source = _make_mock_source_samples([[(2, 2)]])
-    batch = _make_mock_batch(source)
+def _patch_cuda_memory(allocated, reserved, calls: list | None = None):
+    """Patch the CUDA peak counters to return successive values — tests run on CPU."""
+    allocated, reserved = iter(allocated), iter(reserved)
 
-    logged = {}
+    def read(it, name):
+        def _read(device):
+            if calls is not None:
+                calls.append(name)
+            return next(it)
 
-    tracker.step(batch, istep=1, log_fn=lambda m: logged.update(m))
-    tracker._t0 = time.time() - 0.1
+        return _read
 
-    with patch("weathergen.utils.performance.is_root", return_value=False):
-        tracker.step(batch, istep=2, log_fn=lambda m: logged.update(m))
+    def reset(device):
+        if calls is not None:
+            calls.append("reset")
 
-    assert logged == {}
+    return (
+        patch("torch.cuda.max_memory_allocated", side_effect=read(allocated, "read_allocated")),
+        patch("torch.cuda.max_memory_reserved", side_effect=read(reserved, "read_reserved")),
+        patch("torch.cuda.reset_peak_memory_stats", side_effect=reset),
+    )
+
+
+def test_memory_tracker_returns_peaks_in_gib():
+    a, r, z = _patch_cuda_memory([2 * _GIB], [3 * _GIB])
+    with a, r, z:
+        metrics = MemoryTracker(device=torch.device("cpu")).collect("train")
+
+    assert metrics == {
+        "performance.memory.train.max_allocated_gib": pytest.approx(2.0),
+        "performance.memory.train.max_reserved_gib": pytest.approx(3.0),
+    }
+
+
+def test_memory_tracker_reads_peaks_before_resetting():
+    """Resetting first would zero the high-water marks; each read must precede its reset."""
+    calls = []
+    a, r, z = _patch_cuda_memory([0, 0], [0, 0], calls)
+    with a, r, z:
+        tracker = MemoryTracker(device=torch.device("cpu"))
+        tracker.collect("train")
+        tracker.collect("train")
+
+    read = ["read_allocated", "read_reserved", "reset"]
+    assert calls == ["reset", *read, *read]
+
+
+def test_memory_tracker_closed_windows_keep_their_own_peak():
+    """A closed window keeps the max of its parts; other windows do not see its peak."""
+    a, r, z = _patch_cuda_memory([5 * _GIB, 9 * _GIB, 1 * _GIB], [6 * _GIB, 9 * _GIB, 2 * _GIB])
+    with a, r, z:
+        tracker = MemoryTracker(device=torch.device("cpu"))
+        tracker.close_window("train")  # training steps before a checkpoint
+        save = tracker.collect("save_model")  # the checkpoint itself
+        train = tracker.collect("train")  # the rest of the training steps
+
+    assert save["performance.memory.save_model.max_allocated_gib"] == pytest.approx(9.0)
+    assert train["performance.memory.train.max_allocated_gib"] == pytest.approx(5.0)
+    assert train["performance.memory.train.max_reserved_gib"] == pytest.approx(6.0)

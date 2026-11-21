@@ -1,5 +1,5 @@
 # ruff: noqa: N801, N806
-# pylint: disable=W0201
+# pylint: disable=W0201,bad-builtin
 
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
