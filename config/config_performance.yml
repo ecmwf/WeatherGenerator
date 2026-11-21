@@ -1,0 +1,24 @@
+# Overwrite config for measuring a training run:
+#   train --config config/config_performance.yml
+# Keys and defaults: ProfilingConfig in src/weathergen/utils/profiling.py and
+# ThroughputTracker in src/weathergen/utils/performance.py.
+
+# trace a short stretch of training, then end the run
+profiling:
+  enabled: True
+  stop_after_profiling: True
+  wait_iteration: 1
+  warmup_iteration: 1
+  active_iteration: 3
+  repeat: 1
+  pytorch_profiler:
+    enabled: True
+  memory_snapshot:
+    enabled: True
+  # nvtx_annotate: True
+
+# cheap whole-run metrics, safe to leave on for a full run
+performance_logging:
+  throughput:
+    enabled: True
+    # warmup_steps: 2
