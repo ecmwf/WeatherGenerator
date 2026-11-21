@@ -4,7 +4,8 @@
 
 ae_local_num_blocks: 0
 
-with_step_conditioning: True
+forecast_engine:
+  with_step_conditioning: True
 diffusion:
   enabled: True
   conditioning: "forecast"
