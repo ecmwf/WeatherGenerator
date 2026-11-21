@@ -19,6 +19,8 @@ import time
 import traceback
 from pathlib import Path
 
+from torch import distributed as dist
+
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
@@ -109,6 +111,9 @@ def run_inference(args):
     trainer = Trainer(cf.train_logging)
     try:
         trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+        # Ensure ranks exit when TCPStore server is gone.
+        if dist.is_initialized():
+            dist.destroy_process_group()
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -148,6 +153,9 @@ def run_continue(args):
 
     try:
         trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+        # Ensure ranks exit when TCPStore server is gone.
+        if dist.is_initialized():
+            dist.destroy_process_group()
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -189,6 +197,9 @@ def run_train(args):
 
     try:
         trainer.run(cf, devices)
+        # Ensure ranks exit when TCPStore server is gone.
+        if dist.is_initialized():
+            dist.destroy_process_group()
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
