@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common.config import Config, str_to_datetime64
+from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
@@ -86,21 +86,33 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
 
 
 def parse_date_ranges(
-    date_ranges: Sequence | None,
+    date_ranges: Sequence, time_window_step: np.timedelta64, repeat_data: bool
 ) -> tuple[list[tuple[np.datetime64, np.datetime64]] | None, np.typing.NDArray | None]:
     """
-    Parse date_ranges, which is either a list of {start_date, end_date} periods or a list of
-    single forecast init dates. Returns (periods, None) or (None, sorted init dates).
+    Split date_ranges, a list of either {start_date, end_date} periods or {init_date} forecast
+    init dates (see weathergen.common.config), into (periods, None) or (None, sorted init dates).
+    Init dates are checked for validity with the time_window_step and repeat_data of the stage.
     """
-    assert date_ranges, "date_ranges (or start_date and end_date) has to be specified"
-    is_period = [OmegaConf.is_dict(entry) for entry in date_ranges]
-    assert all(is_period) or not any(is_period), (
-        "date_ranges has to be either a list of {start_date, end_date} periods "
-        "or a list of init dates, not a mix of both"
+    if "init_date" in date_ranges[0]:
+        init_dates = np.sort([entry.init_date for entry in date_ranges])
+        _check_init_dates(init_dates, time_window_step, repeat_data)
+        return None, init_dates
+    return [(period.start_date, period.end_date) for period in date_ranges], None
+
+
+def _check_init_dates(
+    init_dates: np.typing.NDArray, time_window_step: np.timedelta64, repeat_data: bool
+):
+    """Assert that each init date of date_ranges is sampled exactly once."""
+    offsets = (init_dates - init_dates[0]) % time_window_step
+    assert np.all(offsets == np.timedelta64(0)), (
+        "date_ranges init dates have to be spaced by multiples of "
+        f"time_window_step ({time_window_step}) to match a sample"
     )
-    if all(is_period):
-        return [(period.start_date, period.end_date) for period in date_ranges], None
-    return None, np.sort([str_to_datetime64(date) for date in date_ranges])
+    # reset() pads the samples of a mini epoch with random repetitions otherwise
+    assert not repeat_data, (
+        "repeat_data_in_mini_epoch has to be False when date_ranges is a list of init dates"
+    )
 
 
 @dataclasses.dataclass
@@ -148,9 +160,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             [sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()]
         ).max()
 
-        self._date_ranges, self._init_dates = parse_date_ranges(mode_cfg.get("date_ranges"))
-        if self._init_dates is not None:
-            self._check_init_dates()
+        self._date_ranges, self._init_dates = parse_date_ranges(
+            mode_cfg.date_ranges, self.step_timedelta, self.repeat_data
+        )
         tw = TimeWindowHandler(*self._get_time_span(), self.len_timedelta, self.step_timedelta)
 
         self.time_window_handler = tw
@@ -217,18 +229,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         n_duplicates = self.len * self.world_size - available_samples
         if not self.repeat_data:
             assert n_duplicates <= 0
-
-    def _check_init_dates(self):
-        """Assert that each init date of date_ranges is sampled exactly once."""
-        offsets = (self._init_dates - self._init_dates[0]) % self.step_timedelta
-        assert np.all(offsets == np.timedelta64(0)), (
-            "date_ranges init dates have to be spaced by multiples of "
-            f"time_window_step ({self.step_timedelta}) to match a sample"
-        )
-        # reset() pads the samples of a mini epoch with random repetitions otherwise
-        assert not self.repeat_data, (
-            "repeat_data_in_mini_epoch has to be False when date_ranges is a list of init dates"
-        )
 
     def _get_time_span(self) -> tuple[np.datetime64, np.datetime64]:
         """

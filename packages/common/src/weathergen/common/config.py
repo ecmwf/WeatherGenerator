@@ -90,12 +90,11 @@ def _patch_time(key, sub_conf, resolver):
 
 
 def _sanitize_start_end_time_keys(sub_conf):
-    """Convert start_date and end_date of the date_ranges periods to datetime resolvers."""
-    for period in sub_conf.get("date_ranges") or []:
-        # single init dates (instead of periods) are parsed where they are consumed
-        if OmegaConf.is_dict(period):
-            for key in ("start_date", "end_date"):
-                _patch_time(key, period, _DATETIME_TYPE_NAME)
+    """Convert the dates of the date_ranges entries to datetime resolvers."""
+    for entry in sub_conf.get("date_ranges") or []:
+        for key in ("start_date", "end_date", "init_date"):
+            if key in entry:
+                _patch_time(key, entry, _DATETIME_TYPE_NAME)
 
 
 def _sanitize_delta_time_keys(sub_conf):
@@ -122,6 +121,10 @@ def _sanitize_time_keys(conf: Config) -> Config:
     conf = conf.copy()
 
     if conf.get("training_config") is not None:
+        # validation_config and test_config fall back to the dates of training_config
+        assert conf.training_config.get("date_ranges") is not None, (
+            "training_config: date_ranges (or start_date and end_date) has to be specified"
+        )
         _sanitize_delta_time_keys(conf.training_config)
         _sanitize_start_end_time_keys(conf.training_config)
 
@@ -424,12 +427,12 @@ def merge_configs(base_config: Config, update_config: Config):
     return OmegaConf.merge(base_config, update_config)
 
 
-def _start_end_to_date_ranges(config: Config) -> Config:
+def _normalize_date_ranges(config: Config) -> Config:
     """
-    Replace start_date/end_date of each stage config by the equivalent single-period
-    date_ranges. Applied to every config before merging, so that date_ranges is the only date
-    representation and an overwrite replaces the dates of the base config instead of mixing
-    with them.
+    Convert the dates of each stage config to a date_ranges list of either
+    {start_date, end_date} periods or {init_date} forecast init dates. Applied to every config
+    before merging, so that date_ranges is the only date representation and an overwrite
+    replaces the dates of the base config instead of mixing with them.
     """
     config = config.copy()
     for stage in ("training_config", "validation_config", "test_config"):
@@ -438,16 +441,34 @@ def _start_end_to_date_ranges(config: Config) -> Config:
             continue
         start_date = stage_cfg.pop("start_date", None)
         end_date = stage_cfg.pop("end_date", None)
-        if start_date is None and end_date is None:
-            continue
-        assert start_date is not None and end_date is not None, (
-            f"{stage}: start_date and end_date have to be specified together"
-        )
-        assert stage_cfg.get("date_ranges") is None, (
-            f"{stage}: specify either start_date/end_date or date_ranges, not both"
-        )
-        stage_cfg.date_ranges = [{"start_date": start_date, "end_date": end_date}]
+        if start_date is not None or end_date is not None:
+            assert start_date is not None and end_date is not None, (
+                f"{stage}: start_date and end_date have to be specified together"
+            )
+            assert stage_cfg.get("date_ranges") is None, (
+                f"{stage}: specify either start_date/end_date or date_ranges, not both"
+            )
+            stage_cfg.date_ranges = [{"start_date": start_date, "end_date": end_date}]
+        if "date_ranges" in stage_cfg:
+            stage_cfg.date_ranges = _to_date_range_entries(stage_cfg.date_ranges, stage)
     return config
+
+
+def _to_date_range_entries(date_ranges: ListConfig, stage: str) -> list:
+    """
+    Check that date_ranges is a non-empty list of either periods or init dates, and wrap
+    single init dates as {init_date: date} entries.
+    """
+    assert OmegaConf.is_list(date_ranges) and len(date_ranges) > 0, (
+        f"{stage}: date_ranges has to be a non-empty list"
+    )
+    entries = [e if OmegaConf.is_dict(e) else {"init_date": e} for e in date_ranges]
+    num_init_dates = sum("init_date" in entry for entry in entries)
+    assert num_init_dates in (0, len(entries)), (
+        f"{stage}: date_ranges has to be a list of either {{start_date, end_date}} periods "
+        "or init dates, not a mix of both"
+    )
+    return entries
 
 
 def load_merge_configs(
@@ -505,7 +526,7 @@ def load_merge_configs(
         if any(o.get("streams_directory") is not None for o in overwrite_configs):
             base_config.streams = None
     configs = [
-        _start_end_to_date_ranges(cfg) for cfg in (base_config, private_config, *overwrite_configs)
+        _normalize_date_ranges(cfg) for cfg in (base_config, private_config, *overwrite_configs)
     ]
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(*configs)

@@ -1,3 +1,4 @@
+import json
 import pathlib
 import tempfile
 
@@ -263,13 +264,32 @@ def test_overwrite_replaces_dates(
 
 @pytest.mark.parametrize(
     "stage_dates",
-    [{"start_date": "2000-01-01T00:00"}, PERIOD_A | {"date_ranges": [PERIOD_B]}],
+    [
+        {"start_date": "2000-01-01T00:00"},
+        PERIOD_A | {"date_ranges": [PERIOD_B]},
+        {"date_ranges": [PERIOD_A, "2015-01-01T00:00"]},
+        {"date_ranges": []},
+    ],
 )
-def test_ambiguous_dates_raise(private_config_file, stage_dates):
+def test_invalid_dates_raise(private_config_file, stage_dates):
     overwrite = {"training_config": stage_dates}
 
     with pytest.raises(AssertionError):
         config.load_merge_configs(private_config_file, None, None, None, overwrite)
+
+
+def test_init_dates_are_converted_and_saved(private_config_file, shared_working_dir):
+    init_dates = ["2015-01-01T00:00", "2015-02-01T00:00"]
+    overwrite = {"test_config": {"date_ranges": init_dates}}
+
+    cf = config.load_merge_configs(private_config_file, None, None, None, overwrite)
+    cf = config.set_run_id(cf, TEST_RUN_ID, False)
+    config.save(cf, None)
+
+    loaded = [entry.init_date for entry in cf.test_config.date_ranges]
+    assert loaded == [config.str_to_datetime64(date) for date in init_dates]
+    saved = json.loads(next(pathlib.Path(shared_working_dir).rglob("*.json")).read_text())
+    assert saved["test_config"]["date_ranges"] == [{"init_date": date} for date in init_dates]
 
 
 @pytest.mark.parametrize("mini_epoch", [None, 0, 1, 2, -1])
