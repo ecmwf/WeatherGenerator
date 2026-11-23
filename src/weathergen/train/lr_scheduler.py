@@ -102,6 +102,18 @@ class LearningRateScheduler:
         elif self.policy_warmup == "cosine":
             n_steps = self.n_steps_warmup + self.n_steps_decay + 1
             pct_start = self.n_steps_warmup / n_steps
+            # If cycle_momentum=True this sets beta1 / muon momentum to 0.85 and ignores
+            # configured values
+            cycle_momentum = bool(lr_cfg.get("cycle_momentum", False))
+            if "cycle_momentum" not in lr_cfg and is_root():
+                # older runs have no key and were trained with beta1 / muon momentum 0.85
+                group = optimizer.param_groups[0]
+                logger.warning(
+                    "Be aware! Beta1 / Muon momentum is now %s instead of 0.85 as in older runs, "
+                    "since cycle_momentum is not set (default False). Set cycle_momentum True to "
+                    "continue an older run unchanged.",
+                    group["betas"][0] if "betas" in group else group["momentum"],
+                )
             self.scheduler_warmup = OneCycleLR(
                 optimizer,
                 max_lr=self.lr_max_scaled,
@@ -109,6 +121,7 @@ class LearningRateScheduler:
                 pct_start=pct_start,
                 div_factor=self.lr_max_scaled / lr_cfg.lr_start,
                 final_div_factor=lr_final_decay_scaled / lr_cfg.lr_start,
+                cycle_momentum=cycle_momentum,
             )
         else:
             if self.n_steps_warmup > 0:

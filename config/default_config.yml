@@ -78,6 +78,8 @@ fe_rope_2D: null
 rope_2D_coord_scale: 30.0
 # Base of 2D RoPE frequencies, sets the slowest one (fastest is set by rope_2D_coord_scale).
 rope_2D_base: 10000.0
+# build pe_global from cell lat/lon, False keeps old encoding that repeats every dim_embed / 2 cells
+pe_global_latlon: False
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -175,6 +177,8 @@ training_config:
     policy_decay: "constant"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
+    # False uses configured adamw beta1 / muon momentum, true reproduces old runs (both 0.85)
+    cycle_momentum: False
 
   optimizer:
     grad_clip: 1.0
