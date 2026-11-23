@@ -700,8 +700,12 @@ class Model(torch.nn.Module):
         )
 
     def get_latent_from_input(self, batch: BatchSamples, model_params: ModelParams):
-        """Source samples and latent tokens to start a chunk of the rollout from."""
+        """
+        Get initial latent space representation either from physical space source samples through
+        the encoder or directly when latent state is provided (e.g. for incremental rollout).
+        """
 
+        # physical space source samples
         if len(batch.latent) == 0:
             source_samples = batch
             tokens, posteriors = self.encoder(model_params, batch)
@@ -709,6 +713,7 @@ class Model(torch.nn.Module):
             shape = (len(batch), *tokens.shape[1:])
             # collapse along input step dimension
             tokens = tokens.reshape(shape)
+        # latent space is provided, so just extract
         else:
             source_samples = batch.batch_samples
             tokens, posteriors = (
