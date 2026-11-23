@@ -95,15 +95,18 @@ def parse_date_ranges(
     """
     if "init_date" in date_ranges[0]:
         init_dates = np.sort([entry.init_date for entry in date_ranges])
-        _check_init_dates(init_dates, time_window_step, repeat_data)
+        _check_init_dates_aligned_and_unrepeated(init_dates, time_window_step, repeat_data)
         return None, init_dates
     return [(period.start_date, period.end_date) for period in date_ranges], None
 
 
-def _check_init_dates(
+def _check_init_dates_aligned_and_unrepeated(
     init_dates: np.typing.NDArray, time_window_step: np.timedelta64, repeat_data: bool
 ):
-    """Assert that each init date of date_ranges is sampled exactly once."""
+    """
+    Check that the init dates are spaced by multiples of time_window_step, so that each one
+    matches a sample, and that repeat_data is off, so that none is sampled more than once.
+    """
     offsets = (init_dates - init_dates[0]) % time_window_step
     assert np.all(offsets == np.timedelta64(0)), (
         "date_ranges init dates have to be spaced by multiples of "
