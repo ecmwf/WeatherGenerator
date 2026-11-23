@@ -238,6 +238,7 @@ class DataReaderAnemoiRT(DataReaderTimestep):
     def denormalize_target_channels(self, data):
         return data
 
+
 def _clip_lat(lats: NDArray) -> NDArray[np.float32]:
     """
     Clip latitudes to the range [-90, 90] and ensure periodicity.
