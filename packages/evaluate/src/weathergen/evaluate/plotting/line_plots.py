@@ -442,17 +442,17 @@ class LinePlots:
 
         ax = fig.gca()
 
-        ax.set_xlabel(xlabel, fontsize=10)
-        ax.set_ylabel(ylabel, fontsize=10)
+        ax.set_xlabel(xlabel, fontsize="medium")
+        ax.set_ylabel(ylabel, fontsize="medium")
 
         clean_title = title if title is not None else clean_label(name)
         ax.set_title(
             clean_title,
-            fontsize=11,
+            fontsize="large",
             fontweight="medium",
         )
-        ax.legend(frameon=False, fancybox=False, edgecolor="0.6", fontsize=8)
-        ax.tick_params(axis="both", labelsize=9, direction="in", top=True, right=True)
+        ax.legend(frameon=False, fancybox=False, edgecolor="0.6", fontsize="small")
+        ax.tick_params(axis="both", labelsize="small", direction="in", top=True, right=True)
 
         # Thin spines
         for spine in ax.spines.values():
@@ -791,7 +791,7 @@ class LinePlots:
         if forecast_step:
             title_parts.append(f"step {forecast_step}")
         ax_spec.set_title(" – ".join(title_parts))
-        ax_spec.legend(frameon=False, fontsize=7)
+        ax_spec.legend(frameon=False, fontsize="x-small")
         ax_spec.grid(True, which="both", ls="--", alpha=0.4)
 
         # Lower panel: ratio (pred / target)

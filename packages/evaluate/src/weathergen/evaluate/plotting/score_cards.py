@@ -137,16 +137,16 @@ class ScoreCards:
             f"{model_name}\nSkill: {skill_models[i]:.3f}" for i, model_name in enumerate(runs[1::])
         ]
         ax.set_xticks(np.arange(1, n_runs))
-        ax.set_xticklabels(xlabels, fontsize=10)
+        ax.set_xticklabels(xlabels, fontsize="medium")
         ax.set_yticks(np.arange(n_common_channels) + 0.5)
-        ax.set_yticklabels(ylabels, fontsize=10)
+        ax.set_yticklabels(ylabels, fontsize="medium")
         for label in ax.get_yticklabels():
             label.set_horizontalalignment("center")
             label.set_x(-0.17)
-        ax.set_ylabel("Variable", fontsize=14)
+        ax.set_ylabel("Variable", fontsize="x-large")
         ax.set_title(
             f"Model Scorecard vs. Baseline '{runs[0]}'",
-            fontsize=16,
+            fontsize="xx-large",
             pad=20,
         )
         for x in np.arange(0.5, n_runs - 1, 1):

@@ -20,6 +20,7 @@ Is this PR a draft? Mark it as draft.
 ## Checklist before asking for review
 
 -   [ ] I have performed a self-review of my code
+-   [ ] I have had an LLM review my code and addressed its relevant findings
 -   [ ] My changes comply with basic sanity checks:
       - I have fixed formatting issues with `./scripts/actions.sh lint`
       - I have run unit tests with `./scripts/actions.sh unit-test`
@@ -32,3 +33,7 @@ Is this PR a draft? Mark it as draft.
 -   [ ] I have informed and aligned with people impacted by my change:
     - for config changes: the MatterMost channels and/or a design doc
     - for changes of dependencies: the MatterMost software development channel
+
+#### FastEvaluation
+ - [ ] I have updated the public documentation if necessary
+

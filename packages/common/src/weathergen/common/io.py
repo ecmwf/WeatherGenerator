@@ -35,6 +35,9 @@ type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
+# pseudo-stream name for latent outputs
+LATENT_STREAM = "latent"
+
 _logger = logging.getLogger(__name__)
 
 
@@ -101,21 +104,6 @@ class TimeRange:
             "start": str(self.start),
             "end": str(self.end),
         }
-
-    def forecast_interval(self, forecast_dt_hours: int, fstep: int) -> "TimeRange":
-        """
-        Infer the interval cosidered at forecast step `fstep`.
-
-        Args:
-            forecast_dt_hours: number of hours the source TimeRange is shifted per forecast step.
-            fstep: current forecast step.
-
-        Returns:
-            New TimeRange shifted TimeRange.
-        """
-        assert forecast_dt_hours > 0 and fstep >= 0
-        offset = np.timedelta64(forecast_dt_hours * fstep, "h")
-        return TimeRange(self.start + offset, self.end + offset)
 
 
 @dataclasses.dataclass
@@ -335,10 +323,11 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
-        forecast_offset=int | None,
+        forecast_offset: int | None,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
+        latent: list[OutputDataset] | None = None,
     ):
         """Collection of possible datasets for one output item."""
         self.key = key
@@ -351,9 +340,11 @@ class OutputItem:
         if self.key.with_source:
             self._append_dataset(self.source, "source")
 
-        if self.key.with_target(forecast_offset):
+        if forecast_offset is not None and self.key.with_target(forecast_offset):
             self._append_dataset(self.target, "target")
             self._append_dataset(self.prediction, "prediction")
+        if latent is not None:
+            self._append_dataset(latent, "latent")
 
     def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
@@ -483,19 +474,39 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
+        if self.example_key.forecast_step != 0:
+            # Fstep 0 always holds source and targets when forecast_offset=0, so
+            # a store without it was written with forecast_offset=1.
+            return 1
         fstep0_datasets = self._get_datasets(self.example_key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
-    @functools.cached_property
-    def example_key(self) -> ItemKey:
+    def _example_sample_and_stream(self) -> tuple[str, zarr.Group, str, zarr.Group]:
+        """Return the first sample and its first stream that has forecast step groups.
+
+        Streams are not guaranteed to contain forecast steps (e.g. "latent", or
+        input-only streams), so skip the ones without any.
+        """
         try:
             sample, example_sample = next(self.data_root.groups())
-            stream, example_stream = next(example_sample.groups())
-            fstep = 0
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
 
+        for stream, candidate in example_sample.groups():
+            if any(True for _ in candidate.group_keys()):
+                return sample, example_sample, stream, candidate
+
+        msg = f"No stream with forecast steps found in {self._store_path}"
+        raise FileNotFoundError(msg)
+
+    @functools.cached_property
+    def example_key(self) -> ItemKey:
+        """Key of fstep 0 (or the first stored fstep if fstep 0 was not written)."""
+        sample, _, stream, example_stream = self._example_sample_and_stream()
+        fstep = min(int(step) for step in example_stream.group_keys())
+        if fstep > 1:
+            _logger.warning(f"First stored fstep is {fstep} (> 1). This is unexpected.")
         return ItemKey(sample, fstep, stream)
 
     @functools.cached_property
@@ -511,18 +522,15 @@ class ZarrIO:
         return list(example_sample.group_keys())
 
     @functools.cached_property
-    def forecast_steps(self) -> list[int]:
-        """Query available forecast steps in this zarr store."""
+    def forecast_steps(self) -> list[str]:
+        """Query available forecast steps (zarr group names, sorted numerically) in this store."""
         # assume stream/samples/forecast_steps are orthogonal
-        _, example_sample = next(self.data_root.groups())
-        _, example_stream = next(example_sample.groups())
+        _, _, _, example_stream = self._example_sample_and_stream()
+        all_steps = sorted(example_stream.group_keys(), key=int)
 
-        all_steps = sorted(list(example_stream.group_keys()))
-
-        if self.forecast_offset == 1:
-            return all_steps[1:]  # exclude fstep with no targets/preds
-        else:
-            return all_steps
+        if self.forecast_offset == 1 and all_steps and int(all_steps[0]) == 0:
+            return all_steps[1:]  # exclude fstep 0, which has no targets/preds
+        return all_steps
 
 
 class ZipZarrIO(ZarrIO):
@@ -580,8 +588,12 @@ class OutputBatchData:
     source_channels: list[list[str]]
     geoinfo_channels: list[list[str]]
 
-    sample_start: int
-    forecast_offset: int
+    # latent outputs: outer list over forecast steps, inner list over samples.
+    # each entry is a dict mapping latent_name -> ndarray
+    latents: list[list[dict]]
+
+    sample_start: int = 0
+    forecast_offset: int = 0
 
     @functools.cached_property
     def samples(self):

@@ -58,9 +58,9 @@ class Metrics:
 
 class TrainLogger:
     #######################################
-    def __init__(self, cf, path_run: Path) -> None:
+    def __init__(self, cf, path_results: Path) -> None:
         self.cf = cf
-        self.path_run = path_run
+        self.path_results = path_results
 
     def log_metrics(self, stage: Stage, metrics: dict[str, float], step: int | None = None) -> None:
         """
@@ -86,7 +86,7 @@ class TrainLogger:
         # but we can probably do better and rely for example on the logging module.
 
         metrics_path = get_train_metrics_path(
-            base_path=config.get_path_run(self.cf), run_id=self.cf.general.run_id
+            base_path=self.path_results, run_id=self.cf.general.run_id
         )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
@@ -152,7 +152,7 @@ class TrainLogger:
             )
         run_id = cf.general.run_id
 
-        result_dir_base = config.get_path_run(cf)
+        result_dir_base = config.get_path_results(cf)
 
         # define cols for training
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
@@ -234,39 +234,6 @@ def clean_df(df, columns: list[str] | None):
         df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))
 
     return df
-
-
-def clean_name(s: str) -> str:
-    """
-    Remove all characters from a string except letters, digits, and underscores.
-
-    Args:
-        s (str): The input string.
-
-    Returns:
-        str: A new string containing only alphanumeric characters and underscores,
-             in the same order and capitalization as they appeared in the input.
-    """
-    return "".join(c for c in s if c.isalnum() or c == "-" or c == "_")
-
-
-def _clean_stream_name(stream_name: str) -> str:
-    return stream_name.replace(",", "").replace("/", "_").replace(" ", "_") + ", "
-
-
-def _key_loss(st_name: str, lf_name: str) -> str:
-    st_name = clean_name(st_name)
-    return f"LossPhysical.{st_name}.{lf_name}.avg"
-
-
-def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
-    st_name = clean_name(st_name)
-    return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
-
-
-def _key_stddev(st_name: str) -> str:
-    st_name = clean_name(st_name)
-    return f"stream.{st_name}.stddev_avg"
 
 
 def prepare_losses_for_logging(

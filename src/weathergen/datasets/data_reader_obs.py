@@ -138,29 +138,6 @@ class DataReaderObs(DataReaderBase):
 
         return selected_colnames
 
-    def first_sample_with_data(self) -> int:
-        """
-        Returns the position of the first sample which contains data.
-        """
-        return (
-            int(np.nonzero(self.indices_end)[0][0])
-            if self.indices_end[-1] != self.indices_end[0]
-            else None
-        )
-
-    def last_sample_with_data(self) -> int:
-        """
-        Returns the position of the last sample which contains data.
-        """
-        if self.indices_end[-1] == self.indices_end[0]:
-            last_sample = None
-        else:
-            last_sample = int(
-                np.where(np.diff(np.append(self.indices_end, self.indices_end[-1])) > 0)[0][-1] + 1
-            )
-
-        return last_sample
-
     def _setup_sample_index(self) -> None:
         """
         Dataset is divided into samples;
