@@ -87,7 +87,7 @@ class ModelOutput:
     ) -> None:
         self.physical[fstep][stream_name] = pred
 
-    def add_latent_prediction(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
+    def add_latent(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
         self.latent[fstep][latent_name] = pred
 
     def add_deep_latent_prediction(
@@ -760,7 +760,7 @@ class Model(torch.nn.Module):
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
 
             # decoder predictions
-            output.add_latent_prediction(
+            output.add_latent(
                 output.chunk_idx(step),
                 "latent_state",
                 self.tokens_to_latent_state(None, tokens),
@@ -787,11 +787,11 @@ class Model(torch.nn.Module):
         # safe latent prediction
         tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
-        output.add_latent_prediction(output.chunk_idx(step), "latent_state", latent_state)
+        output.add_latent(output.chunk_idx(step), "latent_state", latent_state)
 
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
-            output.add_latent_prediction(output.chunk_idx(step), name, head(latent_state))
+            output.add_latent(output.chunk_idx(step), name, head(latent_state))
 
         return output
 
@@ -839,10 +839,7 @@ class Model(torch.nn.Module):
         batch_size = tokens.shape[0]
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         # Add per-member batch offsets so that member i looks up its own rows in the
-        # flattened (batch_size * H, Q, D) tensor.  Without the offset every member
-        # would index into [0, H) — i.e. always member 0's tokens — causing all
-        # ensemble members to decode with identical features and produce identical
-        # predictions.
+        # flattened (batch_size * H, Q, D) tensor.
         batch_offsets = (
             torch.arange(batch_size, device=model_params.hp_nbours.device)[:, None, None]
             * self.num_healpix_cells
