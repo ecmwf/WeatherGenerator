@@ -264,25 +264,36 @@ class ModelParams(torch.nn.Module):
         # teacher representation (evaluated without dropout) collapses to low rank.
         self.pe_global.data.fill_(0.0)
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
+        phase = torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+        if cf.get("pe_global_latlon", False):
+            # phase above (cell index) repeats every dim_embed / 2 cells thus 12 faces share codes
+            # phase from cell lat/lon below gives every cell its own code
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            latlon = r3tos2(verts.to(self.pe_global.device)).float()
+            # frequencies are whole numbers thus a cell at lon -180 and one at 180 get the same code
+            # highest frequency (3 * 2^healpix_level) still separates neighbouring cells
+            freqs = torch.logspace(
+                0,
+                math.log2(3 * 2**self.healpix_level),
+                xs.shape[0],
+                base=2,
+                device=self.pe_global.device,
+            ).round()
+            phase = torch.cat(
+                [torch.outer(latlon[:, 0], freqs[0::2]), torch.outer(latlon[:, 1], freqs[1::2])],
+                dim=1,
+            )
         self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
         )
         self.pe_global.data[..., 0::2] += (
-            torch.sin(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
+            torch.sin(phase).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 1))
         )
         self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
         )
         self.pe_global.data[..., 1::2] += (
-            torch.cos(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
+            torch.cos(phase).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 1))
         )
 
         # healpix neighborhood structure
