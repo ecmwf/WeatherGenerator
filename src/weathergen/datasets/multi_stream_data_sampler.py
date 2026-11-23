@@ -239,14 +239,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         window of the first to the end of the longest forecast of the last init date.
         """
         if self._init_dates is None:
-            return min(s for s, _ in self._date_ranges), max(e for _, e in self._date_ranges)
-
-        input_horizon = self.max_input_steps * self.step_timedelta
-        max_forecast_horizon = (
-            self.list_num_forecast_steps.max() + self.output_offset
-        ) * self.time_step
-        t_start = self._init_dates[0] - input_horizon
-        t_end = self._init_dates[-1] + max_forecast_horizon + self.len_timedelta
+            t_start = min(start for start, _ in self._date_ranges)
+            t_end = max(end for _, end in self._date_ranges)
+        else:
+            # init dates: room for the inputs of the first and the longest forecast of the last
+            input_horizon = self.max_input_steps * self.step_timedelta
+            max_forecast_horizon = (
+                self.list_num_forecast_steps.max() + self.output_offset
+            ) * self.time_step
+            t_start = self._init_dates[0] - input_horizon
+            t_end = self._init_dates[-1] + max_forecast_horizon + self.len_timedelta
         return t_start, t_end
 
     def _in_date_ranges(self, window_starts: np.typing.NDArray, fsm: int) -> np.typing.NDArray:
@@ -265,10 +267,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
         idxs = np.arange(self.max_input_steps, perms_len)
 
-        window_starts = self.time_window_handler.t_start + idxs * self.step_timedelta
-        if self._init_dates is not None:
-            return idxs[np.isin(window_starts, self._init_dates.astype(window_starts.dtype))]
-        return idxs[self._in_date_ranges(window_starts, fsm)]
+        window_starts = self.time_window_handler.window_starts(idxs)
+        if self._init_dates is None:
+            mask = self._in_date_ranges(window_starts, fsm)
+        else:
+            # init dates: keep only the samples that start exactly at one of them
+            mask = np.isin(window_starts, self._init_dates.astype(window_starts.dtype))
+        return idxs[mask]
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""
