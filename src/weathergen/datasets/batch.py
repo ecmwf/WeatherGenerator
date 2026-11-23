@@ -35,7 +35,9 @@ class Sample:
     streams_data: dict[str, StreamData | None]
 
     def pin_memory(self):
-        """Pin all tensors in this Sample to CPU pinned memory"""
+        """
+        Pin all tensors in this Sample to CPU pinned memory
+        """
 
         # Pin StreamData objects in streams_data dict
         if hasattr(self, "streams_data") and isinstance(self.streams_data, dict):
@@ -54,6 +56,9 @@ class Sample:
         return self
 
     def __init__(self, stream_names: list[str]) -> None:
+        """
+        Initialize a sample with the given stream names.
+        """
         self.meta_info = {}
 
         self.streams_data = {}
@@ -68,6 +73,9 @@ class Sample:
         include_target_coords: bool = True,
         include_target_tokens: bool = True,
     ) -> None:
+        """
+        Move all tensors of the sample to the specified device.
+        """
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
                 self.meta_info[key].mask.to(device, non_blocking=True)
@@ -85,10 +93,13 @@ class Sample:
                     include_target_tokens,
                 )
 
-    def clear_target_coordinates(self, target_steps: list[int]) -> None:
+    def del_target_coordinates(self, target_steps: list[int]) -> None:
+        """
+        Delete target coordinates for steps
+        """
         for stream_data in self.streams_data.values():
             if stream_data is not None:
-                stream_data.clear_target_coordinates(target_steps)
+                stream_data.del_target_coordinates(target_steps)
 
     def is_empty(self) -> bool:
         """
@@ -230,9 +241,9 @@ class BatchSamples:
 
         return self
 
-    def clear_target_coordinates(self, target_steps: list[int]) -> None:
+    def del_target_coordinates(self, target_steps: list[int]) -> None:
         for sample in self.samples:
-            sample.clear_target_coordinates(target_steps)
+            sample.del_target_coordinates(target_steps)
 
     def get_samples(self) -> list[Sample]:
         return self.samples
@@ -376,11 +387,17 @@ class ModelBatch:
 
         return self
 
-    def to_device(self, device):  # -> ModelBatch
+    def set_device(self, device):
+        """Set a device to be used by to_device() and related functions."""
+        self.device = device
+        return self
+
+    def to_device(self, device=None):
         """
         Move batch to device
         """
 
+        device = device if device is not None else self.device
         self.source_samples.to_device(device)
         self.target_samples.to_device(device)
 
@@ -388,26 +405,22 @@ class ModelBatch:
 
         return self
 
-    def to_device_for_chunked_inference(self, device, loss_steps: list[int]):
-        """Move source inputs and the targets required for the final chunk loss."""
+    def to_device_input_chunk(self, device=None):
+        """Move source inputs and the targets for one chunk."""
+
+        device = device if device is not None else self.device
         self.source_samples.to_device(
             device,
             target_steps=[],
             include_target_coords=False,
             include_target_tokens=False,
         )
-        self.target_samples.to_device(
-            device,
-            target_steps=loss_steps,
-            include_source=False,
-            include_target_coords=False,
-        )
-        self.device = device
 
         return self
 
-    def to_device_for_output_chunk(self, device, target_steps: list[int]):
+    def to_device_output_chunk(self, target_steps: list[int], device=None):
         """Move decoder coordinates for the active forecast chunk."""
+        device = device if device is not None else self.device
         self.source_samples.to_device(
             device,
             target_steps=target_steps,
@@ -417,9 +430,9 @@ class ModelBatch:
 
         return self
 
-    def clear_output_chunk_coordinates(self, target_steps: list[int]) -> None:
+    def del_output_chunk_coordinates(self, target_steps: list[int]) -> None:
         """Release decoder coordinates after output for a forecast chunk was written."""
-        self.source_samples.clear_target_coordinates(target_steps)
+        self.source_samples.del_target_coordinates(target_steps)
 
     def add_source_stream(
         self,

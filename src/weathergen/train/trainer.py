@@ -222,12 +222,14 @@ class Trainer(TrainerBase):
         # inital data for forecast stepping
         forecast_chunk = batch.get_source_samples()
 
-        batch.to_device_for_chunked_inference(self.device, chunks[-1])
+        # move required data to device
+        batch.set_device(self.device)
+        batch.to_device_input_chunk()
 
         # process chunk-by-chunk
         for chunk in chunks:
-            # move to chunk to device
-            batch.to_device_for_output_chunk(self.device, chunk)
+            # move chunk to device
+            batch.to_device_output_chunk(chunk)
 
             # model forward
             if self.ema_model is None:
@@ -260,7 +262,8 @@ class Trainer(TrainerBase):
 
             forecast_chunk.physical.clear()
             forecast_chunk.latent = [forecast_chunk.latent[-1]]
-            batch.clear_output_chunk_coordinates(chunk)
+            # clear chunk from device
+            batch.del_output_chunk_coordinates(chunk)
 
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization

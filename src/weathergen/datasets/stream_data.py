@@ -117,7 +117,9 @@ class StreamData:
         self.source_idxs_embed_pe = [torch.tensor([]) for _ in range(self.input_steps)]
 
     def pin_memory(self):
-        """Pin all tensors in this StreamData object to CPU pinned memory"""
+        """
+        Pin all tensors in this StreamData object to CPU pinned memory
+        """
 
         # Pin target tensors
         self.target_coords = _pin_tensor_list(self.target_coords)
@@ -176,8 +178,10 @@ class StreamData:
 
         return self
 
-    def clear_target_coordinates(self, target_steps: list[int]) -> None:
-        """Release decoder coordinates for forecast steps that have been processed."""
+    def del_target_coordinates(self, target_steps: list[int]) -> None:
+        """
+        Delete decoder coordinates for the specified target steps
+        """
         for step in target_steps:
             self.target_coords[step] = torch.empty(0)
             self.target_coords_lens[step] = torch.empty(0, dtype=torch.int32)
