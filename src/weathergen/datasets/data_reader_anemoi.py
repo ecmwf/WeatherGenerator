@@ -9,7 +9,7 @@
 
 import logging
 from pathlib import Path
-from typing import override
+from typing import Any, override
 
 import anemoi.datasets as anemoi_datasets
 import numpy as np
@@ -48,13 +48,31 @@ def _take_var_axis(arr: NDArray[np.float32], var_idx: list[int] | NDArray) -> ND
     return np.ascontiguousarray(selected.transpose(0, 2, 1)).reshape(n_time * n_grid, n_sel)
 
 
+def _strip_zarr_suffix(value: Any) -> Any:
+    """Recursively strip a trailing .zarr/.zip suffix from dataset name strings.
+
+    anemoi.datasets only resolves a bare dataset name against the registered
+    search path (i.e. our `data_paths`); a name that already ends in .zarr/.zip
+    is instead treated as a literal (relative-to-cwd) path and fails to open
+    unless it happens to exist there. Stripping the suffix restores the
+    search-path lookup for names that are not themselves existing paths.
+    """
+    if isinstance(value, dict):
+        return {k: _strip_zarr_suffix(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_zarr_suffix(v) for v in value]
+    if isinstance(value, str) and value.endswith((".zarr", ".zip")) and not Path(value).exists():
+        return value.rsplit(".", 1)[0]
+    return value
+
+
 class DataReaderAnemoi(DataReaderTimestep):
     "Wrapper for Anemoi datasets"
 
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
-        filename: Path,
+        filename: Path | dict[str, Any],
         stream_info: dict,
         stage: Stage,
     ) -> None:
@@ -64,7 +82,9 @@ class DataReaderAnemoi(DataReaderTimestep):
         Parameters
         ----------
         filename :
-            filename (and path) of dataset
+            filename (and path) of dataset, or, if `stream_info["anemoi_config"]`
+            is set, a plain dict describing the anemoi dataset to open (filename
+            is ignored in that case)
         stream_info :
             information about stream
 
@@ -78,7 +98,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         anemoi_config = stream_info.get("anemoi_config")
         if anemoi_config:
             # convert OmegaConf DictConfig to a plain dict for anemoi.open_dataset.
-            filename = OmegaConf.to_container(anemoi_config, resolve=True)
+            filename = _strip_zarr_suffix(OmegaConf.to_container(anemoi_config, resolve=True))
             # add additional data paths
             for path in data_paths:
                 anemoi_datasets.add_dataset_path(path)
@@ -180,6 +200,11 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.mean_geoinfo = np.zeros(0)
             self.stdev_geoinfo = np.ones(0)
 
+        self.ens_member = 0
+        if stream_info.get("ensemble_member") is not None:
+            self.ens_member = stream_info.get("ensemble_member")
+            _logger.info(f"{stream_info['name']}: using ensemble member {self.ens_member}")
+
         ds_name = stream_info["name"]
         _logger.info(f"{ds_name}: source channels: {self.source_channels}")
         _logger.info(f"{ds_name}: target channels: {self.target_channels}")
@@ -232,7 +257,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
         try:
-            data = np.asarray(self.ds[didx_start:didx_end][:, :, 0], dtype=np.float32)
+            data = np.asarray(self.ds[didx_start:didx_end][:, :, self.ens_member], dtype=np.float32)
         except MissingDateError as e:
             _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
             return ReaderData.empty(

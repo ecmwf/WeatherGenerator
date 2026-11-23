@@ -224,22 +224,6 @@ class Masker:
 
         return rate
 
-    def get_target_rel_mask(self, target_masks, masking_config):
-        """
-        Get target relationship strategy and target mask
-        """
-        relationship = masking_config.get("target_relationship", {"independent": None})
-        assert len(relationship) == 1, "Only one target_relationship supported."
-
-        target_idx = list(relationship.values())[0]
-
-        target_relationship_mask = (
-            list(relationship.keys())[0],  # target relationship strategy
-            target_masks.get_mask(target_idx),  # target mask
-        )
-
-        return target_relationship_mask, target_idx
-
     def parse_src_target_correspondence(self, losses, target_cfgs, source_cfgs) -> dict:
         """
         Parses losses and obtain consolidated source -> target correspondence dict

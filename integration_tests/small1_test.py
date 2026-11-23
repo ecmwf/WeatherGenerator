@@ -109,9 +109,10 @@ def evaluate_results(run_id):
                             "plotting": {
                                 "sample": [0, 1],
                                 "forecast_step": [0],
-                                "plot_maps": True,
-                                "plot_histograms": True,
-                                "plot_animations": True,
+                                "data_plots": [
+                                    {"maps": {"predictions": ["image", "video"]}},
+                                    {"histograms": ["image", "video"]},
+                                ],
                             },
                         }
                     },

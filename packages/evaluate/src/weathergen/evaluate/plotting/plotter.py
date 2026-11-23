@@ -37,7 +37,11 @@ except ImportError:
     HAS_DATASHADER = False
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plotting.plot_utils import DefaultMarkerSize, format_datetime
+from weathergen.evaluate.plotting.plot_utils import (
+    DefaultMarkerSize,
+    apply_font_settings,
+    format_datetime,
+)
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -139,6 +143,9 @@ class Plotter:
             Stream identifier for which the plots will be created.
             It can also be set later via update_data_selection.
         """
+        # Plotters are constructed inside loky worker processes, which do not
+        # inherit rcParams set in the parent — apply font settings here.
+        apply_font_settings(plotter_cfg)
 
         _logger.debug(f"Taking cartopy paths from {work_dir}")
 
@@ -448,8 +455,8 @@ class Plotter:
             0.5,
             stat_text,
             ha="center",
-            va="center",
-            fontsize=7,
+            va="top",
+            fontsize="x-small",
             family="monospace",
             transform=ax_text.transAxes,
             bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
@@ -584,7 +591,7 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=self._match_glob_kwargs(map_kwargs, var) | map_kwargs_stream,
-                        title=self.get_map_title(var, valid_time, da_t),
+                        title=self.get_map_title(var, valid_time, da_t, tag=tag),
                     )
                     plot_names.append(name)
 
@@ -1095,10 +1102,10 @@ class Plotter:
             shrink=0.6,
             orientation="horizontal",
         )
-        cbar.set_label(f"Variable: {varname}", fontsize=7)
-        cbar.ax.tick_params(labelsize=6)
+        cbar.set_label(f"Variable: {varname}", fontsize="x-small")
+        cbar.ax.tick_params(labelsize="xx-small")
         cbar.outline.set_linewidth(0.3)
-        plt.title(title, fontsize=8)
+        plt.title(title, fontsize="small")
 
         # save
         name = self._build_map_filename(varname, regionname, tag, data)
@@ -1177,7 +1184,7 @@ class Plotter:
         """
         return self.out_plot_basedir / self.stream / "histograms"
 
-    def get_map_title(self, var, valid_time, data):
+    def get_map_title(self, var, valid_time, data, tag=""):
         """Build the title string for a map plot.
 
         Parameters
@@ -1190,6 +1197,9 @@ class Plotter:
         data : xr.DataArray
             DataArray from which to extract ``valid_time`` range when
             *valid_time* is ``None``.
+        tag : str
+            Plot tag. When ``"targets"``, ``" (target)"`` is appended
+            to the title.
 
         Returns
         -------
@@ -1197,6 +1207,8 @@ class Plotter:
             Formatted title string.
         """
         title = f"{self.stream}, {var} : fstep = {self.fstep:03}"
+        if tag == "targets":
+            title += " (target)"
         if valid_time is not None:
             title += f" ({format_datetime(valid_time)})"
         elif "valid_time" in data.coords:
