@@ -65,7 +65,7 @@ class Tokenizer:
             ([verts10, verts11, verts01, vertsmm], verts00_rots),
             ([verts00, verts11, verts01, vertsmm], verts10_rots),
             ([verts00, verts10, verts01, vertsmm], verts11_rots),
-            ([verts00, verts11, verts10, vertsmm], verts01_rots),
+            ([verts00, verts10, verts11, vertsmm], verts01_rots),
             ([verts00, verts10, verts11, verts01], vertsmm_rots),
         ]
 
