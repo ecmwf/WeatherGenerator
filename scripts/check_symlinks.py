@@ -1,52 +1,47 @@
 #!/usr/bin/env python3
+"""Create shared-directory links and optionally replace incorrect symlinks."""
 
 import argparse
 import logging
 import os
+from pathlib import Path
 
-# parse command-line options
-parser = argparse.ArgumentParser(description="Create symlinks to shared directories")
-parser.add_argument("working_dir", help="path to the shared working directory")
-parser.add_argument(
-    "--fix",
-    action="store_true",
-    help="automatically remove and recreate any incorrect symlinks",
-)
-args = parser.parse_args()
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# Change to the repo root directory (parent of scripts/)
-script_dir = os.path.dirname(os.path.abspath(__file__))
-repo_root = os.path.dirname(script_dir)
-os.chdir(repo_root)
 
-# Create all the links
-for d in ["logs", "models", "plots", "results"]:
-    target = os.path.join(args.working_dir, d)
-    # Check if something exists at this path (including broken symlinks)
-    if os.path.islink(d):
-        # It's a symlink - check if it points to the correct target
-        if os.readlink(d) == target and os.path.exists(target):
-            logger.info(f"'{d}' already correctly linked to {target}, skipping.")
-            continue
-        else:
-            logger.warning(f"'{d}' is a symlink BUT IS NOT correctly linked to {target}.")
+def main():
+    parser = argparse.ArgumentParser(description="Create symlinks to shared directories")
+    parser.add_argument("working_dir", type=Path, help="path to the shared working directory")
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="automatically remove and recreate any incorrect symlinks",
+    )
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    os.chdir(Path(__file__).resolve().parent.parent)
+
+    for name in ["logs", "models", "plots", "results"]:
+        link = Path(name)
+        target = args.working_dir / name
+        if link.is_symlink() and (link.readlink() != target or not target.exists()):
+            logger.warning(f"'{name}' is a symlink BUT IS NOT correctly linked to {target}.")
             if args.fix:
-                logger.info(f"Removing incorrect symlink '{d}' and recreating it.")
-                os.remove(d)
-                # fall through to create the correct link below
+                logger.info(f"Removing incorrect symlink '{name}' and recreating it.")
+                link.unlink()
             else:
                 logger.warning("Run this script with --fix to remove it automatically.")
-                continue
-    elif os.path.exists(d):
-        # It exists but is not a symlink (regular file or directory)
-        logger.warning(
-            f"'{d}' exists as a file/directory (not a symlink), PLEASE REMOVE IT MANUALLY."
-        )
-        continue
+        elif link.is_symlink():
+            logger.info(f"'{name}' already correctly linked to {target}, skipping.")
+        elif link.exists():
+            logger.warning(
+                f"'{name}' exists as a file/directory (not a symlink), PLEASE REMOVE IT MANUALLY."
+            )
 
-    # create link if we didn't continue above
-    logger.info(f"{d} -> {target}")
-    os.symlink(target, d)
+        if not link.is_symlink() and not link.exists():
+            logger.info(f"{name} -> {target}")
+            link.symlink_to(target)
+
+
+if __name__ == "__main__":
+    main()

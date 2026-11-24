@@ -168,8 +168,7 @@ case "$1" in
         exit 1
       fi
       echo "Working directory: $working_dir"
-      shift
-      uv run --no-project python scripts/check_symlinks.py "$working_dir" "$@"
+      uv run --no-project python scripts/check_symlinks.py "$working_dir" "${@:2}"
     )
     ;;
   create-jupyter-kernel)
