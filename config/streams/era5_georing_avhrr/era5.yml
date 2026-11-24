@@ -9,23 +9,27 @@
 
 ERA5_in :
   type : anemoi
-  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr']
   stream_id : 0
-  source_exclude : ['w_', 'slor', 'sdor', 'skt', 'tcw', 'cp', 'tp']
-  target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
-  geoinfo_channels : ['lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  source_exclude : ['z', 'w_10', 'w_50', 'w_100', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_1000', 'skt', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
+  target_exclude : ['z', 'w_10', 'w_50', 'w_100', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_1000', 'slor', 'sdor', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
+  geoinfo_channels : ['z', 'lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.
   location_weight : cosine_latitude
-  masking_rate : 0.6
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 0.1
   token_size : 8
   tokenize_spacetime : True
   max_num_targets: -1
   forcing: True
+  frequency : 06:00:00
   embed : 
     net : transformer
     num_tokens : 1
     num_heads : 8
-    dim_embed : 256
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords :
     net : linear

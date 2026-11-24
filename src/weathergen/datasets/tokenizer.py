@@ -15,7 +15,6 @@ import torch
 
 from weathergen.datasets.utils import (
     healpix_verts_rots,
-    r3tos2,
 )
 
 
@@ -41,13 +40,6 @@ class Tokenizer:
         verts11, verts11_rots = healpix_verts_rots(self.hl_source, 1.0, 1.0)
         verts01, verts01_rots = healpix_verts_rots(self.hl_source, 0.0, 1.0)
         vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_source, 0.5, 0.5)
-        self.hpy_verts = [
-            verts00.to(torch.float32),
-            verts10.to(torch.float32),
-            verts11.to(torch.float32),
-            verts01.to(torch.float32),
-            vertsmm.to(torch.float32),
-        ]
         self.hpy_verts_rots_source = [
             verts00_rots.to(torch.float32),
             verts10_rots.to(torch.float32),
@@ -61,13 +53,6 @@ class Tokenizer:
         verts11, verts11_rots = healpix_verts_rots(self.hl_target, 1.0, 1.0)
         verts01, verts01_rots = healpix_verts_rots(self.hl_target, 0.0, 1.0)
         vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_target, 0.5, 0.5)
-        self.hpy_verts = [
-            verts00.to(torch.float32),
-            verts10.to(torch.float32),
-            verts11.to(torch.float32),
-            verts01.to(torch.float32),
-            vertsmm.to(torch.float32),
-        ]
         self.hpy_verts_rots_target = [
             verts00_rots.to(torch.float32),
             verts10_rots.to(torch.float32),
@@ -115,26 +100,6 @@ class Tokenizer:
             .transpose(1, 0)
             .to(torch.float32)
         )
-
-    def compute_source_centroids(self, source_tokens_cells: list[torch.Tensor]) -> torch.Tensor:
-        source_means = [
-            (
-                self.hpy_verts[-1][i].unsqueeze(0).repeat(len(s), 1)
-                if len(s) > 0
-                else torch.tensor([])
-            )
-            for i, s in enumerate(source_tokens_cells)
-        ]
-        source_means_lens = [len(s) for s in source_means]
-        # merge and split to vectorize computations
-        source_means = torch.cat(source_means)
-        # TODO: precompute also source_means_r3 and then just cat
-        source_centroids = torch.cat(
-            [source_means.to(torch.float32), r3tos2(source_means).to(torch.float32)], -1
-        )
-        source_centroids = torch.split(source_centroids, source_means_lens)
-
-        return source_centroids
 
     def get_size_time_embedding(self) -> int:
         """

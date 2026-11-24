@@ -32,8 +32,6 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
-MAX_NUMBER_TOKENS_LOCAL_PER_CELL = 64
-
 
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
@@ -50,16 +48,15 @@ class EmbeddingEngine(torch.nn.Module):
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        self.streams = cf.streams
 
-        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
+        for i, (stream_name, si) in enumerate(self.streams.items()):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
 
             if si["embed"]["net"] == "transformer":
                 self.embeds[stream_name] = StreamEmbedTransformer(
-                    mode=self.cf.embed_orientation,
                     num_tokens=si["embed"]["num_tokens"],
                     token_size=si["token_size"],
                     num_channels=self.sources_size[i],
@@ -68,6 +65,7 @@ class EmbeddingEngine(torch.nn.Module):
                     num_blocks=si["embed"]["num_blocks"],
                     num_heads=si["embed"]["num_heads"],
                     dropout_rate=self.cf.embed_dropout_rate,
+                    dropout_final_rate=self.cf.get("embed_final_dropout_rate", 0.1),
                     norm_type=self.cf.norm_type,
                     unembed_mode=self.cf.embed_unembed_mode,
                     stream_name=stream_name,
@@ -82,7 +80,7 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, batch, pe_embed):
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
 
         num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
@@ -91,7 +89,7 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
-        for stream_name in self.stream_names:
+        for stream_name in self.streams.keys():
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -111,6 +109,13 @@ class EmbeddingEngine(torch.nn.Module):
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
+        # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
+        max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
+        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+            "max number of tokens per cell for positional encoding exceeded."
+        )
+        " Increase ae_local_max_tokens_per_cell in config."
+
         if batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
             tokens_all = torch.cat(x_embeds)
@@ -119,10 +124,6 @@ class EmbeddingEngine(torch.nn.Module):
             scatter_idxs = self.get_scatter_idxs_vectorized(batch)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-            # if the assert is hit, MAX_NUMBER_TOKENS_LOCAL_PER_CELL needs to be increased
-            assert (
-                batch.tokens_lens.flatten(0, 2).sum(0).max() < MAX_NUMBER_TOKENS_LOCAL_PER_CELL
-            ), "max number of tokens per cell for positional encoding exceeded"
             # actual scatter operation and apply per cell positional encoding
             tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
 
@@ -722,6 +723,7 @@ class TargetPredictionEngineClassic(nn.Module):
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
         self.tte = torch.nn.ModuleList()
+        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1)
 
         for i in range(len(self.dims_embed) - 1):
             # Multi-Cross Attention Head
@@ -733,7 +735,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
-                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    dropout_rate=pred_dropout_rate,  # Assuming dropout_rate is 0.1
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
@@ -750,7 +752,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     MultiSelfAttentionHeadVarlen(
                         dim_embed=self.dims_embed[i],
                         num_heads=stream_config["target_readout"]["num_heads"],
-                        dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                        dropout_rate=pred_dropout_rate,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
@@ -768,7 +770,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     self.dims_embed[i + 1],
                     with_residual=True,
                     hidden_factor=self.tr_mlp_hidden_factor,
-                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
+                    dropout_rate=pred_dropout_rate,  # Assuming dropout_rate is 0.1
                     norm_type=self.cf.norm_type,
                     dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
                     norm_eps=self.cf.mlp_norm_eps,
@@ -838,6 +840,7 @@ class TargetPredictionEngine(nn.Module):
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
+        pred_dropout_rate = cf.get("pred_dropout_rate", 0.1)
 
         # For backwards compatibility
 
@@ -847,7 +850,7 @@ class TargetPredictionEngine(nn.Module):
 
         attention_kwargs = {
             "with_qk_lnorm": True,
-            "dropout_rate": 0.1,  # Assuming dropout_rate is 0.1
+            "dropout_rate": pred_dropout_rate,  # Assuming dropout_rate is 0.1
             "with_flash": self.cf.with_flash_attention,
             "norm_type": self.cf.norm_type,
             "qk_norm_type": self.cf.qk_norm_type,
@@ -864,6 +867,7 @@ class TargetPredictionEngine(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
 
+        target_readout_num_heads = next(self.cf.streams.values())["target_readout"]["num_heads"]
         for ith, dim in enumerate(self.dims_embed[:-1]):
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
@@ -872,7 +876,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=False,
                         with_adanorm=False,
                         with_mlp=False,
@@ -884,10 +888,10 @@ class TargetPredictionEngine(nn.Module):
                     SelfAttentionBlock(
                         dim=dim,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
-                        dropout_rate=0.1,
+                        dropout_rate=pred_dropout_rate,
                     )
                 )
             elif self.cf.decoder_type == "CrossAttentionConditioning":
@@ -896,11 +900,11 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=self.cf.ae_global_dim_embed,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=False,
                         with_mlp=True,
-                        dropout_rate=0.1,
+                        dropout_rate=pred_dropout_rate,
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -910,11 +914,11 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=True,
                         with_mlp=True,
-                        dropout_rate=0.1,
+                        dropout_rate=pred_dropout_rate,
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -926,7 +930,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_out=self.dims_embed[ith + 1],
                         dim_kv=dim_aux,
                         dim_aux=self.dim_coord_in,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,

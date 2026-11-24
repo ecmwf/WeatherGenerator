@@ -32,11 +32,14 @@ class QuantilePlots:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
-        self.out_plot_dir = Path(output_basedir) / "quantile_plots"
+        self._base_dir = Path(output_basedir) / "quantile_plots"
+        self.out_plot_dir = self._base_dir
+        os.makedirs(self.out_plot_dir, exist_ok=True)
 
-        if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
-            os.makedirs(self.out_plot_dir, exist_ok=True)
+    def set_subdir(self, metric: str, region: str) -> None:
+        """Set a metric/region subdirectory for output."""
+        self.out_plot_dir = self._base_dir / metric / region
+        os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
@@ -151,9 +154,9 @@ class QuantilePlots:
             )
 
         # Format main Q-Q plot
-        ax_qq.set_xlabel("Ground Truth Quantiles", fontsize=12)
-        ax_qq.set_ylabel("Prediction Quantiles", fontsize=12)
-        ax_qq.set_title("Quantile-Quantile Plot for Extreme Value Analysis", fontsize=14)
+        ax_qq.set_xlabel("Ground Truth Quantiles", fontsize="large")
+        ax_qq.set_ylabel("Prediction Quantiles", fontsize="large")
+        ax_qq.set_title("Quantile-Quantile Plot for Extreme Value Analysis", fontsize="x-large")
 
         # Add perfect agreement line (y=x)
         min_val = min([ds["gt_quantiles"].min().values for ds in data_list])
@@ -196,14 +199,14 @@ class QuantilePlots:
                     label="Upper Extreme Zone",
                 )
 
-        ax_qq.legend(frameon=False, loc="upper left", fontsize=10)
+        ax_qq.legend(frameon=False, loc="upper left", fontsize="medium")
         ax_qq.grid(True, linestyle="--", alpha=0.3)
 
         # Format deviation plot
-        ax_dev.set_xlabel("Quantile Level", fontsize=12)
-        ax_dev.set_ylabel("Absolute Deviation", fontsize=12)
-        ax_dev.set_title("Quantile Deviation", fontsize=14)
-        ax_dev.legend(frameon=False, fontsize=10)
+        ax_dev.set_xlabel("Quantile Level", fontsize="large")
+        ax_dev.set_ylabel("Absolute Deviation", fontsize="large")
+        ax_dev.set_title("Quantile Deviation", fontsize="x-large")
+        ax_dev.legend(frameon=False, fontsize="medium")
         ax_dev.grid(True, linestyle="--", alpha=0.3)
 
         # Highlight extreme regions in deviation plot

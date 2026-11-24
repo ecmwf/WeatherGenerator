@@ -1,9 +1,9 @@
 #optional: if commented out all is taken care of by the default settings
 # NB. global options apply to all run_ids
 #global_plotting_options:
-#  regions: ["europe", "global"]
+#  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
-#  animation_format: "gif" #options: "mp4", "gif"
+#  animation_format: "mp4" #options: "mp4", "gif"
 #  dpi_val : 300
 #  fps: 2
 #  ERA5:
@@ -25,23 +25,21 @@
 
 evaluation:
   metrics: ["rmse", "mae"]
-  regions: ["global", "nhem"]
-  summary_plots : true
-  ratio_plots : false
-  heat_maps : false
+  # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
+  # Score visualisations: metric_plots, ratio, heatmap, scorecard, bar,
+  #                       score_map, score_animation, init_hour
+  score_plots: [metric_plots]
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
-  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
-  score_cards: false
-  bar_plots: false
   #agg_dims: ["ipoint"] #----> NOTE: advanced! Handle with care. This will average the scores across the specified list of dimensions. Supported dimensions: "ipoint", "sample", "forecast_step", "ensemble". Use with caution, as it can hide important details about the model performance. 
 
 
 default_streams:
   ERA5:
+    regions: ["global"]
     channels: ["2t", "10u", "10v", "z_500", "t_850", "u_850", "v_850", "q_850"]
     evaluation:
       forecast_step: "all"
@@ -50,10 +48,11 @@ default_streams:
     plotting:
       sample: [0]
       forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
-      plot_maps: true
-      plot_histograms: false
-      plot_animations: true
+      data_plots:
+        - maps:
+            predictions: [image, video]
   CERRA:
+    regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"] #, "blah"]
     evaluation:
       forecast_step: "all"
@@ -61,9 +60,8 @@ default_streams:
     plotting:
       sample: [0]
       forecast_step: "all"
-      plot_maps: true
-      plot_bias: false
-      plot_target: false
-      plot_histograms: true
-      plot_animations: true
+      data_plots:
+        - maps:
+            predictions: [image, video]
+        - histograms: [image, video]
       

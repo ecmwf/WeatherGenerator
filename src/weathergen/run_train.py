@@ -100,7 +100,7 @@ def run_inference(args):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    init_loggers(cf.general.run_id)
+    init_loggers(log_path=config.get_path_logs(cf))
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
@@ -139,7 +139,7 @@ def run_continue(args):
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
-    init_loggers(cf.general.run_id)
+    init_loggers(log_path=config.get_path_logs(cf))
 
     # track history of run to ensure traceability of results
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
@@ -176,7 +176,7 @@ def run_train(args):
 
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
-    init_loggers(cf.general.run_id)
+    init_loggers(log_path=config.get_path_logs(cf))
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 

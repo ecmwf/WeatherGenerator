@@ -10,20 +10,23 @@
 METEOSAT_SEVIRI_IR :
   type : obs
   stream_id : 10
-  filenames : ['observations-od-ai-0001-201311-202505-msg-combined-seviri-o256-v1.zarr']
+  filenames : ['observations-file-2014-2024-seviri-o256-wegen-v3.zarr']
   # filenames : ['observations-file-2014-2024-seviri-h512-v5.zarr']
-  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   loss_weight : 1.0
-  masking_rate : 0.5
-  token_size : 128
-  tokenize_spacetime : True
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 0.5
+  token_size : 1024
+  tokenize_spacetime : False
   max_num_targets: 262144
   forcing: True
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 2
-    dim_embed : 256
+    num_heads : 4
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords : 
     net : linear
@@ -41,18 +44,21 @@ GOES_ABI_IR :
   stream_id : 11
   filenames : ['observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr']
   # filenames : ['observations-file-2017-2024-abi-goes16-IR-h512-v2.zarr']
-  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day','zenith', 'cos_sza']
   loss_weight : 1.0
-  masking_rate : 0.5
-  token_size : 128
-  tokenize_spacetime : True
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 0.5
+  token_size : 1024
+  tokenize_spacetime : False
   max_num_targets: 262144
   forcing: True
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 2
-    dim_embed : 256
+    num_heads : 4
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords : 
     net : linear
@@ -70,18 +76,21 @@ HIMAWARI_AHI_IR :
   stream_id : 12
   filenames : ['observations-file-2015-2022-himawari8-IR-o256-v1.zarr', 'observations-file-2022-2024-himawari9-IR-o256-v1.zarr']
   # filenames : ['observations-file-2015-2022-himawari8-IR-h512-v1.zarr', observations-file-2022-2024-himawari9-IR-o256-v1.zarr]
-  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   loss_weight : 1.0
-  masking_rate : 0.5
-  token_size : 128
-  tokenize_spacetime : True
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 0.5
+  token_size : 1024
+  tokenize_spacetime : False
   max_num_targets: 262144
   forcing: True
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 2
-    dim_embed : 256
+    num_heads : 4
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords : 
     net : linear
@@ -99,18 +108,21 @@ GOES_ABI_VIS :
   stream_id : 13
   filenames : ['observations-file-2017-2024-abi-goes16-VIS-o256-v2.zarr']
   # filenames : ['observations-file-2017-2024-abi-goes16-RED-h512-v2.zarr']
-  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   loss_weight : 1.0
-  masking_rate : 0.5
-  token_size : 128
-  tokenize_spacetime : True
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 0.5
+  token_size : 1024
+  tokenize_spacetime : False
   max_num_targets: 262144
   forcing: True
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 2
-    dim_embed : 256
+    num_heads : 4
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords : 
     net : linear
@@ -128,18 +140,21 @@ HIMAWARI_AHI_VIS :
   stream_id : 14
   filenames : ['observations-file-2015-2022-himawari8-VIS-o256-v1.zarr', 'observations-file-2022-2024-himawari9-VIS-o256-v1.zarr']
   # filenames : ['observations-file-2015-2022-himawari8-IR-h512-v1.zarr', observations-file-2022-2024-himawari9-IR-o256-v1.zarr]
-  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   loss_weight : 1.0
-  masking_rate : 0.5
-  token_size : 128
-  tokenize_spacetime : True
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 0.5
+  token_size : 1024
+  tokenize_spacetime : False
   max_num_targets: 262144
   forcing: True
   embed :
     net : transformer
     num_tokens : 1
-    num_heads : 2
-    dim_embed : 256
+    num_heads : 4
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords : 
     net : linear

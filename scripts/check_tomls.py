@@ -29,7 +29,7 @@ def check_toml_key(main_toml_dict, other_toml_dict, list_keys, name):
     except Exception as e:
         assert (
             type(e) is not KeyError
-        ), f"""KeyError: '{list_keys}' not found in {name} pyproject.toml, 
+        ), f"""KeyError: '{list_keys}' not found in {name} pyproject.toml,
                 please populate this field"""
         print(e)
 
@@ -52,7 +52,7 @@ def check_tomls(main_toml, *tomls):
         # check python version is the same
         # check_toml_key(main_toml_dict, toml_dict, [], name)
         # check project.version/authors/urls are the same
-        for key in ["version", "requires-python"]:
+        for key in ["requires-python"]:
             check_toml_key(main_toml_dict["project"], toml_dict["project"], [key], name)
         # check tool.ruff is the same (disabled until issue 1081)
         # check_toml_key(main_toml_dict, toml_dict, ["tool", "ruff"], name)

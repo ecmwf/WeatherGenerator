@@ -16,7 +16,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-# Third-party
 import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
@@ -34,14 +33,19 @@ from weathergen.evaluate.io.wegen_reader import (
 )
 from weathergen.evaluate.plotting.plot_orchestration import (
     plot_data,
-    plot_score_maps_per_stream,
+    plot_init_hour_summary,
     plot_summary,
+    run_score_map_pipeline,
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.scores.init_hour import compute_scores_by_init_hour
 from weathergen.evaluate.scores.score_orchestration import (
     calc_scores_per_stream,
     metric_list_to_json,
+    results_to_dict,
 )
+from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
+from weathergen.evaluate.utils.config_compat import get_plot_score_options, parse_plot_config
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
@@ -161,7 +165,7 @@ def get_reader(
     region: str | None = None,
     metric: dict[str, object] | None = None,
 ):
-    if reader_type == "zarr":
+    if reader_type in ("zarr", "anemoi-target"):
         reader = WeatherGenZarrReader(run, run_id, private_paths)
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
@@ -186,7 +190,7 @@ def _process_stream(
     global_plotting_opts: dict[str, object],
     regions: list[str],
     metrics: dict[str, object],
-    plot_score_maps: bool,
+    plot_score_options: dict[str, object],
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
     """
     Worker function for a single stream of a single run.
@@ -208,8 +212,8 @@ def _process_stream(
         List of regions to be processed.
     metrics:
         Dict of metrics to be processed and their parameters.
-    plot_score_maps:
-        Bool to define if the score maps need to be plotted or not.
+    plot_score_options:
+        Dictionary containing all common score calculation options.
     """
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
@@ -217,16 +221,34 @@ def _process_stream(
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
-        return run_id, stream, {}
+        return run_id, stream, {}, {}
 
-    needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
+    needs_plotting = stream_dict.get("plotting") and type_ in ("zarr", "anemoi-target")
     needs_scoring = stream_dict.get("evaluation", False)
 
-    output_data = None
-    if (needs_plotting or needs_scoring) and type_ == "zarr":
-        available_data = reader.check_availability(stream, mode="evaluation")
+    # --- Determine scoring state before loading any data ---
+    # score maps and init-hour scores are recomputed from the data: readers that load it only
+    reads_data = type_ in ("zarr", "anemoi-target")
+    for option, name in (("plot_score_maps", "score_map"), ("plot_score_init_hour", "init_hour")):
+        if plot_score_options.get(option, False) and not reads_data:
+            _logger.warning(f"RUN {run_id} - {stream}: '{name}' not supported for type '{type_}'.")
+    plot_score_maps = plot_score_options.get("plot_score_maps", False) and reads_data
+    plot_score_init_hour = plot_score_options.get("plot_score_init_hour", False) and reads_data
 
-        output_data = None
+    recomputable_metrics = {}
+    stream_loaded_scores: dict = {}
+    needs_score_recomputation = False
+
+    if needs_scoring:
+        stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
+        needs_score_recomputation = (
+            plot_score_maps or plot_score_init_hour or bool(recomputable_metrics)
+        ) and reads_data
+
+    # --- Load data only when necessary ---
+    output_data = None
+    if needs_score_recomputation:
+        available_data = reader.check_availability(stream, mode="evaluation")
         if available_data.score_availability:
             output_data = reader.get_data(
                 stream,
@@ -235,50 +257,61 @@ def _process_stream(
                 channels=available_data.channels,
                 ensemble=available_data.ensemble,
             )
-
             _logger.info(f"RUN {run_id} - {stream}: Data loaded successfully.")
 
-    # Plotting (pass pre-loaded data)
+    # Plotting: pass pre-loaded data if available, otherwise plot_data loads its own subset
     if needs_plotting:
         plot_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
     if not needs_scoring:
-        return run_id, stream, {}
+        return run_id, stream, {}, {}
 
-    score_maps = plot_score_maps and type_ == "zarr"
-
-    stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif score_maps:
+    elif plot_score_maps or plot_score_init_hour:
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
-        return run_id, stream, scores_dict
+        return run_id, stream, scores_dict, {}
 
-    stream_computed_scores = calc_scores_per_stream(
+    # The climatology is aligned once and shared by both scoring calls.
+    climatology = (
+        get_climatology(reader, output_data.target, stream)
+        if output_data is not None and needs_climatology(metrics_to_compute)
+        else None
+    )
+    # Per-sample scores plus, for the score maps, the sample-aggregated scores.
+    results = calc_scores_per_stream(
         reader,
         stream,
         regions_to_compute,
         metrics_to_compute,
         output_data=output_data,
+        climatology=climatology,
+        compute_spatial=plot_score_maps,
     )
-    metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
-    scores_dict = merge(stream_loaded_scores, stream_computed_scores)
+    if plot_score_init_hour and output_data is not None:
+        compute_scores_by_init_hour(
+            reader, stream, results, output_data, metrics_to_compute, climatology
+        )
+    metric_list_to_json(reader, stream, results, regions_to_compute)
+    scores_dict = merge(stream_loaded_scores, results_to_dict(results, "score"))
 
-    if score_maps:
-        plot_score_maps_per_stream(
+    if plot_score_maps:
+        run_score_map_pipeline(
             reader,
             stream,
-            regions_to_compute,
-            metrics_to_compute,
-            output_data=output_data,
+            results,
+            global_plotting_options=global_plotting_opts,
+            plot_score_options=plot_score_options,
         )
 
-    return run_id, stream, scores_dict
+    init_hour_scores = results_to_dict(results, "by_init_hour") if plot_score_init_hour else {}
+
+    return run_id, stream, scores_dict, init_hour_scores
 
 
 def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
@@ -298,8 +331,14 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
-    regions = cfg.evaluation.get("regions", ["global"])
-    plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
+
+    # backward-compatibility with old way of specifying plotting options (bools) instead of lists:
+    # TODO: remove this in a few weeks once all users moved to the new style.
+    with open_dict(cfg):
+        parse_plot_config(cfg)
+
+    plot_score_options = get_plot_score_options(cfg.evaluation)
+
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})
     max_workers = cfg.get("max_workers")  # global hard cap for parallel workers
@@ -318,6 +357,9 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
             run["max_workers"] = max_workers
 
         for stream in run.get("streams", {}):
+            regions = cfg.evaluation.get(
+                "regions", run.get("streams", {}).get(stream, {}).get("regions", ["global"])
+            )
             tasks.append(
                 {
                     "run_id": run_id,
@@ -327,18 +369,22 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     "global_plotting_opts": global_plotting_opts,
                     "regions": regions,
                     "metrics": metrics,
-                    "plot_score_maps": plot_score_maps,
+                    "plot_score_options": plot_score_options,
                 }
             )
 
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    # init_hour_scores[metric][region][stream][run_id] = xr.DataArray(init_hour, forecast_step, ...)
+    init_hour_scores: dict = {}
     results = [_process_stream(**task) for task in tasks]
 
-    for _, stream, stream_scores in results:
+    for _run_id, _stream, stream_scores, stream_init_hour_scores in results:
         for metric, regions_dict in stream_scores.items():
             for region, streams_dict in regions_dict.items():
-                for stream, runs_dict in streams_dict.items():
-                    scores_dict[metric][region][stream].update(runs_dict)
+                for stream_key, runs_dict in streams_dict.items():
+                    scores_dict[metric][region][stream_key].update(runs_dict)
+
+        merge(init_hour_scores, stream_init_hour_scores)
 
     # MLFlow logging
     if mlflow_client:
@@ -374,6 +420,8 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     # summary plots
     if scores_dict:
         plot_summary(cfg, scores_dict, summary_dir)
+    if init_hour_scores:
+        plot_init_hour_summary(cfg, init_hour_scores, summary_dir)
 
 
 if __name__ == "__main__":

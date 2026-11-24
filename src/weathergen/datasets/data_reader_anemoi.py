@@ -9,13 +9,14 @@
 
 import logging
 from pathlib import Path
-from typing import override
+from typing import Any, override
 
 import anemoi.datasets as anemoi_datasets
 import numpy as np
 from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
+from omegaconf import OmegaConf
 
 from weathergen.common.config import timedelta_to_str
 from weathergen.datasets.data_reader_base import (
@@ -25,8 +26,28 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     check_reader_data,
 )
+from weathergen.train.utils import Stage
+from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
+
+
+def _strip_zarr_suffix(value: Any) -> Any:
+    """Recursively strip a trailing .zarr/.zip suffix from dataset name strings.
+
+    anemoi.datasets only resolves a bare dataset name against the registered
+    search path (i.e. our `data_paths`); a name that already ends in .zarr/.zip
+    is instead treated as a literal (relative-to-cwd) path and fails to open
+    unless it happens to exist there. Stripping the suffix restores the
+    search-path lookup for names that are not themselves existing paths.
+    """
+    if isinstance(value, dict):
+        return {k: _strip_zarr_suffix(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_zarr_suffix(v) for v in value]
+    if isinstance(value, str) and value.endswith((".zarr", ".zip")) and not Path(value).exists():
+        return value.rsplit(".", 1)[0]
+    return value
 
 
 class DataReaderAnemoi(DataReaderTimestep):
@@ -35,8 +56,9 @@ class DataReaderAnemoi(DataReaderTimestep):
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
-        filename: Path,
+        filename: Path | dict[str, Any],
         stream_info: dict,
+        stage: Stage,
     ) -> None:
         """
         Construct data reader for anemoi dataset
@@ -44,7 +66,9 @@ class DataReaderAnemoi(DataReaderTimestep):
         Parameters
         ----------
         filename :
-            filename (and path) of dataset
+            filename (and path) of dataset, or, if `stream_info["anemoi_config"]`
+            is set, a plain dict describing the anemoi dataset to open (filename
+            is ignored in that case)
         stream_info :
             information about stream
 
@@ -52,6 +76,19 @@ class DataReaderAnemoi(DataReaderTimestep):
         -------
         None
         """
+
+        # use anemoi_config if it's defined; ignore filename in this case
+        data_paths = stream_info.get("data_paths", [])
+        anemoi_config = stream_info.get("anemoi_config")
+        if anemoi_config:
+            # convert OmegaConf DictConfig to a plain dict for anemoi.open_dataset.
+            filename = _strip_zarr_suffix(OmegaConf.to_container(anemoi_config, resolve=True))
+            # add additional data paths
+            for path in data_paths:
+                anemoi_datasets.add_dataset_path(path)
+            # provide some visibility since we ignore filename
+            if is_root():
+                _logger.info("Ignoring filename and using anemoi_config option.")
 
         # open  dataset to peak that it is compatible with requested parameters
         ds0: Dataset = anemoi_datasets.open_dataset(filename)
@@ -104,19 +141,35 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.longitudes = _clip_lon(ds.longitudes)
 
         # select/filter requested source channels
-        self.source_idx = self.select_channels(ds0, "source")
-        self.source_channels = [ds.variables[i] for i in self.source_idx]
+        if stream_info.get(str(stage) + "_source_channels") is None:
+            self.source_idx = self.select_channels(ds, "source")
+            self.source_channels = [ds.variables[i] for i in self.source_idx]
+        else:
+            self.source_channels = stream_info.get(str(stage) + "_source_channels")
+            self.source_idx = [ds.variables.index(ch) for ch in self.source_channels]
 
         # select/filter requested target channels
-        self.target_idx = self.select_channels(ds0, "target")
-        self.target_channels = [ds.variables[i] for i in self.target_idx]
+        if stream_info.get(str(stage) + "_target_channels") is None:
+            self.target_idx = self.select_channels(ds, "target")
+            self.target_channels = [ds.variables[i] for i in self.target_idx]
+        else:
+            self.target_channels = stream_info.get(str(stage) + "_target_channels")
+            self.target_idx = [ds.variables.index(ch) for ch in self.target_channels]
 
         # get target channel weights from stream config
-        self.target_channel_weights = self.parse_target_channel_weights()
+        if stream_info.get("target_channel_weights") is None:
+            self.target_channel_weights = self.parse_target_channel_weights()
+        else:
+            self.target_channel_weights = stream_info.get("target_channel_weights")
 
         # select/filter requested geoinfo channels (can be any variable, not just constant-in-time)
-        self.geoinfo_idx = self.select_geoinfo_channels(ds0)
-        self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
+        if stream_info.get("geoinfo_channels") is None:
+            self.geoinfo_idx = self.select_geoinfo_channels(ds)
+            self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
+        else:
+            self.geoinfo_channels = stream_info.get("geoinfo_channels")
+            self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
+
         # set geoinfo normalization statistics
         if len(self.geoinfo_idx) > 0:
             self.mean_geoinfo = ds.statistics["mean"][self.geoinfo_idx]
@@ -124,6 +177,11 @@ class DataReaderAnemoi(DataReaderTimestep):
         else:
             self.mean_geoinfo = np.zeros(0)
             self.stdev_geoinfo = np.ones(0)
+
+        self.ens_member = 0
+        if stream_info.get("ensemble_member") is not None:
+            self.ens_member = stream_info.get("ensemble_member")
+            _logger.info(f"{stream_info['name']}: using ensemble member {self.ens_member}")
 
         ds_name = stream_info["name"]
         _logger.info(f"{ds_name}: source channels: {self.source_channels}")
@@ -180,7 +238,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
         try:
-            data = self.ds[didx_start:didx_end][:, :, 0].astype(np.float32)
+            data = self.ds[didx_start:didx_end][:, :, self.ens_member].astype(np.float32)
         except MissingDateError as e:
             _logger.debug(f"Date not present in anemoi dataset: {str(e)}. Skipping.")
             return ReaderData.empty(
@@ -253,9 +311,9 @@ class DataReaderAnemoi(DataReaderTimestep):
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
                     and (
-                        np.array([f in k for f in channels]).any() if channels is not None else True
+                        np.array([f == k for f in channels]).any() if channels is not None else True
                     )
-                    and not np.array([f in k for f in channels_exclude]).any()
+                    and not np.array([f == k for f in channels_exclude]).any()
                 )
             ]
         )

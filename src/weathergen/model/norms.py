@@ -78,6 +78,13 @@ class AdaLayerNorm(torch.nn.Module):
         self.embed_aux.append(torch.nn.Linear(4 * dim_aux, 2 * dim_embed_x))
 
         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        # zero-init the final projection so conditioning starts as identity (scale=0, shift=0),
+        # matching the DiT-style zero-init used in AdaLayerNormLayer
+        torch.nn.init.zeros_(self.embed_aux[-1].weight)
+        torch.nn.init.zeros_(self.embed_aux[-1].bias)
 
     def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
         for block in self.embed_aux:

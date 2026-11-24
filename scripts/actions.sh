@@ -8,6 +8,7 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
+      # Creates a virtual environment without checking the integrity of the cache.
       # If we are running on a mac, use the cpu extra
       if [[ "$(uname)" == "Darwin" ]]; then
         uv sync --all-packages --extra cpu
@@ -15,6 +16,28 @@ case "$1" in
       fi
       # Otherwise, use the gpu extra
       uv sync --all-packages --extra gpu
+    )
+    ;;
+  sync-safe)
+    (
+      # Creates a virtual environment, checking the integrity of the cache
+      # and copying the files.
+      # This is slower (+ 60 seconds to the sync) but it is prevents issues with
+      # corrupted cache. These issues happen when a shared filesystem such as LUSTRE
+      # is used along with symlinks and a SCRATCH deletion policy: some files from
+      # cached packages may get deleted because they seem to not be touched enough.
+      cd "$SCRIPT_DIR" || exit 1
+      # --refresh --reinstall : LUSTRE may clean up some pieces of the cache.
+      # This ensures basic integrity but it is too slow (adds 60 seconds to the sync) to do it on every sync. So we only do it on mac, where the cache is more likely to get corrupted.
+      # --link-mode=copy overrides the pyproject.toml setting (symlink) to fully
+      # detach installed files from the cache, so SCRATCH cleanups can't corrupt the venv.
+      # If we are running on a mac, use the cpu extra
+      if [[ "$(uname)" == "Darwin" ]]; then
+        uv sync --all-packages --extra cpu --refresh --reinstall --link-mode=copy
+        exit 0
+      fi
+      # Otherwise, use the gpu extra
+      uv sync --all-packages --extra gpu --refresh --reinstall --link-mode=copy
     )
     ;;
   lint)
@@ -29,9 +52,11 @@ case "$1" in
     ;;
   lint-check)
     (
+      # Warning: make sure that the ruff versions are aligned
+      # with pyproject.toml
       cd "$SCRIPT_DIR" || exit 1
       uv run --no-project --with "ruff==0.12.2" \
-        ruff format --target-version py312 -n src/ scripts/ packages/ \
+      ruff format --target-version py312 --check src/ scripts/ packages/ \
       && \
       uv run --no-project --with "ruff==0.12.2" \
         ruff check  --target-version py312 src/ scripts/ packages/ \
@@ -124,14 +149,27 @@ case "$1" in
   create-links)
     (
       cd "$SCRIPT_DIR" || exit 1
-      # This script creates symbolic links to the shared working directories.
-      # 1. Get the path of the private config of the cluster
-      # 2. Read the yaml and extract the path of the shared conf
-      # A new --fix flag is supported by the Python script to remove incorrect
-      # symlinks automatically; pass it after the command name below.
-      # The Python helper handles config lookup and symlink validation/creation.
-      shift  # consume the "create-links" argument and forward remaining args
-      uv run --no-project python scripts/check_symlinks.py "$@"
+      # Use an isolated yq cache to avoid corruption on shared filesystems.
+      # See https://github.com/ecmwf/WeatherGenerator/issues/2298
+      if [ -n "${WEATHERGEN_PRIVATE_CONF:-}" ]; then
+        private_conf="$WEATHERGEN_PRIVATE_CONF"
+      elif ! private_conf=$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config); then
+        echo "Failed to locate the private config." >&2
+        exit 1
+      fi
+      echo "Private config: $private_conf"
+      if ! working_dir=$(UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV="" \
+        uvx yq -r .path_shared_working_dir "$private_conf"); then
+        echo "Failed to read the shared working directory from $private_conf." >&2
+        exit 1
+      fi
+      if [ ! -d "$working_dir" ]; then
+        echo "Working directory $working_dir does not exist. Please check the configuration." >&2
+        exit 1
+      fi
+      echo "Working directory: $working_dir"
+      shift
+      uv run --no-project python scripts/check_symlinks.py "$working_dir" "$@"
     )
     ;;
   create-jupyter-kernel)
@@ -156,7 +194,7 @@ case "$1" in
   *)
     (
       # Automatically extract all options from the case statement
-      options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
+      options=$(sed -nE 's/^[[:space:]]*([a-zA-Z][a-zA-Z0-9_-]*)\).*/\1/p' "$0" | tr '\n' '|' | sed 's/|$//')
       echo "Usage: $0 {$options}"
       exit 1
     )
