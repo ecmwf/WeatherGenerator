@@ -111,6 +111,19 @@ case "$1" in
       uv run --no-project python scripts/check_tomls.py
     )
     ;;
+  wg-install)
+    (
+      echo "Test uv installation"
+      export TEST_DIR="$(mktemp -d)"
+      cd $TEST_DIR
+      echo $TEST_DIR
+      uv venv "$TEST_DIR/.venv"
+      uv pip install "$SCRIPT_DIR" --python $TEST_DIR/.venv/bin/python || { rm -rf $TEST_DIR; exit 1; }
+      echo "uv pip install successful"
+      echo "Removing temp dir: $TEST_DIR"
+      rm -rf $TEST_DIR
+    )
+    ;;
   integration-test-single)
     (
       cd "$SCRIPT_DIR" || exit 1
