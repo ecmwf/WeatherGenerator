@@ -584,7 +584,7 @@ class OutputBatchData:
     def samples(self):
         """Continous indices of all samples accross all batches."""
 
-        # TODO associate samples with the sampel idx used for the time window
+        # TODO associate samples with the sample idx used for the time window
         return np.arange(len(self.sources)) + self.sample_start
 
     @functools.cached_property
