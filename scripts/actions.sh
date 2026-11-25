@@ -162,42 +162,26 @@ case "$1" in
   create-links)
     (
       cd "$SCRIPT_DIR" || exit 1
-      # This script creates symbolic links to the shared working directories.
-      # 1. Get the path of the private config: WEATHERGEN_PRIVATE_CONF if set
-      #    (e.g. in CI), otherwise inferred from the hostname by platform-env.py
-      # 2. Read the yaml and extract the path of the shared conf
-      # This uses the yq command. It is a python package so uvx (bundled with uv) will donwload and create the right venv
-      # The 'yq' command is used in a separate virtual environment, because the cache
-      # around that tool can get corrupted.
+      # Use an isolated yq cache to avoid corruption on shared filesystems.
       # See https://github.com/ecmwf/WeatherGenerator/issues/2298
-      private_conf="${WEATHERGEN_PRIVATE_CONF:-$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config)}"
-      echo "Private config: $private_conf"
-      export working_dir=$(cat "$private_conf" |
-        UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV=""  uvx yq .path_shared_working_dir)
-      # Remove quotes
-      export working_dir=$(echo "$working_dir" | sed 's/[\"\x27]//g')
-      # If the working directory does not exist, exit with an error
-      if [ ! -d "$working_dir" ]; then
-        echo "Working directory $working_dir does not exist. Please check the configuration."
+      if [ -n "${WEATHERGEN_PRIVATE_CONF:-}" ]; then
+        private_conf="$WEATHERGEN_PRIVATE_CONF"
+      elif ! private_conf=$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config); then
+        echo "Failed to locate the private config." >&2
         exit 1
       fi
-      # Ensure the working directory ends with a slash
-      if [[ "$working_dir" != */ ]]; then
-        working_dir="$working_dir/"
+      echo "Private config: $private_conf"
+      if ! working_dir=$(UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV="" \
+        uvx yq -r .path_shared_working_dir "$private_conf"); then
+        echo "Failed to read the shared working directory from $private_conf." >&2
+        exit 1
+      fi
+      if [ ! -d "$working_dir" ]; then
+        echo "Working directory $working_dir does not exist. Please check the configuration." >&2
+        exit 1
       fi
       echo "Working directory: $working_dir"
-      # Create all the links
-      for d in "logs" "models" "output" "plots" "results"
-      do
-        # If the link already exists, do nothing
-        # If a file with the same name exists, skip it
-        if [ -e "$d" ]; then
-          echo "'$d' already exists, skipping. The results in $d will not be linked to the shared working directory."
-          continue
-        fi
-        echo "$d -> $working_dir$d"
-        ln -s "$working_dir$d" "$d"
-      done
+      uv run --no-project python scripts/check_symlinks.py "$working_dir" "${@:2}"
     )
     ;;
   create-jupyter-kernel)
