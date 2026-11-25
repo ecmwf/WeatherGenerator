@@ -24,7 +24,9 @@ def main():
     for name in ["logs", "models", "plots", "results"]:
         link = Path(name)
         target = args.working_dir / name
-        if link.is_symlink() and (link.readlink() != target or not target.exists()):
+        if not target.exists():
+            logger.warning(f"Target '{target}' does not exist.")
+        if link.is_symlink() and link.readlink() != target:
             logger.warning(f"'{name}' is a symlink BUT IS NOT correctly linked to {target}.")
             if args.fix:
                 logger.info(f"Removing incorrect symlink '{name}' and recreating it.")
