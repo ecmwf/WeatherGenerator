@@ -4,6 +4,9 @@ The reference Zarr supplies coordinates and interval metadata only, never predic
 or normalization statistics. Local products may have unknown ecCodes short names;
 the raw parameter, table and fixed-surface keys define their identity.
 
+Channels may be named in the IFS style (``2t``, ``q_850``) or with their ICON names
+(``T_2M``, ``QV_850``); both are encoded identically.
+
 Output follows evalml's ``grib_forecaster`` layout, one file per initialisation and
 lead time (whole hours) holding all surface and pressure-level messages::
 
@@ -106,8 +109,48 @@ FIELD_SPECS = {
     "VMAX_10M": FieldSpec((0, 2, 22), (103, 0, 10), processing=2),
 }
 
+# ICON names, as used by the datasets without "ifsnames", and the IFS-style names above
+# that they correspond to. Names spelled the same in both conventions are not listed.
+ICON_NAMES = {
+    "T_2M": "2t",
+    "TD_2M": "2d",
+    "U_10M": "10u",
+    "V_10M": "10v",
+    "SKT": "skt",
+    "FIS": "z",
+    "PS": "sp",
+    "PMSL": "msl",
+    "CLCH": "hcc",
+    "CLCM": "mcc",
+    "CLCL": "lcc",
+    "CLCT": "tcc",
+    "FR_LAND": "lsm",
+    "SSO_STDH": "sdor",
+    "SSO_THETA": "anor",
+    "SSO_SIGMA": "slor",
+    "SSO_GAMMA": "isor",
+    "TOT_PREC_1H": "tp",
+    "TOT_PREC_6H": "tp_6h",
+    "RUNOFF_S_1H_0": "ro",
+    "RUNOFF_S_6H_0": "ro_6h",
+    "ssrd_1h": "ssrd",
+    "strd_1h": "strd",
+}
+ICON_PRESSURE_NAMES = {"FI": "z", "QV": "q", "T": "t", "U": "u", "V": "v", "W": "w"}
+
+
+def _ifs_name(name):
+    """Return the IFS-style name of a channel given in either naming convention."""
+    if name in ICON_NAMES:
+        return ICON_NAMES[name]
+    match = re.fullmatch(r"([A-Z]+)_(\d+)", name)
+    if match and match[1] in ICON_PRESSURE_NAMES:
+        return f"{ICON_PRESSURE_NAMES[match[1]]}_{match[2]}"
+    return name
+
 
 def _field_spec(name, metadata):
+    channel, name = name, _ifs_name(name)
     if name in FIELD_SPECS:
         spec = FIELD_SPECS[name]
         if name == "VMAX_10M":
@@ -127,7 +170,7 @@ def _field_spec(name, metadata):
     match = re.fullmatch(r"(z|q|t|u|v|w)_(\d+)", name)
     if match and int(match[2]) in LEVELS:
         return FieldSpec(PRESSURE_PARAMETERS[match[1]], (100, -2, int(match[2])), level_type="pl")
-    raise ValueError(f"Unmapped ICON physical channel: {name}")
+    raise ValueError(f"Unmapped ICON physical channel: {channel}")
 
 
 def _identity(spec):
@@ -135,6 +178,7 @@ def _identity(spec):
 
 
 def _prototype(name, spec):
+    name = _ifs_name(name)
     if spec.level_type == "pl" or name == "z":
         prefix = name.split("_")[0]
         parameter = (0, 2, 8) if prefix == "w" else PRESSURE_PARAMETERS[prefix]
@@ -207,7 +251,8 @@ class IconParser(CfParser):
         ):
             raise ValueError("Reference grid contains duplicate coordinates or is empty")
         requested = list(self.channels)
-        if len(set(requested)) != len(requested):
+        # Also catches one field requested under both its IFS-style and its ICON name.
+        if len({_ifs_name(name) for name in requested}) != len(requested):
             raise ValueError("ICON channel selection contains duplicates")
         excluded = [
             name

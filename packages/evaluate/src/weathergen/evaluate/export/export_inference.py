@@ -105,8 +105,8 @@ def parse_args(args: list) -> argparse.Namespace:
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["N320", "ERA5", "ERA5pl", "ERA5ml", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
-        help="Stream name to retrieve data for, if not provided retrieves all",
+        help="Stream name to retrieve data for, if not provided retrieves all "
+        "(required for --format icon)",
         default=None,
     )
 
@@ -270,6 +270,9 @@ def parse_args(args: list) -> argparse.Namespace:
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
+    if args.output_format == "icon" and args.stream is None:
+        # Without it every stream of the run, e.g. ERA5, would go through the ICON parser.
+        parser.error("--stream is required with --format icon: select the ICON stream to export")
     return args
 
 
