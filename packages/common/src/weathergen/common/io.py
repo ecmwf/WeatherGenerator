@@ -26,8 +26,6 @@ from numpy.typing import NDArray
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
-zarr.config.set({"async.concurrency": 64})
-SHARDING_ENABLED = True
 CHUNK_N_SAMPLES = 542080
 SHARD_N_SAMPLES = 6 * 542080
 SCALE_FACTOR = 1  # scaling for the other dimensions
@@ -44,18 +42,22 @@ def is_ndarray(obj: typing.Any) -> bool:
 
 
 def _get_shards(
-    shard_nsamples: tuple[int], chunks: tuple[int]
+    output_options: dict, chunks: tuple[int]
 ) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find number of shards from chunks and predefined size of shards"""
-    shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
+    shard_nsamples = output_options.get("shard_n_samples", SHARD_N_SAMPLES)
+    scale_factor = output_options.get("chunk_scale_factor", SCALE_FACTOR)
+    shards = (shard_nsamples, *((scale_factor + 1) * x for x in chunks[1:]))
     return shards
 
 
 def _get_chunks(
-    chunk_nsamples: tuple[int], data_shape: tuple[int]
+    output_options: dict, data_shape: tuple[int]
 ) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find chunks from shape of data and predefined size of chunks"""
-    chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in data_shape[1:]))
+    chunk_nsamples = output_options.get("chunk_n_samples", CHUNK_N_SAMPLES)
+    scale_factor = output_options.get("chunk_scale_factor", SCALE_FACTOR)
+    chunks = (chunk_nsamples, *(max(x // scale_factor, 1) for x in data_shape[1:]))
     return chunks
 
 
@@ -270,21 +272,10 @@ class OutputDataset:
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(
-        self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples=SHARD_N_SAMPLES
-    ) -> xr.DataArray:
+    def as_xarray(self) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
-        chunks = _get_chunks(chunk_nsamples, self.data.shape)
-        if SHARDING_ENABLED:
-            shards = _get_shards(shard_nsamples, chunks)
-            _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
-        else:
-            shards = None
-            _logger.debug(f"sharding disabled, using chunks: {chunks}")
         # maybe do dask conversion earlier? => usefull for parallel writing?
-        data = da.from_zarr(
-            self.data, chunks=chunks, shards=shards
-        )  # dont call compute to lazy load
+        data = da.from_zarr(self.data)  # dont call compute to lazy load
         # include pseudo ens dim so all data arrays have same dimensionality
         # TODO: does it make sense for target and source to have ens dim?
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
@@ -347,10 +338,11 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path, read_only: bool):
+    def __init__(self, store_path: pathlib.Path, output_options: dict, read_only: bool):
         self._store: LocalStore | ZipStore | None = None
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
+        self.output_options = output_options
         self.read_only = read_only
 
     @property
@@ -446,14 +438,14 @@ class ZarrIO:
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = _get_chunks(CHUNK_N_SAMPLES, array.shape)
+            chunks = _get_chunks(self.output_options, array.shape)
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + f"into group: {group}."
         )
         start_time = timeit.default_timer()
-        if SHARDING_ENABLED and chunks != "auto":
-            shards = _get_shards(SHARD_N_SAMPLES, chunks)
+        if self.output_options.get("sharding", True) and chunks != "auto":
+            shards = _get_shards(self.output_options, chunks)
             group.create_array(name, data=array, chunks=chunks, shards=shards)
             _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
@@ -799,7 +791,7 @@ def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:
     return _get_backend(store_path, read_only=True)
 
 
-def zarrio_writer(store_path: pathlib.Path) -> ZarrIO:
+def zarrio_writer(store_path: pathlib.Path, output_options: dict) -> ZarrIO:
     """
     Get the proper io-writer for a given store.
 
@@ -807,13 +799,13 @@ def zarrio_writer(store_path: pathlib.Path) -> ZarrIO:
         store_path: Full path to the storage location.
     """
 
-    return _get_backend(store_path, read_only=False)
+    return _get_backend(store_path, output_options, read_only=False)
 
 
 _IO_CLASSES: dict[StoreType, type] = {StoreType.ZIP: ZipZarrIO, StoreType.LOCAL: ZarrIO}
 
 
-def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
+def _get_backend(store_path: pathlib.Path, output_options: dict, read_only: bool) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
-    return _IO_CLASSES[StoreType(ext)](store_path, read_only)
+    return _IO_CLASSES[StoreType(ext)](store_path, output_options, read_only)

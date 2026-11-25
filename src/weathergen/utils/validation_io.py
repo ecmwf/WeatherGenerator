@@ -239,6 +239,6 @@ def write_output(
         forecast_offset,
         forecast_steps_override=timestep_idxs_chunk,
     )
-    with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
+    with zarrio_writer(config.get_path_results(cf, mini_epoch), val_cfg.get("output", {})) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
