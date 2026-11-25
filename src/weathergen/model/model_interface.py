@@ -66,6 +66,10 @@ def init_model_and_shard(
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
+    if "register_tokens" in cf.freeze_modules:
+        model.encoder.register_tokens.requires_grad = False
+    if "class_tokens" in cf.freeze_modules:
+        model.encoder.class_tokens.requires_grad = False
 
     if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
