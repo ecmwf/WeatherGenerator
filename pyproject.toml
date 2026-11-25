@@ -183,8 +183,10 @@ exclude-newer-package = {certifi = false}
 # torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
 override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]
 
-# Pinned to avoid many uv cache buckets (one per uv version).
-# Keep in sync with UV_VERSION in .github/workflows/ci.yml and ci/cscs.yaml.
+# Pinned: uv versions differ in their cache bucket formats, and a shared cache
+# then stores the same packages once per format.
+# Keep in sync with UV_VERSION in .github/workflows/ci.yml and ci/cscs.yaml,
+# and with INSTALL.md.
 required-version = "==0.13.7"
 
 # The supported environments

@@ -5,9 +5,32 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 PRIVATE_REPO_PATH="${WEATHERGEN_PRIVATE_REPO_PATH:-$SCRIPT_DIR/../WeatherGenerator-private}"
 
 # uv_link_mode from WeatherGenerator-private's hpc/<hpc>/config/paths.yml, if set.
+# Warns if platform-env.py fails, e.g. on JUPITER without `jutil env`.
 hpc_uv_link_mode() {
   local platform_env="$PRIVATE_REPO_PATH/hpc/platform-env.py"
-  [[ -x "$platform_env" ]] && "$platform_env" uv-link-mode 2>/dev/null
+  [[ -x "$platform_env" ]] || return 0
+  local errors
+  errors=$(mktemp)
+  if ! "$platform_env" uv-link-mode 2> "$errors"; then
+    echo "Could not read the HPC's uv link mode ($(tail -n 1 "$errors"));" \
+      "using pyproject.toml's." >&2
+  fi
+  rm -f "$errors"
+}
+
+# Value of a --link-mode argument among the given arguments, if any.
+link_mode_argument() {
+  local argument previous=""
+  for argument in "$@"; do
+    if [[ "$argument" == --link-mode=* ]]; then
+      echo "${argument#--link-mode=}"
+      return
+    elif [[ "$previous" == --link-mode ]]; then
+      echo "$argument"
+      return
+    fi
+    previous="$argument"
+  done
 }
 
 # Git hooks that re-sync the venv when dependencies change, so that `uv run`
@@ -56,8 +79,8 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       # Link mode: --link-mode argument > UV_LINK_MODE > HPC config > pyproject.toml.
-      link_mode=""
-      if [[ "$*" == *--link-mode* ]]; then
+      link_mode=$(link_mode_argument "$@")
+      if [[ -n "$link_mode" ]]; then
         :
       elif [[ -n "${UV_LINK_MODE:-}" ]]; then
         link_mode="$UV_LINK_MODE"
@@ -79,6 +102,10 @@ case "$1" in
         done < <(symlinked_packages)
         if (( ${#packages[@]} )); then
           echo "Relinking ${#packages[@]} symlinked packages as $link_mode"
+          if (( ${#packages[@]} > 50 )); then
+            echo "On a shared filesystem this can take half an hour. Faster: interrupt" \
+              "(Ctrl-C), move the venv aside (mv .venv .venv.old) and sync again."
+          fi
           for package in "${packages[@]}"; do
             relink+=(--reinstall-package "$package")
           done
