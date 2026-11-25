@@ -35,7 +35,9 @@ class Sample:
     streams_data: dict[str, StreamData | None]
 
     def pin_memory(self):
-        """Pin all tensors in this Sample to CPU pinned memory"""
+        """
+        Pin all tensors in this Sample to CPU pinned memory
+        """
 
         # Pin StreamData objects in streams_data dict
         if hasattr(self, "streams_data") and isinstance(self.streams_data, dict):
@@ -54,13 +56,26 @@ class Sample:
         return self
 
     def __init__(self, stream_names: list[str]) -> None:
+        """
+        Initialize a sample with the given stream names.
+        """
         self.meta_info = {}
 
         self.streams_data = {}
         for stream_name in stream_names:
             self.streams_data[stream_name] = None
 
-    def to_device(self, device) -> None:
+    def to_device(
+        self,
+        device,
+        target_steps: list[int] | None = None,
+        include_source: bool = True,
+        include_target_coords: bool = True,
+        include_target_tokens: bool = True,
+    ) -> None:
+        """
+        Move all tensors of the sample to the specified device.
+        """
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
                 self.meta_info[key].mask.to(device, non_blocking=True)
@@ -70,7 +85,21 @@ class Sample:
 
         for key, val in self.streams_data.items():
             if val is not None:
-                self.streams_data[key] = val.to_device(device)
+                self.streams_data[key] = val.to_device(
+                    device,
+                    target_steps,
+                    include_source,
+                    include_target_coords,
+                    include_target_tokens,
+                )
+
+    def del_target_coordinates(self, target_steps: list[int]) -> None:
+        """
+        Delete target coordinates for steps
+        """
+        for stream_data in self.streams_data.values():
+            if stream_data is not None:
+                stream_data.del_target_coordinates(target_steps)
 
     def is_empty(self) -> bool:
         """
@@ -167,6 +196,8 @@ class BatchSamples:
     output_steps: int
     output_idxs: list[int]
     device: str | None
+    step_offset: int
+    latent: list[dict] | None
 
     def __init__(
         self, stream_names: list[str], num_samples: int, output_steps, output_idxs
@@ -176,21 +207,43 @@ class BatchSamples:
         self.output_steps = output_steps
         self.output_idxs = output_idxs
         self.device = None
+        self.step_offset = 0
+        self.latent = []
 
     def __len__(self) -> int:
         return len(self.samples)
 
-    def to_device(self, device):
+    def to_device(
+        self,
+        device,
+        target_steps: list[int] | None = None,
+        include_source: bool = True,
+        include_target_coords: bool = True,
+        include_target_tokens: bool = True,
+    ):
         for sample in self.samples:
-            sample.to_device(device)
+            sample.to_device(
+                device,
+                target_steps,
+                include_source,
+                include_target_coords,
+                include_target_tokens,
+            )
 
-        self.tokens_lens = (
-            self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
-        )
+        if include_source:
+            self.tokens_lens = (
+                self.tokens_lens.to(device, non_blocking=True)
+                if self.tokens_lens is not None
+                else None
+            )
 
         self.device = device
 
         return self
+
+    def del_target_coordinates(self, target_steps: list[int]) -> None:
+        for sample in self.samples:
+            sample.del_target_coordinates(target_steps)
 
     def get_samples(self) -> list[Sample]:
         return self.samples
@@ -334,17 +387,52 @@ class ModelBatch:
 
         return self
 
-    def to_device(self, device):  # -> ModelBatch
+    def set_device(self, device):
+        """Set a device to be used by to_device() and related functions."""
+        self.device = device
+        return self
+
+    def to_device(self, device=None):
         """
         Move batch to device
         """
 
+        device = device if device is not None else self.device
         self.source_samples.to_device(device)
         self.target_samples.to_device(device)
 
         self.device = device
 
         return self
+
+    def to_device_input_chunk(self, device=None):
+        """Move source inputs and the targets for one chunk."""
+
+        device = device if device is not None else self.device
+        self.source_samples.to_device(
+            device,
+            target_steps=[],
+            include_target_coords=False,
+            include_target_tokens=False,
+        )
+
+        return self
+
+    def to_device_output_chunk(self, target_steps: list[int], device=None):
+        """Move decoder coordinates for the active forecast chunk."""
+        device = device if device is not None else self.device
+        self.source_samples.to_device(
+            device,
+            target_steps=target_steps,
+            include_source=False,
+            include_target_tokens=False,
+        )
+
+        return self
+
+    def del_output_chunk_coordinates(self, target_steps: list[int]) -> None:
+        """Release decoder coordinates after output for a forecast chunk was written."""
+        self.source_samples.del_target_coordinates(target_steps)
 
     def add_source_stream(
         self,

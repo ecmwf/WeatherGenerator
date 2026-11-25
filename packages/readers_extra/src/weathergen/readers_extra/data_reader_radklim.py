@@ -15,8 +15,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import override
 
-import netCDF4 as nc
+import netCDF4 as netCDF
 import numpy as np
+import numpy.typing as npt
 import yaml
 
 from weathergen.datasets.data_reader_base import (
@@ -38,7 +39,7 @@ _INDEX_CACHE_VERSION = 2
 def _scan_nc_file(path: Path) -> dict | None:
     """Read the time range of one RADKLIM file for parallelization."""
 
-    with nc.Dataset(path, "r") as ds:
+    with netCDF.Dataset(path, "r") as ds:
         if "RR" not in ds.variables:
             return None
 
@@ -46,7 +47,7 @@ def _scan_nc_file(path: Path) -> dict | None:
         if len(time_var) == 0:
             return None
 
-        times = nc.num2date(time_var[:], time_var.units, time_var.calendar)
+        times = netCDF.num2date(time_var[:], time_var.units, time_var.calendar)
 
     start_time, end_time = times[0], times[-1]
 
@@ -119,16 +120,18 @@ class DataReaderRadklim(DataReaderTimestep):
         # Get spatial subsampling stride from stream_info (default: 1 = no subsampling)
         self.spatial_stride = stream_info.get("spatial_stride", 1)
 
-        with nc.Dataset(first_file, "r") as ds:
+        with netCDF.Dataset(first_file, "r") as ds:
             # Read lat/lon arrays (2D)
             lat_2d = ds.variables["lat"][:]
             lon_2d = ds.variables["lon"][:]
 
             # Apply spatial subsampling if stride > 1
             if self.spatial_stride > 1:
-                lat_2d = lat_2d[::self.spatial_stride, ::self.spatial_stride]
-                lon_2d = lon_2d[::self.spatial_stride, ::self.spatial_stride]
-                _logger.info(f"Applied spatial stride {self.spatial_stride}: grid reduced to {lat_2d.shape}")
+                lat_2d = lat_2d[:: self.spatial_stride, :: self.spatial_stride]
+                lon_2d = lon_2d[:: self.spatial_stride, :: self.spatial_stride]
+                _logger.info(
+                    f"Applied spatial stride {self.spatial_stride}: grid reduced to {lat_2d.shape}"
+                )
 
             # Flatten and create coordinate template
             lat_flat = lat_2d.flatten()
@@ -166,24 +169,27 @@ class DataReaderRadklim(DataReaderTimestep):
         stats_file = self.base_path / "statistics.yml"
         calc_stats = stream_info.get("calc_stats", False)
 
-        if stats_file.exists():     # read saved mean and stdev
+        if stats_file.exists():  # read saved mean and stdev
             _logger.info(f"Loading actual statistics from {stats_file}")
             with stats_file.open("r") as f:
                 statistics = yaml.safe_load(f)
-            
+
             if "mean" in statistics and statistics["mean"] is not None:
                 self.mean = np.array([statistics["mean"]], dtype=np.float32)
 
             if "stdev" in statistics and statistics["stdev"] is not None:
                 self.stdev = np.array([statistics["stdev"]], dtype=np.float32)
-        elif calc_stats:        # calculate mean and stdev
+        elif calc_stats:  # calculate mean and stdev
             _logger.info("statistics.yml not found and calc_stats=True. Calculating statistics...")
             mean, stdev = self._calculate_and_save_statistics(stats_file)
             self.mean = np.array([mean], dtype=np.float32)
             self.stdev = np.array([stdev], dtype=np.float32)
-            
-        else:                   # no statistics.yml and calc_stats=False
-            _logger.info(f"No statistics.yml found and calc_stats=False. Falling back to default mean (0.1) and stdev (1.0).")
+
+        else:  # no statistics.yml and calc_stats=False
+            _logger.info(
+                "No statistics.yml found and calc_stats=False."
+                + " Falling back to default mean (0.1) and stdev (1.0)."
+            )
 
         # Select channels (use netCDF variable name)
         available_channels = ["RR"]
@@ -321,7 +327,7 @@ class DataReaderRadklim(DataReaderTimestep):
             return None
 
         _logger.info(f"Loaded cached file index from {cache_file}")
-        
+
         return cached["index"]
 
     @staticmethod
@@ -373,7 +379,7 @@ class DataReaderRadklim(DataReaderTimestep):
 
         return files
 
-    def _open_file(self, filepath: Path, cache: bool = True) -> tuple[nc.Dataset, np.ndarray]:
+    def _open_file(self, filepath: Path, cache: bool = True) -> tuple[netCDF.Dataset, npt.NDarray]:
         """
         Open netCDF file and decode its timestamps, using cache if possible
 
@@ -402,12 +408,13 @@ class DataReaderRadklim(DataReaderTimestep):
             try:
                 self.current_file.close()
             except Exception:
+                _logger.warning("Failed to close current file.")
                 pass  # Ignore errors when closing
 
         # Open new file and cache decoded timestamps
-        ds = nc.Dataset(filepath, "r")
+        ds = netCDF.Dataset(filepath, "r")
         time_var = ds.variables["time"]
-        file_times = nc.num2date(time_var[:], time_var.units, time_var.calendar)
+        file_times = netCDF.num2date(time_var[:], time_var.units, time_var.calendar)
         file_times_dt64 = np.array([np.datetime64(t) for t in file_times])
 
         self.current_file = ds
@@ -513,7 +520,7 @@ class DataReaderRadklim(DataReaderTimestep):
 
                     # Apply spatial subsampling if stride > 1
                     if self.spatial_stride > 1:
-                        rr_data = rr_data[:, ::self.spatial_stride, ::self.spatial_stride]
+                        rr_data = rr_data[:, :: self.spatial_stride, :: self.spatial_stride]
 
                     # Convert masked array to regular array, replacing fill values with NaN
                     if np.ma.is_masked(rr_data):
@@ -575,7 +582,7 @@ class DataReaderRadklim(DataReaderTimestep):
     def _compute_file_stats(filepath: Path, spatial_stride: int = 1):
         """Standalone worker function for multiprocessing dataset statistics."""
         try:
-            with nc.Dataset(filepath, "r") as ds:
+            with netCDF.Dataset(filepath, "r") as ds:
                 rr_data = ds.variables["RR"][:]
 
             if spatial_stride > 1:
@@ -610,9 +617,7 @@ class DataReaderRadklim(DataReaderTimestep):
         total_sum = 0.0
         total_sq_sum = 0.0
         count = 0
-        _logger.info(
-            f"Starting to process {len(self.file_index)} files for statistics using multiprocessing..."
-        )
+        _logger.info(f"Processing {len(self.file_index)} for statistics using multiprocessing...")
         filepaths = [entry["path"] for entry in self.file_index]
         n_workers = min(_INDEX_SCAN_WORKERS, os.cpu_count() or 1)
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
@@ -658,11 +663,12 @@ class DataReaderRadklim(DataReaderTimestep):
             tmp_file.unlink(missing_ok=True)
 
         return mean, stdev
-    
+
     def __del__(self):
         """Close any open files"""
         if hasattr(self, "current_file") and self.current_file is not None:
             try:
                 self.current_file.close()
             except Exception:
+                _logger.warning("Failed to close current file during cleanup.")
                 pass  # Ignore errors during cleanup
