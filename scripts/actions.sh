@@ -34,32 +34,9 @@ link_mode_argument() {
 }
 
 # Git hooks that re-sync the venv when dependencies change, so that `uv run`
-# doesn't sync with symlinks. Existing hooks are left alone.
+# doesn't sync with symlinks. Needs the venv's Python.
 install_sync_hooks() {
-  local hooks_dir hook file
-  hooks_dir=$(git rev-parse --git-path hooks 2>/dev/null) || return
-  mkdir -p "$hooks_dir"
-  for hook in post-merge post-rewrite post-checkout; do
-    file="$hooks_dir/$hook"
-    if [[ -e "$file" ]] && ! grep -q weathergen-sync-venv "$file"; then
-      echo "Not installing the $hook hook: $file exists." >&2
-      continue
-    fi
-    hook_stub "$hook" > "$file"
-    chmod +x "$file"
-  done
-}
-
-# Hook that runs scripts/git-hooks/sync-venv.sh, if the checkout has it.
-hook_stub() {
-  cat <<EOF
-#!/bin/sh
-# weathergen-sync-venv: installed by scripts/actions.sh sync
-top=\$(git rev-parse --show-toplevel) || exit 0
-f="\$top/scripts/git-hooks/sync-venv.sh"
-[ -x "\$f" ] && exec "\$f" $1 "\$@"
-exit 0
-EOF
+  .venv/bin/python -I scripts/git-hooks/sync-venv.py install || true
 }
 
 # Venv packages installed as symlinks.
@@ -79,6 +56,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       # Link mode: --link-mode argument > UV_LINK_MODE > HPC config > pyproject.toml.
+      install_hooks=""
       link_mode=$(link_mode_argument "$@")
       if [[ -n "$link_mode" ]]; then
         :
@@ -90,7 +68,7 @@ case "$1" in
         if [[ -n "$link_mode" ]]; then
           echo "uv link mode from the HPC config: $link_mode"
           export UV_LINK_MODE="$link_mode"
-          install_sync_hooks
+          install_hooks=1
         fi
       fi
       # Reinstall symlinked packages in the chosen link mode.
@@ -118,7 +96,8 @@ case "$1" in
         exit 0
       fi
       # Otherwise, use the gpu extra
-      uv sync --all-packages --extra gpu "${relink[@]}" "$@"
+      uv sync --all-packages --extra gpu "${relink[@]}" "$@" || exit
+      [[ -z "$install_hooks" ]] || install_sync_hooks
     )
     ;;
   sync-safe)
