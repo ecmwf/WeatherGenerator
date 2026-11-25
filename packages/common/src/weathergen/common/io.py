@@ -121,11 +121,22 @@ class IOReaderData:
     datetimes: NDArray[NPDT64]
     is_spoof: bool = False
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         """
         Test if data object is empty
         """
         return len(self.datetimes) == 0
+
+    def clear(self) -> "IOReaderData":
+        """
+        Clear data but retain correct shapes
+        """
+        self.coords = np.zeros((0, 2))
+        self.geoinfos = np.zeros((0, self.geoinfos.shape[-1]))
+        self.data = np.zeros((0, self.data.shape[-1]))
+        self.datetimes = np.array([], dtype="datetime64[ns]")
+
+        return self
 
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":

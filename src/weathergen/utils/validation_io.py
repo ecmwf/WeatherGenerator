@@ -180,7 +180,10 @@ def write_output(
     for sample in batch.get_source_samples().get_samples():
         sources += [[]]
         for _, stream_data in sample.streams_data.items():
+            rdata = stream_data.source_raw[0]
             # TODO: support multiple input steps
+            if stream_data.is_spoof(0):
+                rdata = rdata.clear()
             sources[-1] += [stream_data.source_raw[0]]
 
     sample_idxs = [
