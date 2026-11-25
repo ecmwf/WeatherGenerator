@@ -95,17 +95,18 @@ def parse_args(args: list) -> argparse.Namespace:
         "--format",
         dest="output_format",
         type=str,
-        choices=["netcdf", "verif", "quaver"],
+        choices=["netcdf", "verif", "quaver", "icon"],
         help="Output file format; netcdf (CF-compliant netcdfs), \
-        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool)",
+        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool), \
+        icon (native ICON GRIB2 in evalml's per-init layout)",
         required=True,
     )
 
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["N320", "ERA5", "ERA5pl", "ERA5ml", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
-        help="Stream name to retrieve data for, if not provided retrieves all",
+        help="Stream name to retrieve data for, if not provided retrieves all "
+        "(required for --format icon)",
         default=None,
     )
 
@@ -194,6 +195,31 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--icon-dataset",
+        type=str,
+        required=False,
+        dest="icon_dataset",
+        help="Reference ICON Zarr dataset supplying native grid coordinates and "
+        "variable metadata (required for --format icon)",
+    )
+
+    parser.add_argument(
+        "--icon-surface-template",
+        type=str,
+        required=False,
+        dest="icon_surface_template",
+        help="ICON GRIB2 file with surface-level template messages (required for --format icon)",
+    )
+
+    parser.add_argument(
+        "--icon-pressure-template",
+        type=str,
+        required=False,
+        dest="icon_pressure_template",
+        help="ICON GRIB2 file with pressure-level template messages (required for --format icon)",
+    )
+
+    parser.add_argument(
         "--expver",
         type=str,
         help="Expver to include in the output filename (i.e. 'iuoo')",
@@ -244,6 +270,9 @@ def parse_args(args: list) -> argparse.Namespace:
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
+    if args.output_format == "icon" and args.stream is None:
+        # Without it every stream of the run, e.g. ERA5, would go through the ICON parser.
+        parser.error("--stream is required with --format icon: select the ICON stream to export")
     return args
 
 
