@@ -70,6 +70,8 @@ healpix_level: 5
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
 rope_2D: False
+# build pe_global from cell lat/lon, False keeps old encoding that repeats every dim_embed / 2 cells
+pe_global_latlon: False
 
 with_mixed_precision: True
 with_flash_attention: True
