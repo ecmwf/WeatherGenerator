@@ -17,11 +17,12 @@ import torch.nn as nn
 logger = logging.getLogger(__name__)
 
 
-def compile_block(block):
+def compile_block(block, recompile_limit=None):
     """torch.compile of a block in place (state dict keys unchanged), dynamic shapes"""
-    # each stream decoder needs its own compiled version of the same forward. Torch keeps at
-    # most 8 by default which is too few, thus set to 64
-    torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
+    # recompile_limit raises how many compiled versions of a forward torch keeps, torch default is 8
+    if recompile_limit is not None:
+        cfg = torch._dynamo.config
+        cfg.recompile_limit = max(cfg.recompile_limit, recompile_limit)
     # only small blocks are compiled, thus no graph split at DDP buckets (fails in the partitioner)
     torch._dynamo.config.optimize_ddp = False
     block.compile(dynamic=True)
