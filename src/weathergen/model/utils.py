@@ -17,6 +17,17 @@ import torch.nn as nn
 logger = logging.getLogger(__name__)
 
 
+def compile_block(block, recompile_limit=None):
+    """torch.compile of a block in place (state dict keys unchanged), dynamic shapes"""
+    # recompile_limit raises how many compiled versions of a forward torch keeps, torch default is 8
+    if recompile_limit is not None:
+        cfg = torch._dynamo.config
+        cfg.recompile_limit = max(cfg.recompile_limit, recompile_limit)
+    # only small blocks are compiled, thus no graph split at DDP buckets (fails in the partitioner)
+    torch._dynamo.config.optimize_ddp = False
+    block.compile(dynamic=True)
+
+
 def get_num_parameters(block):
     nps = filter(lambda p: p.requires_grad, block.parameters())
     return sum([torch.prod(torch.tensor(p.size())) for p in nps])
