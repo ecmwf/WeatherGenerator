@@ -1030,7 +1030,18 @@ class TargetPredictionEngineClassic(nn.Module):
         # thus one gpu to cpu sync instead of one per block
         max_q, max_kv = torch.stack([tcs_lens.max(), tokens_lens.max()]).tolist()
 
+        # compile with FSDP: inputs are fp32 in the forward but bf16 in checkpoint recompute,
+        # hence compiled blocks crash. Cast to fp32 to ensure forward and recompute are same
+        cf = self.cf
+        fsdp_mp = cf.with_ddp and cf.with_fsdp and cf.with_mixed_precision
+        to_fp32 = cf.get("compile_decoder", False) and fsdp_mp
+        if to_fp32:
+            tokens_stream = tokens_stream.float()
+            tcs_aux = tcs_aux.float() if tcs_aux is not None else None
+
         for block in self.tte:
+            if to_fp32:
+                tc_tokens = tc_tokens.float()
             # self attention uses q lens for kv too, MLP ignores max_lens
             is_cross = isinstance(block, MultiCrossAttentionHeadVarlen)
             tc_tokens = checkpoint(
