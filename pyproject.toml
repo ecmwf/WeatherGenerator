@@ -12,7 +12,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
- 'zarr~=3.1.3',
+ 'zarr~=3.4.2',
  'pandas~=2.2',
  'tqdm',
  'matplotlib',
@@ -23,13 +23,12 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "numexpr>=2.11.0",
- "anemoi-datasets",
+ # First release that supports zarr 3 (>= 3.4.1).
+ "anemoi-datasets>=0.5.50,<0.6",
  "weathergen-common",
  "weathergen-evaluate",
  "weathergen-readers-extra",
  "pytest>=9.0.2",
- # older version have no precompiled linux-aarch64 cp312 wheel
- "numcodecs>=0.16",
  # This seems necessary for build isolation?
  'wheel',
  'setuptools',
@@ -207,7 +206,6 @@ conflicts = [
 ]
 
 [tool.uv.extra-build-dependencies]
-anemoi-datasets = ["setuptools<76", "wheel"]
 cfunits = ["setuptools<76", "wheel"]
 antlr4-python3-runtime = ["setuptools<76", "wheel"]
 # Cartopy  requires setuptools >= 77
@@ -264,9 +262,6 @@ torch = [
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
-# TODO: switch back to this branch, but this is a larger update and the tag name is incorrect
-# anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
-anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
 
 
 [tool.pytest.ini_options]

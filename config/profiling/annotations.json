@@ -105,13 +105,19 @@
     {
       "domain": "Anemoi",
       "color": "E05269",
-      "module": "anemoi.datasets.data.store",
-      "functions": ["Zarr.__getitem__","Zarr.__init__","open"]
+      "module": "anemoi.datasets.usage.gridded.store",
+      "functions": ["GriddedZarr.__getitem__","GriddedZarr.__init__","ZarrWithMissingDates.__getitem__"]
+    },
+    {
+      "domain": "Anemoi",
+      "color": "E05269",
+      "module": "anemoi.datasets.usage.store",
+      "functions": ["open_zarr"]
     },
     {
       "domain": "Anemoi",
       "color": "EB8E9D",
-      "module": "anemoi.datasets.data.subset",
+      "module": "anemoi.datasets.usage.gridded.subset",
       "functions": ["Subset.__getitem__","Subset.__init__"]
     },
     {
@@ -327,8 +333,8 @@
     {
       "domain": "Anemoi",
       "color": "C7233E",
-      "module": "anemoi.datasets.data.dataset",
-      "functions": ["Dataset.__init__"]
+      "module": "anemoi.datasets.usage.dataset",
+      "functions": ["Dataset._subset"]
     },
     {
       "domain": "Zarr",

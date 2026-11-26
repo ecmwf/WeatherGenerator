@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import override
 
 import numpy as np
-from anemoi.datasets.data import MissingDateError
+from anemoi.datasets import MissingDateError
 
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
