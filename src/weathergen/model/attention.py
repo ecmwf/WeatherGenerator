@@ -103,7 +103,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         assert with_flash, "Only flash attention supported at the moment"
 
     def forward(self, x, x_lens, ada_ln_aux=None, coords=None, max_lens=None):
-        # max_lens (q, kv) as python ints, passed in by the decoder,
+        # max_lens (q, kv) as python ints, passed in by the caller,
         # else computed here with a gpu to cpu sync
         if self.with_residual:
             x_in = x
@@ -435,7 +435,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         assert with_flash, "Only flash attention supported at the moment"
 
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None, max_lens=None):
-        # max_lens (q, kv) as python ints, passed in by the decoder,
+        # max_lens (q, kv) as python ints, passed in by the caller,
         # else computed here with a gpu to cpu sync
         if self.with_residual:
             x_q_in = x_q

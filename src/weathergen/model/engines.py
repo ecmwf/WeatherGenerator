@@ -968,10 +968,11 @@ class TargetPredictionEngineClassic(nn.Module):
             )
 
         # compile each block: merges norms and small elementwise steps into fewer gpu kernels,
-        # dynamic since target counts vary
+        # dynamic since target counts vary. Each stream decoder needs its own compiled version
+        # of the same forward, default 8 is too few thus 64
         if cf.get("compile_decoder", False):
             for block in self.tte:
-                compile_block(block)
+                compile_block(block, recompile_limit=64)
 
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
         tc_tokens = output
@@ -990,12 +991,12 @@ class TargetPredictionEngineClassic(nn.Module):
         fsdp_mp = cf.with_ddp and cf.with_fsdp and cf.with_mixed_precision
         to_fp32 = cf.get("compile_decoder", False) and fsdp_mp
         if to_fp32:
-            tokens_stream = tokens_stream.float()
-            tcs_aux = tcs_aux.float() if tcs_aux is not None else None
+            tokens_stream = tokens_stream.to(torch.float32)
+            tcs_aux = tcs_aux.to(torch.float32) if tcs_aux is not None else None
 
         for ib, block in enumerate(self.tte):
             if to_fp32:
-                tc_tokens = tc_tokens.float()
+                tc_tokens = tc_tokens.to(torch.float32)
             if self.cf.pred_self_attention and ib % 3 == 1:
                 tc_tokens = checkpoint(
                     block,
