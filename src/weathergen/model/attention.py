@@ -102,7 +102,9 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x, x_lens, ada_ln_aux=None, coords=None, **kwargs):
+    def forward(self, x, x_lens, ada_ln_aux=None, coords=None, max_lens=None, **kwargs):
+        # max_lens (q, kv) as python ints, passed in by the decoder,
+        # else computed here with a gpu to cpu sync
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
@@ -123,6 +125,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         dropout_rate = self.dropout_rate if self.training else 0.0
 
         cum_x_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
+        max_q, max_kv = max_lens if max_lens is not None else (x_lens.max(), x_lens.max())
         # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
         outs = flash_attn_varlen_func(
             qs,
@@ -130,8 +133,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
             vs,
             cum_x_lens,
             cum_x_lens,
-            x_lens.max(),
-            x_lens.max(),
+            max_q,
+            max_kv,
             softcap=self.softcap,
             dropout_p=dropout_rate,
         )
@@ -430,7 +433,11 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None, **kwargs):
+    def forward(
+        self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None, max_lens=None, **kwargs
+    ):
+        # max_lens (q, kv) as python ints, passed in by the decoder,
+        # else computed here with a gpu to cpu sync
         if self.with_residual:
             x_q_in = x_q
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
@@ -450,14 +457,15 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         if x_kv_lens is not None:
             cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
             cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
+            max_q, max_kv = max_lens if max_lens is not None else (x_q_lens.max(), x_kv_lens.max())
             outs = flash_attn_varlen_func(
                 qs,
                 ks,
                 vs,
                 cum_x_q_lens,
                 cum_x_kv_lens,
-                x_q_lens.max(),
-                x_kv_lens.max(),
+                max_q,
+                max_kv,
                 softcap=self.softcap,
                 dropout_p=dropout_rate,
             )

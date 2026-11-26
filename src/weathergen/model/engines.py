@@ -29,7 +29,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP, KwargLayerNorm
-from weathergen.model.utils import ActivationFactory
+from weathergen.model.utils import ActivationFactory, compile_block
 from weathergen.utils.utils import get_dtype
 
 
@@ -1013,6 +1013,12 @@ class TargetPredictionEngineClassic(nn.Module):
                 )
             )
 
+        # compile each block: merges norms and small elementwise steps into fewer gpu kernels,
+        # dynamic since target counts vary
+        if cf.get("compile_decoder", False):
+            for block in self.tte:
+                compile_block(block)
+
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
         tc_tokens = output
         tcs_lens = output_lens
@@ -1020,7 +1026,13 @@ class TargetPredictionEngineClassic(nn.Module):
         tokens_lens = latent_lens
         tcs_aux = coordinates
 
+        # max lens for flash attention once per call,
+        # thus one gpu to cpu sync instead of one per block
+        max_q, max_kv = torch.stack([tcs_lens.max(), tokens_lens.max()]).tolist()
+
         for block in self.tte:
+            # self attention uses q lens for kv too, MLP ignores max_lens
+            is_cross = isinstance(block, MultiCrossAttentionHeadVarlen)
             tc_tokens = checkpoint(
                 block,
                 tc_tokens,
@@ -1029,6 +1041,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 x_q_lens=tcs_lens,
                 x_kv_lens=tokens_lens,
                 ada_ln_aux=tcs_aux,
+                max_lens=(max_q, max_kv) if is_cross else (max_q, max_q),
                 use_reentrant=False,
             )
         return tc_tokens
