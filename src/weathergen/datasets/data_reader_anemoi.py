@@ -13,8 +13,8 @@ from typing import Any, override
 
 import anemoi.datasets as anemoi_datasets
 import numpy as np
-from anemoi.datasets.data import MissingDateError
-from anemoi.datasets.data.dataset import Dataset
+from anemoi.datasets import MissingDateError
+from anemoi.datasets.usage.dataset import Dataset
 from numpy.typing import NDArray
 from omegaconf import OmegaConf
 

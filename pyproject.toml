@@ -12,7 +12,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
- 'zarr~=3.1.3',
+ 'zarr~=3.4.2',
  'pandas~=2.2',
  'tqdm',
  'matplotlib',
@@ -23,13 +23,12 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "numexpr>=2.11.0",
- "anemoi-datasets",
+ # First release that supports zarr 3 (>= 3.4.1).
+ "anemoi-datasets>=0.5.50,<0.6",
  "weathergen-common",
  "weathergen-evaluate",
  "weathergen-readers-extra",
  "pytest>=9.0.2",
- # older version have no precompiled linux-aarch64 cp312 wheel
- "numcodecs>=0.16",
  # This seems necessary for build isolation?
  'wheel',
  'setuptools',
@@ -175,9 +174,9 @@ link-mode = "symlink"
 # by future releases of dependencies or sub-dependencies.
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
-exclude-newer = "2026-04-27T00:00:00Z"
-# TODO: update exclude-newer so certifi is automatically >= 2026.10.19
-exclude-newer-package = {certifi = false}
+# Bump it about every two months, to a date a week or two in the past, so that
+# broken releases have had time to be yanked.
+exclude-newer = "2026-11-16T00:00:00Z"
 
 # torch 2.9.1 pulls nvidia-nccl-cu12==2.27.5. Override
 # torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
@@ -207,7 +206,6 @@ conflicts = [
 ]
 
 [tool.uv.extra-build-dependencies]
-anemoi-datasets = ["setuptools<76", "wheel"]
 cfunits = ["setuptools<76", "wheel"]
 antlr4-python3-runtime = ["setuptools<76", "wheel"]
 # Cartopy  requires setuptools >= 77
@@ -264,9 +262,6 @@ torch = [
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
-# TODO: switch back to this branch, but this is a larger update and the tag name is incorrect
-# anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
-anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
 
 
 [tool.pytest.ini_options]

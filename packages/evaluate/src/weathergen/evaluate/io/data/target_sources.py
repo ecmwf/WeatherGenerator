@@ -156,7 +156,7 @@ class AnemoiTargetSource:
 
         Returns
         -------
-        anemoi.datasets.data.dataset.Dataset
+        anemoi.datasets.usage.dataset.Dataset
             The dataset over ``self.filenames``.
         """
         return anemoi.datasets.open_dataset(
@@ -173,7 +173,7 @@ class AnemoiTargetSource:
 
         Returns
         -------
-        anemoi.datasets.data.dataset.Dataset
+        anemoi.datasets.usage.dataset.Dataset
             The dataset; its variables and dates are stored in ``self._variables``
             and ``self._dates``.
         """
@@ -313,7 +313,7 @@ class AnemoiTargetSource:
 
         Parameters
         ----------
-        ds : anemoi.datasets.data.dataset.Dataset
+        ds : anemoi.datasets.usage.dataset.Dataset
             The anemoi dataset.
         cols : list[int]
             Target columns of the channels present in the dataset.
