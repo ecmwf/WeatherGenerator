@@ -1,6 +1,5 @@
 name: Task / Issue
 description: A task or issue that should take less than a week to complete.
-title: "Task"
 
 body:
   - type: textarea
@@ -16,6 +15,24 @@ body:
       label: Hedgedoc URL, if you are keeping notes, plots, logs in hedgedoc.
       description: Paste a link to logs, screenshots, or related resources
       placeholder: "https://gitlab.jsc.fz-juelich.de/hedgedoc/..."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: public_only
+    attributes:
+      label: Repositories affected
+      description: Tick this if the task needs changes in this public repository only. Otherwise, link the related work below.
+      options:
+        - label: Only this public repository (WeatherGenerator) is affected.
+
+  - type: textarea
+    id: external_links
+    attributes:
+      label: Linked work in other repositories
+      description: Links to merge requests, pull requests or issues in other repositories, e.g. WeatherGenerator-private or the configs repository. Leave empty if only this repository is affected.
+      placeholder: |
+        - https://gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private/-/merge_requests/...
     validations:
       required: false
 
