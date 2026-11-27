@@ -4,18 +4,100 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 PRIVATE_REPO_PATH="${WEATHERGEN_PRIVATE_REPO_PATH:-$SCRIPT_DIR/../WeatherGenerator-private}"
 
+# uv_link_mode from WeatherGenerator-private's hpc/<hpc>/config/paths.yml, if set.
+# Warns if platform-env.py fails, e.g. on JUPITER without `jutil env`.
+hpc_uv_link_mode() {
+  local platform_env="$PRIVATE_REPO_PATH/hpc/platform-env.py"
+  [[ -x "$platform_env" ]] || return 0
+  local errors
+  errors=$(mktemp)
+  if ! "$platform_env" uv-link-mode 2> "$errors"; then
+    echo "Could not read the HPC's uv link mode ($(tail -n 1 "$errors"));" \
+      "using pyproject.toml's." >&2
+  fi
+  rm -f "$errors"
+}
+
+# Value of a --link-mode argument among the given arguments, if any.
+link_mode_argument() {
+  local argument previous=""
+  for argument in "$@"; do
+    if [[ "$argument" == --link-mode=* ]]; then
+      echo "${argument#--link-mode=}"
+      return
+    elif [[ "$previous" == --link-mode ]]; then
+      echo "$argument"
+      return
+    fi
+    previous="$argument"
+  done
+}
+
+# Git hooks that re-sync the venv when dependencies change, so that `uv run`
+# doesn't sync with symlinks. Needs the venv's Python.
+install_sync_hooks() {
+  .venv/bin/python -I scripts/git-hooks/sync-venv.py install || true
+}
+
+# Venv packages installed as symlinks.
+symlinked_packages() {
+  local metadata dist_info
+  for metadata in .venv/lib/python3*/site-packages/*.dist-info/METADATA; do
+    [[ -L "$metadata" ]] || continue
+    dist_info=$(basename "$(dirname "$metadata")")
+    echo "${dist_info%%-*}"
+  done
+}
+
 case "$1" in
   sync)
+    # Extra arguments go to uv sync.
+    shift
     (
       cd "$SCRIPT_DIR" || exit 1
+      # Link mode: --link-mode argument > UV_LINK_MODE > HPC config > pyproject.toml.
+      install_hooks=""
+      link_mode=$(link_mode_argument "$@")
+      if [[ -n "$link_mode" ]]; then
+        :
+      elif [[ -n "${UV_LINK_MODE:-}" ]]; then
+        link_mode="$UV_LINK_MODE"
+        echo "uv link mode from UV_LINK_MODE in your environment: $link_mode"
+      else
+        link_mode=$(hpc_uv_link_mode)
+        if [[ -n "$link_mode" ]]; then
+          echo "uv link mode from the HPC config: $link_mode"
+          export UV_LINK_MODE="$link_mode"
+          install_hooks=1
+        fi
+      fi
+      # Reinstall symlinked packages in the chosen link mode.
+      relink=()
+      if [[ -n "$link_mode" && "$link_mode" != symlink ]]; then
+        packages=()
+        while read -r package; do
+          packages+=("$package")
+        done < <(symlinked_packages)
+        if (( ${#packages[@]} )); then
+          echo "Relinking ${#packages[@]} symlinked packages as $link_mode"
+          if (( ${#packages[@]} > 50 )); then
+            echo "On a shared filesystem this can take half an hour. Faster: interrupt" \
+              "(Ctrl-C), move the venv aside (mv .venv .venv.old) and sync again."
+          fi
+          for package in "${packages[@]}"; do
+            relink+=(--reinstall-package "$package")
+          done
+        fi
+      fi
       # Creates a virtual environment without checking the integrity of the cache.
       # If we are running on a mac, use the cpu extra
       if [[ "$(uname)" == "Darwin" ]]; then
-        uv sync --all-packages --extra cpu
+        uv sync --all-packages --extra cpu "${relink[@]}" "$@"
         exit 0
       fi
       # Otherwise, use the gpu extra
-      uv sync --all-packages --extra gpu
+      uv sync --all-packages --extra gpu "${relink[@]}" "$@" || exit
+      [[ -z "$install_hooks" ]] || install_sync_hooks
     )
     ;;
   sync-safe)
