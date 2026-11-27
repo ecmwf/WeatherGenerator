@@ -29,7 +29,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.utils import ActivationFactory
+from weathergen.model.utils import ActivationFactory, compile_block
 from weathergen.utils.utils import get_dtype
 
 
@@ -777,6 +777,13 @@ class TargetPredictionEngineClassic(nn.Module):
                 )
             )
 
+        # compile each block: merges norms and small elementwise steps into fewer gpu kernels,
+        # dynamic since target counts vary. Each stream decoder needs its own compiled version
+        # of the same forward, default 8 is too few thus 64
+        if cf.get("compile_decoder", False):
+            for block in self.tte:
+                compile_block(block, recompile_limit=64)
+
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
         tc_tokens = output
         tcs_lens = output_lens
@@ -784,9 +791,42 @@ class TargetPredictionEngineClassic(nn.Module):
         tokens_lens = latent_lens
         tcs_aux = coordinates
 
+        # max lens for flash attention once per call,
+        # thus one gpu to cpu sync instead of one per block
+        max_q, max_kv = torch.stack([tcs_lens.max(), tokens_lens.max()]).tolist()
+
+        # compile with FSDP: inputs are fp32 in the forward but bf16 in checkpoint recompute,
+        # hence compiled blocks crash. Cast to fp32 to ensure forward and recompute are same
+        cf = self.cf
+        fsdp_mp = cf.with_ddp and cf.with_fsdp and cf.with_mixed_precision
+        to_fp32 = cf.get("compile_decoder", False) and fsdp_mp
+        if to_fp32:
+            tokens_stream = tokens_stream.to(torch.float32)
+            tcs_aux = tcs_aux.to(torch.float32) if tcs_aux is not None else None
+
         for ib, block in enumerate(self.tte):
+            if to_fp32:
+                tc_tokens = tc_tokens.to(torch.float32)
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
+                tc_tokens = checkpoint(
+                    block,
+                    tc_tokens,
+                    tcs_lens,
+                    tcs_aux,
+                    max_lens=(max_q, max_q),
+                    use_reentrant=False,
+                )
+            elif isinstance(block, MultiCrossAttentionHeadVarlen):
+                tc_tokens = checkpoint(
+                    block,
+                    tc_tokens,
+                    tokens_stream,
+                    tcs_lens,
+                    tokens_lens,
+                    tcs_aux,
+                    max_lens=(max_q, max_kv),
+                    use_reentrant=False,
+                )
             else:
                 tc_tokens = checkpoint(
                     block,
