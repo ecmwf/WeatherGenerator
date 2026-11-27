@@ -2,7 +2,7 @@
 # /// script
 # dependencies = ["boto3<1.36", "certifi>=2026.10.19"]
 # [tool.uv]
-# exclude-newer = "2025-05-01T00:00:00Z"
+# exclude-newer = "2026-11-16T00:00:00Z"
 # ///
 
 """Download a WeatherGenerator checkpoint without WeatherGenerator-private."""
