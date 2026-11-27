@@ -28,7 +28,7 @@ from zarr.storage import LocalStore, ZipStore
 
 CHUNK_N_SAMPLES = 542080
 SHARD_N_SAMPLES = 6 * 542080
-SCALE_FACTOR = 1  # scaling for the other dimensions
+CHUNK_SCALE_FACTOR = 1  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
@@ -46,7 +46,7 @@ def _get_shards(
 ) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find number of shards from chunks and predefined size of shards"""
     shard_nsamples = output_options.get("shard_n_samples", SHARD_N_SAMPLES)
-    scale_factor = output_options.get("chunk_scale_factor", SCALE_FACTOR)
+    scale_factor = output_options.get("chunk_scale_factor", CHUNK_SCALE_FACTOR)
     shards = (shard_nsamples, *((scale_factor + 1) * x for x in chunks[1:]))
     return shards
 
@@ -56,7 +56,7 @@ def _get_chunks(
 ) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find chunks from shape of data and predefined size of chunks"""
     chunk_nsamples = output_options.get("chunk_n_samples", CHUNK_N_SAMPLES)
-    scale_factor = output_options.get("chunk_scale_factor", SCALE_FACTOR)
+    scale_factor = output_options.get("chunk_scale_factor", CHUNK_SCALE_FACTOR)
     chunks = (chunk_nsamples, *(max(x // scale_factor, 1) for x in data_shape[1:]))
     return chunks
 
