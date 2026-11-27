@@ -208,7 +208,7 @@ class ReaderData:
         return ReaderData(
             self.coords[idx_valid],
             self.geoinfos[idx_valid],
-            self.data[idx_valid],
+            self.data[idx_valid] if len(self.data) > 0 else self.data,
             self.datetimes[idx_valid],
         )
 
@@ -346,10 +346,10 @@ class DataReaderBase(metaclass=ABCMeta):
         self.geoinfo_idx = []
         self.target_channel_weights = []
 
-        self.mean = np.zeros(0)
-        self.stdev = np.ones(0)
-        self.mean_geoinfo = np.zeros(0)
-        self.stdev_geoinfo = np.ones(0)
+        self.mean = np.zeros(0, dtype=np.float32)
+        self.stdev = np.ones(0, dtype=np.float32)
+        self.mean_geoinfo = np.zeros(0, dtype=np.float32)
+        self.stdev_geoinfo = np.ones(0, dtype=np.float32)
 
     @abstractmethod
     def length(self) -> int:
@@ -556,8 +556,9 @@ class DataReaderBase(metaclass=ABCMeta):
             raise ValueError(
                 f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}"
             )
-        for i, ch in enumerate(idx):
-            data[..., i] = (data[..., i] - mean[ch]) / stdev[ch]
+
+        idx_lin = list(range(len(idx)))
+        data[..., idx_lin] = (data[..., idx_lin] - mean[idx]) / stdev[idx]
 
         return data
 
@@ -593,6 +594,7 @@ class DataReaderBase(metaclass=ABCMeta):
             raise ValueError(
                 f"incorrect number of {name} channels: expected {len(idx)}, got {data.shape[-1]}"
             )
+
         for i, ch in enumerate(idx):
             data[..., i] = (data[..., i] * stdev[ch]) + mean[ch]
 
@@ -678,6 +680,10 @@ class DataReaderBase(metaclass=ABCMeta):
         -------
         Denormalized target data
         """
+
+        if len(target) == 0:
+            return target
+
         return self._denormalize(target, self.target_idx, self.mean, self.stdev, "target")
 
 

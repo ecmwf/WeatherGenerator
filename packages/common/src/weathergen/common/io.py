@@ -26,17 +26,12 @@ from numpy.typing import NDArray
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
-# experimental value, should be inferred more intelligently
-SHARDING_ENABLED = True
-SHARD_N_SAMPLES = 40320
-CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
-SCALE_FACTOR = 4  # scaling for the other dimensions
+CHUNK_N_SAMPLES = 542080
+SHARD_N_SAMPLES = 6 * 542080
+CHUNK_SCALE_FACTOR = 1  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
-
-# pseudo-stream name for latent outputs
-LATENT_STREAM = "latent"
 
 _logger = logging.getLogger(__name__)
 
@@ -47,18 +42,22 @@ def is_ndarray(obj: typing.Any) -> bool:
 
 
 def _get_shards(
-    shard_nsamples: tuple[int], chunks: tuple[int]
+    output_options: dict, chunks: tuple[int]
 ) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find number of shards from chunks and predefined size of shards"""
-    shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
+    shard_nsamples = output_options.get("shard_n_samples", SHARD_N_SAMPLES)
+    scale_factor = output_options.get("chunk_scale_factor", CHUNK_SCALE_FACTOR)
+    shards = (shard_nsamples, *((scale_factor + 1) * x for x in chunks[1:]))
     return shards
 
 
 def _get_chunks(
-    chunk_nsamples: tuple[int], data_shape: tuple[int]
+    output_options: dict, data_shape: tuple[int]
 ) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find chunks from shape of data and predefined size of chunks"""
-    chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in data_shape[1:]))
+    chunk_nsamples = output_options.get("chunk_n_samples", CHUNK_N_SAMPLES)
+    scale_factor = output_options.get("chunk_scale_factor", CHUNK_SCALE_FACTOR)
+    chunks = (chunk_nsamples, *(max(x // scale_factor, 1) for x in data_shape[1:]))
     return chunks
 
 
@@ -122,11 +121,22 @@ class IOReaderData:
     datetimes: NDArray[NPDT64]
     is_spoof: bool = False
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         """
         Test if data object is empty
         """
-        return len(self.data) == 0
+        return len(self.datetimes) == 0
+
+    def clear(self) -> "IOReaderData":
+        """
+        Clear data but retain correct shapes
+        """
+        self.coords = np.zeros((0, 2))
+        self.geoinfos = np.zeros((0, self.geoinfos.shape[-1]))
+        self.data = np.zeros((0, self.data.shape[-1]))
+        self.datetimes = np.array([], dtype="datetime64[ns]")
+
+        return self
 
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
@@ -135,16 +145,13 @@ class IOReaderData:
 
         other should be such an instance.
         """
-        coords = np.asarray(other.coords)
-        geoinfos = np.asarray(other.geoinfos)
-        data = np.asarray(other.data)
-        datetimes = np.asarray(other.datetimes)
 
-        n_datapoints = len(data)
-
-        assert coords.shape == (n_datapoints, 2), "number of datapoints do not match data"
-        assert geoinfos.shape[0] == n_datapoints, "number of datapoints do not match data"
-        assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
+        assert other.coords.shape[0] == other.datetimes.shape[0], (
+            "number of datapoints do not match data"
+        )
+        assert other.geoinfos.shape[0] == other.datetimes.shape[0], (
+            "number of datapoints do not match data"
+        )
 
         return cls(**dataclasses.asdict(other))
 
@@ -165,10 +172,9 @@ class IOReaderData:
         is_spoof = True
 
         for other in others:
-            n_datapoints = len(other.data)
+            n_datapoints = len(other.datetimes)
             assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
             assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
-            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
 
             coords = np.concatenate([coords, other.coords])
             geoinfos = np.concatenate([geoinfos, other.geoinfos])
@@ -277,21 +283,10 @@ class OutputDataset:
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(
-        self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples=SHARD_N_SAMPLES
-    ) -> xr.DataArray:
+    def as_xarray(self) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
-        chunks = _get_chunks(chunk_nsamples, self.data.shape)
-        if SHARDING_ENABLED:
-            shards = _get_shards(shard_nsamples, chunks)
-            _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
-        else:
-            shards = None
-            _logger.debug(f"sharding disabled, using chunks: {chunks}")
         # maybe do dask conversion earlier? => usefull for parallel writing?
-        data = da.from_zarr(
-            self.data, chunks=chunks, shards=shards
-        )  # dont call compute to lazy load
+        data = da.from_zarr(self.data)  # dont call compute to lazy load
         # include pseudo ens dim so all data arrays have same dimensionality
         # TODO: does it make sense for target and source to have ens dim?
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
@@ -323,11 +318,10 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
-        forecast_offset: int | None,
+        forecast_offset=int | None,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
-        latent: list[OutputDataset] | None = None,
     ):
         """Collection of possible datasets for one output item."""
         self.key = key
@@ -340,11 +334,9 @@ class OutputItem:
         if self.key.with_source:
             self._append_dataset(self.source, "source")
 
-        if forecast_offset is not None and self.key.with_target(forecast_offset):
+        if self.key.with_target(forecast_offset):
             self._append_dataset(self.target, "target")
             self._append_dataset(self.prediction, "prediction")
-        if latent is not None:
-            self._append_dataset(latent, "latent")
 
     def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
@@ -357,10 +349,11 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path, read_only: bool):
+    def __init__(self, store_path: pathlib.Path, output_options: dict, read_only: bool):
         self._store: LocalStore | ZipStore | None = None
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
+        self.output_options = output_options
         self.read_only = read_only
 
     @property
@@ -456,14 +449,14 @@ class ZarrIO:
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = _get_chunks(CHUNK_N_SAMPLES, array.shape)
+            chunks = _get_chunks(self.output_options, array.shape)
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + f"into group: {group}."
         )
         start_time = timeit.default_timer()
-        if SHARDING_ENABLED and chunks != "auto":
-            shards = _get_shards(SHARD_N_SAMPLES, chunks)
+        if self.output_options.get("sharding", True) and chunks != "auto":
+            shards = _get_shards(self.output_options, chunks)
             group.create_array(name, data=array, chunks=chunks, shards=shards)
             _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
@@ -588,18 +581,21 @@ class OutputBatchData:
     source_channels: list[list[str]]
     geoinfo_channels: list[list[str]]
 
-    # latent outputs: outer list over forecast steps, inner list over samples.
-    # each entry is a dict mapping latent_name -> ndarray
-    latents: list[list[dict]]
+    sample_start: int
+    forecast_offset: int
+    forecast_steps_override: list[int] | None = None
 
-    sample_start: int = 0
-    forecast_offset: int = 0
+    @functools.cached_property
+    def _forecast_step_to_index(self) -> dict[int, int] | None:
+        if self.forecast_steps_override is None:
+            return None
+        return {step: idx for idx, step in enumerate(self.forecast_steps_override)}
 
     @functools.cached_property
     def samples(self):
         """Continous indices of all samples accross all batches."""
 
-        # TODO associate samples with the sampel idx used for the time window
+        # TODO associate samples with the sample idx used for the time window
         return np.arange(len(self.sources)) + self.sample_start
 
     @functools.cached_property
@@ -607,6 +603,17 @@ class OutputBatchData:
         """Indices of all forecast steps adjusted by the forecast offset"""
         # forecast offset should be either 1 for forecasting or 0 for MTM
         assert self.forecast_offset in (0, 1)
+        if self.forecast_steps_override is not None:
+            forecast_steps = np.array(self.forecast_steps_override)
+            if self.forecast_offset == 1 and len(forecast_steps) > 0:
+                # Only the first validation chunk should expose the synthetic source step 0.
+                # Later chunks carry absolute forecast steps only, otherwise source output is
+                # written repeatedly and collides in the zarr store.
+                if forecast_steps[0] == self.forecast_offset:
+                    return np.concatenate(([0], forecast_steps))
+            if self.forecast_offset == 1 and len(forecast_steps) == 0:
+                return np.concatenate(([0], forecast_steps))
+            return forecast_steps
         return np.arange(len(self.targets) + self.forecast_offset)
 
     def items(self) -> typing.Generator[OutputItem, None, None]:
@@ -664,9 +671,16 @@ class OutputBatchData:
             - `forecast_step` is adjusted from including `forecast_offset` to indexing
                the data (always starts at 0)
         """
-        return ItemKey(
-            key.sample - self.sample_start, key.forecast_step - self.forecast_offset, key.stream
-        )
+        if self._forecast_step_to_index is None:
+            forecast_step = key.forecast_step - self.forecast_offset
+        elif key.with_source and self.forecast_offset == 1:
+            forecast_step = 0
+        else:
+            if key.forecast_step not in self._forecast_step_to_index:
+                raise KeyError(f"Unknown forecast_step {key.forecast_step}")
+            forecast_step = self._forecast_step_to_index[key.forecast_step]
+
+        return ItemKey(key.sample - self.sample_start, forecast_step, key.stream)
 
     def _extract_targets_predictions(self, stream_idx, offset_key, key, source_interval):
         datapoints = self._get_datapoints_per_sample(offset_key, stream_idx)
@@ -788,7 +802,7 @@ def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:
     return _get_backend(store_path, read_only=True)
 
 
-def zarrio_writer(store_path: pathlib.Path) -> ZarrIO:
+def zarrio_writer(store_path: pathlib.Path, output_options: dict) -> ZarrIO:
     """
     Get the proper io-writer for a given store.
 
@@ -796,13 +810,13 @@ def zarrio_writer(store_path: pathlib.Path) -> ZarrIO:
         store_path: Full path to the storage location.
     """
 
-    return _get_backend(store_path, read_only=False)
+    return _get_backend(store_path, output_options, read_only=False)
 
 
 _IO_CLASSES: dict[StoreType, type] = {StoreType.ZIP: ZipZarrIO, StoreType.LOCAL: ZarrIO}
 
 
-def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
+def _get_backend(store_path: pathlib.Path, output_options: dict, read_only: bool) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
-    return _IO_CLASSES[StoreType(ext)](store_path, read_only)
+    return _IO_CLASSES[StoreType(ext)](store_path, output_options, read_only)
