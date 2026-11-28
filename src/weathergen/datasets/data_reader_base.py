@@ -125,6 +125,10 @@ class TimeWindowHandler:
 
         return TimeIndexRange(idx_start, idx_end)
 
+    def window_starts(self, idxs: NDArray[np.int64]) -> NDArray[datetime64]:
+        """Start times of the temporal windows corresponding to the array of indices idxs."""
+        return self.t_start + self.t_window_step * idxs
+
     def window(self, idx: TIndex) -> DTRange:
         """
         Temporal window corresponding to index
