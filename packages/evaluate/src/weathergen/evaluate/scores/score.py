@@ -224,6 +224,7 @@ class Scores:
             "ssr": self.calc_ssr,
             "crps": self.calc_crps,
             "rank_histogram": self.calc_rank_histogram,
+            "rank_histogram_flatness": self.calc_rank_histogram_flatness,
             "spread": self.calc_spread,
         }
 
@@ -1564,16 +1565,16 @@ class Scores:
             reduce_dims=self._agg_dims,
         )
 
-    def calc_rank_histogram(
+    def calc_rank_histogram_counts(
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        norm: bool = True,
-        add_noise: bool = True,
-        noise_fac=1.0e-03,
+        random_for_tied: bool = True,
+        seed: int | None = None,
     ) -> xr.DataArray:
         """
-        Calculate the rank histogram of the forecast data w.r.t. reference data.
+        Calculate pooled rank-histogram bin counts (Talagrand diagram) of forecast data
+        w.r.t. reference data. Ranks are pooled across all spatial points and samples.
 
         Parameters
         ----------
@@ -1581,21 +1582,20 @@ class Scores:
             Forecast data array with ensemble dimension
         gt: xr.DataArray
             Ground truth data array
-        norm: bool
-            Flag if normalized counts should be returned. If True, the rank histogram will be
-            normalized by the number of ensemble members in the forecast data.
-        add_noise: bool
-            Flag if a small amount of random noise should be added to the data to avoid ties in the
-            rank histogram.
-            This is recommended for fair computations, cf. Sec. 4.2.2 in Harris et al. 2022
-        noise_fac: float
-            Magnitude of random noise to be added to the data if add_noise is True.
-            Default is 1.0e-03. This value is only relevant if add_noise is True
+        random_for_tied: bool
+            If True, the obs rank is drawn uniformly among the positions it ties with ensemble
+            members (Hamill 2001), as in ``xskillscore.rank_histogram``. If False, ties are
+            counted as "obs above forecast", which biases data with many ties (e.g. precipitation
+            zeros) towards the upper bins.
+        seed: int | None
+            Seed for the tie-breaking random numbers (None for non-reproducible results).
 
         Returns
         -------
         xr.DataArray
-            Rank histogram data array averaged over the provided dimensions
+            Raw (unnormalized) per-bin counts, dims ``[*preserve_dims, "rank_bin"]``
+            (``preserve_dims`` is typically just ``channel``). ``.attrs["n_bins"]`` holds
+            the number of bins (ensemble size + 1).
         """
 
         # unstack stacked time-dimension beforehand if required (time may be stacked for forecast
@@ -1610,58 +1610,185 @@ class Scores:
             if isinstance(prediction.indexes["time"], pd.MultiIndex):
                 prediction = prediction.reset_index("time")
 
+        # pool ranks across the aggregation dims *and* samples (if present) - a rank
+        # histogram needs many pooled points to be statistically meaningful.
+        hist_dims = list(self._agg_dims)
+        if "sample" in ground_truth.dims and "sample" not in hist_dims:
+            hist_dims = [*hist_dims, "sample"]
+
         # perform the stacking
-        obs_stacked = ground_truth.stack({"npoints": self._agg_dims})
-        fcst_stacked = prediction.stack({"npoints": self._agg_dims})
+        obs_stacked = ground_truth.stack({"npoints": hist_dims})
+        fcst_stacked = prediction.stack({"npoints": hist_dims})
 
-        # add noise to data if desired
-        if add_noise:
-            if obs_stacked.chunks is None and fcst_stacked.chunks is None:
-                # underlying arrays are numpy arrays -> use numpy's native random generator
-                rng = np.random.default_rng()
-
-                obs_stacked += rng.random(size=obs_stacked.shape, dtype=np.float32) * noise_fac
-                fcst_stacked += rng.random(size=fcst_stacked.shape, dtype=np.float32) * noise_fac
+        # rank of the obs among the members: number of members below it, plus the ties
+        n_less = (fcst_stacked < obs_stacked).sum(dim=self._ens_dim)
+        n_tied = (fcst_stacked == obs_stacked).sum(dim=self._ens_dim)
+        if random_for_tied:
+            # draw the obs rank uniformly among its tied positions (Hamill 2001), so that ties
+            # contribute a flat histogram instead of piling up in the upper bins
+            if n_tied.chunks is None:
+                u = np.random.default_rng(seed).random(size=n_tied.shape)
             else:
-                # underlying arrays are dask arrays -> use dask's random generator
-                obs_stacked += (
-                    da.random.random(size=obs_stacked.shape, chunks=obs_stacked.chunks) * noise_fac
-                )
-                fcst_stacked += (
-                    da.random.random(size=fcst_stacked.shape, chunks=fcst_stacked.chunks)
-                    * noise_fac
-                )
-        # preserve the other coordinates
-        preserved_coords = {
-            c: obs_stacked[c].values
-            for c in obs_stacked.coords
-            if all(dim not in {self._ens_dim, "npoints"} for dim in obs_stacked[c].dims)
-        }
-
-        # calculate ranks for all data points
-        rank = (obs_stacked >= fcst_stacked).sum(dim=self._ens_dim)
-        # and count occurence of rank values
+                u = da.random.default_rng(seed).random(size=n_tied.shape, chunks=n_tied.chunks)
+            rank = n_less + np.floor(n_tied.copy(data=u) * (n_tied + 1)).astype(n_less.dtype)
+        else:
+            rank = n_less + n_tied
         rank.name = "rank"  # name for xr.DataArray is required for histogram-method
-        rank_counts = histogram(
+
+        n_bins = len(fcst_stacked[self._ens_dim]) + 1
+        bins = np.arange(n_bins + 1)
+
+        # histogram() builds a fresh DataArray and drops scalar coords (e.g. lead_time)
+        # present on gt/p, so re-attach them here for downstream lead-time plotting.
+        scalar_coords = {name: coord for name, coord in gt.coords.items() if coord.dims == ()}
+
+        # dims still remaining after pooling into "npoints" (typically just "channel") are kept
+        counts = histogram(
             rank,
             dim=["npoints"],
-            bins=np.arange(len(fcst_stacked[self._ens_dim]) + 2),
+            bins=bins,
             block_size=None if rank.chunks is None else "auto",
-        )
+        ).astype(np.float64)
+        counts = counts.assign_coords(scalar_coords)
+        counts.attrs["n_bins"] = n_bins
+        preserve_dims = [d for d in counts.dims if d != "rank_bin"]
+        if preserve_dims:
+            counts.attrs["preserve_dims"] = preserve_dims
+        return counts.compute()
 
-        # Reattach preserved coordinates by broadcasting
-        for coord_name, coord_values in preserved_coords.items():
-            # Only keep unique values along npoints if necessary
-            if coord_name in rank_counts.coords:
-                continue
-            rank_counts = rank_counts.assign_coords({coord_name: coord_values})
+    @staticmethod
+    def _rank_histogram_attrs(counts: xr.DataArray, n_bins: int) -> dict:
+        """Build the ``.attrs`` dict for per-bin rank counts, keyed per preserved-dim
+        combination (e.g. per channel), or flat if there are no other preserved dims.
+        """
+        preserve_dims = [d for d in counts.dims if d != "rank_bin"]
+        if not preserve_dims:
+            return {"rank_counts": counts.values.tolist(), "n_bins": n_bins}
 
-        # provide normalized rank counts if desired
-        if norm:
-            npoints = len(fcst_stacked["npoints"])
-            rank_counts = rank_counts / npoints
+        attrs: dict = {"n_bins": n_bins, "preserve_dims": preserve_dims}
+        for idx in np.ndindex(*tuple(counts.sizes[d] for d in preserve_dims)):
+            sel = dict(zip(preserve_dims, idx, strict=False))
+            key = "_".join(
+                str(counts.coords[d].values[i]) if d in counts.coords else str(i)
+                for d, i in sel.items()
+            )
+            attrs[f"{key}/rank_counts"] = counts.isel(**sel).values.tolist()
+        return attrs
 
-        return rank_counts
+    @staticmethod
+    def calc_rank_histogram_flatness_score(
+        counts: xr.DataArray,
+        norm: bool = True,
+    ) -> xr.DataArray:
+        """
+        Calculate the rank-histogram flatness score from (pooled) bin counts, e.g. as
+        returned by ``calc_rank_histogram_counts``.
+
+        Parameters
+        ----------
+        counts: xr.DataArray
+            Per-bin counts along a ``rank_bin`` dimension. ``.attrs["n_bins"]`` must hold
+            the number of bins.
+        norm: bool
+            Flag if normalized counts should be used. If True, counts are normalized by the
+            number of verification points before computing the deviation from uniform.
+
+        Returns
+        -------
+        xr.DataArray
+            Rank histogram flatness score - the RMS deviation of the (normalized) rank
+            frequencies from a perfectly flat/uniform histogram, 0 meaning perfectly
+            calibrated - one value per preserved dimension (e.g. channel).
+        """
+        n_bins = counts.attrs["n_bins"]
+        npoints = counts.sum(dim="rank_bin")
+        normed = counts / npoints.where(npoints > 0, 1.0) if norm else counts
+        expected = 1.0 / n_bins if norm else npoints / n_bins
+        score = np.sqrt(((normed - expected) ** 2).mean(dim="rank_bin"))
+
+        score.attrs.update(Scores._rank_histogram_attrs(normed, n_bins))
+        return score
+
+    def calc_rank_histogram(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        random_for_tied: bool = True,
+        seed: int | None = None,
+        pool_n_fsteps: int | None = None,
+    ) -> xr.DataArray:
+        """
+        Calculate raw (unnormalized) rank-histogram bin counts (Talagrand diagram) for
+        one forecast step, stored in ``.attrs["rank_counts"]`` for plotting. Set
+        ``pool_n_fsteps`` to pool several consecutive forecast steps into one plot.
+        Use ``calc_rank_histogram_flatness`` for a scalar calibration score instead.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        random_for_tied: bool
+            If True, the obs rank is drawn uniformly among the positions it ties with ensemble
+            members (Hamill 2001), as in ``xskillscore.rank_histogram``. If False, ties are
+            counted as "obs above forecast", which biases data with many ties (e.g. precipitation
+            zeros) towards the upper bins.
+        seed: int | None
+            Seed for the tie-breaking random numbers (None for non-reproducible results).
+        pool_n_fsteps: int | None
+            Number of consecutive forecast steps to pool into one histogram plot. Not used in
+            the computation; it is read from the metric parameters at plotting time.
+
+        Returns
+        -------
+        xr.DataArray
+            Number of pooled verification points per preserved dimension (e.g. channel) -
+            a placeholder value; the actual per-bin counts are stored in ``.attrs``.
+        """
+        counts = self.calc_rank_histogram_counts(p, gt, random_for_tied=random_for_tied, seed=seed)
+        n_bins = counts.attrs["n_bins"]
+        npoints = counts.sum(dim="rank_bin")
+
+        npoints.attrs.update(self._rank_histogram_attrs(counts, n_bins))
+        return npoints
+
+    def calc_rank_histogram_flatness(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        norm: bool = True,
+        random_for_tied: bool = True,
+        seed: int | None = None,
+    ) -> xr.DataArray:
+        """
+        Calculate the rank histogram (Talagrand diagram) flatness score of forecast data
+        w.r.t. reference data for one forecast step, 0 meaning perfectly calibrated.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        norm: bool
+            Flag if normalized counts should be returned. If True, the rank histogram will be
+            normalized by the number of verification points.
+        random_for_tied: bool
+            If True, the obs rank is drawn uniformly among the positions it ties with ensemble
+            members (Hamill 2001), as in ``xskillscore.rank_histogram``. If False, ties are
+            counted as "obs above forecast", which biases data with many ties (e.g. precipitation
+            zeros) towards the upper bins.
+        seed: int | None
+            Seed for the tie-breaking random numbers (None for non-reproducible results).
+
+        Returns
+        -------
+        xr.DataArray
+            Rank histogram flatness score, one value per preserved dimension (e.g. channel).
+        """
+        counts = self.calc_rank_histogram_counts(p, gt, random_for_tied=random_for_tied, seed=seed)
+        return self.calc_rank_histogram_flatness_score(counts, norm=norm)
 
     def calc_rank_histogram_xskillscore(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
